@@ -10,7 +10,6 @@ use ironrdp_pdu::{mcs, nego, x224};
 use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
-use uuid::Uuid;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
@@ -37,13 +36,6 @@ pub struct RdpProxy<C, S> {
     subscriber_tx: SubscriberSender,
     server_dns_name: String,
     disconnect_interest: Option<DisconnectInterest>,
-    #[builder(default)]
-    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
-    /// `jet_agent_id` from the parent association token, if any. When set, the routing
-    /// pipeline must route via that agent (or fail) — never silently fall back to
-    /// another agent or to direct connect. See [`send_krb_message`].
-    #[builder(default)]
-    explicit_agent_id: Option<Uuid>,
 }
 
 impl<A, B> RdpProxy<A, B>
@@ -75,12 +67,7 @@ where
         subscriber_tx,
         server_dns_name,
         disconnect_interest,
-        agent_tunnel_handle,
-        explicit_agent_id,
     } = proxy;
-
-    // session_id used for KDC-via-tunnel correlation (see send_krb_message).
-    let session_id = session_info.id;
 
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
     let gateway_hostname = conf.hostname.clone();
@@ -140,9 +127,6 @@ where
         credential_injection_kdc.proxy_credential(),
         krb_server_config,
         &credential_injection_kdc,
-        agent_tunnel_handle.as_deref(),
-        session_id,
-        explicit_agent_id,
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -166,9 +150,6 @@ where
         handshake_result.server_security_protocol,
         credential_injection_kdc.target_credential(),
         krb_client_config,
-        agent_tunnel_handle.as_deref(),
-        session_id,
-        explicit_agent_id,
     );
 
     let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
@@ -399,7 +380,6 @@ pub(crate) fn credential_injection_kerberos_server_config(
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
 pub(crate) async fn perform_credssp_as_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
@@ -408,9 +388,6 @@ pub(crate) async fn perform_credssp_as_client<S>(
     security_protocol: nego::SecurityProtocol,
     credentials: &AppCredential,
     kerberos_config: Option<ironrdp_connector::credssp::KerberosConfig>,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -443,7 +420,7 @@ where
     loop {
         let client_state = {
             let mut generator = sequence.process_ts_request(ts_request);
-            resolve_client_generator(&mut generator, agent_tunnel_handle, session_id, explicit_agent_id).await?
+            resolve_client_generator(&mut generator).await?
         }; // drop generator
 
         buf.clear();
@@ -476,9 +453,6 @@ where
 async fn resolve_server_generator(
     generator: &mut CredsspServerProcessGenerator<'_>,
     credential_injection_kdc: &CredentialInjectionKdc,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
 ) -> Result<sspi::credssp::ServerState, sspi::credssp::ServerError> {
     let mut state = generator.start();
 
@@ -487,9 +461,7 @@ async fn resolve_server_generator(
             GeneratorState::Suspended(request) => {
                 let response = match credential_injection_kdc.intercept_network_request(&request) {
                     Ok(CredentialInjectionKdcInterception::Intercepted(response)) => Ok(response),
-                    Ok(CredentialInjectionKdcInterception::NotInjectionRequest) => {
-                        send_network_request(&request, agent_tunnel_handle, session_id, explicit_agent_id).await
-                    }
+                    Ok(CredentialInjectionKdcInterception::NotInjectionRequest) => send_network_request(&request).await,
                     Ok(CredentialInjectionKdcInterception::NotInjectionRealm(mismatch)) => Err(anyhow::anyhow!(
                         "kdc request realm does not match credential-injection session realm: {mismatch}"
                     )),
@@ -511,17 +483,13 @@ async fn resolve_server_generator(
 
 async fn resolve_client_generator(
     generator: &mut CredsspClientProcessGenerator<'_>,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response =
-                    send_network_request(&request, agent_tunnel_handle, session_id, explicit_agent_id).await?;
+                let response = send_network_request(&request).await?;
                 state = generator.resume(Ok(response));
             }
             GeneratorState::Completed(client_state) => {
@@ -533,7 +501,6 @@ async fn resolve_client_generator(
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
 pub(crate) async fn perform_credssp_as_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
@@ -543,9 +510,6 @@ pub(crate) async fn perform_credssp_as_server<S>(
     credentials: &AppCredential,
     kerberos_server_config: Option<sspi::KerberosServerConfig>,
     credential_injection_kdc: &CredentialInjectionKdc,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -567,9 +531,6 @@ where
         credentials,
         kerberos_server_config,
         credential_injection_kdc,
-        agent_tunnel_handle,
-        session_id,
-        explicit_agent_id,
     )
     .await;
 
@@ -590,7 +551,6 @@ where
 
     return result;
 
-    #[expect(clippy::too_many_arguments)]
     async fn credssp_loop<S>(
         framed: &mut ironrdp_tokio::Framed<S>,
         buf: &mut ironrdp_pdu::WriteBuf,
@@ -599,9 +559,6 @@ where
         credentials: &AppCredential,
         kerberos_server_config: Option<sspi::KerberosServerConfig>,
         credential_injection_kdc: &CredentialInjectionKdc,
-        agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-        session_id: Uuid,
-        explicit_agent_id: Option<Uuid>,
     ) -> anyhow::Result<()>
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -643,14 +600,7 @@ where
 
             let result = {
                 let mut generator = sequence.process_ts_request(ts_request);
-                resolve_server_generator(
-                    &mut generator,
-                    credential_injection_kdc,
-                    agent_tunnel_handle,
-                    session_id,
-                    explicit_agent_id,
-                )
-                .await
+                resolve_server_generator(&mut generator, credential_injection_kdc).await
             }; // drop generator
 
             buf.clear();
@@ -689,25 +639,18 @@ where
 /// TODO(sspi-rs#664): when sspi-rs ships a pluggable KDC dispatcher API, the URL trick for
 /// credential injection goes away entirely and this helper can be inlined back into the
 /// CredSSP loops.
-async fn send_network_request(
-    request: &NetworkRequest,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
-) -> anyhow::Result<Vec<u8>> {
+async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
     match request.url.scheme() {
         "tcp" | "udp" => {
             let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
-            send_krb_message(
-                &target_addr,
-                &request.data,
-                agent_tunnel_handle,
-                session_id,
-                explicit_agent_id,
-            )
-            .await
-            .map_err(|err| anyhow::anyhow!("failed to send KDC message: {err}"))
+            // TODO(DGW-384): plumb `agent_tunnel_handle` through `RdpProxy` so
+            // CredSSP-originated Kerberos requests can traverse the agent tunnel.
+            // Currently these go direct from the gateway host, bypassing the
+            // routing pipeline used by every other proxy path.
+            send_krb_message(&target_addr, &request.data)
+                .await
+                .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
         }
         unsupported => anyhow::bail!("unsupported KDC request scheme: {unsupported}"),
     }

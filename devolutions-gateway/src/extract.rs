@@ -8,7 +8,7 @@ use crate::DgwState;
 use crate::http::HttpError;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, JmuxTokenClaims, JrecTokenClaims,
-    JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims, extract_jti,
+    JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
 
 #[derive(Clone)]
@@ -109,13 +109,7 @@ where
 /// the path, runs it through the same `authenticate()` routine the middleware would, and
 /// unwraps the `Kdc` variant so handlers receive `KdcTokenClaims` directly.
 #[derive(Clone)]
-pub struct KdcToken {
-    pub claims: KdcTokenClaims,
-    /// The KDC token's own `jti`. Carried alongside the claims so the KDC proxy handler can
-    /// use it as a persistent session-correlation identifier (the JWT standard `jti` claim
-    /// is not threaded through [`KdcTokenClaims`] itself).
-    pub jti: uuid::Uuid,
-}
+pub struct KdcToken(pub KdcTokenClaims);
 
 impl FromRequestParts<DgwState> for KdcToken {
     type Rejection = HttpError;
@@ -141,10 +135,7 @@ impl FromRequestParts<DgwState> for KdcToken {
         .map_err(HttpError::unauthorized().err())?;
 
         match claims {
-            AccessTokenClaims::Kdc(claims) => {
-                let jti = extract_jti(&token).map_err(HttpError::internal().with_msg("KDC token missing jti").err())?;
-                Ok(Self { claims, jti })
-            }
+            AccessTokenClaims::Kdc(claims) => Ok(Self(claims)),
             _ => Err(HttpError::forbidden().msg("token not allowed (expected KDC token)")),
         }
     }

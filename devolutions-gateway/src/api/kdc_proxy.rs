@@ -7,7 +7,6 @@ use axum::routing::post;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
-use uuid::Uuid;
 
 use crate::DgwState;
 use crate::credential_injection_kdc::{
@@ -27,13 +26,9 @@ async fn kdc_proxy(
     State(DgwState {
         conf_handle,
         credentials,
-        agent_tunnel_handle,
         ..
     }): State<DgwState>,
-    KdcToken {
-        claims: KdcTokenClaims { destination },
-        jti: token_jti,
-    }: KdcToken,
+    KdcToken(KdcTokenClaims { destination }): KdcToken,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, HttpError> {
     let conf = conf_handle.get_conf();
@@ -82,8 +77,6 @@ async fn kdc_proxy(
                 &krb_kdc,
                 conf.debug.override_kdc.as_ref(),
                 conf.debug.disable_token_validation,
-                agent_tunnel_handle.as_deref(),
-                token_jti,
             )
             .await
         }
@@ -107,7 +100,6 @@ fn credential_injection_resolve_error(error: CredentialInjectionKdcResolveError)
 // The forward path requires the envelope realm to be set: there is no fallback since this is
 // not a credential-injection session. After resolving, validates the realm against the
 // token's `krb_realm` claim before forwarding anything.
-#[expect(clippy::too_many_arguments)]
 async fn forward_to_real_kdc(
     kdc_proxy_message: KdcProxyMessage,
     envelope_realm: Option<String>,
@@ -115,13 +107,6 @@ async fn forward_to_real_kdc(
     token_kdc_addr: &TargetAddr,
     override_kdc: Option<&TargetAddr>,
     bypass_realm_check: bool,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    // The HTTP /jet/KdcProxy endpoint has no parent association token, so we use the KDC
-    // token's own `jti` for log/agent-side correlation. It is persistent for the lifetime of
-    // the KDC token (which can be reused) rather than per-request, but it is the most stable
-    // identifier we have here. The RDP CredSSP/NLA caller (rdp_proxy.rs::send_network_request)
-    // passes `claims.jet_aid` instead so KDC sub-traffic correlates with its RDP session.
-    session_id: Uuid,
 ) -> Result<Vec<u8>, HttpError> {
     let realm = envelope_realm.ok_or_else(|| HttpError::bad_request().msg("realm is missing from KDC request"))?;
     debug!(resolved_realm = %realm, "Forward-to-real-KDC realm resolved");
@@ -135,19 +120,7 @@ async fn forward_to_real_kdc(
         None => token_kdc_addr,
     };
 
-    // No parent association token here, so no `jet_agent_id` to enforce. The HTTP
-    // /jet/KdcProxy endpoint stands on its own — let the routing pipeline pick any
-    // matching agent (or fall back to direct connect).
-    let explicit_agent_id = None;
-
-    let kdc_reply_bytes = send_krb_message(
-        kdc_addr,
-        &kdc_proxy_message.kerb_message.0.0,
-        agent_tunnel_handle,
-        session_id,
-        explicit_agent_id,
-    )
-    .await?;
+    let kdc_reply_bytes = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
 
     let reply = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_bytes)
         .map_err(HttpError::internal().with_msg("couldn't create KDC proxy reply").err())?;
@@ -157,7 +130,7 @@ async fn forward_to_real_kdc(
     reply.to_vec().map_err(HttpError::internal().err())
 }
 
-fn enforce_credential_injection_enabled(jet_cred_id: Uuid, enable_unstable: bool) -> Result<(), HttpError> {
+fn enforce_credential_injection_enabled(jet_cred_id: uuid::Uuid, enable_unstable: bool) -> Result<(), HttpError> {
     if enable_unstable {
         return Ok(());
     }
@@ -192,33 +165,11 @@ fn enforce_realm_token_match(token_realm: &str, request_realm: &str, bypass: boo
         .err()(format!("expected: {token_realm}, got: {request_realm}")))
 }
 
-/// Hard ceiling on the announced length of a TCP-framed KDC reply.
-///
-/// The KDC TCP transport prefixes its message with a 4-byte big-endian length.
-/// A misbehaving (or malicious) peer can claim up to `u32::MAX` bytes, which
-/// without a cap would have us pre-allocate ~4 GiB on a single reply. 64 KiB
-/// is well above any realistic Kerberos reply size while keeping the worst
-/// case bounded.
-const MAX_KDC_REPLY_MESSAGE_LEN: u32 = 64 * 1024;
-
-async fn read_kdc_reply_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
-    let len = reader.read_u32().await?;
-
-    if len > MAX_KDC_REPLY_MESSAGE_LEN {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("KDC reply too large: announced {len} bytes, maximum is {MAX_KDC_REPLY_MESSAGE_LEN}"),
-        ));
-    }
-
-    let total_len = len
-        .checked_add(4)
-        .and_then(|n| usize::try_from(n).ok())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "KDC reply length prefix overflowed"))?;
-
-    let mut buf = vec![0; total_len];
-    buf[0..4].copy_from_slice(&len.to_be_bytes());
-    reader.read_exact(&mut buf[4..]).await?;
+async fn read_kdc_reply_message(connection: &mut TcpStream) -> io::Result<Vec<u8>> {
+    let len = connection.read_u32().await?;
+    let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
+    buf[0..4].copy_from_slice(&(len.to_be_bytes()));
+    connection.read_exact(&mut buf[4..]).await?;
     Ok(buf)
 }
 
@@ -247,67 +198,7 @@ fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
 }
 
 /// Sends the Kerberos message to the specified KDC address.
-///
-/// Uses the same routing pipeline as connection forwarding:
-/// if an agent claims the KDC's domain/subnet, traffic goes through the tunnel.
-/// Falls back to direct connect when no agent matches.
-///
-/// `session_id` is forwarded to the agent as the QUIC stream's session ID for
-/// log correlation. Callers that have a parent association (RDP CredSSP) should
-/// pass the parent's `jet_aid`; the HTTP `/jet/KdcProxy` endpoint passes the KDC
-/// token's own `jti` (no parent association exists for that path).
-///
-/// `explicit_agent_id` honors the same routing contract as every other proxy path:
-/// when the parent association token pins the session to a specific agent via
-/// `jet_agent_id`, that pin is enforced here too (route via that agent or fail —
-/// do **not** silently fall back to another agent or to direct connect).
-/// Callers with no parent association (HTTP `/jet/KdcProxy`) pass `None`.
-pub async fn send_krb_message(
-    kdc_addr: &TargetAddr,
-    message: &[u8],
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-    session_id: Uuid,
-    explicit_agent_id: Option<Uuid>,
-) -> Result<Vec<u8>, HttpError> {
-    // Route through agent tunnel using the SAME pipeline as connection forwarding,
-    // but only for `tcp` KDC targets. The agent tunnel currently has a single
-    // `ConnectRequest::tcp` shape, so a `udp://` KDC routed this way would be
-    // delivered to the agent as a TCP target — wrong protocol semantics that can
-    // silently break UDP Kerberos deployments. Fall through to the direct path
-    // (which honors the scheme) until an explicit UDP tunnel hop exists.
-    //
-    // `as_addr()` returns `host:port` (with IPv6 brackets), which is what the agent
-    // tunnel target parser expects — unlike `to_string()` which includes the scheme.
-    let kdc_target = kdc_addr.as_addr();
-    let tunnel_handle = if kdc_addr.scheme().eq_ignore_ascii_case("tcp") {
-        agent_tunnel_handle
-    } else {
-        None
-    };
-
-    let route_target = match kdc_addr.host_ip() {
-        Some(ip) => agent_tunnel::routing::RouteTarget::ip(ip),
-        None => agent_tunnel::routing::RouteTarget::hostname(kdc_addr.host()),
-    };
-
-    if let Some((mut stream, _agent)) =
-        agent_tunnel::routing::try_route(tunnel_handle, explicit_agent_id, &route_target, session_id, kdc_target)
-            .await
-            .map_err(|e| HttpError::bad_gateway().build(format!("KDC routing through agent tunnel failed: {e:#}")))?
-    {
-        stream.write_all(message).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to send KDC message through agent tunnel")
-                .err(),
-        )?;
-
-        return read_kdc_reply_message(&mut stream).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to read KDC reply through agent tunnel")
-                .err(),
-        );
-    }
-
+pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
     let protocol = kdc_addr.scheme();
 
     debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
@@ -397,11 +288,11 @@ mod tests {
 
     #[test]
     fn credential_injection_gate_allows_jet_cred_id_when_enabled() {
-        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), true).is_ok());
+        assert!(enforce_credential_injection_enabled(uuid::Uuid::new_v4(), true).is_ok());
     }
 
     #[test]
     fn credential_injection_gate_rejects_jet_cred_id_when_disabled() {
-        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), false).is_err());
+        assert!(enforce_credential_injection_enabled(uuid::Uuid::new_v4(), false).is_err());
     }
 }
