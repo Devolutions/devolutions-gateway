@@ -177,6 +177,8 @@ where
                         .client_stream_leftover_bytes(leftover_bytes)
                         .server_dns_name(selected_target.host().to_owned())
                         .disconnect_interest(disconnect_interest)
+                        .agent_tunnel_handle(agent_tunnel_handle)
+                        .explicit_agent_id(claims.jet_agent_id)
                         .build()
                         .run()
                         .await

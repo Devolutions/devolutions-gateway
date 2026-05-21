@@ -152,7 +152,7 @@ impl AgentTunnelListener {
         let handle = AgentTunnelHandle {
             registry: Arc::clone(&registry),
             agent_connections: Arc::clone(&agent_connections),
-            ca_manager,
+            ca_manager: Arc::clone(&ca_manager),
         };
 
         let listener = Self {
