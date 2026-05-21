@@ -325,6 +325,7 @@ namespace DevolutionsAgent.Actions
             string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
+            string gatewayUrlArg = session.Property(AgentProperties.AgentTunnelGatewayUrl)?.Trim() ?? string.Empty;
 
             if (enrollmentString.Length == 0)
             {
@@ -342,6 +343,7 @@ namespace DevolutionsAgent.Actions
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
 
                 string arguments = $"up --enrollment-string \"{enrollmentString}\"";
+                if (gatewayUrlArg.Length != 0) arguments += $" --gateway \"{gatewayUrlArg}\"";
                 if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
 
                 string Redact(string s) => s.Replace(enrollmentString, "***");
