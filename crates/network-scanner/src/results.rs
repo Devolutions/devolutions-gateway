@@ -12,7 +12,7 @@ use crate::port_discovery::TcpKnockEvent;
 use crate::scanner::{DnsEvent, ServiceType, TcpKnockWithHost};
 use crate::sources::{ScannerSource, source_for_address};
 
-/// Selects which serialized shape the websocket emits. Plan §9 v1 is
+/// Selects which serialized shape the websocket emits. The v1 shape is
 /// opt-in via `response_format=network_scan_result_v1`; otherwise we keep
 /// the legacy shape for back-compat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -47,10 +47,6 @@ impl ScanEventFilter {
 
     pub fn enable_ping_event(&self) -> bool {
         self.config.report_ping_start || self.config.report_ping_success || self.config.report_ping_failure
-    }
-
-    pub fn enable_failure(&self) -> bool {
-        self.config.report_ping_failure || self.config.report_tcp_failure
     }
 
     pub fn report_ping_start(&self) -> bool {
@@ -143,8 +139,8 @@ impl ScanEventFilter {
             }
             NetworkScanResultKind::Service => {
                 // Successful service entries always emit; failed TCP probes
-                // get suppressed unless the caller asked for them via
-                // `report_tcp_failure` (or its legacy alias `enable_failure`).
+                // get suppressed unless the caller explicitly opts in via
+                // `report_tcp_failure`.
                 if response.is_reachable == Some(false) {
                     return cfg.report_tcp_failure;
                 }
@@ -314,11 +310,11 @@ pub enum HostScanState {
     Unreachable,
 }
 
-/// Plan §9 wire shape for `response_format=network_scan_result_v1`.
+/// Wire shape for `response_format=network_scan_result_v1`.
 ///
-/// Field set is intentionally exactly the plan's required + recommended
-/// fields, with `source` constant and `discoverySource` describing how the
-/// host/service was discovered (subnet, broadcast, TCP probe, mDNS, …).
+/// `source` is a constant marker for the producing component; `discoverySource`
+/// describes how the host/service was discovered (subnet, broadcast, TCP
+/// probe, mDNS, …).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkScanResultEvent {
@@ -350,8 +346,8 @@ pub struct NetworkScanResultEvent {
     service_type: Option<String>,
     /// Hardware address of the discovered host. Populated from ARP/NDP
     /// neighbor cache when that capability is enabled; otherwise omitted.
-    /// Declared in the wire schema per plan §9 so the field is stable
-    /// even in builds without ARP support.
+    /// Declared in the wire schema so the field stays stable even in builds
+    /// without ARP support.
     #[serde(skip_serializing_if = "Option::is_none")]
     mac_address: Option<String>,
 }

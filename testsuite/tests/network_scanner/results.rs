@@ -137,8 +137,8 @@ fn network_scan_result_v1_maps_ping_success_to_host_result() {
         .expect("ping success should produce network scan result JSON");
     let value: serde_json::Value = serde_json::from_str(&json).expect("network scan result JSON should parse");
 
-    // Plan §9 wire shape: kind/source/discoverySource/hostScanState
-    // values are lowercase, `source` is constant `"gateway"`, and the
+    // V1 wire shape: kind/source/discoverySource/hostScanState values are
+    // lowercase, `source` is the constant `"gateway"` marker, and the
     // discovery path is in `discoverySource`.
     assert_eq!(value["kind"], "host");
     assert_eq!(value["address"], "192.168.1.10");
@@ -259,11 +259,11 @@ fn network_scan_result_v1_maps_discovery_sources() {
 
 #[test]
 fn network_scan_result_v1_omits_mac_address_when_unknown() {
-    // Plan §9 declares `macAddress` in the wire schema, but it's only
-    // populated by ARP/NDP discovery (not in this build). The field must
-    // therefore be absent from serialized events — neither `null` nor a
-    // placeholder string — so consumers can rely on `macAddress` being
-    // present iff a real hardware address was learned.
+    // `macAddress` is declared in the wire schema, but it's only populated
+    // by ARP/NDP discovery (not in this build). The field must therefore be
+    // absent from serialized events — neither `null` nor a placeholder
+    // string — so consumers can rely on `macAddress` being present iff a
+    // real hardware address was learned.
     let source = scanner_source();
     let filter = filter_with(
         true,

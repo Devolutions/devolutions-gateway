@@ -203,8 +203,7 @@ pub struct NetworkScanQueryParams {
     pub probes: Vec<String>,
 
     /// **Legacy alias** for `report_ping_start`. Prefer the explicit name in
-    /// new clients; kept for backward compatibility per plan §"Compatibility
-    /// strategy".
+    /// new clients; kept so existing consumers don't break.
     #[deprecated(note = "see field doc comment for the new parameter name")]
     #[serde(default)]
     pub enable_ping_start: bool,
@@ -285,9 +284,9 @@ pub struct NetworkScanQueryParams {
     /// Maximum TCP probe concurrency.
     pub max_tcp_probe_concurrency: Option<usize>,
 
-    /// **Legacy alias** for `report_tcp_failure`. Per plan §4, `enable_failure`
-    /// remains for failed TCP probes only; new clients should use the explicit
-    /// `report_tcp_failure` parameter.
+    /// **Legacy alias** for `report_ping_failure`. TCP-probe failure events
+    /// are off by default and only emit when a caller explicitly opts in via
+    /// `report_tcp_failure`; `enable_failure` never enables them implicitly.
     #[deprecated(note = "see field doc comment for the new parameter name")]
     #[serde(default)]
     pub enable_failure: bool,
@@ -548,15 +547,20 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
 
         #[allow(deprecated)]
         let enable_ping_start = val.enable_ping_start;
-        let report_ping_start = val.report_ping_start || enable_ping_start || val.report_ping_status;
-        let report_ping_success = val.report_ping_success || val.report_ping_status || has_ping_probe;
-        let report_ping_failure = val.report_ping_failure || val.report_ping_status;
-        // Plan §4 "enable_failure remains only for failed TCP probes and
-        // legacy behavior" — keep it as the legacy alias for
-        // `report_tcp_failure` and nothing else.
         #[allow(deprecated)]
         let enable_failure = val.enable_failure;
-        let report_tcp_failure = val.report_tcp_failure || enable_failure;
+        // `has_ping_probe` implicitly enables all three ping event classes
+        // (start, success, failure) so a bare `probe=ping` request emits the
+        // full ping lifecycle without any extra toggle. Callers that want
+        // only a subset can leave `probe=ping` off and set the explicit
+        // `report_ping_*` flags individually.
+        let report_ping_start = val.report_ping_start || enable_ping_start || val.report_ping_status || has_ping_probe;
+        let report_ping_success = val.report_ping_success || val.report_ping_status || has_ping_probe;
+        // `enable_failure` is the legacy alias for `report_ping_failure`.
+        // TCP-probe failures stay off unless `report_tcp_failure` is set
+        // explicitly — no legacy alias enables them implicitly.
+        let report_ping_failure = val.report_ping_failure || val.report_ping_status || has_ping_probe || enable_failure;
+        let report_tcp_failure = val.report_tcp_failure;
 
         let ping_interval = Duration::from_millis(val.ping_interval.unwrap_or(200));
         let ping_timeout = Duration::from_millis(val.ping_timeout.unwrap_or(500));
@@ -1013,23 +1017,33 @@ mod tests {
     }
 
     #[test]
-    fn query_mapping_probe_ping_implicitly_enables_ping_success_events() {
-        // Plan §4: `probe=ping` should be sufficient to receive ping events
-        // even when the explicit `report_ping_*` toggles are off. Locks the
+    fn query_mapping_probe_ping_implicitly_enables_ping_start_success_and_failure_events() {
+        // `probe=ping` must enable the full ping lifecycle (start + success
+        // + failure) without any explicit `report_ping_*` toggle. Locks the
         // `has_ping_probe` auto-enable branch in `try_from`, which the
         // boolean-toggle permutation test does not exercise (it always
         // ships an empty `probes` list).
         let (_, filter) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
             probes: vec!["ping".to_owned()],
+            report_ping_start: false,
             report_ping_success: false,
+            report_ping_failure: false,
             report_ping_status: false,
             ..minimal_query()
         })
         .expect("probe=ping query should map to scanner params");
 
         assert!(
+            filter.report_ping_start(),
+            "probe=ping must implicitly enable ping start events"
+        );
+        assert!(
             filter.report_ping_success(),
-            "probe=ping must implicitly enable ping success events even with report_ping_success=false"
+            "probe=ping must implicitly enable ping success events"
+        );
+        assert!(
+            filter.report_ping_failure(),
+            "probe=ping must implicitly enable ping failure events"
         );
     }
 
@@ -1105,37 +1119,56 @@ mod tests {
 
     #[test]
     #[allow(deprecated)]
-    fn query_mapping_enable_failure_is_legacy_alias_for_report_tcp_failure() {
-        // Plan §4 + Compatibility strategy: `enable_failure` is the legacy
-        // toggle for TCP-probe failures. It must NOT trigger ping failures.
+    fn query_mapping_enable_failure_is_legacy_alias_for_report_ping_failure() {
+        // `enable_failure` is the legacy alias for `report_ping_failure`; it
+        // must NOT silently enable TCP-probe failure reporting (that requires
+        // opting in explicitly via `report_tcp_failure`). Use an empty
+        // `probes` list so `has_ping_probe` doesn't trivially satisfy the
+        // ping_failure assertion via a different path.
         let (_, filter) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: Vec::new(),
             enable_failure: true,
             ..minimal_query()
         })
         .expect("enable_failure query should map to scanner params");
 
         assert!(
-            filter.report_tcp_failure(),
-            "enable_failure=true must activate TCP-probe failure reporting (legacy semantics)"
+            filter.report_ping_failure(),
+            "enable_failure=true must activate ping-failure reporting"
         );
         assert!(
-            !filter.report_ping_failure(),
-            "enable_failure=true must NOT silently activate ping-failure reporting"
+            !filter.report_tcp_failure(),
+            "enable_failure=true must NOT silently activate TCP-probe failure reporting"
         );
     }
 
     #[test]
     #[allow(deprecated)]
-    fn query_mapping_report_tcp_failure_works_without_enable_failure() {
-        let (_, filter) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
-            enable_failure: false,
+    fn query_mapping_report_tcp_failure_only_via_explicit_flag() {
+        // `report_tcp_failure` is the only switch that turns on TCP-probe
+        // failure events; no legacy alias enables it implicitly. Use an
+        // empty `probes` list so `has_ping_probe` doesn't muddy the ping
+        // toggles we want to assert against.
+        let (_, filter_explicit) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: Vec::new(),
             report_tcp_failure: true,
             ..minimal_query()
         })
         .expect("report_tcp_failure query should map to scanner params");
 
-        assert!(filter.report_tcp_failure());
-        assert!(!filter.report_ping_failure());
+        assert!(filter_explicit.report_tcp_failure());
+        assert!(!filter_explicit.report_ping_failure());
+
+        let (_, filter_default) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: Vec::new(),
+            ..minimal_query()
+        })
+        .expect("default query should map to scanner params");
+
+        assert!(
+            !filter_default.report_tcp_failure(),
+            "TCP-probe failure must stay off unless `report_tcp_failure` is explicitly set"
+        );
     }
 
     #[test]
@@ -1171,9 +1204,9 @@ mod tests {
 
     #[test]
     fn query_mapping_accepts_enable_netbios_toggle() {
-        // Plan §1 + §2: explicit `target=` with `enable_netbios=false`
-        // must scope the scan to the listed targets without sweeping the
-        // surrounding subnet over NetBIOS.
+        // Explicit `target=` with `enable_netbios=false` must scope the scan
+        // to the listed targets without sweeping the surrounding subnet over
+        // NetBIOS.
         let (params, _) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
             targets: vec!["10.10.0.1".to_owned()],
             enable_netbios: false,
@@ -1186,8 +1219,8 @@ mod tests {
 
     #[test]
     fn query_mapping_rejects_invalid_probe_with_named_value() {
-        // Plan §6 mandates the 400 body name the offending value so callers
-        // can fix their config without scraping prose.
+        // The 400 body must name the offending value so callers can fix their
+        // config without scraping prose.
         let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
             probes: vec!["22".to_owned(), "garbage-value".to_owned()],
             ..minimal_query()
@@ -1216,7 +1249,7 @@ mod tests {
 
     #[test]
     fn query_mapping_rejects_invalid_target_with_named_value() {
-        // Plan §6: structured 400 must name the offending value, same as
+        // The structured 400 must name the offending value, same as
         // probe/range. Locks the `Vec<String>` + parse-at-validate-time
         // path so a future refactor to `Vec<IpAddr>` (which would push the
         // error into the serde extractor and lose the structured body)
@@ -1359,6 +1392,7 @@ mod tests {
                                                                         || report_ping_success
                                                                         || report_ping_failure
                                                                         || report_ping_status
+                                                                        || enable_failure
                                                                 );
                                                                 assert_eq!(
                                                                     filter.report_ping_start(),
@@ -1372,11 +1406,13 @@ mod tests {
                                                                 );
                                                                 assert_eq!(
                                                                     filter.report_ping_failure(),
-                                                                    report_ping_failure || report_ping_status
+                                                                    report_ping_failure
+                                                                        || report_ping_status
+                                                                        || enable_failure
                                                                 );
                                                                 assert_eq!(
                                                                     filter.report_tcp_failure(),
-                                                                    report_tcp_failure || enable_failure
+                                                                    report_tcp_failure
                                                                 );
                                                                 assert_eq!(
                                                                     filter.include_host_results(),
