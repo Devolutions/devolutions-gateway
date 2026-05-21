@@ -425,9 +425,6 @@ async fn handle_with_credential_injection(
         credential_injection_kdc.proxy_credential(),
         krb_server_config,
         &credential_injection_kdc,
-        agent_tunnel_handle.as_deref(),
-        claims.jet_aid,
-        claims.jet_agent_id,
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -451,9 +448,6 @@ async fn handle_with_credential_injection(
         server_security_protocol,
         credential_injection_kdc.target_credential(),
         krb_client_config,
-        agent_tunnel_handle.as_deref(),
-        claims.jet_aid,
-        claims.jet_agent_id,
     );
 
     let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
