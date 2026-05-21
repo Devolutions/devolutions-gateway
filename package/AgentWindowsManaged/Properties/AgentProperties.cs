@@ -17,7 +17,7 @@ namespace DevolutionsAgent.Properties
         public static string InstallDir = "INSTALLDIR";
 
         /// <summary>
-        /// Agent tunnel enrollment string (dgw-enroll:v1:...)
+        /// Agent tunnel enrollment string (DVLS-signed JWT verbatim)
         /// </summary>
         public static string AgentTunnelEnrollmentString = "AGENT_TUNNEL_ENROLLMENT_STRING";
 
@@ -30,6 +30,13 @@ namespace DevolutionsAgent.Properties
         /// Comma-separated DNS domains to advertise (e.g., "corp.example.com, lab.example.com")
         /// </summary>
         public static string AgentTunnelAdvertiseDomains = "AGENT_TUNNEL_ADVERTISE_DOMAINS";
+
+        /// <summary>
+        /// Optional gateway URL override. When set, the agent uses this URL instead of the JWT's
+        /// jet_gw_url claim. Useful when the JWT was minted with a URL that isn't reachable from
+        /// the agent's network (e.g. DVLS embedded "localhost" but the agent is remote).
+        /// </summary>
+        public static string AgentTunnelGatewayUrl = "AGENT_TUNNEL_GATEWAY_URL";
 
         public AgentProperties(ISession runtimeSession)
         {
