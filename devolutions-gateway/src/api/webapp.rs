@@ -390,6 +390,7 @@ pub(crate) async fn sign_session_token(
                     krb_realm: krb_realm.into(),
                     krb_kdc: krb_kdc.clone(),
                 },
+                jti,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

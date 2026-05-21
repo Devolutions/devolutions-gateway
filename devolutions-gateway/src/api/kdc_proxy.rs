@@ -1,12 +1,8 @@
-use std::io;
-
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::routing::post;
 use picky_krb::messages::KdcProxyMessage;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpStream, UdpSocket};
+use uuid::Uuid;
 
 use crate::DgwState;
 use crate::credential_injection_kdc::{
@@ -14,7 +10,8 @@ use crate::credential_injection_kdc::{
     kdc_proxy_message_realm,
 };
 use crate::extract::KdcToken;
-use crate::http::{HttpError, HttpErrorBuilder};
+use crate::http::HttpError;
+use crate::kdc_connector::KdcConnector;
 use crate::target_addr::TargetAddr;
 use crate::token::{KdcDestination, KdcTokenClaims};
 
@@ -26,9 +23,13 @@ async fn kdc_proxy(
     State(DgwState {
         conf_handle,
         credentials,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
-    KdcToken(KdcTokenClaims { destination }): KdcToken,
+    KdcToken(KdcTokenClaims {
+        destination,
+        jti: token_jti,
+    }): KdcToken,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, HttpError> {
     let conf = conf_handle.get_conf();
@@ -70,6 +71,13 @@ async fn kdc_proxy(
         }
         KdcDestination::Real { krb_realm, krb_kdc } => {
             let envelope_realm = kdc_proxy_message_realm(&kdc_proxy_message);
+
+            // session_id: the HTTP /jet/KdcProxy endpoint has no parent association token, so we
+            // use the KDC token's own `jti` for log correlation (the RDP CredSSP/NLA caller
+            // passes `claims.jet_aid` so KDC sub-traffic correlates with its parent RDP session).
+            // explicit_agent_id: HTTP has no parent association, hence no `jet_agent_id` pin.
+            let kdc_connector = KdcConnector::new(token_jti, None, agent_tunnel_handle);
+
             forward_to_real_kdc(
                 kdc_proxy_message,
                 envelope_realm,
@@ -77,6 +85,7 @@ async fn kdc_proxy(
                 &krb_kdc,
                 conf.debug.override_kdc.as_ref(),
                 conf.debug.disable_token_validation,
+                &kdc_connector,
             )
             .await
         }
@@ -107,6 +116,7 @@ async fn forward_to_real_kdc(
     token_kdc_addr: &TargetAddr,
     override_kdc: Option<&TargetAddr>,
     bypass_realm_check: bool,
+    kdc_connector: &KdcConnector,
 ) -> Result<Vec<u8>, HttpError> {
     let realm = envelope_realm.ok_or_else(|| HttpError::bad_request().msg("realm is missing from KDC request"))?;
     debug!(resolved_realm = %realm, "Forward-to-real-KDC realm resolved");
@@ -120,7 +130,9 @@ async fn forward_to_real_kdc(
         None => token_kdc_addr,
     };
 
-    let kdc_reply_bytes = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
+    let kdc_reply_bytes = kdc_connector
+        .send(kdc_addr, &kdc_proxy_message.kerb_message.0.0)
+        .await?;
 
     let reply = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_bytes)
         .map_err(HttpError::internal().with_msg("couldn't create KDC proxy reply").err())?;
@@ -130,7 +142,7 @@ async fn forward_to_real_kdc(
     reply.to_vec().map_err(HttpError::internal().err())
 }
 
-fn enforce_credential_injection_enabled(jet_cred_id: uuid::Uuid, enable_unstable: bool) -> Result<(), HttpError> {
+fn enforce_credential_injection_enabled(jet_cred_id: Uuid, enable_unstable: bool) -> Result<(), HttpError> {
     if enable_unstable {
         return Ok(());
     }
@@ -165,104 +177,6 @@ fn enforce_realm_token_match(token_realm: &str, request_realm: &str, bypass: boo
         .err()(format!("expected: {token_realm}, got: {request_realm}")))
 }
 
-async fn read_kdc_reply_message(connection: &mut TcpStream) -> io::Result<Vec<u8>> {
-    let len = connection.read_u32().await?;
-    let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
-    buf[0..4].copy_from_slice(&(len.to_be_bytes()));
-    connection.read_exact(&mut buf[4..]).await?;
-    Ok(buf)
-}
-
-#[track_caller]
-fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
-    use io::ErrorKind;
-
-    let builder = match error.kind() {
-        ErrorKind::TimedOut => HttpErrorBuilder::new(StatusCode::GATEWAY_TIMEOUT),
-        ErrorKind::ConnectionRefused => HttpError::bad_gateway(),
-        ErrorKind::ConnectionAborted => HttpError::bad_gateway(),
-        ErrorKind::ConnectionReset => HttpError::bad_gateway(),
-        ErrorKind::BrokenPipe => HttpError::bad_gateway(),
-        ErrorKind::OutOfMemory => HttpError::internal(),
-        // FIXME: once stabilized use new IO error variants
-        // - https://github.com/rust-lang/rust/pull/106375
-        // - https://github.com/rust-lang/rust/issues/86442
-        // ErrorKind::NetworkDown => HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE),
-        // ErrorKind::NetworkUnreachable => HttpError::bad_gateway(),
-        // ErrorKind::HostUnreachable => HttpError::bad_gateway(),
-        // TODO: When the above is applied, we can return an internal error in the fallback branch.
-        _ => HttpError::bad_gateway(),
-    };
-
-    builder.with_msg("unable to reach KDC server").build(error)
-}
-
-/// Sends the Kerberos message to the specified KDC address.
-pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
-    let protocol = kdc_addr.scheme();
-
-    debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
-
-    if protocol == "tcp" {
-        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
-        let mut connection = TcpStream::connect(kdc_addr.as_addr()).await.map_err(|e| {
-            error!(%kdc_addr, "failed to connect to KDC server");
-            unable_to_reach_kdc_server_err(e)
-        })?;
-
-        trace!("Connected! Forwarding KDC message...");
-
-        connection.write_all(message).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to send the message to the KDC server")
-                .err(),
-        )?;
-
-        trace!("Reading KDC reply...");
-
-        Ok(read_kdc_reply_message(&mut connection).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to read KDC reply message")
-                .err(),
-        )?)
-    } else {
-        // We assume that ticket length is not bigger than 2048 bytes.
-        let mut buf = [0; 2048];
-
-        let udp_socket = UdpSocket::bind("127.0.0.1:0")
-            .await
-            .map_err(HttpError::internal().with_msg("unable to bind UDP socket").err())?;
-
-        let port = udp_socket
-            .local_addr()
-            .map_err(HttpError::internal().with_msg("unable to get UDP socket address").err())?
-            .port();
-
-        trace!("Binded UDP listener to 127.0.0.1:{port}, forwarding KDC message...");
-
-        // First 4 bytes contains message length. We don't need it for UDP.
-        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
-        udp_socket
-            .send_to(&message[4..], kdc_addr.as_addr())
-            .await
-            .map_err(|e| unable_to_reach_kdc_server_err(e))?;
-
-        trace!("Reading KDC reply...");
-
-        let n = udp_socket.recv(&mut buf).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to read reply from the KDC server")
-                .err(),
-        )?;
-
-        let mut reply_buf = Vec::new();
-        reply_buf.extend_from_slice(&u32::try_from(n).expect("n not too big").to_be_bytes());
-        reply_buf.extend_from_slice(&buf[0..n]);
-
-        Ok(reply_buf)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,11 +202,11 @@ mod tests {
 
     #[test]
     fn credential_injection_gate_allows_jet_cred_id_when_enabled() {
-        assert!(enforce_credential_injection_enabled(uuid::Uuid::new_v4(), true).is_ok());
+        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), true).is_ok());
     }
 
     #[test]
     fn credential_injection_gate_rejects_jet_cred_id_when_disabled() {
-        assert!(enforce_credential_injection_enabled(uuid::Uuid::new_v4(), false).is_err());
+        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), false).is_err());
     }
 }

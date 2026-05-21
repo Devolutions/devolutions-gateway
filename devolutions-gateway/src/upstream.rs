@@ -298,7 +298,7 @@ impl<'a> RoutePlan<'a> {
     }
 }
 
-fn route_target_from_target_addr(target: &TargetAddr) -> RouteTarget {
+pub(crate) fn route_target_from_target_addr(target: &TargetAddr) -> RouteTarget {
     match target.host_ip() {
         Some(ip) => RouteTarget::ip(ip),
         None => RouteTarget::hostname(target.host()),

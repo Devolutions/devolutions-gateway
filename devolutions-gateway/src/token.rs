@@ -609,6 +609,13 @@ pub struct JrecTokenClaims {
 pub struct KdcTokenClaims {
     /// Where the KDC traffic for this session is routed.
     pub destination: KdcDestination,
+
+    /// JWT "JWT ID" claim, the unique ID for this token.
+    ///
+    /// Used as the agent-tunnel session ID when the HTTP `/jet/KdcProxy` endpoint forwards
+    /// through an agent — it has no parent association token to inherit `jet_aid` from, so the
+    /// KDC token's own `jti` provides a persistent log-correlation identifier instead.
+    pub jti: Uuid,
 }
 
 /// Destination for a KDC session token.
@@ -1482,6 +1489,7 @@ mod serde_impl {
         krb_kdc: Option<SmolStr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         jet_cred_id: Option<Uuid>,
+        jti: Uuid,
     }
 
     impl ser::Serialize for SessionTtl {
@@ -1733,11 +1741,13 @@ mod serde_impl {
                     krb_realm: Some(krb_realm.clone()),
                     krb_kdc: Some(SmolStr::new(krb_kdc.as_str())),
                     jet_cred_id: None,
+                    jti: self.jti,
                 },
                 KdcDestination::Inject { jti } => KdcClaimsHelper {
                     krb_realm: None,
                     krb_kdc: None,
                     jet_cred_id: Some(*jti),
+                    jti: self.jti,
                 },
             };
 
@@ -1789,7 +1799,10 @@ mod serde_impl {
                 }
             };
 
-            Ok(Self { destination })
+            Ok(Self {
+                destination,
+                jti: claims.jti,
+            })
         }
     }
 }

@@ -163,6 +163,12 @@ where
                         "RDP-TLS forwarding with credential injection"
                     );
 
+                    let kdc_connector = crate::kdc_connector::KdcConnector::new(
+                        claims.jet_aid,
+                        claims.jet_agent_id,
+                        agent_tunnel_handle.clone(),
+                    );
+
                     // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
                     return crate::rdp_proxy::RdpProxy::builder()
                         .conf(conf)
@@ -177,6 +183,7 @@ where
                         .client_stream_leftover_bytes(leftover_bytes)
                         .server_dns_name(selected_target.host().to_owned())
                         .disconnect_interest(disconnect_interest)
+                        .kdc_connector(kdc_connector)
                         .build()
                         .run()
                         .await
