@@ -24,6 +24,7 @@ pub mod http;
 pub mod interceptor;
 pub mod jmux;
 pub mod job_queue;
+pub mod kdc_connector;
 pub mod listener;
 pub mod log;
 pub mod middleware;

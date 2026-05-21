@@ -417,6 +417,9 @@ async fn handle_with_credential_injection(
     let krb_server_config =
         crate::rdp_proxy::credential_injection_kerberos_server_config(&conf, client_addr, &credential_injection_kdc)?;
 
+    let kdc_connector =
+        crate::kdc_connector::KdcConnector::new(claims.jet_aid, claims.jet_agent_id, agent_tunnel_handle.clone());
+
     let client_credssp_fut = crate::rdp_proxy::perform_credssp_as_server(
         &mut client_framed,
         client_addr.ip(),
@@ -425,6 +428,7 @@ async fn handle_with_credential_injection(
         credential_injection_kdc.proxy_credential(),
         krb_server_config,
         &credential_injection_kdc,
+        &kdc_connector,
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -448,6 +452,7 @@ async fn handle_with_credential_injection(
         server_security_protocol,
         credential_injection_kdc.target_credential(),
         krb_client_config,
+        &kdc_connector,
     );
 
     let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
