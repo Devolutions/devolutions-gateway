@@ -32,6 +32,36 @@ pub(crate) struct ConfigDiagnostic {
     version: &'static str,
     /// Listeners configured on this instance
     listeners: Vec<ListenerUrls>,
+    /// Agent tunnel configuration summary (`null` when feature is disabled or absent in config).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_tunnel: Option<AgentTunnelDiagnostic>,
+}
+
+/// Agent tunnel diagnostic surface.
+///
+/// DVLS reads this when building the "Generate enrollment string" dropdown so
+/// admins pick a name the Gateway is actually advertising. Same auth scope as
+/// the rest of `/jet/diagnostics/configuration`.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+pub(crate) struct AgentTunnelDiagnostic {
+    /// Whether the agent tunnel listener is enabled.
+    enabled: bool,
+    /// UDP port the agent tunnel QUIC listener is bound to.
+    listen_port: u16,
+    /// Names or IPs this Gateway is reachable as for agent tunnel enrollment.
+    advertised_names: Vec<AdvertisedNameDiagnostic>,
+}
+
+/// One advertised name entry, with an optional display label for DVLS UI.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+pub(crate) struct AdvertisedNameDiagnostic {
+    /// Host or IP literal (canonical form).
+    name: String,
+    /// Optional display label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
 }
 
 impl From<&Conf> for ConfigDiagnostic {
@@ -75,11 +105,30 @@ impl From<&Conf> for ConfigDiagnostic {
             }
         }
 
+        let agent_tunnel = if conf.agent_tunnel.enabled {
+            Some(AgentTunnelDiagnostic {
+                enabled: conf.agent_tunnel.enabled,
+                listen_port: conf.agent_tunnel.listen_port,
+                advertised_names: conf
+                    .agent_tunnel
+                    .advertised_names
+                    .iter()
+                    .map(|n| AdvertisedNameDiagnostic {
+                        name: n.name().to_owned(),
+                        label: n.label().map(str::to_owned),
+                    })
+                    .collect(),
+            })
+        } else {
+            None
+        };
+
         ConfigDiagnostic {
             id: conf.id,
             listeners,
             version: env!("CARGO_PKG_VERSION"),
             hostname: conf.hostname.clone(),
+            agent_tunnel,
         }
     }
 }

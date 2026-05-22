@@ -897,6 +897,18 @@ impl Conf {
             );
         }
 
+        // Build the migrated agent_tunnel config before moving `hostname` into the result.
+        let agent_tunnel = {
+            let mut agent_tunnel = conf_file.agent_tunnel.clone().unwrap_or_default();
+            // Migration shim: if `AdvertisedNames` is not configured, fall back
+            // to the legacy single-hostname behaviour by advertising the
+            // Gateway's `hostname`.
+            if agent_tunnel.advertised_names.is_empty() {
+                agent_tunnel.advertised_names = vec![dto::AdvertisedName::Bare(hostname.clone())];
+            }
+            agent_tunnel
+        };
+
         Ok(Conf {
             id: conf_file.id,
             hostname,
@@ -928,7 +940,7 @@ impl Conf {
                 .as_ref()
                 .map(AiGatewayConf::from_dto)
                 .unwrap_or_default(),
-            agent_tunnel: conf_file.agent_tunnel.clone().unwrap_or_default(),
+            agent_tunnel,
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
@@ -1941,6 +1953,14 @@ pub mod dto {
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
         pub listen_port: u16,
+        /// Names or IPs this Gateway is reachable as for the agent tunnel.
+        ///
+        /// Each entry is either a bare string or `{ "name": "...", "label": "..." }`.
+        /// All entries are added to the agent tunnel server certificate's SAN list,
+        /// and only enrollment requests whose `jet_gw_url` host matches one of them
+        /// are accepted.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub advertised_names: Vec<AdvertisedName>,
     }
 
     impl AgentTunnelConf {
@@ -1954,6 +1974,69 @@ pub mod dto {
             Self {
                 enabled: false,
                 listen_port: Self::default_listen_port(),
+                advertised_names: Vec::new(),
+            }
+        }
+    }
+
+    /// An advertised name (FQDN or IP literal) under which the agent tunnel
+    /// Gateway accepts enrollments and which is included in the server cert SAN.
+    ///
+    /// Accepts two equivalent JSON shapes via `#[serde(untagged)]`:
+    /// - A bare string: `"gateway.corp.example.com"`
+    /// - An object with an optional display label:
+    ///   `{ "name": "gateway.corp.example.com", "label": "HQ FQDN" }`
+    ///
+    /// The label is purely informational and surfaced by DVLS UI. The Gateway
+    /// itself only uses `name` for SAN generation and host validation.
+    #[derive(PartialEq, Eq, Debug, Clone, Deserialize)]
+    #[serde(untagged)]
+    pub enum AdvertisedName {
+        /// Bare string form: just a host or IP literal.
+        Bare(String),
+        /// Object form with a name and an optional display label.
+        Labeled {
+            #[serde(rename = "Name", alias = "name")]
+            name: String,
+            #[serde(rename = "Label", alias = "label", default, skip_serializing_if = "Option::is_none")]
+            label: Option<String>,
+        },
+    }
+
+    impl AdvertisedName {
+        /// Return the name portion (host or IP literal) for SAN/host matching.
+        pub fn name(&self) -> &str {
+            match self {
+                AdvertisedName::Bare(name) => name.as_str(),
+                AdvertisedName::Labeled { name, .. } => name.as_str(),
+            }
+        }
+
+        /// Return the optional display label (informational only).
+        pub fn label(&self) -> Option<&str> {
+            match self {
+                AdvertisedName::Bare(_) => None,
+                AdvertisedName::Labeled { label, .. } => label.as_deref(),
+            }
+        }
+    }
+
+    /// Serialize as a bare string when no label is set, otherwise as an object.
+    impl serde::Serialize for AdvertisedName {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            match self {
+                AdvertisedName::Bare(name) => serializer.serialize_str(name),
+                AdvertisedName::Labeled { name, label: None } => serializer.serialize_str(name),
+                AdvertisedName::Labeled {
+                    name,
+                    label: Some(label),
+                } => {
+                    use serde::ser::SerializeMap as _;
+                    let mut map = serializer.serialize_map(Some(2))?;
+                    map.serialize_entry("Name", name)?;
+                    map.serialize_entry("Label", label)?;
+                    map.end()
+                }
             }
         }
     }

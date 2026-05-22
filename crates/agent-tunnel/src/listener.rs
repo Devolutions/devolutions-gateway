@@ -112,10 +112,10 @@ impl AgentTunnelListener {
     pub async fn bind(
         listen_addr: SocketAddr,
         ca_manager: Arc<CaManager>,
-        hostname: &str,
+        advertised_names: &[&str],
     ) -> anyhow::Result<(Self, AgentTunnelHandle)> {
         let tls_config = ca_manager
-            .build_server_tls_config(hostname)
+            .build_server_tls_config(advertised_names)
             .context("build server TLS config")?;
 
         let quic_server_config = quinn::crypto::rustls::QuicServerConfig::try_from(Arc::new(tls_config))

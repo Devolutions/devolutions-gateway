@@ -277,7 +277,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     // Initialize agent tunnel if configured.
     let agent_tunnel_handle = if conf.agent_tunnel.enabled {
         let data_dir = config::get_data_dir();
-        let hostname = &conf.hostname;
+        let advertised_names: Vec<&str> = conf
+            .agent_tunnel
+            .advertised_names
+            .iter()
+            .map(|n| n.name())
+            .collect();
 
         let ca_manager = agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
             .context("failed to initialize agent tunnel CA")?;
@@ -290,7 +295,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
 
         let (listener, handle) =
-            agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), hostname)
+            agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), &advertised_names)
                 .await
                 .context("failed to bind agent tunnel listener")?;
 

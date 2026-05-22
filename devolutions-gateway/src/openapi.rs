@@ -46,6 +46,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         PubKeyFormat,
         Subscriber,
         crate::api::diagnostics::ConfigDiagnostic,
+        crate::api::diagnostics::AgentTunnelDiagnostic,
+        crate::api::diagnostics::AdvertisedNameDiagnostic,
         crate::api::diagnostics::ClockDiagnostic,
         SubProvisionerKey,
         ConfigPatch,

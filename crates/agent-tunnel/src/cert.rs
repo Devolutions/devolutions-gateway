@@ -250,34 +250,62 @@ impl CaManager {
 
     /// Ensure a server certificate exists for the QUIC listener (signed by our CA).
     ///
+    /// `advertised_names` is the authoritative list of names/IPs the agent tunnel
+    /// is reachable as. Each entry is added to the cert SAN — DNS literals are
+    /// inserted as `SanType::DnsName`, IP literals (parseable by [`std::net::IpAddr`])
+    /// as `SanType::IpAddress`. When the on-disk cert's SAN set differs from the
+    /// expected SAN set, the cert is regenerated reusing the existing keypair so
+    /// the SPKI pin captured at enrollment stays stable.
+    ///
     /// Returns `(cert_path, key_path)` on disk.
-    pub fn ensure_server_cert(&self, hostname: &str) -> anyhow::Result<(Utf8PathBuf, Utf8PathBuf)> {
+    pub fn ensure_server_cert(&self, advertised_names: &[&str]) -> anyhow::Result<(Utf8PathBuf, Utf8PathBuf)> {
         let cert_path = self.data_dir.join(SERVER_CERT_FILENAME);
         let key_path = self.data_dir.join(SERVER_KEY_FILENAME);
 
-        match check_server_cert(&cert_path, &key_path, hostname) {
-            ServerCertStatus::Valid => {
-                info!(%cert_path, "Using existing agent tunnel server certificate");
-                return Ok((cert_path, key_path));
-            }
-            status => {
-                info!(%cert_path, ?status, "Generating server certificate");
-            }
+        if advertised_names.is_empty() {
+            anyhow::bail!("at least one advertised name is required to generate the agent tunnel server certificate");
         }
 
-        info!(%hostname, "Generating agent tunnel server certificate");
+        // Compute the expected SAN set (canonical, deduped).
+        let expected_sans = build_san_set(advertised_names)?;
 
-        let server_key_pair =
-            KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate server key pair")?;
+        let status = check_server_cert(&cert_path, &key_path, &expected_sans);
+
+        // Pick the primary name for cert CN / log messages: the first advertised
+        // name. Stable across regenerations so log lines remain greppable.
+        let primary_name = advertised_names[0];
+
+        // The keypair is preserved across SAN regenerations to keep the SPKI pin
+        // stable for already-enrolled agents. Only the cert document changes.
+        // Generate a fresh key only if the existing key is missing/unreadable.
+        let server_key_pair = match (status, std::fs::read_to_string(&key_path)) {
+            (ServerCertStatus::Valid, _) => {
+                info!(%cert_path, ?expected_sans, "Using existing agent tunnel server certificate");
+                return Ok((cert_path, key_path));
+            }
+            (ServerCertStatus::SanMismatch { on_disk_sans }, Ok(key_pem)) => {
+                info!(
+                    %cert_path,
+                    ?on_disk_sans,
+                    new_sans = ?expected_sans,
+                    "Agent tunnel server cert SAN set changed; regenerating with the existing keypair",
+                );
+                KeyPair::from_pem(&key_pem).context("parse existing server key pair from PEM")?
+            }
+            (other_status, _) => {
+                info!(%cert_path, ?other_status, "Generating new server certificate keypair");
+                KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate server key pair")?
+            }
+        };
 
         let mut server_params = CertificateParams::default();
-        server_params.distinguished_name.push(DnType::CommonName, hostname);
+        server_params.distinguished_name.push(DnType::CommonName, primary_name);
         server_params
             .distinguished_name
             .push(DnType::OrganizationName, CA_ORG_NAME);
-        server_params
-            .subject_alt_names
-            .push(SanType::DnsName(hostname.try_into().context("DNS SAN")?));
+        for san in &expected_sans {
+            server_params.subject_alt_names.push(san_entry(san)?);
+        }
         server_params
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ServerAuth);
@@ -291,9 +319,16 @@ impl CaManager {
             .signed_by(&server_key_pair, &ca_cert, &self.ca_key_pair)
             .context("sign server certificate with CA")?;
 
-        std::fs::write(&cert_path, server_cert.pem()).with_context(|| format!("write server cert to {cert_path}"))?;
-        std::fs::write(&key_path, server_key_pair.serialize_pem())
-            .with_context(|| format!("write server key to {key_path}"))?;
+        let server_cert_pem = server_cert.pem();
+        let fingerprint = cert_fingerprint_from_pem(&server_cert_pem).unwrap_or_else(|_| "<unknown>".to_owned());
+
+        std::fs::write(&cert_path, &server_cert_pem).with_context(|| format!("write server cert to {cert_path}"))?;
+        // Only write the key when generating a new one. Reusing the existing key
+        // means we already validated the file is readable above.
+        if !key_path.exists() {
+            std::fs::write(&key_path, server_key_pair.serialize_pem())
+                .with_context(|| format!("write server key to {key_path}"))?;
+        }
 
         #[cfg(unix)]
         {
@@ -302,7 +337,13 @@ impl CaManager {
                 .with_context(|| format!("set permissions on {key_path}"))?;
         }
 
-        info!(%cert_path, %hostname, "Server certificate generated and saved");
+        info!(
+            %cert_path,
+            primary_name,
+            sans = ?expected_sans,
+            %fingerprint,
+            "Agent tunnel server certificate generated and saved",
+        );
 
         Ok((cert_path, key_path))
     }
@@ -321,13 +362,13 @@ impl CaManager {
     ///
     /// The server certificate is signed by our CA; clients must present a certificate
     /// also signed by our CA (mutual TLS).
-    pub fn build_server_tls_config(&self, hostname: &str) -> anyhow::Result<rustls::ServerConfig> {
+    pub fn build_server_tls_config(&self, advertised_names: &[&str]) -> anyhow::Result<rustls::ServerConfig> {
         use rustls::pki_types::PrivateKeyDer;
 
         // Ensure rustls crypto provider is installed (ring).
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let (server_cert_path, server_key_path) = self.ensure_server_cert(hostname)?;
+        let (server_cert_path, server_key_path) = self.ensure_server_cert(advertised_names)?;
 
         // Load server certificate.
         let server_cert_pem =
@@ -375,12 +416,100 @@ impl CaManager {
     /// Compute the SPKI SHA-256 hash of the server certificate.
     ///
     /// Loads the cert from disk. Only called during enrollment (infrequent).
-    pub fn server_spki_sha256(&self, hostname: &str) -> anyhow::Result<String> {
-        let (server_cert_path, _) = self.ensure_server_cert(hostname)?;
+    pub fn server_spki_sha256(&self, advertised_names: &[&str]) -> anyhow::Result<String> {
+        let (server_cert_path, _) = self.ensure_server_cert(advertised_names)?;
         let pem_str = std::fs::read_to_string(&server_cert_path)
             .with_context(|| format!("read server cert from {server_cert_path}"))?;
         let der = cert_pem_to_der(&pem_str).context("parse server cert PEM")?;
         spki_sha256_from_der(&der)
+    }
+}
+
+/// Canonical SAN identifier kept inside the manager.
+///
+/// `Dns` names are lower-cased; `Ip` values are normalized via [`std::net::IpAddr`]
+/// so `10.10.0.7` and `10.10.000.7` collapse to the same identifier and IPv6
+/// literals compare in canonical form.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SanIdent {
+    Dns(String),
+    Ip(std::net::IpAddr),
+}
+
+impl std::fmt::Display for SanIdent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SanIdent::Dns(name) => f.write_str(name),
+            SanIdent::Ip(ip) => write!(f, "{ip}"),
+        }
+    }
+}
+
+/// Build a deduped, canonical SAN set from the raw advertised names.
+///
+/// Strings that parse as `IpAddr` become `SanIdent::Ip` (with canonical formatting);
+/// everything else becomes `SanIdent::Dns` lower-cased.
+pub(crate) fn build_san_set(advertised_names: &[&str]) -> anyhow::Result<Vec<SanIdent>> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for raw in advertised_names {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("advertised name cannot be empty");
+        }
+        let ident = if let Ok(ip) = trimmed.parse::<std::net::IpAddr>() {
+            SanIdent::Ip(ip)
+        } else {
+            SanIdent::Dns(trimmed.to_ascii_lowercase())
+        };
+        if seen.insert(ident.clone()) {
+            out.push(ident);
+        }
+    }
+    Ok(out)
+}
+
+/// Build the rcgen `SanType` for a canonical SAN identifier.
+fn san_entry(san: &SanIdent) -> anyhow::Result<SanType> {
+    match san {
+        SanIdent::Dns(name) => Ok(SanType::DnsName(name.clone().try_into().context("DNS SAN")?)),
+        SanIdent::Ip(ip) => Ok(SanType::IpAddress(*ip)),
+    }
+}
+
+/// Extract the SAN set from a parsed certificate as a canonical `Vec<SanIdent>`.
+fn extract_san_set(cert: &Cert) -> Vec<SanIdent> {
+    let mut sans = Vec::new();
+    for ext in cert.extensions() {
+        if let ExtensionView::SubjectAltName(names) = ext.extn_value() {
+            for name in &names.0 {
+                match name {
+                    GeneralName::DnsName(dns) => sans.push(SanIdent::Dns(dns.as_utf8().to_ascii_lowercase())),
+                    GeneralName::IpAddress(bytes) => {
+                        // X.509 IP SAN encodes IPv4 as 4 bytes, IPv6 as 16 bytes.
+                        if let Some(ip) = ip_from_san_bytes(bytes) {
+                            sans.push(SanIdent::Ip(ip));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    sans
+}
+
+fn ip_from_san_bytes(bytes: &[u8]) -> Option<std::net::IpAddr> {
+    match bytes.len() {
+        4 => {
+            let octets: [u8; 4] = bytes.try_into().ok()?;
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(octets)))
+        }
+        16 => {
+            let octets: [u8; 16] = bytes.try_into().ok()?;
+            Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(octets)))
+        }
+        _ => None,
     }
 }
 
@@ -445,21 +574,22 @@ pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> anyhow::Result<Uuid> {
 // ---------------------------------------------------------------------------
 
 /// Why an existing server certificate cannot be reused.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ServerCertStatus {
-    /// Certificate is valid and matches the configured hostname.
+    /// Certificate is valid and the SAN set matches the configured advertised names.
     Valid,
     /// Certificate or key file does not exist yet.
     NotFound,
     /// Certificate expires within 7 days.
     ExpiringSoon,
-    /// Certificate's DNS SAN does not match the configured hostname.
-    HostnameMismatch,
+    /// Certificate's SAN set does not match the configured advertised names.
+    /// The existing keypair can be reused; only the cert document is regenerated.
+    SanMismatch { on_disk_sans: Vec<SanIdent> },
     /// Certificate file is corrupt or unparseable.
     Unreadable,
 }
 
-fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) -> ServerCertStatus {
+fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, expected_sans: &[SanIdent]) -> ServerCertStatus {
     if !cert_path.exists() || !key_path.exists() {
         return ServerCertStatus::NotFound;
     }
@@ -483,20 +613,15 @@ fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) 
         return ServerCertStatus::ExpiringSoon;
     }
 
-    // Hostname: reject if DNS SAN doesn't match the configured hostname.
-    let san_matches = cert.extensions().iter().any(|ext| {
-        if let ExtensionView::SubjectAltName(names) = ext.extn_value() {
-            names
-                .0
-                .iter()
-                .any(|name| matches!(name, GeneralName::DnsName(h) if h.as_utf8() == hostname))
-        } else {
-            false
-        }
-    });
-
-    if !san_matches {
-        return ServerCertStatus::HostnameMismatch;
+    // SAN set match: order-insensitive, canonical comparison.
+    let mut on_disk_sans = extract_san_set(&cert);
+    let mut on_disk_sorted = on_disk_sans.clone();
+    on_disk_sorted.sort();
+    let mut expected_sorted = expected_sans.to_vec();
+    expected_sorted.sort();
+    if on_disk_sorted != expected_sorted {
+        on_disk_sans.sort();
+        return ServerCertStatus::SanMismatch { on_disk_sans };
     }
 
     ServerCertStatus::Valid
@@ -555,7 +680,7 @@ mod tests {
 
         // Server certificate.
         let (server_cert_path, server_key_path) = ca
-            .ensure_server_cert("test-gateway.local")
+            .ensure_server_cert(&["test-gateway.local"])
             .expect("server cert should succeed");
         assert!(server_cert_path.exists());
         assert!(server_key_path.exists());
@@ -673,6 +798,101 @@ mod tests {
         let err = read_cert_chain("").expect_err("empty input should fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("no CERTIFICATE blocks"), "got: {msg}");
+    }
+
+    // ---------------------------------------------------------------------
+    // SAN regen idempotence — same SAN set must not rotate the keypair, a
+    // different SAN set must regenerate the cert but keep the keypair so the
+    // SPKI pin held by already-enrolled agents stays stable.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn ensure_server_cert_is_idempotent_when_san_set_matches() {
+        let temp_dir = std::env::temp_dir().join(format!("dgw-san-idem-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temp path UTF-8");
+        let ca = CaManager::load_or_generate(&data_dir).expect("CA");
+
+        let names = ["gateway.corp.example.com", "10.10.0.7"];
+        let (_cert_path, key_path) = ca.ensure_server_cert(&names).expect("first issue");
+
+        let key_pem_before = std::fs::read_to_string(&key_path).expect("read key after first issue");
+
+        // Re-running with the same set must be a no-op (same key, same cert content).
+        let (cert_path_2, key_path_2) = ca.ensure_server_cert(&names).expect("second issue");
+        assert_eq!(cert_path_2, _cert_path);
+        assert_eq!(key_path_2, key_path);
+
+        let key_pem_after = std::fs::read_to_string(&key_path_2).expect("read key after second issue");
+        assert_eq!(key_pem_before, key_pem_after, "keypair must not rotate when SAN set unchanged");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn ensure_server_cert_regenerates_on_san_change_keeping_keypair() {
+        let temp_dir = std::env::temp_dir().join(format!("dgw-san-change-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temp path UTF-8");
+        let ca = CaManager::load_or_generate(&data_dir).expect("CA");
+
+        let names_before = ["gateway.corp.example.com"];
+        let (cert_path, key_path) = ca.ensure_server_cert(&names_before).expect("first issue");
+        let key_pem_before = std::fs::read_to_string(&key_path).expect("read key");
+        let cert_pem_before = std::fs::read_to_string(&cert_path).expect("read cert");
+
+        // Now configure a different SAN set: add an IP literal and a public DNS name.
+        let names_after = ["gateway.corp.example.com", "10.10.0.7", "agw.public.example.com"];
+        ca.ensure_server_cert(&names_after).expect("regen with new SAN set");
+
+        let key_pem_after = std::fs::read_to_string(&key_path).expect("read key after regen");
+        let cert_pem_after = std::fs::read_to_string(&cert_path).expect("read cert after regen");
+
+        assert_eq!(
+            key_pem_before, key_pem_after,
+            "keypair must be reused when only the SAN set changes — SPKI pin stays stable"
+        );
+        assert_ne!(
+            cert_pem_before, cert_pem_after,
+            "cert document must be reissued when the SAN set changes"
+        );
+
+        // Confirm the new cert actually contains the new SANs in canonical form.
+        let der = cert_pem_to_der(&cert_pem_after).expect("parse new cert PEM");
+        let cert = Cert::from_der(&der).expect("parse new cert DER");
+        let mut sans = extract_san_set(&cert);
+        sans.sort();
+        let mut expected = build_san_set(&names_after).expect("build expected SAN set");
+        expected.sort();
+        assert_eq!(sans, expected);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn build_san_set_normalizes_and_dedups() {
+        // Mixed case DNS, alternate IP formatting, duplicate entries.
+        let names = [
+            "Gateway.Corp.Example.com",
+            "gateway.corp.example.com",
+            "10.10.0.7",
+            "fd00::7",
+            "fd00::0007", // same IPv6 in alternate form
+        ];
+        let sans = build_san_set(&names).expect("build SAN set");
+
+        // Expected canonical: lowered DNS, canonical IP strings, deduped.
+        let expected: Vec<SanIdent> = vec![
+            SanIdent::Dns("gateway.corp.example.com".to_owned()),
+            SanIdent::Ip("10.10.0.7".parse().unwrap()),
+            SanIdent::Ip("fd00::7".parse().unwrap()),
+        ];
+        assert_eq!(sans, expected);
+    }
+
+    #[test]
+    fn build_san_set_rejects_empty_entry() {
+        let err = build_san_set(&["   "]).expect_err("empty advertised name should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("empty"), "got: {msg}");
     }
 
     #[test]
