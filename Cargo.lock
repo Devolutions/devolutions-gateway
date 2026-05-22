@@ -8024,6 +8024,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unigetui-broker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes 1.11.1",
+ "chrono",
+ "devolutions-gateway-task",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio 1.52.3",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "universal-hash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
