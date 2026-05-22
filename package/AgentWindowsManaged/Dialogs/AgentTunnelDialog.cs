@@ -22,6 +22,7 @@ public partial class AgentTunnelDialog : AgentDialog
     public override bool ToProperties()
     {
         Runtime.Session[AgentProperties.AgentTunnelEnrollmentString] = enrollmentString.Text.Trim();
+        Runtime.Session[AgentProperties.AgentTunnelAgentName] = agentName.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseSubnets] = advertiseSubnets.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseDomains] = advertiseDomains.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelGatewayUrl] = gatewayUrl.Text.Trim();
@@ -34,6 +35,7 @@ public partial class AgentTunnelDialog : AgentDialog
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
         enrollmentString.Text = Runtime.Session.Property(AgentProperties.AgentTunnelEnrollmentString);
+        agentName.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAgentName);
         advertiseSubnets.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseSubnets);
         advertiseDomains.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
         gatewayUrl.Text = Runtime.Session.Property(AgentProperties.AgentTunnelGatewayUrl);
@@ -43,10 +45,12 @@ public partial class AgentTunnelDialog : AgentDialog
 
     public override bool DoValidate()
     {
-        // Tunnel is optional — if enrollment string is empty, skip tunnel setup entirely.
+        // The dialog is only reached when the Agent Tunnel feature is selected (see Wizard.ShouldSkip),
+        // so an enrollment string is required at this point.
         if (string.IsNullOrWhiteSpace(enrollmentString.Text))
         {
-            return true;
+            ShowValidationErrorString("Enrollment string is required. Paste a JWT from Devolutions Server, Hub, or Gateway, or go back and deselect the Agent Tunnel feature.");
+            return false;
         }
 
         // JWT shape: three base64url segments separated by dots. The agent's `up --enrollment-string`
