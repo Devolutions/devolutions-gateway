@@ -10,3 +10,4 @@ pub mod models;
 pub mod pipe;
 pub mod policy_loader;
 pub mod server;
+pub mod task;

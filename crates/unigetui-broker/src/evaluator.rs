@@ -243,20 +243,19 @@ fn constraints_pass(
     }
 
     // Check install location patterns.
-    if flags.has_custom_install_location {
-        if let Some(patterns) = &c.allowed_install_location_patterns {
-            if !wildcard_any_vec(&flags.custom_install_location, patterns) {
-                return false;
-            }
-        }
+    if flags.has_custom_install_location
+        && let Some(patterns) = &c.allowed_install_location_patterns
+        && !wildcard_any_vec(&flags.custom_install_location, patterns)
+    {
+        return false;
     }
 
     // Check custom parameters.
     for param in &flags.custom_parameters {
-        if let Some(denied) = &c.denied_custom_parameters {
-            if wildcard_any_vec(param, denied) {
-                return false;
-            }
+        if let Some(denied) = &c.denied_custom_parameters
+            && wildcard_any_vec(param, denied)
+        {
+            return false;
         }
         if c.allowed_custom_parameters.is_some() || c.allowed_custom_parameter_patterns.is_some() {
             let exact_allowed = c
@@ -337,20 +336,20 @@ fn wildcard_match(value: &str, pattern: &str) -> bool {
 }
 
 fn get_effective_version(request: &PackageRequest) -> String {
-    if let Some(v) = &request.options.version {
-        if !v.is_empty() {
-            return v.clone();
-        }
+    if let Some(v) = &request.options.version
+        && !v.is_empty()
+    {
+        return v.clone();
     }
-    if let Some(v) = &request.package.new_version {
-        if !v.is_empty() {
-            return v.clone();
-        }
+    if let Some(v) = &request.package.new_version
+        && !v.is_empty()
+    {
+        return v.clone();
     }
-    if let Some(v) = &request.package.version {
-        if !v.is_empty() {
-            return v.clone();
-        }
+    if let Some(v) = &request.package.version
+        && !v.is_empty()
+    {
+        return v.clone();
     }
     String::new()
 }
@@ -368,15 +367,17 @@ fn version_range_matches(
     if version.contains('-') && !range.include_prerelease {
         return false;
     }
-    if let Some(min) = &range.min_version {
-        if !min.is_empty() && compare_versions(version, min) < 0 {
-            return false;
-        }
+    if let Some(min) = &range.min_version
+        && !min.is_empty()
+        && compare_versions(version, min) < 0
+    {
+        return false;
     }
-    if let Some(max) = &range.max_version {
-        if !max.is_empty() && compare_versions(version, max) > 0 {
-            return false;
-        }
+    if let Some(max) = &range.max_version
+        && !max.is_empty()
+        && compare_versions(version, max) > 0
+    {
+        return false;
     }
     true
 }

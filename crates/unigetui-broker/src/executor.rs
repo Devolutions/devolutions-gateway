@@ -92,6 +92,22 @@ impl CommandExecutor for WindowsExecutor {
     }
 }
 
+/// Create the appropriate command executor for the current platform.
+///
+/// On Windows, returns a `WindowsExecutor` that runs real processes.
+/// On other platforms, returns a `DryRunExecutor` since named pipes
+/// and WinGet are not available.
+pub fn create_platform_executor() -> Box<dyn CommandExecutor> {
+    #[cfg(windows)]
+    {
+        Box::new(WindowsExecutor)
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(DryRunExecutor)
+    }
+}
+
 /// Resolve a user's profile directory from their username.
 /// Format expected: "DOMAIN\\username" or just "username".
 #[cfg(windows)]

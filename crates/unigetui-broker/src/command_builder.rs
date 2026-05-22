@@ -70,11 +70,11 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
 }
 
 fn add_pair(command: &mut Vec<String>, flag: &str, value: Option<&str>) {
-    if let Some(v) = value {
-        if !v.is_empty() {
-            command.push(flag.to_owned());
-            command.push(v.to_owned());
-        }
+    if let Some(v) = value
+        && !v.is_empty()
+    {
+        command.push(flag.to_owned());
+        command.push(v.to_owned());
     }
 }
 

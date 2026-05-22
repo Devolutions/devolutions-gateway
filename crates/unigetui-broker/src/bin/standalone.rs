@@ -13,6 +13,9 @@
 //!   --execute            Enable real command execution (default: dry-run)
 //!   --help               Show this help
 
+// CLI binary legitimately uses stderr for user-facing messages.
+#![allow(clippy::print_stderr)]
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

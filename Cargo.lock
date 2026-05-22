@@ -1578,6 +1578,7 @@ dependencies = [
  "tokio 1.52.3",
  "tokio-rustls",
  "tracing",
+ "unigetui-broker",
  "url",
  "uuid",
  "win-api-wrappers",

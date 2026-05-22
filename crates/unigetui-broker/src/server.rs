@@ -247,7 +247,7 @@ async fn handle_evaluate(
             state.policy.metadata.revision.to_string(),
         )
         .body(Full::new(Bytes::from(body)))
-        .unwrap()
+        .expect("BUG: response builder with valid status and ASCII headers")
 }
 
 fn make_error_response(
@@ -301,7 +301,7 @@ fn make_error_response(
         .header("UniGetUI-Policy-Id", &policy.metadata.id)
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
-        .unwrap()
+        .expect("BUG: response builder with valid status and ASCII headers")
 }
 
 fn not_found() -> Response<Full<Bytes>> {
@@ -311,7 +311,7 @@ fn not_found() -> Response<Full<Bytes>> {
         .body(Full::new(Bytes::from(
             r#"{"error":"not found"}"#.as_bytes().to_vec(),
         )))
-        .unwrap()
+        .expect("BUG: static response builder")
 }
 
 fn json_response(status: StatusCode, body: &serde_json::Value) -> Response<Full<Bytes>> {
@@ -320,7 +320,7 @@ fn json_response(status: StatusCode, body: &serde_json::Value) -> Response<Full<
         .status(status)
         .header("Content-Type", "application/json")
         .body(Full::new(Bytes::from(bytes)))
-        .unwrap()
+        .expect("BUG: response builder with valid status")
 }
 
 fn generate_audit_id() -> String {

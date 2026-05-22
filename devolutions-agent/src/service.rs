@@ -14,6 +14,8 @@ use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 #[cfg(windows)]
 use devolutions_pedm::PedmTask;
+#[cfg(windows)]
+use unigetui_broker::task::{BrokerTask, BrokerTaskConfig};
 use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
 
@@ -212,6 +214,18 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
 
         if conf.pedm.enabled {
             tasks.register(PedmTask::new())
+        }
+
+        if conf.package_broker.enabled {
+            let broker_config = BrokerTaskConfig {
+                pipe_name: conf
+                    .package_broker
+                    .pipe_name
+                    .clone()
+                    .unwrap_or_else(|| unigetui_broker::pipe::DEFAULT_PIPE_NAME.to_owned()),
+                policy_path: conf.package_broker.policy_path.clone(),
+            };
+            tasks.register(BrokerTask::new(broker_config));
         }
 
         if conf.session.enabled {

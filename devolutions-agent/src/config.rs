@@ -20,6 +20,7 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
+    pub package_broker: dto::PackageBrokerConf,
     pub tunnel: TunnelConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
@@ -122,6 +123,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            package_broker: conf_file.package_broker.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -436,6 +438,30 @@ pub mod dto {
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
+    pub struct PackageBrokerConf {
+        /// Enable UniGetUI package broker module (disabled by default)
+        pub enabled: bool,
+        /// Named pipe name to listen on (optional, uses default if omitted)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub pipe_name: Option<String>,
+        /// Path to the policy JSON file (optional, uses default location if omitted)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub policy_path: Option<String>,
+    }
+
+    #[allow(clippy::derivable_impls)]
+    impl Default for PackageBrokerConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                pipe_name: None,
+                policy_path: None,
+            }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     pub struct TunnelConf {
         /// Enable tunnel module
         pub enabled: bool,
@@ -534,6 +560,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session: Option<SessionConf>,
 
+        /// UniGetUI package broker configuration
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub package_broker: Option<PackageBrokerConf>,
+
         /// Agent Tunnel configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
@@ -567,6 +597,7 @@ pub mod dto {
                 proxy: None,
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
+                package_broker: None,
                 tunnel: None,
                 rest: serde_json::Map::new(),
             }
