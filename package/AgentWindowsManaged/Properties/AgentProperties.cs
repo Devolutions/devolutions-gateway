@@ -32,13 +32,6 @@ namespace DevolutionsAgent.Properties
         public static string AgentTunnelAdvertiseDomains = "AGENT_TUNNEL_ADVERTISE_DOMAINS";
 
         /// <summary>
-        /// Optional gateway URL override. When set, the agent uses this URL instead of the JWT's
-        /// jet_gw_url claim. Useful when the JWT was minted with a URL that isn't reachable from
-        /// the agent's network (e.g. DVLS embedded "localhost" but the agent is remote).
-        /// </summary>
-        public static string AgentTunnelGatewayUrl = "AGENT_TUNNEL_GATEWAY_URL";
-
-        /// <summary>
         /// Optional agent display name. Resolution order at install time:
         /// dialog value (if non-empty) > JWT's jet_agent_name claim (if present) > local computer name.
         /// </summary>

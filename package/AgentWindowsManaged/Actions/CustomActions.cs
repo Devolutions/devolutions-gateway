@@ -325,7 +325,6 @@ namespace DevolutionsAgent.Actions
             string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
-            string gatewayUrlArg = session.Property(AgentProperties.AgentTunnelGatewayUrl)?.Trim() ?? string.Empty;
             string agentNameArg = session.Property(AgentProperties.AgentTunnelAgentName)?.Trim() ?? string.Empty;
 
             ActionResult Fail(string msg)
@@ -361,7 +360,6 @@ namespace DevolutionsAgent.Actions
                 }
 
                 string arguments = $"up --enrollment-string \"{enrollmentString}\"";
-                if (gatewayUrlArg.Length != 0) arguments += $" --gateway \"{gatewayUrlArg}\"";
                 if (resolvedName.Length != 0) arguments += $" --name \"{resolvedName}\"";
                 if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
 
@@ -469,6 +467,117 @@ namespace DevolutionsAgent.Actions
                 // Don't fail the install over this — the tunnel works fine without domain
                 // advertisements (subnets cover IP routing on their own).
                 session.Log($"Failed to write advertise_domains to agent.json: {e}");
+            }
+        }
+
+        /// <summary>
+        /// After `EnrollAgentTunnel` succeeds, exercises one real QUIC handshake +
+        /// `RouteAdvertise`/`Heartbeat` round-trip via `agent.exe verify-tunnel` so the
+        /// installer only reports success when the tunnel is actually reachable.
+        ///
+        /// The agent emits a single-line JSON triple `{kind, detail, next_step}` on stderr
+        /// when verification fails. The CA parses that triple, logs it, and surfaces
+        /// `next_step` (the operator-facing help text) through `session.Message(InstallMessage.Error, ...)`.
+        /// If the agent exits with a non-zero status but stderr contains no parseable triple,
+        /// the CA falls back to a generic "unexpected_error" message — it never silently
+        /// swallows a failure.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult VerifyAgentTunnel(Session session)
+        {
+            ActionResult Fail(string title, string detail, string nextStep)
+            {
+                string composed = string.IsNullOrEmpty(nextStep)
+                    ? $"{title}\n\n{detail}"
+                    : $"{title}\n\n{detail}\n\n{nextStep}";
+                session.Log($"verify-tunnel failure: kind={title}; detail={detail}; next_step={nextStep}");
+                using Record record = new(0) { FormatString = composed };
+                session.Message(InstallMessage.Error, record);
+                return ActionResult.Failure;
+            }
+
+            try
+            {
+                string installDir = session.Property(AgentProperties.InstallDir);
+                string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
+
+                // The 10s budget is hardcoded by design: no MSI property, no escape hatch.
+                // If real deployments later need a longer budget for slow customer networks,
+                // expose a property then — not pre-emptively.
+                const int VerifyTimeoutSeconds = 10;
+                string arguments = $"verify-tunnel --timeout {VerifyTimeoutSeconds}";
+
+                session.Log($"Running verify-tunnel: {exePath} {arguments}");
+
+                ProcessStartInfo startInfo = new(exePath, arguments)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = ProgramDataDirectory,
+                };
+
+                using Process process = Process.Start(startInfo);
+                // Hard wall-clock cap a few seconds beyond the agent's own --timeout so a
+                // misbehaving process can't hang the installer.
+                if (!process.WaitForExit((VerifyTimeoutSeconds + 5) * 1000))
+                {
+                    try { process.Kill(); } catch { /* already gone */ }
+                    return Fail(
+                        "quic_handshake_timeout",
+                        $"verify-tunnel exceeded {VerifyTimeoutSeconds + 5}s wall-clock budget without exiting.",
+                        "Re-run the installer. If the failure repeats, network path likely drops UDP mid-flow; check Windows Firewall, NAT, and EDR network inspection.");
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+
+                if (!string.IsNullOrEmpty(stdout)) session.Log($"verify-tunnel stdout: {stdout}");
+                if (!string.IsNullOrEmpty(stderr)) session.Log($"verify-tunnel stderr: {stderr}");
+
+                if (process.ExitCode == 0)
+                {
+                    session.Log("Agent tunnel verification succeeded");
+                    return ActionResult.Success;
+                }
+
+                // Failure path: parse the last non-blank stderr line as the JSON triple.
+                string triple = (stderr ?? string.Empty)
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Reverse()
+                    .FirstOrDefault(l => l.TrimStart().StartsWith("{"));
+
+                if (string.IsNullOrEmpty(triple))
+                {
+                    return Fail(
+                        "unexpected_error",
+                        $"verify-tunnel exited with code {process.ExitCode} but emitted no parseable JSON triple on stderr.",
+                        "Collect the agent log and the installer log (.msi /l*v) and file a support issue.");
+                }
+
+                try
+                {
+                    JObject parsed = JObject.Parse(triple);
+                    string kind = parsed.Value<string>("kind") ?? "unexpected_error";
+                    string detail = parsed.Value<string>("detail") ?? string.Empty;
+                    string nextStep = parsed.Value<string>("next_step") ?? string.Empty;
+                    return Fail(kind, detail, nextStep);
+                }
+                catch (Exception e)
+                {
+                    return Fail(
+                        "unexpected_error",
+                        $"verify-tunnel emitted unparseable stderr ({e.Message}). Raw: {triple}",
+                        "Collect the agent log and the installer log (.msi /l*v) and file a support issue.");
+                }
+            }
+            catch (Exception e)
+            {
+                return Fail(
+                    "unexpected_error",
+                    $"Failed to invoke verify-tunnel: {e.Message}",
+                    "Collect the agent log and the installer log (.msi /l*v) and file a support issue.");
             }
         }
 

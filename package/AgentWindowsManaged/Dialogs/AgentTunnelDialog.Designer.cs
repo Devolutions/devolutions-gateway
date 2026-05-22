@@ -44,9 +44,6 @@ namespace WixSharpSetup.Dialogs
             this.labelDomains = new System.Windows.Forms.Label();
             this.advertiseDomains = new System.Windows.Forms.TextBox();
             this.labelDomainsHint = new System.Windows.Forms.Label();
-            this.labelGatewayUrl = new System.Windows.Forms.Label();
-            this.gatewayUrl = new System.Windows.Forms.TextBox();
-            this.labelGatewayUrlHint = new System.Windows.Forms.Label();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -93,18 +90,12 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.Controls.Add(this.labelDomains, 0, 8);
             this.tableLayoutPanel2.Controls.Add(this.advertiseDomains, 0, 9);
             this.tableLayoutPanel2.Controls.Add(this.labelDomainsHint, 0, 10);
-            this.tableLayoutPanel2.Controls.Add(this.labelGatewayUrl, 0, 11);
-            this.tableLayoutPanel2.Controls.Add(this.gatewayUrl, 0, 12);
-            this.tableLayoutPanel2.Controls.Add(this.labelGatewayUrlHint, 0, 13);
             this.tableLayoutPanel2.AutoSize = true;
             this.tableLayoutPanel2.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 14;
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowCount = 11;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -233,38 +224,6 @@ namespace WixSharpSetup.Dialogs
             this.labelDomainsHint.Size = new System.Drawing.Size(300, 13);
             this.labelDomainsHint.TabIndex = 7;
             this.labelDomainsHint.Text = "[AgentTunnelDlgDomainsHint]";
-            //
-            // labelGatewayUrl
-            //
-            this.labelGatewayUrl.AutoSize = true;
-            this.labelGatewayUrl.BackColor = System.Drawing.Color.Transparent;
-            this.labelGatewayUrl.Location = new System.Drawing.Point(3, 231);
-            this.labelGatewayUrl.Margin = new System.Windows.Forms.Padding(3, 8, 3, 3);
-            this.labelGatewayUrl.Name = "labelGatewayUrl";
-            this.labelGatewayUrl.Size = new System.Drawing.Size(200, 13);
-            this.labelGatewayUrl.TabIndex = 8;
-            this.labelGatewayUrl.Text = "[AgentTunnelDlgGatewayUrlLabel]";
-            //
-            // gatewayUrl
-            //
-            this.gatewayUrl.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.gatewayUrl.Location = new System.Drawing.Point(3, 250);
-            this.gatewayUrl.Name = "gatewayUrl";
-            this.gatewayUrl.Size = new System.Drawing.Size(443, 20);
-            this.gatewayUrl.TabIndex = 9;
-            //
-            // labelGatewayUrlHint
-            //
-            this.labelGatewayUrlHint.AutoSize = true;
-            this.labelGatewayUrlHint.BackColor = System.Drawing.Color.Transparent;
-            this.labelGatewayUrlHint.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.labelGatewayUrlHint.Location = new System.Drawing.Point(3, 276);
-            this.labelGatewayUrlHint.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
-            this.labelGatewayUrlHint.Name = "labelGatewayUrlHint";
-            this.labelGatewayUrlHint.Size = new System.Drawing.Size(300, 13);
-            this.labelGatewayUrlHint.TabIndex = 10;
-            this.labelGatewayUrlHint.Text = "[AgentTunnelDlgGatewayUrlHint]";
             //
             // topBorder
             //
@@ -449,8 +408,5 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label labelDomains;
         private System.Windows.Forms.TextBox advertiseDomains;
         private System.Windows.Forms.Label labelDomainsHint;
-        private System.Windows.Forms.Label labelGatewayUrl;
-        private System.Windows.Forms.TextBox gatewayUrl;
-        private System.Windows.Forms.Label labelGatewayUrlHint;
     }
 }
