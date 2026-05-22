@@ -294,10 +294,35 @@ internal static class AgentActions
         UsesProperties = string.Join(";", new[]
         {
             AgentProperties.AgentTunnelEnrollmentString,
-            AgentProperties.AgentTunnelGatewayUrl,
             AgentProperties.AgentTunnelAgentName,
             AgentProperties.AgentTunnelAdvertiseSubnets,
             AgentProperties.AgentTunnelAdvertiseDomains,
+            AgentProperties.InstallDir,
+        }.Select(p => $"{p}=[{p}]")),
+    };
+
+    /// <summary>
+    /// After `up` returns success, run `agent.exe verify-tunnel` with a hardcoded 10s timeout
+    /// to confirm the tunnel is actually reachable.
+    /// </summary>
+    /// <remarks>
+    /// Per the identity refactor, the installer's "success" means "the tunnel is up", not just
+    /// "a cert was written to disk". The CA parses the agent's structured JSON triple from
+    /// stderr and surfaces it through `session.Message(InstallMessage.Error, ...)` so the
+    /// dialog box contains an actionable `next_step` for the operator.
+    /// </remarks>
+    private static readonly ElevatedManagedAction verifyAgentTunnel = new(
+        new Id($"CA.{nameof(verifyAgentTunnel)}"),
+        CustomActions.VerifyAgentTunnel,
+        Return.check,
+        When.After, new Step(enrollAgentTunnel.Id),
+        Features.AGENT_TUNNEL_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = string.Join(";", new[]
+        {
             AgentProperties.InstallDir,
         }.Select(p => $"{p}=[{p}]")),
     };
@@ -376,6 +401,7 @@ internal static class AgentActions
         setFeaturesToConfigure,
         configureFeatures,
         enrollAgentTunnel,
+        verifyAgentTunnel,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
