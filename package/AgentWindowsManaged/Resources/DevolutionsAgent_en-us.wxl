@@ -67,6 +67,8 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Comma-separated CIDR notation, e.g. 10.10.0.0/24, 192.168.1.0/24. Leave blank for auto-detection.</String>
                 <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>
                 <String Id="AgentTunnelDlgDomainsHint">Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com. Leave blank to skip.</String>
+                <String Id="AgentTunnelDlgAgentNameLabel">Agent name (optional):</String>
+                <String Id="AgentTunnelDlgAgentNameHint">Identifier for this agent. Leave blank to use the name in the JWT, or the local computer name as a final fallback.</String>
                 <String Id="AgentTunnelDlgGatewayUrlLabel">Gateway URL (advanced, optional):</String>
                 <String Id="AgentTunnelDlgGatewayUrlHint">Override the URL embedded in the enrollment JWT. Leave blank to use the JWT's value.</String>
                     </WixLocalization>

@@ -326,11 +326,20 @@ namespace DevolutionsAgent.Actions
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
             string gatewayUrlArg = session.Property(AgentProperties.AgentTunnelGatewayUrl)?.Trim() ?? string.Empty;
+            string agentNameArg = session.Property(AgentProperties.AgentTunnelAgentName)?.Trim() ?? string.Empty;
+
+            ActionResult Fail(string msg)
+            {
+                session.Log(msg);
+                using Record record = new(0) { FormatString = msg };
+                session.Message(InstallMessage.Error, record);
+                return ActionResult.Failure;
+            }
 
             if (enrollmentString.Length == 0)
             {
-                session.Log("Agent tunnel enrollment string not provided, skipping tunnel setup");
-                return ActionResult.Success;
+                return Fail("Agent tunnel feature was selected but no enrollment string was provided. " +
+                    "Paste a JWT from Devolutions Server, Hub, or Gateway, or deselect the Agent Tunnel feature.");
             }
 
             try
@@ -342,8 +351,18 @@ namespace DevolutionsAgent.Actions
                 string installDir = session.Property(AgentProperties.InstallDir);
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
 
+                // agent.exe `up` requires an agent name. Resolution: dialog value > JWT's
+                // jet_agent_name (left to the agent CLI by omitting --name) > local computer name.
+                string resolvedName = agentNameArg;
+                if (resolvedName.Length == 0 && !JwtHasAgentName(enrollmentString))
+                {
+                    resolvedName = Environment.MachineName;
+                    session.Log($"JWT carried no jet_agent_name and no name was provided in the wizard; falling back to computer name '{resolvedName}'");
+                }
+
                 string arguments = $"up --enrollment-string \"{enrollmentString}\"";
                 if (gatewayUrlArg.Length != 0) arguments += $" --gateway \"{gatewayUrlArg}\"";
+                if (resolvedName.Length != 0) arguments += $" --name \"{resolvedName}\"";
                 if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
 
                 string Redact(string s) => s.Replace(enrollmentString, "***");
@@ -362,8 +381,7 @@ namespace DevolutionsAgent.Actions
                 if (!process.WaitForExit(60_000))
                 {
                     try { process.Kill(); } catch { /* already gone */ }
-                    session.Log("Enrollment process timed out after 60 seconds");
-                    return ActionResult.Failure;
+                    return Fail("Agent tunnel enrollment timed out after 60 seconds.");
                 }
                 string stdout = process.StandardOutput.ReadToEnd();
                 string stderr = process.StandardError.ReadToEnd();
@@ -373,8 +391,8 @@ namespace DevolutionsAgent.Actions
 
                 if (process.ExitCode != 0)
                 {
-                    session.Log($"Enrollment failed with exit code {process.ExitCode}");
-                    return ActionResult.Failure;
+                    string detail = !string.IsNullOrWhiteSpace(stderr) ? Redact(stderr).Trim() : $"exit code {process.ExitCode}";
+                    return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
 
                 if (domainsArg.Length != 0)
@@ -387,8 +405,25 @@ namespace DevolutionsAgent.Actions
             }
             catch (Exception e)
             {
-                session.Log($"Agent tunnel enrollment failed: {e}");
-                return ActionResult.Failure;
+                return Fail($"Agent tunnel enrollment failed: {e.Message}");
+            }
+        }
+
+        private static bool JwtHasAgentName(string jwt)
+        {
+            try
+            {
+                string[] parts = jwt.Split('.');
+                if (parts.Length != 3) return false;
+                string payload = parts[1].Replace('-', '+').Replace('_', '/');
+                payload = payload.PadRight((payload.Length + 3) & ~3, '=');
+                string json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+                string name = JObject.Parse(json)["jet_agent_name"]?.ToString();
+                return !string.IsNullOrWhiteSpace(name);
+            }
+            catch
+            {
+                return false;
             }
         }
 
