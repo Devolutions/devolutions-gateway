@@ -325,10 +325,20 @@ async fn run_single_connection(
     // -- DNS resolve --
 
     // Extract hostname for TLS server name validation.
-    let (gateway_hostname, _) = tunnel_conf
-        .gateway_endpoint
-        .rsplit_once(':')
-        .context("gateway_endpoint missing port separator")?;
+    //
+    // We split via the shared `endpoint::split_endpoint` helper rather than a
+    // raw `rsplit_once(':')` because the persisted endpoint may be an IPv6
+    // literal in bracketed form — e.g. `[fd00::7]:4433`. A raw `rsplit_once`
+    // would leave `gateway_hostname` as `[fd00::7]` (brackets included), and
+    // `rustls_pki_types::ServerName::try_from` would then reject it. The
+    // helper hands back an unbracketed host suitable for Rustls / Quinn.
+    //
+    // Lookup uses the original endpoint string (brackets + port) — both
+    // bracketed and unbracketed IPv6 host:port forms are accepted by
+    // `tokio::net::lookup_host`, but the bracketed form is the canonical
+    // one we persist.
+    let (gateway_hostname, _) = crate::endpoint::split_endpoint(&tunnel_conf.gateway_endpoint)
+        .context("parse gateway_endpoint")?;
 
     let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
         .await
@@ -356,7 +366,7 @@ async fn run_single_connection(
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
-        .connect(gateway_addr, gateway_hostname)
+        .connect(gateway_addr, gateway_hostname.as_str())
         .context("initiate QUIC connection")?
         .await
         .context("QUIC handshake")?;
