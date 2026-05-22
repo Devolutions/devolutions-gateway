@@ -1489,7 +1489,12 @@ mod serde_impl {
         krb_kdc: Option<SmolStr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         jet_cred_id: Option<Uuid>,
+        #[serde(default = "legacy_kdc_token_jti")]
         jti: Uuid,
+    }
+
+    fn legacy_kdc_token_jti() -> Uuid {
+        Uuid::new_v4()
     }
 
     impl ser::Serialize for SessionTtl {
@@ -1833,5 +1838,28 @@ mod tests {
             extract_dst_alt(&token).expect("dst_alt parses"),
             vec!["secondary.example:3389".to_owned()]
         );
+    }
+
+    #[test]
+    fn kdc_real_claims_without_jti_deserialize_for_legacy_tokens() {
+        let claims: KdcTokenClaims = serde_json::from_value(serde_json::json!({
+            "krb_realm": "example.com",
+            "krb_kdc": "tcp://dc.example.com:88",
+        }))
+        .expect("legacy KDC token without jti should still deserialize");
+
+        assert_ne!(claims.jti, Uuid::nil());
+        assert!(matches!(claims.destination, KdcDestination::Real { .. }));
+    }
+
+    #[test]
+    fn kdc_injection_claims_without_jti_deserialize_for_legacy_tokens() {
+        let claims: KdcTokenClaims = serde_json::from_value(serde_json::json!({
+            "jet_cred_id": Uuid::new_v4(),
+        }))
+        .expect("legacy injection KDC token without jti should still deserialize");
+
+        assert_ne!(claims.jti, Uuid::nil());
+        assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
     }
 }

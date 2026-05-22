@@ -7,6 +7,7 @@
 //! pre-decided by the caller.
 
 use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -128,24 +129,30 @@ impl KdcConnector {
                     .err(),
             )?)
         } else {
+            let udp_payload = message.get(4..).ok_or_else(|| {
+                HttpError::bad_request().msg("KDC UDP message is too short to contain a length prefix")
+            })?;
+
+            let destination_addr = resolve_udp_destination(kdc_addr).await?;
+            let bind_addr = udp_bind_addr_for(destination_addr);
+
             // We assume that ticket length is not bigger than 2048 bytes.
             let mut buf = [0; 2048];
 
-            let udp_socket = UdpSocket::bind("127.0.0.1:0")
+            let udp_socket = UdpSocket::bind(bind_addr)
                 .await
                 .map_err(HttpError::internal().with_msg("unable to bind UDP socket").err())?;
 
-            let port = udp_socket
+            let local_addr = udp_socket
                 .local_addr()
-                .map_err(HttpError::internal().with_msg("unable to get UDP socket address").err())?
-                .port();
+                .map_err(HttpError::internal().with_msg("unable to get UDP socket address").err())?;
 
-            trace!("Binded UDP listener to 127.0.0.1:{port}, forwarding KDC message...");
+            trace!(%local_addr, %destination_addr, "Bound UDP listener, forwarding KDC message");
 
             // First 4 bytes contains message length. We don't need it for UDP.
             #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
             udp_socket
-                .send_to(&message[4..], kdc_addr.as_addr())
+                .send_to(udp_payload, destination_addr)
                 .await
                 .map_err(|e| unable_to_reach_kdc_server_err(e))?;
 
@@ -184,6 +191,24 @@ impl KdcConnector {
             }
             unsupported => anyhow::bail!("unsupported KDC request scheme: {unsupported}"),
         }
+    }
+}
+
+async fn resolve_udp_destination(kdc_addr: &TargetAddr) -> Result<SocketAddr, HttpError> {
+    let mut addrs = tokio::net::lookup_host(kdc_addr.as_addr())
+        .await
+        .map_err(unable_to_reach_kdc_server_err)?;
+
+    addrs.next().ok_or_else(|| {
+        unable_to_reach_kdc_server_err(io::Error::new(io::ErrorKind::NotFound, "KDC address resolved empty"))
+    })
+}
+
+fn udp_bind_addr_for(destination_addr: SocketAddr) -> SocketAddr {
+    if destination_addr.is_ipv4() {
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+    } else {
+        SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
     }
 }
 
@@ -257,6 +282,10 @@ mod tests {
         TargetAddr::parse("tcp://127.0.0.1:1", Some(88)).expect("static target addr is valid")
     }
 
+    fn udp_kdc_addr() -> TargetAddr {
+        TargetAddr::parse("udp://127.0.0.1:88", Some(88)).expect("static target addr is valid")
+    }
+
     /// No tunnel handle + explicit agent pin → must error.
     ///
     /// `jet_agent_id` declares a routing requirement; with no agent tunnel listener
@@ -287,5 +316,27 @@ mod tests {
             format!("{err}").contains("unable to reach KDC server"),
             "should have reached the direct-connect branch, got: {err}",
         );
+    }
+
+    #[tokio::test]
+    async fn udp_message_shorter_than_length_prefix_errors() {
+        let connector = KdcConnector::new(Uuid::new_v4(), None, None);
+        let result = connector.send(&udp_kdc_addr(), b"\x00\x01\x02").await;
+        let err = result.expect_err("UDP message shorter than the TCP length prefix must be rejected");
+        assert!(
+            format!("{err}").contains("too short"),
+            "error message should explain the malformed UDP payload, got: {err}",
+        );
+    }
+
+    #[test]
+    fn udp_bind_addr_matches_destination_family() {
+        let v4_bind = udp_bind_addr_for(SocketAddr::from((Ipv4Addr::LOCALHOST, 88)));
+        assert!(v4_bind.is_ipv4());
+        assert_eq!(v4_bind.port(), 0);
+
+        let v6_bind = udp_bind_addr_for(SocketAddr::from((Ipv6Addr::LOCALHOST, 88)));
+        assert!(v6_bind.is_ipv6());
+        assert_eq!(v6_bind.port(), 0);
     }
 }
