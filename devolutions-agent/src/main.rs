@@ -142,6 +142,31 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Default verify-tunnel timeout (matches what the installer CA hardcodes).
+const VERIFY_TUNNEL_DEFAULT_TIMEOUT_SECS: u64 = 10;
+
+/// Parse `verify-tunnel` CLI arguments. Currently supports a single `--timeout
+/// <secs>` flag and falls back to [`VERIFY_TUNNEL_DEFAULT_TIMEOUT_SECS`] when
+/// absent.
+fn parse_verify_tunnel_args(args: &[String]) -> Result<std::time::Duration> {
+    let mut timeout_secs = VERIFY_TUNNEL_DEFAULT_TIMEOUT_SECS;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--timeout" => {
+                let value = parse_required_value(args, &mut index, "--timeout")?;
+                timeout_secs = value.parse::<u64>().context("--timeout must be a positive integer (seconds)")?;
+                if timeout_secs == 0 {
+                    bail!("--timeout must be > 0");
+                }
+            }
+            unexpected => bail!("unknown argument for verify-tunnel: {unexpected}"),
+        }
+        index += 1;
+    }
+    Ok(std::time::Duration::from_secs(timeout_secs))
+}
+
 fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     let mut gateway_url = None;
     let mut enrollment_token = None;
@@ -258,6 +283,50 @@ fn main() {
                     }
                 });
             }
+            "verify-tunnel" => {
+                let args: Vec<String> = env::args().skip(2).collect();
+                let timeout = match parse_verify_tunnel_args(&args) {
+                    Ok(timeout) => timeout,
+                    Err(error) => {
+                        eprintln!("[ERROR] Invalid verify-tunnel arguments: {error:#}");
+                        // Emit a structured unexpected_error triple so the installer CA still
+                        // has something parseable on stderr.
+                        let triple = devolutions_agent::verify_tunnel::ErrorTriple::new(
+                            devolutions_agent::verify_tunnel::ErrorKind::UnexpectedError,
+                            format!("verify-tunnel argument parse error: {error:#}"),
+                        );
+                        triple.emit_to_stderr();
+                        std::process::exit(1);
+                    }
+                };
+
+                let conf_handle = match ConfHandle::init() {
+                    Ok(handle) => handle,
+                    Err(error) => {
+                        let triple = devolutions_agent::verify_tunnel::ErrorTriple::new(
+                            devolutions_agent::verify_tunnel::ErrorKind::UnexpectedError,
+                            format!("failed to load agent configuration: {error:#}"),
+                        );
+                        triple.emit_to_stderr();
+                        std::process::exit(1);
+                    }
+                };
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                let result = rt.block_on(devolutions_agent::verify_tunnel::verify_tunnel(&conf_handle, timeout));
+
+                match result {
+                    Ok(()) => {
+                        // Success path: nothing on stderr — installer CA only consumes stderr
+                        // and absence of a JSON triple confirms the verification succeeded.
+                        println!("verify-tunnel: tunnel is reachable and route-advertise round-trip ok");
+                    }
+                    Err(triple) => {
+                        triple.emit_to_stderr();
+                        std::process::exit(1);
+                    }
+                }
+            }
             "up" => {
                 let args: Vec<String> = env::args().skip(2).collect();
                 let command = match parse_up_command_args(&args) {
@@ -354,6 +423,30 @@ mod tests {
             b64.encode(payload.to_string()),
             b64.encode("signature-placeholder"),
         )
+    }
+
+    #[test]
+    fn parse_verify_tunnel_defaults_to_10s() {
+        let timeout = parse_verify_tunnel_args(&[]).expect("parse empty");
+        assert_eq!(timeout, std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn parse_verify_tunnel_explicit_timeout() {
+        let timeout = parse_verify_tunnel_args(&["--timeout".to_owned(), "30".to_owned()]).expect("parse");
+        assert_eq!(timeout, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parse_verify_tunnel_rejects_zero_timeout() {
+        let err = parse_verify_tunnel_args(&["--timeout".to_owned(), "0".to_owned()]).expect_err("expect rejection");
+        assert!(format!("{err:#}").contains("> 0"), "{err:#}");
+    }
+
+    #[test]
+    fn parse_verify_tunnel_rejects_unknown_flag() {
+        let err = parse_verify_tunnel_args(&["--bogus".to_owned()]).expect_err("expect rejection");
+        assert!(format!("{err:#}").contains("--bogus"), "{err:#}");
     }
 
     #[test]
