@@ -36,6 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
+use crate::dvc::encoding::DataEncoding;
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
@@ -282,7 +283,8 @@ fn default_server_caps() -> NowChannelCapsetMsg {
                 | NowExecCapsetFlags::STYLE_BATCH
                 | NowExecCapsetFlags::STYLE_PWSH
                 | NowExecCapsetFlags::STYLE_WINPS
-                | NowExecCapsetFlags::IO_REDIRECTION,
+                | NowExecCapsetFlags::IO_REDIRECTION
+                | NowExecCapsetFlags::UNICODE_CONSOLE,
         )
 }
 
@@ -617,7 +619,15 @@ impl MessageProcessor {
     async fn process_exec_process(&mut self, exec_msg: NowExecProcessMsg<'_>) -> Result<(), ExecError> {
         self.ensure_session_id_free(exec_msg.session_id()).await?;
 
-        let mut run_process = WinApiProcessBuilder::new(exec_msg.filename());
+        // Process exec: no assumptions about encoding by default (raw passthrough).
+        // When ENCODING_UTF8 is set, transcode IO between OEM codepage and UTF-8.
+        let io_encoding = if exec_msg.is_encoding_utf8() {
+            DataEncoding::from_oem_codepage()
+        } else {
+            DataEncoding::Raw
+        };
+
+        let mut run_process = WinApiProcessBuilder::new(exec_msg.filename()).with_encoding(io_encoding);
 
         if let Some(parameters) = exec_msg.parameters() {
             run_process = run_process.with_command_line(parameters);
@@ -646,23 +656,36 @@ impl MessageProcessor {
     async fn process_exec_batch(&mut self, batch_msg: NowExecBatchMsg<'_>) -> Result<(), ExecError> {
         self.ensure_session_id_free(batch_msg.session_id()).await?;
 
-        let tmp_file = TmpFileGuard::new("bat")?;
-        tmp_file.write_content(batch_msg.command())?;
+        let mut script = batch_msg.command().to_owned();
 
-        // "/Q" - Turns command echo off.
-        // "/C" - Carries out the command specified by string and then terminates.
+        // Batch exec encoding logic:
+        // - Default: transcode OEM ↔ UTF-8
+        // - RAW_ENCODING: pass through raw bytes without transcoding.
+        // - UNICODE_CONSOLE: inject `@chcp 65001`, write file as BOM-less UTF-8, IO passthrough.
+        let (file_encoding, io_encoding) = if batch_msg.is_unicode_console() {
+            script = format!("@chcp 65001 > nul\r\n{}", script);
+            (DataEncoding::Raw, DataEncoding::Raw)
+        } else if batch_msg.is_raw_encoding() {
+            (DataEncoding::from_oem_codepage(), DataEncoding::Raw)
+        } else {
+            (DataEncoding::from_oem_codepage(), DataEncoding::from_oem_codepage())
+        };
+
+        let tmp_file = TmpFileGuard::new("bat")?;
+        tmp_file.write_content_encoded(&script, file_encoding)?;
+
         let parameters = format!("/Q /C \"{}\"", tmp_file.path_string());
 
         let mut run_batch = WinApiProcessBuilder::new("cmd.exe")
             .with_temp_file(tmp_file)
-            .with_command_line(&parameters);
+            .with_command_line(&parameters)
+            .with_encoding(io_encoding);
 
         if let Some(directory) = batch_msg.directory() {
             run_batch = run_batch.with_current_directory(directory);
         }
 
         if batch_msg.is_detached() {
-            // Detached mode: fire-and-forget, no IO redirection
             run_batch.run_detached(batch_msg.session_id())?;
             self.send_detached_process_success(batch_msg.session_id()).await?;
             return Ok(());
@@ -681,28 +704,41 @@ impl MessageProcessor {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
         let mut params = Vec::new();
-
         append_ps_args(&mut params, &winps_msg);
 
+        // WinPs exec encoding logic:
+        // - Script file is ALWAYS written as UTF-8 with BOM (PS 5.x needs BOM to detect UTF-8).
+        // - Default IO: transcode OEM ↔ UTF-8
+        // - RAW_ENCODING or UNICODE_CONSOLE: pass through raw bytes (UTF-8 passthrough).
+        let io_encoding = if winps_msg.is_unicode_console() || winps_msg.is_raw_encoding() {
+            DataEncoding::Raw
+        } else {
+            DataEncoding::from_oem_codepage()
+        };
+
         let tmp_file = if winps_msg.is_server_mode() {
-            // IMPORTANT: It is absolutely necessary to pass "-s" as the last parameter to make
-            // PowerShell run in server mode.
             params.push("-s".to_owned());
             None
         } else {
+            let mut script = winps_msg.command().to_owned();
+            if winps_msg.is_unicode_console() {
+                // Inject UTF-8 encoding setup for Windows PowerShell.
+                script = format!(
+                    "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\r\n{}",
+                    script
+                );
+            }
             let tmp_file = TmpFileGuard::new("ps1")?;
-            tmp_file.write_content(winps_msg.command())?;
-
-            // "-Command" runs script without command echo and terminates.
+            tmp_file.write_content_utf8_bom(&script)?;
             params.push("-Command".to_owned());
             params.push(format!("\"{}\"", tmp_file.path_string()));
-
             Some(tmp_file)
         };
 
         let params_str = params.join(" ");
-
-        let mut run_process = WinApiProcessBuilder::new("powershell.exe").with_command_line(&params_str);
+        let mut run_process = WinApiProcessBuilder::new("powershell.exe")
+            .with_command_line(&params_str)
+            .with_encoding(io_encoding);
 
         if let Some(tmp_file) = tmp_file {
             run_process = run_process.with_temp_file(tmp_file);
@@ -713,7 +749,6 @@ impl MessageProcessor {
         }
 
         if winps_msg.is_detached() {
-            // Detached mode: fire-and-forget, no IO redirection
             run_process.run_detached(winps_msg.session_id())?;
             self.send_detached_process_success(winps_msg.session_id()).await?;
             return Ok(());
@@ -728,55 +763,66 @@ impl MessageProcessor {
         Ok(())
     }
 
-    async fn process_exec_pwsh(&mut self, winps_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
-        self.ensure_session_id_free(winps_msg.session_id()).await?;
+    async fn process_exec_pwsh(&mut self, pwsh_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_session_id_free(pwsh_msg.session_id()).await?;
 
         let mut params = Vec::new();
+        append_pwsh_args(&mut params, &pwsh_msg);
 
-        append_pwsh_args(&mut params, &winps_msg);
+        // Pwsh exec encoding logic (mirrors winps behavior):
+        // - Script file is written as plain UTF-8 (pwsh reads UTF-8 natively, no BOM needed).
+        // - Default IO: transcode OEM ↔ UTF-8 (pwsh still uses OEM encoding for console).
+        // - RAW_ENCODING or UNICODE_CONSOLE: pass through raw bytes (UTF-8 passthrough).
+        let io_encoding = if pwsh_msg.is_unicode_console() || pwsh_msg.is_raw_encoding() {
+            DataEncoding::Raw
+        } else {
+            DataEncoding::from_oem_codepage()
+        };
 
-        let tmp_file = if winps_msg.is_server_mode() {
-            // IMPORTANT: It is absolutely necessary to pass "-s" as the last parameter to make
-            // PowerShell run in server mode.
+        let tmp_file = if pwsh_msg.is_server_mode() {
             params.push("-s".to_owned());
             None
         } else {
+            let mut script = pwsh_msg.command().to_owned();
+            if pwsh_msg.is_unicode_console() {
+                // Inject UTF-8 encoding setup for PowerShell 7+.
+                script = format!(
+                    "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\r\n{}",
+                    script
+                );
+            }
             let tmp_file = TmpFileGuard::new("ps1")?;
-            tmp_file.write_content(winps_msg.command())?;
-
-            // "-Command" runs script without command echo and terminates.
+            tmp_file.write_content_encoded(&script, DataEncoding::Raw)?;
             params.push("-Command".to_owned());
             params.push(format!("\"{}\"", tmp_file.path_string()));
-
             Some(tmp_file)
         };
 
         let params_str = params.join(" ");
-
         let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
             .with_command_line(&params_str)
-            .with_env("NO_COLOR", "1"); // Suppress ANSI escape codes in pwsh output.
+            .with_encoding(io_encoding)
+            .with_env("NO_COLOR", "1");
 
         if let Some(tmp_file) = tmp_file {
             run_process = run_process.with_temp_file(tmp_file);
         }
 
-        if let Some(directory) = winps_msg.directory() {
+        if let Some(directory) = pwsh_msg.directory() {
             run_process = run_process.with_current_directory(directory);
         }
 
-        if winps_msg.is_detached() {
-            // Detached mode: fire-and-forget, no IO redirection
-            run_process.run_detached(winps_msg.session_id())?;
-            self.send_detached_process_success(winps_msg.session_id()).await?;
+        if pwsh_msg.is_detached() {
+            run_process.run_detached(pwsh_msg.session_id())?;
+            self.send_detached_process_success(pwsh_msg.session_id()).await?;
             return Ok(());
         }
 
         let process = run_process
-            .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+            .with_io_redirection(pwsh_msg.is_with_io_redirection())
+            .run(pwsh_msg.session_id(), self.io_notification_tx.clone())?;
 
-        self.sessions.insert(winps_msg.session_id(), process);
+        self.sessions.insert(pwsh_msg.session_id(), process);
 
         Ok(())
     }

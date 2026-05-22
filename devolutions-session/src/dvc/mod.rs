@@ -34,6 +34,7 @@
 //!   session result with error to the client (if possible).
 
 pub mod channel;
+pub mod encoding;
 pub mod fs;
 pub mod io;
 pub mod now_message_dissector;
