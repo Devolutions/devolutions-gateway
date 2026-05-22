@@ -192,31 +192,37 @@ impl InputEncoder {
             return Cow::Owned(Vec::new());
         }
 
-        // Find the longest valid UTF-8 prefix.
-        let valid_end = find_valid_utf8_end(&input);
-
-        if valid_end == 0 {
-            // All bytes are part of an incomplete sequence.
-            self.leftover = input.into_owned();
-            return Cow::Owned(Vec::new());
-        }
-
-        // Save any trailing incomplete UTF-8 bytes.
-        if valid_end < input.len() {
-            self.leftover = input[valid_end..].to_vec();
-        }
-
-        let utf8_str = match std::str::from_utf8(&input[..valid_end]) {
-            Ok(s) => s,
-            Err(_) => {
-                // Should not happen since we validated above, but handle gracefully.
-                warn!("Unexpected invalid UTF-8 in stdin data");
-                self.leftover.clear();
-                return Cow::Borrowed(data);
+        match validate_utf8(&input) {
+            Utf8Validation::Valid => {
+                // SAFETY: validate_utf8 confirmed all bytes are valid UTF-8.
+                let utf8_str = unsafe { std::str::from_utf8_unchecked(&input) };
+                Cow::Owned(convert_from_utf8(codepage, utf8_str))
             }
-        };
-
-        Cow::Owned(convert_from_utf8(codepage, utf8_str))
+            Utf8Validation::IncompleteTail { valid_end: 0 } => {
+                // Entire input is an incomplete sequence. Buffer it.
+                self.leftover = input.into_owned();
+                Cow::Owned(Vec::new())
+            }
+            Utf8Validation::InvalidByte {
+                valid_end: 0,
+                error_len,
+            } => {
+                // Invalid byte(s) at start. Skip them to ensure forward progress.
+                warn!("Replacing {error_len} invalid UTF-8 byte(s) in stdin data");
+                let remaining = &input[error_len..];
+                if !remaining.is_empty() {
+                    self.leftover = remaining.to_vec();
+                }
+                Cow::Owned(convert_from_utf8(codepage, "\u{FFFD}"))
+            }
+            Utf8Validation::IncompleteTail { valid_end } | Utf8Validation::InvalidByte { valid_end, .. } => {
+                // Save trailing bytes for the next call.
+                self.leftover = input[valid_end..].to_vec();
+                // SAFETY: validate_utf8 confirmed bytes up to valid_end are valid UTF-8.
+                let utf8_str = unsafe { std::str::from_utf8_unchecked(&input[..valid_end]) };
+                Cow::Owned(convert_from_utf8(codepage, utf8_str))
+            }
+        }
     }
 
     /// Flush any remaining leftover bytes (call when stdin is closed).
@@ -238,32 +244,35 @@ impl InputEncoder {
     }
 }
 
-/// Find the end index of the longest valid UTF-8 prefix in `data`.
-///
-/// Returns the byte index up to which the data is valid UTF-8.
-/// Any trailing incomplete multi-byte sequence is excluded.
-fn find_valid_utf8_end(data: &[u8]) -> usize {
+/// Result of UTF-8 validation on a byte slice.
+enum Utf8Validation {
+    /// The entire input is valid UTF-8.
+    Valid,
+    /// Valid up to `valid_end`, with an incomplete multi-byte sequence at the tail.
+    IncompleteTail { valid_end: usize },
+    /// Valid up to `valid_end`, with `error_len` invalid bytes at that position.
+    InvalidByte { valid_end: usize, error_len: usize },
+}
+
+/// Validate UTF-8 content and classify any error.
+fn validate_utf8(data: &[u8]) -> Utf8Validation {
     match std::str::from_utf8(data) {
-        Ok(_) => data.len(),
-        Err(e) => {
-            // `valid_up_to()` gives us the position of the first invalid byte.
-            // If the error is due to an incomplete sequence at the end (not an
-            // invalid byte), `error_len()` returns None.
-            if e.error_len().is_none() {
-                // Incomplete sequence at end - return up to the valid portion.
-                e.valid_up_to()
-            } else {
-                // Genuinely invalid byte. Include up to that point.
-                // The caller will handle the leftover which includes the bad byte.
-                e.valid_up_to()
-            }
-        }
+        Ok(_) => Utf8Validation::Valid,
+        Err(e) => match e.error_len() {
+            Some(error_len) => Utf8Validation::InvalidByte {
+                valid_end: e.valid_up_to(),
+                error_len,
+            },
+            None => Utf8Validation::IncompleteTail {
+                valid_end: e.valid_up_to(),
+            },
+        },
     }
 }
 
 /// Convert bytes from a Windows codepage to UTF-8 using Win32 API.
 ///
-/// Returns `Err` if the input contains an incomplete multi-byte character.
+/// Returns `Err` if the input contains invalid or incomplete multi-byte characters.
 fn convert_to_utf8(codepage: u32, data: &[u8]) -> Result<Vec<u8>, ()> {
     if data.is_empty() {
         return Ok(Vec::new());
@@ -423,15 +432,31 @@ mod tests {
     }
 
     #[test]
-    fn find_valid_utf8_end_complete() {
+    fn validate_utf8_complete() {
         let data = "Hello".as_bytes();
-        assert_eq!(find_valid_utf8_end(data), 5);
+        assert!(matches!(validate_utf8(data), Utf8Validation::Valid));
     }
 
     #[test]
-    fn find_valid_utf8_end_incomplete() {
+    fn validate_utf8_incomplete_tail() {
         // "é" is [0xC3, 0xA9]. If we only have the lead byte:
         let data = &[b'H', b'i', 0xC3];
-        assert_eq!(find_valid_utf8_end(data), 2);
+        assert!(matches!(
+            validate_utf8(data),
+            Utf8Validation::IncompleteTail { valid_end: 2 }
+        ));
+    }
+
+    #[test]
+    fn validate_utf8_invalid_byte() {
+        // 0xFF is never valid in UTF-8.
+        let data = &[0xFF, b'H', b'i'];
+        assert!(matches!(
+            validate_utf8(data),
+            Utf8Validation::InvalidByte {
+                valid_end: 0,
+                error_len: 1
+            }
+        ));
     }
 }
