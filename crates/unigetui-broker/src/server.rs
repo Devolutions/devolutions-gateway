@@ -21,8 +21,10 @@ use crate::command_builder::build_winget_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::models::{
-    BrokerInfo, BrokerResponse, ExecutionInfo, PackageRequest, PolicyDocument, PolicyInfo,
+    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageRequest, PolicyDocument,
+    ResponsePolicyInfo, Transport,
 };
+use crate::schema::SchemaValidators;
 
 const PROTOCOL_VERSION: &str = "1.0";
 
@@ -33,6 +35,7 @@ pub struct BrokerState {
     pub policy: PolicyDocument,
     pub executor: Box<dyn CommandExecutor>,
     pub pipe_name: String,
+    pub validators: SchemaValidators,
 }
 
 /// Serve one HTTP connection over an arbitrary async stream.
@@ -58,9 +61,7 @@ async fn handle_request(
     let response = match (req.method(), req.uri().path()) {
         (&Method::GET, "/v1/health") => handle_health(&state),
         (&Method::GET, "/v1/capabilities") => handle_capabilities(&state),
-        (&Method::POST, "/v1/package-operations/evaluate") => {
-            handle_evaluate(req, &state, false).await
-        }
+        (&Method::POST, "/v1/package-operations/evaluate") => handle_evaluate(req, &state, false).await,
         (&Method::POST, "/v1/package-operations") => handle_evaluate(req, &state, true).await,
         _ => not_found(),
     };
@@ -102,11 +103,7 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
     json_response(StatusCode::OK, &body)
 }
 
-async fn handle_evaluate(
-    req: Request<Incoming>,
-    state: &BrokerState,
-    execute: bool,
-) -> Response<Full<Bytes>> {
+async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: bool) -> Response<Full<Bytes>> {
     let audit_id = generate_audit_id();
     let received_at = chrono::Utc::now().to_rfc3339();
 
@@ -136,15 +133,42 @@ async fn handle_evaluate(
         );
     }
 
-    // Parse request.
-    let request: PackageRequest = match serde_json::from_slice(&body_bytes) {
+    // Parse as generic JSON first for schema validation.
+    let request_value: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(error) => {
+            return make_error_response(
+                &state.policy,
+                &audit_id,
+                &received_at,
+                &format!("invalid JSON: {error}"),
+                StatusCode::BAD_REQUEST,
+                &state.pipe_name,
+            );
+        }
+    };
+
+    // Validate request against schema.
+    if let Err(error) = evaluator::validate_request(&state.validators, &request_value) {
+        return make_error_response(
+            &state.policy,
+            &audit_id,
+            &received_at,
+            &error.to_string(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &state.pipe_name,
+        );
+    }
+
+    // Deserialize into typed request.
+    let request: PackageRequest = match serde_json::from_value(request_value) {
         Ok(req) => req,
         Err(error) => {
             return make_error_response(
                 &state.policy,
                 &audit_id,
                 &received_at,
-                &format!("invalid request JSON: {error}"),
+                &format!("request deserialization failed: {error}"),
                 StatusCode::UNPROCESSABLE_ENTITY,
                 &state.pipe_name,
             );
@@ -166,7 +190,20 @@ async fn handle_evaluate(
         }
     };
 
-    let (command, would_execute) = if decision.decision == "allow" {
+    let (command, would_execute) = if decision.decision == Decision::Allow {
+        if request.manager.name != crate::models::ManagerName::Winget {
+            return make_error_response(
+                &state.policy,
+                &audit_id,
+                &received_at,
+                &format!(
+                    "manager '{}' is not supported for command execution",
+                    request.manager.name
+                ),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &state.pipe_name,
+            );
+        }
         let cmd = build_winget_command(&request);
         (cmd, true)
     } else {
@@ -174,24 +211,21 @@ async fn handle_evaluate(
     };
 
     // If execute mode and decision is allow, run the command.
-    let execution_mode = if execute && would_execute {
-        // Execute the command via the configured executor.
-        match state
-            .executor
-            .execute(&command, &request.broker.effective_user)
-            .await
-        {
-            Ok(()) => "elevated",
+    let (execution_mode, note) = if execute && would_execute {
+        match state.executor.execute(&command, &request.broker.effective_user).await {
+            Ok(()) => (ExecutionMode::Elevated, "Command executed successfully.".to_owned()),
             Err(error) => {
                 tracing::error!(%error, "Command execution failed");
-                // Still report the decision as allow, but note execution failure in reason.
-                "elevated-failed"
+                (ExecutionMode::Elevated, format!("Execution failed: {error}"))
             }
         }
     } else if execute {
-        "denied"
+        (ExecutionMode::Elevated, "Denied by policy.".to_owned())
     } else {
-        "dry-run"
+        (
+            ExecutionMode::SimulatedElevated,
+            "Dry-run: command not executed.".to_owned(),
+        )
     };
 
     let completed_at = chrono::Utc::now().to_rfc3339();
@@ -202,34 +236,35 @@ async fn handle_evaluate(
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
             protocol_version: PROTOCOL_VERSION.to_owned(),
-            transport: "http-named-pipe".to_owned(),
-            pipe_name: state.pipe_name.clone(),
+            transport: Transport::HttpNamedPipe,
+            pipe_name: Some(state.pipe_name.clone()),
             elevated_simulation: !execute,
         },
         audit_id: audit_id.clone(),
         request_id: Some(request.request_id.clone()),
         received_at,
         completed_at,
-        manager: Some(request.manager.name.clone()),
+        manager: Some(request.manager.name.to_string()),
         source: Some(request.source.name.clone()),
         package_id: Some(request.package.id.clone()),
-        operation: Some(request.operation.clone()),
-        decision: decision.decision.clone(),
+        operation: Some(request.operation),
+        decision: decision.decision,
         rule_id: decision.rule_id,
         reason: decision.reason,
         would_execute,
-        policy: PolicyInfo {
+        policy: ResponsePolicyInfo {
             id: state.policy.metadata.id.clone(),
             revision: state.policy.metadata.revision,
-            default_decision: state.policy.enforcement.default_decision.clone(),
+            policy_version: state.policy.policy_version.clone(),
         },
         execution: ExecutionInfo {
-            mode: execution_mode.to_owned(),
+            mode: execution_mode,
             command,
+            note,
         },
     };
 
-    let status = if decision.decision == "allow" {
+    let status = if decision.decision == Decision::Allow {
         StatusCode::OK
     } else {
         StatusCode::FORBIDDEN
@@ -242,10 +277,7 @@ async fn handle_evaluate(
         .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION)
         .header("UniGetUI-Audit-Id", &audit_id)
         .header("UniGetUI-Policy-Id", &state.policy.metadata.id)
-        .header(
-            "UniGetUI-Policy-Revision",
-            state.policy.metadata.revision.to_string(),
-        )
+        .header("UniGetUI-Policy-Revision", state.policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
 }
@@ -265,8 +297,8 @@ fn make_error_response(
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
             protocol_version: PROTOCOL_VERSION.to_owned(),
-            transport: "http-named-pipe".to_owned(),
-            pipe_name: pipe_name.to_owned(),
+            transport: Transport::HttpNamedPipe,
+            pipe_name: Some(pipe_name.to_owned()),
             elevated_simulation: false,
         },
         audit_id: audit_id.to_owned(),
@@ -277,18 +309,19 @@ fn make_error_response(
         source: None,
         package_id: None,
         operation: None,
-        decision: "deny".to_owned(),
+        decision: Decision::Deny,
         rule_id: "<validation-failure>".to_owned(),
         reason: reason.to_owned(),
         would_execute: false,
-        policy: PolicyInfo {
+        policy: ResponsePolicyInfo {
             id: policy.metadata.id.clone(),
             revision: policy.metadata.revision,
-            default_decision: policy.enforcement.default_decision.clone(),
+            policy_version: policy.policy_version.clone(),
         },
         execution: ExecutionInfo {
-            mode: "none".to_owned(),
+            mode: ExecutionMode::SimulatedElevated,
             command: vec![],
+            note: "Validation failed; no command built.".to_owned(),
         },
     };
 
@@ -308,9 +341,7 @@ fn not_found() -> Response<Full<Bytes>> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .header("Content-Type", "application/json")
-        .body(Full::new(Bytes::from(
-            r#"{"error":"not found"}"#.as_bytes().to_vec(),
-        )))
+        .body(Full::new(Bytes::from(r#"{"error":"not found"}"#.as_bytes().to_vec())))
         .expect("BUG: static response builder")
 }
 

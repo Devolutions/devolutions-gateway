@@ -10,7 +10,7 @@ mod windows_pipe {
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
     use tokio::sync::Notify;
 
-    use crate::server::{serve_connection, BrokerState};
+    use crate::server::{BrokerState, serve_connection};
 
     /// Default pipe name for the UniGetUI package broker.
     pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\UniGetUI.PackageBroker.v1";
@@ -53,9 +53,7 @@ mod windows_pipe {
         // 2. Allows Administrators full control
         // 3. Allows authenticated interactive users to connect
         // 4. Denies network access
-        let server = ServerOptions::new()
-            .first_pipe_instance(false)
-            .create(pipe_name)?;
+        let server = ServerOptions::new().first_pipe_instance(false).create(pipe_name)?;
 
         Ok(server)
     }

@@ -14,6 +14,7 @@ use tokio::sync::Notify;
 use crate::executor::{self, CommandExecutor};
 use crate::pipe::DEFAULT_PIPE_NAME;
 use crate::policy_loader;
+use crate::schema::SchemaValidators;
 use crate::server::BrokerState;
 
 /// Configuration for the broker task.
@@ -52,14 +53,14 @@ impl Task for BrokerTask {
     const NAME: &'static str = "unigetui-broker";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
+        let validators = SchemaValidators::new();
+
         let policy_path = match &self.config.policy_path {
             Some(path) => std::path::PathBuf::from(path),
-            None => policy_loader::find_default_policy()
-                .context("failed to find default broker policy")?,
+            None => policy_loader::find_default_policy().context("failed to find default broker policy")?,
         };
 
-        let policy =
-            policy_loader::load_policy(&policy_path).context("failed to load broker policy")?;
+        let policy = policy_loader::load_policy(&policy_path, &validators).context("failed to load broker policy")?;
 
         tracing::info!(
             policy_id = %policy.metadata.id,
@@ -73,6 +74,7 @@ impl Task for BrokerTask {
             policy,
             executor,
             pipe_name: self.config.pipe_name.clone(),
+            validators,
         });
 
         // Bridge the agent's ShutdownSignal to the Notify used by the pipe server.

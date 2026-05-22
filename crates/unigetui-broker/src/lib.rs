@@ -9,5 +9,6 @@ pub mod executor;
 pub mod models;
 pub mod pipe;
 pub mod policy_loader;
+pub mod schema;
 pub mod server;
 pub mod task;

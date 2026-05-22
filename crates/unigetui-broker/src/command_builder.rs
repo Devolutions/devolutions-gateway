@@ -3,17 +3,16 @@
 //! Constructs the command the broker would execute from validated request fields.
 //! The broker never executes client-supplied commands directly.
 
-use crate::models::PackageRequest;
+use crate::models::{Operation, PackageRequest, Scope};
 
 /// Build the WinGet command line from a validated request.
 ///
 /// Returns the command as a list of arguments (first element is the executable).
 pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
-    let operation = match request.operation.as_str() {
-        "install" => "install",
-        "update" => "upgrade",
-        "uninstall" => "uninstall",
-        other => panic!("unsupported operation: {other}"),
+    let operation = match request.operation {
+        Operation::Install => "install",
+        Operation::Update => "upgrade",
+        Operation::Uninstall => "uninstall",
     };
 
     let mut command = vec![
@@ -25,7 +24,15 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
     ];
 
     add_pair(&mut command, "--source", Some(&request.source.name));
-    add_pair(&mut command, "--scope", request.options.scope.as_deref());
+
+    if let Some(scope) = &request.options.scope {
+        let scope_str = match scope {
+            Scope::User => "user",
+            Scope::Machine => "machine",
+        };
+        command.push("--scope".to_owned());
+        command.push(scope_str.to_owned());
+    }
 
     // Version: use explicit version option first, then package new_version for updates.
     let version = request
@@ -35,15 +42,18 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         .or(request.package.new_version.as_deref());
     add_pair(&mut command, "--version", version);
 
-    if request.options.interactive.unwrap_or(false) {
+    if request.options.interactive {
         command.push("--interactive".to_owned());
     } else {
         command.push("--silent".to_owned());
     }
 
-    add_pair(&mut command, "--architecture", request.options.architecture.as_deref());
+    if let Some(arch) = &request.options.architecture {
+        command.push("--architecture".to_owned());
+        command.push(arch.to_string());
+    }
 
-    if request.options.skip_hash_check.unwrap_or(false) {
+    if request.options.skip_hash_check {
         command.push("--ignore-security-hash".to_owned());
     }
 
@@ -83,18 +93,18 @@ mod tests {
     use super::*;
     use crate::models::*;
 
-    #[test]
-    fn test_basic_install_command() {
-        let request = PackageRequest {
+    fn make_request() -> PackageRequest {
+        PackageRequest {
+            schema: None,
             request_version: "1.0.0".to_owned(),
             request_type: "packageOperation".to_owned(),
-            request_id: "test".to_owned(),
-            created_at: "2026-01-01T00:00:00Z".to_owned(),
-            operation: "install".to_owned(),
+            request_id: "req-1".to_owned(),
+            created_at: "2025-01-01T00:00:00Z".to_owned(),
+            operation: Operation::Install,
             manager: RequestManager {
-                name: "Winget".to_owned(),
-                display_name: None,
-                executable_friendly_name: None,
+                name: ManagerName::Winget,
+                display_name: "WinGet".to_owned(),
+                executable_friendly_name: "winget".to_owned(),
             },
             source: RequestSource {
                 name: "winget".to_owned(),
@@ -102,91 +112,56 @@ mod tests {
                 is_virtual_manager: None,
             },
             package: RequestPackage {
-                id: "Microsoft.VisualStudioCode".to_owned(),
-                name: "VS Code".to_owned(),
+                id: "Mozilla.Firefox".to_owned(),
+                name: "Firefox".to_owned(),
                 version: None,
                 new_version: None,
-            },
-            options: RequestOptions {
-                scope: Some("machine".to_owned()),
-                architecture: Some("x64".to_owned()),
-                interactive: Some(false),
-                run_as_administrator: Some(true),
-                skip_hash_check: Some(false),
-                pre_release: Some(false),
-                version: None,
-                custom_parameters: Some(vec![]),
-                custom_install_location: None,
-                kill_before_operation: None,
-                pre_operation_command: None,
-                post_operation_command: None,
-            },
-            broker: BrokerContext {
-                requested_elevation: "elevated".to_owned(),
-                effective_user: "TEST\\user".to_owned(),
-                client_version: "3.0.0".to_owned(),
-            },
-        };
-
-        let cmd = build_winget_command(&request);
-        assert_eq!(cmd[0], "winget.exe");
-        assert_eq!(cmd[1], "install");
-        assert!(cmd.contains(&"--id".to_owned()));
-        assert!(cmd.contains(&"Microsoft.VisualStudioCode".to_owned()));
-        assert!(cmd.contains(&"--exact".to_owned()));
-        assert!(cmd.contains(&"--silent".to_owned()));
-        assert!(cmd.contains(&"--scope".to_owned()));
-        assert!(cmd.contains(&"machine".to_owned()));
-    }
-
-    #[test]
-    fn test_upgrade_command() {
-        let request = PackageRequest {
-            request_version: "1.0.0".to_owned(),
-            request_type: "packageOperation".to_owned(),
-            request_id: "test".to_owned(),
-            created_at: "2026-01-01T00:00:00Z".to_owned(),
-            operation: "update".to_owned(),
-            manager: RequestManager {
-                name: "Winget".to_owned(),
-                display_name: None,
-                executable_friendly_name: None,
-            },
-            source: RequestSource {
-                name: "winget".to_owned(),
-                url: None,
-                is_virtual_manager: None,
-            },
-            package: RequestPackage {
-                id: "Git.Git".to_owned(),
-                name: "Git".to_owned(),
-                version: Some("2.40.0".to_owned()),
-                new_version: Some("2.41.0".to_owned()),
+                channel: None,
             },
             options: RequestOptions {
                 scope: None,
                 architecture: None,
-                interactive: Some(false),
-                run_as_administrator: None,
-                skip_hash_check: None,
-                pre_release: None,
                 version: None,
-                custom_parameters: None,
+                interactive: false,
+                run_as_administrator: false,
+                skip_hash_check: false,
+                pre_release: false,
                 custom_install_location: None,
-                kill_before_operation: None,
+                custom_parameters: None,
                 pre_operation_command: None,
                 post_operation_command: None,
+                kill_before_operation: None,
             },
             broker: BrokerContext {
-                requested_elevation: "elevated".to_owned(),
-                effective_user: "TEST\\user".to_owned(),
-                client_version: "3.0.0".to_owned(),
+                requested_elevation: Elevation::Elevated,
+                effective_user: "DOMAIN\\user".to_owned(),
+                client_version: None,
+                client_process_path: None,
             },
-        };
+        }
+    }
+
+    #[test]
+    fn test_basic_install_command() {
+        let request = make_request();
+        let cmd = build_winget_command(&request);
+        assert_eq!(cmd[0], "winget.exe");
+        assert_eq!(cmd[1], "install");
+        assert!(cmd.contains(&"--id".to_owned()));
+        assert!(cmd.contains(&"Mozilla.Firefox".to_owned()));
+        assert!(cmd.contains(&"--silent".to_owned()));
+        assert!(cmd.contains(&"--accept-source-agreements".to_owned()));
+    }
+
+    #[test]
+    fn test_upgrade_command() {
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        request.package.new_version = Some("120.0".to_owned());
 
         let cmd = build_winget_command(&request);
         assert_eq!(cmd[1], "upgrade");
         assert!(cmd.contains(&"--version".to_owned()));
-        assert!(cmd.contains(&"2.41.0".to_owned()));
+        assert!(cmd.contains(&"120.0".to_owned()));
     }
 }

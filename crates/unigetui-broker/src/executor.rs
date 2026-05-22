@@ -41,6 +41,7 @@ pub struct WindowsExecutor;
 impl CommandExecutor for WindowsExecutor {
     async fn execute(&self, command: &[String], effective_user: &str) -> anyhow::Result<()> {
         use std::process::Stdio;
+
         use tokio::process::Command;
 
         tracing::info!(
@@ -64,9 +65,7 @@ impl CommandExecutor for WindowsExecutor {
         // Try to run directly first (works if service is running as the effective user
         // or if the operation is machine-scoped and WinGet is available system-wide).
         let mut cmd = Command::new(exe);
-        cmd.args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // Set environment for WinGet to work under SYSTEM:
         // WinGet looks for its settings in LOCALAPPDATA. Under SYSTEM that would be
@@ -113,10 +112,7 @@ pub fn create_platform_executor() -> Box<dyn CommandExecutor> {
 #[cfg(windows)]
 fn resolve_user_profile_path(effective_user: &str) -> Option<String> {
     // Extract just the username part.
-    let username = effective_user
-        .rsplit('\\')
-        .next()
-        .unwrap_or(effective_user);
+    let username = effective_user.rsplit('\\').next().unwrap_or(effective_user);
 
     // Common profile path pattern.
     let profiles_dir = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_owned());

@@ -24,6 +24,7 @@ use tokio::sync::Notify;
 use unigetui_broker::executor::{CommandExecutor, DryRunExecutor};
 use unigetui_broker::pipe::DEFAULT_PIPE_NAME;
 use unigetui_broker::policy_loader;
+use unigetui_broker::schema::SchemaValidators;
 use unigetui_broker::server::BrokerState;
 
 #[derive(Debug)]
@@ -116,12 +117,15 @@ async fn main() -> anyhow::Result<()> {
 
     let args = parse_args();
 
+    // Build schema validators.
+    let validators = SchemaValidators::new();
+
     // Load policy.
     let policy_path = match args.policy_path {
         Some(p) => p,
         None => policy_loader::find_default_policy()?,
     };
-    let policy = policy_loader::load_policy(&policy_path)?;
+    let policy = policy_loader::load_policy(&policy_path, &validators)?;
 
     let executor: Box<dyn CommandExecutor> = if args.execute {
         tracing::warn!("Running in EXECUTE mode — commands will be run!");
@@ -142,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         policy,
         executor,
         pipe_name: args.pipe_name.clone(),
+        validators,
     });
 
     let shutdown = Arc::new(Notify::new());
@@ -182,20 +187,14 @@ async fn main() -> anyhow::Result<()> {
             // Wait for shutdown.
             shutdown.notified().await;
         } else {
-            anyhow::bail!(
-                "named pipe is not available on this platform; use --tcp to listen on TCP"
-            );
+            anyhow::bail!("named pipe is not available on this platform; use --tcp to listen on TCP");
         }
     }
 
     Ok(())
 }
 
-async fn run_tcp_server(
-    state: Arc<BrokerState>,
-    addr: SocketAddr,
-    shutdown: Arc<Notify>,
-) -> anyhow::Result<()> {
+async fn run_tcp_server(state: Arc<BrokerState>, addr: SocketAddr, shutdown: Arc<Notify>) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "TCP server listening");
 
