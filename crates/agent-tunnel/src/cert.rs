@@ -128,6 +128,50 @@ pub struct SignedAgentCert {
     pub ca_cert_pem: String,
 }
 
+/// Provenance of the server key used to sign a (re)issued server certificate.
+///
+/// Tracked so that [`CaManager::ensure_server_cert`] always persists a freshly
+/// generated key to disk *before* the new cert document is written. If we only
+/// gated the write on `!key_path.exists()` (the previous behaviour), then for
+/// statuses like `ExpiringSoon` / `Unreadable` — where the key file may still
+/// exist but the keypair we just generated is brand new — the cert would be
+/// signed with a key that never gets persisted, producing a cert/key mismatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyOrigin {
+    LoadedFromDisk,
+    FreshlyGenerated,
+}
+
+/// Atomically write `contents` to `path`: write to a sibling temp file, then
+/// rename over the target. Prevents a crash mid-write from leaving the target
+/// truncated or partially written.
+fn write_atomically(path: &Utf8Path, contents: &[u8]) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .with_context(|| format!("target path has no parent directory: {path}"))?;
+    if !parent.as_str().is_empty() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create directory {parent}"))?;
+    }
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("target path has no file name: {path}"))?;
+    let tmp_path = parent.join(format!(".{file_name}.tmp.{}", Uuid::new_v4()));
+
+    // Best-effort cleanup if anything fails after the temp file is created.
+    let write_result = std::fs::write(&tmp_path, contents);
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(anyhow::Error::new(e).context(format!("write temp file {tmp_path}")));
+    }
+
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(anyhow::Error::new(e).context(format!("rename {tmp_path} -> {path}")));
+    }
+
+    Ok(())
+}
+
 impl CaManager {
     /// Load an existing CA from disk, or generate a new one.
     pub fn load_or_generate(data_dir: &Utf8Path) -> anyhow::Result<Arc<Self>> {
@@ -278,7 +322,13 @@ impl CaManager {
         // The keypair is preserved across SAN regenerations to keep the SPKI pin
         // stable for already-enrolled agents. Only the cert document changes.
         // Generate a fresh key only if the existing key is missing/unreadable.
-        let server_key_pair = match (status, std::fs::read_to_string(&key_path)) {
+        //
+        // `key_origin` tracks whether `server_key_pair` was loaded from disk or
+        // freshly generated. When freshly generated we MUST persist the new key
+        // (atomically) *before* writing the cert, otherwise a crash between the
+        // two writes — or the cert-only write path used previously — would
+        // leave a cert/key mismatch on disk and break Gateway TLS.
+        let (server_key_pair, key_origin) = match (status, std::fs::read_to_string(&key_path)) {
             (ServerCertStatus::Valid, _) => {
                 info!(%cert_path, ?expected_sans, "Using existing agent tunnel server certificate");
                 return Ok((cert_path, key_path));
@@ -290,11 +340,14 @@ impl CaManager {
                     new_sans = ?expected_sans,
                     "Agent tunnel server cert SAN set changed; regenerating with the existing keypair",
                 );
-                KeyPair::from_pem(&key_pem).context("parse existing server key pair from PEM")?
+                let kp = KeyPair::from_pem(&key_pem).context("parse existing server key pair from PEM")?;
+                (kp, KeyOrigin::LoadedFromDisk)
             }
             (other_status, _) => {
                 info!(%cert_path, ?other_status, "Generating new server certificate keypair");
-                KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate server key pair")?
+                let kp =
+                    KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate server key pair")?;
+                (kp, KeyOrigin::FreshlyGenerated)
             }
         };
 
@@ -322,20 +375,24 @@ impl CaManager {
         let server_cert_pem = server_cert.pem();
         let fingerprint = cert_fingerprint_from_pem(&server_cert_pem).unwrap_or_else(|_| "<unknown>".to_owned());
 
-        std::fs::write(&cert_path, &server_cert_pem).with_context(|| format!("write server cert to {cert_path}"))?;
-        // Only write the key when generating a new one. Reusing the existing key
-        // means we already validated the file is readable above.
-        if !key_path.exists() {
-            std::fs::write(&key_path, server_key_pair.serialize_pem())
+        // Order matters: when the key was freshly generated, persist it BEFORE
+        // the cert so we never end up with a new cert on disk paired with an
+        // old/missing key. Use write-to-temp + rename for atomicity so a crash
+        // mid-write cannot leave a truncated key on disk.
+        if matches!(key_origin, KeyOrigin::FreshlyGenerated) {
+            write_atomically(&key_path, server_key_pair.serialize_pem().as_bytes())
                 .with_context(|| format!("write server key to {key_path}"))?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                    .with_context(|| format!("set permissions on {key_path}"))?;
+            }
         }
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                .with_context(|| format!("set permissions on {key_path}"))?;
-        }
+        write_atomically(&cert_path, server_cert_pem.as_bytes())
+            .with_context(|| format!("write server cert to {cert_path}"))?;
 
         info!(
             %cert_path,
@@ -893,6 +950,103 @@ mod tests {
         let err = build_san_set(&["   "]).expect_err("empty advertised name should fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("empty"), "got: {msg}");
+    }
+
+    #[test]
+    fn ensure_server_cert_regenerates_key_atomically_when_cert_expiring_soon() {
+        // Regression for the cert/key mismatch bug: when the cert is expiring
+        // soon (or unreadable / missing) but a stale key file is still on disk
+        // from a previous run, the regeneration path used to sign the new cert
+        // with a freshly generated keypair while skipping the key write —
+        // leaving cert and key out of sync. The fix tracks key provenance and
+        // always persists a freshly generated key BEFORE writing the cert.
+        //
+        // This test backdates the cert's validity by overwriting cert+key on
+        // disk with a deliberately near-expiry pair, then calls
+        // `ensure_server_cert` and asserts the on-disk key is the one inside
+        // the new cert (i.e. they match SPKI-wise).
+
+        let temp_dir = std::env::temp_dir().join(format!("dgw-expiring-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temp path UTF-8");
+        let ca = CaManager::load_or_generate(&data_dir).expect("CA");
+
+        let names = ["gateway.corp.example.com"];
+        let (cert_path, key_path) = ca.ensure_server_cert(&names).expect("first issue");
+
+        // Mint a replacement (cert, key) pair where the cert is already
+        // expiring (within the 7-day window) but the key on disk is a stale
+        // keypair unrelated to whatever the regen path will generate. The
+        // point: force the code into the `ExpiringSoon` branch with a key
+        // file present on disk, and verify regeneration writes a matching key.
+        let stale_key =
+            KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("stale keypair");
+        let mut expiring_params = CertificateParams::default();
+        expiring_params
+            .distinguished_name
+            .push(DnType::CommonName, names[0]);
+        expiring_params
+            .subject_alt_names
+            .push(SanType::DnsName(names[0].try_into().unwrap()));
+        expiring_params.not_before = time::OffsetDateTime::now_utc() - Duration::from_secs(60 * SECS_PER_DAY);
+        // Inside the 7-day "ExpiringSoon" threshold.
+        expiring_params.not_after = time::OffsetDateTime::now_utc() + Duration::from_secs(SECS_PER_DAY);
+        let ca_cert_for_sign = ca.reconstruct_ca_cert().expect("reconstruct CA");
+        let expiring_cert = expiring_params
+            .signed_by(&stale_key, &ca_cert_for_sign, &ca.ca_key_pair)
+            .expect("sign expiring cert");
+        std::fs::write(&cert_path, expiring_cert.pem()).expect("overwrite cert with expiring one");
+        std::fs::write(&key_path, stale_key.serialize_pem()).expect("overwrite key with stale one");
+
+        // Sanity: confirm the status check classifies this as ExpiringSoon.
+        let expected_sans = build_san_set(&names).expect("expected sans");
+        let status = check_server_cert(&cert_path, &key_path, &expected_sans);
+        assert!(
+            matches!(status, ServerCertStatus::ExpiringSoon),
+            "precondition: expected ExpiringSoon, got {status:?}"
+        );
+
+        // Trigger regeneration.
+        ca.ensure_server_cert(&names).expect("regen after expiring");
+
+        // The on-disk key must match the public key embedded in the new cert.
+        let new_cert_pem = std::fs::read_to_string(&cert_path).expect("read regenerated cert");
+        let new_key_pem = std::fs::read_to_string(&key_path).expect("read regenerated key");
+
+        let new_cert_der = cert_pem_to_der(&new_cert_pem).expect("parse new cert PEM");
+        let cert_spki = spki_sha256_from_der(&new_cert_der).expect("cert SPKI");
+
+        // Build the SPKI of the persisted key by self-signing a throwaway cert
+        // with it (rcgen doesn't expose the SPKI of a KeyPair directly).
+        let persisted_key = KeyPair::from_pem(&new_key_pem).expect("parse persisted key");
+        let mut probe_params = CertificateParams::default();
+        probe_params
+            .distinguished_name
+            .push(DnType::CommonName, "probe");
+        let probe_cert = probe_params.self_signed(&persisted_key).expect("self-sign probe");
+        let probe_der = cert_pem_to_der(&probe_cert.pem()).expect("probe DER");
+        let probe_spki = spki_sha256_from_der(&probe_der).expect("probe SPKI");
+
+        assert_eq!(
+            cert_spki, probe_spki,
+            "on-disk key must match the public key embedded in the regenerated cert"
+        );
+
+        // And confirm the key is no longer the stale one we wrote earlier.
+        let mut stale_probe_params = CertificateParams::default();
+        stale_probe_params
+            .distinguished_name
+            .push(DnType::CommonName, "stale-probe");
+        let stale_probe_cert = stale_probe_params
+            .self_signed(&stale_key)
+            .expect("self-sign stale probe");
+        let stale_probe_der = cert_pem_to_der(&stale_probe_cert.pem()).expect("stale probe DER");
+        let stale_spki = spki_sha256_from_der(&stale_probe_der).expect("stale SPKI");
+        assert_ne!(
+            cert_spki, stale_spki,
+            "regenerated cert must NOT use the stale on-disk key"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
