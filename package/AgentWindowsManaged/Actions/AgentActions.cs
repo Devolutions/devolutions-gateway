@@ -289,6 +289,17 @@ internal static class AgentActions
     {
         Execute = Execute.deferred,
         Impersonate = false,
+        // Deferred CAs only see properties bubbled through CustomActionData. The Set_<CA>_Props
+        // immediate action expands [PROP] for each entry below before the deferred CA runs.
+        UsesProperties = string.Join(";", new[]
+        {
+            AgentProperties.AgentTunnelEnrollmentString,
+            AgentProperties.AgentTunnelGatewayUrl,
+            AgentProperties.AgentTunnelAgentName,
+            AgentProperties.AgentTunnelAdvertiseSubnets,
+            AgentProperties.AgentTunnelAdvertiseDomains,
+            AgentProperties.InstallDir,
+        }.Select(p => $"{p}=[{p}]")),
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(

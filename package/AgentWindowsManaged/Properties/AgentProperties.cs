@@ -38,6 +38,12 @@ namespace DevolutionsAgent.Properties
         /// </summary>
         public static string AgentTunnelGatewayUrl = "AGENT_TUNNEL_GATEWAY_URL";
 
+        /// <summary>
+        /// Optional agent display name. Resolution order at install time:
+        /// dialog value (if non-empty) > JWT's jet_agent_name claim (if present) > local computer name.
+        /// </summary>
+        public static string AgentTunnelAgentName = "AGENT_TUNNEL_AGENT_NAME";
+
         public AgentProperties(ISession runtimeSession)
         {
             this.runtimeSession = runtimeSession;

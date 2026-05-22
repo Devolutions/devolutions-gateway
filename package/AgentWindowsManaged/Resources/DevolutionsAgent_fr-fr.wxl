@@ -12,6 +12,8 @@
                 <String Id="AgentTunnelDlgSubnetsHint">Notation CIDR séparée par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Laissez vide pour la détection automatique.</String>
                 <String Id="AgentTunnelDlgDomainsLabel">Domaines annoncés :</String>
                 <String Id="AgentTunnelDlgDomainsHint">Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com. Laissez vide pour ignorer.</String>
+                <String Id="AgentTunnelDlgAgentNameLabel">Nom de l'agent (facultatif) :</String>
+                <String Id="AgentTunnelDlgAgentNameHint">Identifiant de cet agent. Laissez vide pour utiliser le nom inscrit dans le JWT, ou le nom de l'ordinateur local comme dernier recours.</String>
                 <String Id="AgentTunnelDlgGatewayUrlLabel">URL de la passerelle (avancé, facultatif) :</String>
                 <String Id="AgentTunnelDlgGatewayUrlHint">Remplace l'URL incluse dans le JWT d'enrôlement. Laissez vide pour utiliser la valeur du JWT.</String>
                 <String Id="Language">1036</String>
