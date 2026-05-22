@@ -349,6 +349,14 @@ internal class Program
         // - Make DevolutionsDesktopAgent answer WM_CLOSE
         projectProperties.Add(new Property("MSIRESTARTMANAGERCONTROL", "Disable"));
 
+        // Agent tunnel properties: must be declared Secure so the values set in the wizard UI
+        // survive the UAC boundary and reach the deferred CA via CustomActionData.
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelEnrollmentString, "") { Hidden = true, Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelGatewayUrl, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAgentName, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseSubnets, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomains, "") { Secure = true });
+
         project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();
         project.ManagedUI.InstallDialogs.AddRange(Wizard.Dialogs);
