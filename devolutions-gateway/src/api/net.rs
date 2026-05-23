@@ -162,6 +162,7 @@ pub async fn handle_network_scan(
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+#[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
 #[derive(Debug, Deserialize)]
 pub struct NetworkScanQueryParams {
     /// Interval in milliseconds (default is 200)
