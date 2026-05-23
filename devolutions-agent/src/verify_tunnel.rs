@@ -337,10 +337,10 @@ async fn run_verification(conf_handle: &ConfHandle) -> Result<(), ErrorTriple> {
     // ----- Resolve gateway endpoint -----
 
     let endpoint_str = &tunnel_conf.gateway_endpoint;
-    let (gateway_hostname, _port_str) = split_host_port(endpoint_str).ok_or_else(|| {
+    let (gateway_hostname, _port) = crate::endpoint::split_endpoint(endpoint_str).map_err(|e| {
         ErrorTriple::new(
             ErrorKind::UnexpectedError,
-            format!("gateway_endpoint {endpoint_str:?} is malformed (missing port separator)"),
+            format!("gateway_endpoint {endpoint_str:?} is malformed: {e:#}"),
         )
     })?;
 
@@ -496,22 +496,6 @@ where
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Split a `host:port` / `[ipv6]:port` endpoint into the host string and the
-/// port string. Returns `None` when no port separator is found.
-fn split_host_port(endpoint: &str) -> Option<(String, String)> {
-    let trimmed = endpoint.trim();
-    if let Some((host, port)) = trimmed.rsplit_once(']') {
-        // IPv6 form: `[host]:port`.
-        let host = host.strip_prefix('[')?;
-        let port = port.strip_prefix(':')?;
-        Some((host.to_owned(), port.to_owned()))
-    } else {
-        // DNS / IPv4 form: `host:port`.
-        let (host, port) = trimmed.rsplit_once(':')?;
-        Some((host.to_owned(), port.to_owned()))
-    }
-}
 
 fn dns_failed(host: &str, raw: &str) -> ErrorTriple {
     ErrorTriple::new(
@@ -740,29 +724,6 @@ mod tests {
         assert!(triple.detail.contains("log="));
     }
 
-    #[test]
-    fn split_host_port_dns() {
-        let (h, p) = split_host_port("gateway.example.com:4433").unwrap();
-        assert_eq!(h, "gateway.example.com");
-        assert_eq!(p, "4433");
-    }
-
-    #[test]
-    fn split_host_port_ipv4() {
-        let (h, p) = split_host_port("10.10.0.7:4433").unwrap();
-        assert_eq!(h, "10.10.0.7");
-        assert_eq!(p, "4433");
-    }
-
-    #[test]
-    fn split_host_port_ipv6() {
-        let (h, p) = split_host_port("[fd00::7]:4433").unwrap();
-        assert_eq!(h, "fd00::7");
-        assert_eq!(p, "4433");
-    }
-
-    #[test]
-    fn split_host_port_rejects_no_port() {
-        assert!(split_host_port("gateway.example.com").is_none());
-    }
+    // Endpoint splitting tests live in `crate::endpoint` — the shared helper
+    // is the single source of truth for `host:port` / `[ipv6]:port` parsing.
 }
