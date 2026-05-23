@@ -376,13 +376,23 @@ namespace DevolutionsAgent.Actions
                 };
 
                 using Process process = Process.Start(startInfo);
+
+                // Start draining stdout/stderr BEFORE WaitForExit. The default
+                // OS pipe buffer is small (4 KiB-ish on Windows), so if the
+                // child writes more than the buffer holds while we're still
+                // sitting on WaitForExit, the child blocks on a full pipe and
+                // we kill it for "timing out" — classic .NET deadlock.
+                // Running both reads concurrently (as tasks) means the buffer
+                // is drained as the child fills it.
+                System.Threading.Tasks.Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                System.Threading.Tasks.Task<string> stderrTask = process.StandardError.ReadToEndAsync();
                 if (!process.WaitForExit(60_000))
                 {
                     try { process.Kill(); } catch { /* already gone */ }
                     return Fail("Agent tunnel enrollment timed out after 60 seconds.");
                 }
-                string stdout = process.StandardOutput.ReadToEnd();
-                string stderr = process.StandardError.ReadToEnd();
+                string stdout = stdoutTask.GetAwaiter().GetResult();
+                string stderr = stderrTask.GetAwaiter().GetResult();
 
                 if (!string.IsNullOrEmpty(stdout)) session.Log($"enrollment stdout: {Redact(stdout)}");
                 if (!string.IsNullOrEmpty(stderr)) session.Log($"enrollment stderr: {Redact(stderr)}");
@@ -519,6 +529,15 @@ namespace DevolutionsAgent.Actions
                 };
 
                 using Process process = Process.Start(startInfo);
+
+                // Drain stdout/stderr concurrently BEFORE WaitForExit so a
+                // chatty child (verify-tunnel can emit a large diagnostic
+                // payload on the failure path) cannot fill its pipe buffer
+                // and deadlock waiting for us to read. See the matching
+                // pattern in `EnrollAgentTunnel`.
+                System.Threading.Tasks.Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                System.Threading.Tasks.Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+
                 // Hard wall-clock cap a few seconds beyond the agent's own --timeout so a
                 // misbehaving process can't hang the installer.
                 if (!process.WaitForExit((VerifyTimeoutSeconds + 5) * 1000))
@@ -530,8 +549,8 @@ namespace DevolutionsAgent.Actions
                         "Re-run the installer. If the failure repeats, network path likely drops UDP mid-flow; check Windows Firewall, NAT, and EDR network inspection.");
                 }
 
-                string stdout = process.StandardOutput.ReadToEnd();
-                string stderr = process.StandardError.ReadToEnd();
+                string stdout = stdoutTask.GetAwaiter().GetResult();
+                string stderr = stderrTask.GetAwaiter().GetResult();
 
                 if (!string.IsNullOrEmpty(stdout)) session.Log($"verify-tunnel stdout: {stdout}");
                 if (!string.IsNullOrEmpty(stderr)) session.Log($"verify-tunnel stderr: {stderr}");
