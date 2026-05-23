@@ -235,10 +235,6 @@ pub struct NetworkScanQueryParams {
     #[serde(default = "default_true")]
     pub include_host_results: bool,
 
-    /// Emit ping status events.
-    #[serde(default)]
-    pub report_ping_status: bool,
-
     /// Emit ping queued/start host results.
     #[serde(default)]
     pub report_ping_start: bool,
@@ -284,9 +280,17 @@ pub struct NetworkScanQueryParams {
     /// Maximum TCP probe concurrency.
     pub max_tcp_probe_concurrency: Option<usize>,
 
-    /// **Legacy alias** for `report_ping_failure`. TCP-probe failure events
-    /// are off by default and only emit when a caller explicitly opts in via
-    /// `report_tcp_failure`; `enable_failure` never enables them implicitly.
+    /// **Legacy alias** for `report_ping_failure`. `enable_failure=true` only
+    /// opts into ping-failure events; TCP-probe failure events require the
+    /// explicit `report_tcp_failure=true` and are not affected by this alias.
+    ///
+    /// **Behavior change:** historically this single flag controlled both
+    /// ping-failure and TCP-probe-failure reporting. The two are now split:
+    /// clients that want the old "both at once" semantics must send
+    /// `enable_failure=true&report_tcp_failure=true` together. The split is
+    /// intentional — TCP-probe failures are typically high-volume noise that
+    /// callers were filtering client-side anyway, so the two streams are
+    /// independently gated.
     #[deprecated(note = "see field doc comment for the new parameter name")]
     #[serde(default)]
     pub enable_failure: bool,
@@ -539,7 +543,11 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
                 Err(()) => return Err(NetworkScanQueryError::InvalidProbe { value: raw.clone() }),
             }
         }
-        let ports: Vec<MaybeNamedPort> = match (val.enable_tcp_probes, typed_ports.is_empty()) {
+        // Fallback to the default port list only when the caller sent no
+        // `probe=` at all. An explicit `probe=ping` (or any other explicit
+        // probe list) means "scan exactly what I asked for"; we must not
+        // silently add COMMON_PORTS on top of it.
+        let ports: Vec<MaybeNamedPort> = match (val.enable_tcp_probes, val.probes.is_empty()) {
             (false, _) => Vec::new(),
             (true, true) => COMMON_PORTS.iter().map(|p| (*p).into()).collect(),
             (true, false) => typed_ports,
@@ -549,17 +557,18 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
         let enable_ping_start = val.enable_ping_start;
         #[allow(deprecated)]
         let enable_failure = val.enable_failure;
-        // `has_ping_probe` implicitly enables all three ping event classes
-        // (start, success, failure) so a bare `probe=ping` request emits the
-        // full ping lifecycle without any extra toggle. Callers that want
-        // only a subset can leave `probe=ping` off and set the explicit
-        // `report_ping_*` flags individually.
-        let report_ping_start = val.report_ping_start || enable_ping_start || val.report_ping_status || has_ping_probe;
-        let report_ping_success = val.report_ping_success || val.report_ping_status || has_ping_probe;
+        // `has_ping_probe` implies that the caller wants ping start + success
+        // events, matching the pre-PR baseline. It deliberately does NOT
+        // imply `report_ping_failure` — pre-PR clients sending `probe=ping`
+        // alone received only start + success; failure events required
+        // `enable_failure=true` or, in the new explicit form,
+        // `report_ping_failure=true`.
+        let report_ping_start = val.report_ping_start || enable_ping_start || has_ping_probe;
+        let report_ping_success = val.report_ping_success || has_ping_probe;
         // `enable_failure` is the legacy alias for `report_ping_failure`.
         // TCP-probe failures stay off unless `report_tcp_failure` is set
         // explicitly — no legacy alias enables them implicitly.
-        let report_ping_failure = val.report_ping_failure || val.report_ping_status || has_ping_probe || enable_failure;
+        let report_ping_failure = val.report_ping_failure || enable_failure;
         let report_tcp_failure = val.report_tcp_failure;
 
         let ping_interval = Duration::from_millis(val.ping_interval.unwrap_or(200));
@@ -1017,18 +1026,19 @@ mod tests {
     }
 
     #[test]
-    fn query_mapping_probe_ping_implicitly_enables_ping_start_success_and_failure_events() {
-        // `probe=ping` must enable the full ping lifecycle (start + success
-        // + failure) without any explicit `report_ping_*` toggle. Locks the
-        // `has_ping_probe` auto-enable branch in `try_from`, which the
-        // boolean-toggle permutation test does not exercise (it always
-        // ships an empty `probes` list).
+    fn query_mapping_probe_ping_implicitly_enables_ping_start_and_success_only() {
+        // Matches the pre-PR baseline: `probe=ping` alone emits start +
+        // success but NOT failure. Failure events require either the
+        // explicit `report_ping_failure=true` or the legacy
+        // `enable_failure=true` alias. Locks the `has_ping_probe`
+        // auto-enable branch in `try_from`, which the boolean-toggle
+        // permutation test does not exercise (it always ships an empty
+        // `probes` list).
         let (_, filter) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
             probes: vec!["ping".to_owned()],
             report_ping_start: false,
             report_ping_success: false,
             report_ping_failure: false,
-            report_ping_status: false,
             ..minimal_query()
         })
         .expect("probe=ping query should map to scanner params");
@@ -1042,8 +1052,78 @@ mod tests {
             "probe=ping must implicitly enable ping success events"
         );
         assert!(
-            filter.report_ping_failure(),
-            "probe=ping must implicitly enable ping failure events"
+            !filter.report_ping_failure(),
+            "probe=ping alone must NOT auto-enable ping failure (pre-PR baseline)"
+        );
+    }
+
+    #[test]
+    fn query_mapping_probe_ping_alone_does_not_fallback_to_common_ports() {
+        // An explicit probe list — even one containing only `ping` — must
+        // be taken literally; the COMMON_PORTS fallback applies only when
+        // the caller omits `probe=` entirely. Pre-PR baseline.
+        let (params, _) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: vec!["ping".to_owned()],
+            ..minimal_query()
+        })
+        .expect("probe=ping query should map to scanner params");
+
+        assert!(
+            params.config.ports.is_empty(),
+            "probe=ping alone must not trigger COMMON_PORTS fallback"
+        );
+    }
+
+    #[test]
+    fn query_mapping_no_probe_falls_back_to_common_ports() {
+        // Counterpart to the test above: when the caller sends no `probe=`
+        // at all, the default port list kicks in.
+        let (params, _) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: Vec::new(),
+            ..minimal_query()
+        })
+        .expect("default-probe query should map to scanner params");
+
+        assert_eq!(
+            params.config.ports.len(),
+            COMMON_PORTS.len(),
+            "missing probe= must fallback to COMMON_PORTS"
+        );
+    }
+
+    #[test]
+    fn query_mapping_probe_ping_with_explicit_port_uses_only_that_port() {
+        // Mixed-mode: `probe=ping&probe=22` must scan port 22 only — no
+        // COMMON_PORTS fallback — while still emitting ping start + success.
+        let (params, filter) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: vec!["ping".to_owned(), "22".to_owned()],
+            ..minimal_query()
+        })
+        .expect("probe=ping&probe=22 query should map to scanner params");
+
+        assert_eq!(
+            params.config.ports.len(),
+            1,
+            "explicit port list must be honored verbatim, no COMMON_PORTS fallback"
+        );
+        assert!(filter.report_ping_start());
+        assert!(filter.report_ping_success());
+    }
+
+    #[test]
+    fn query_mapping_enable_tcp_probes_false_overrides_explicit_ports() {
+        // `enable_tcp_probes=false` short-circuits the port list regardless of
+        // what `probe=` says. Locks the `(false, _) => Vec::new()` branch.
+        let (params, _) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            probes: vec!["22".to_owned(), "3389".to_owned()],
+            enable_tcp_probes: false,
+            ..minimal_query()
+        })
+        .expect("enable_tcp_probes=false query should map to scanner params");
+
+        assert!(
+            params.config.ports.is_empty(),
+            "enable_tcp_probes=false must produce no ports regardless of probe= list"
         );
     }
 
@@ -1325,22 +1405,21 @@ mod tests {
                     for enable_zeroconf in [false, true] {
                         for enable_resolve_dns in [false, true] {
                             for include_host_results in [false, true] {
-                                for report_ping_status in [false, true] {
-                                    for enable_tcp_probes in [false, true] {
-                                        for enable_failure in [false, true] {
-                                            for report_ping_start in [false, true] {
-                                                for report_ping_success in [false, true] {
-                                                    for report_ping_failure in [false, true] {
-                                                        for report_tcp_failure in [false, true] {
-                                                            for (response_format, expected_format) in [
-                                                                (None, NetworkScanResponseFormat::Legacy),
-                                                                (Some("legacy"), NetworkScanResponseFormat::Legacy),
-                                                                (
-                                                                    Some("network_scan_result_v1"),
-                                                                    NetworkScanResponseFormat::NetworkScanResultV1,
-                                                                ),
-                                                            ] {
-                                                                let (scanner_params, filter) = NetworkScanQueryParams {
+                                for enable_tcp_probes in [false, true] {
+                                    for enable_failure in [false, true] {
+                                        for report_ping_start in [false, true] {
+                                            for report_ping_success in [false, true] {
+                                                for report_ping_failure in [false, true] {
+                                                    for report_tcp_failure in [false, true] {
+                                                        for (response_format, expected_format) in [
+                                                            (None, NetworkScanResponseFormat::Legacy),
+                                                            (Some("legacy"), NetworkScanResponseFormat::Legacy),
+                                                            (
+                                                                Some("network_scan_result_v1"),
+                                                                NetworkScanResponseFormat::NetworkScanResultV1,
+                                                            ),
+                                                        ] {
+                                                            let (scanner_params, filter) = NetworkScanQueryParams {
                                                     probes: Vec::new(),
                                                     enable_ping_start,
                                                     enable_broadcast,
@@ -1348,7 +1427,6 @@ mod tests {
                                                     enable_zeroconf,
                                                     enable_resolve_dns,
                                                     include_host_results,
-                                                    report_ping_status,
                                                     report_ping_start,
                                                     report_ping_success,
                                                     report_ping_failure,
@@ -1361,65 +1439,52 @@ mod tests {
                                                 .try_into()
                                                 .expect("toggle-only query permutation should map to scanner params");
 
-                                                                assert_eq!(
-                                                                    scanner_params.toggle.enable_broadcast,
-                                                                    enable_broadcast
-                                                                );
-                                                                assert_eq!(
-                                                                    scanner_params.toggle.enable_subnet_scan,
-                                                                    enable_subnet_scan
-                                                                );
-                                                                assert_eq!(
-                                                                    scanner_params.toggle.enable_zeroconf,
-                                                                    enable_zeroconf
-                                                                );
-                                                                assert_eq!(
-                                                                    scanner_params.toggle.enable_resolve_dns,
-                                                                    enable_resolve_dns
-                                                                );
-                                                                assert_eq!(
-                                                                    scanner_params.config.ports.len(),
-                                                                    if enable_tcp_probes {
-                                                                        COMMON_PORTS.len()
-                                                                    } else {
-                                                                        0
-                                                                    }
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.enable_ping_event(),
-                                                                    enable_ping_start
-                                                                        || report_ping_start
-                                                                        || report_ping_success
-                                                                        || report_ping_failure
-                                                                        || report_ping_status
-                                                                        || enable_failure
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.report_ping_start(),
-                                                                    enable_ping_start
-                                                                        || report_ping_start
-                                                                        || report_ping_status
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.report_ping_success(),
-                                                                    report_ping_success || report_ping_status
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.report_ping_failure(),
-                                                                    report_ping_failure
-                                                                        || report_ping_status
-                                                                        || enable_failure
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.report_tcp_failure(),
-                                                                    report_tcp_failure
-                                                                );
-                                                                assert_eq!(
-                                                                    filter.include_host_results(),
-                                                                    include_host_results
-                                                                );
-                                                                assert_eq!(filter.response_format(), expected_format);
-                                                            }
+                                                            assert_eq!(
+                                                                scanner_params.toggle.enable_broadcast,
+                                                                enable_broadcast
+                                                            );
+                                                            assert_eq!(
+                                                                scanner_params.toggle.enable_subnet_scan,
+                                                                enable_subnet_scan
+                                                            );
+                                                            assert_eq!(
+                                                                scanner_params.toggle.enable_zeroconf,
+                                                                enable_zeroconf
+                                                            );
+                                                            assert_eq!(
+                                                                scanner_params.toggle.enable_resolve_dns,
+                                                                enable_resolve_dns
+                                                            );
+                                                            assert_eq!(
+                                                                scanner_params.config.ports.len(),
+                                                                if enable_tcp_probes { COMMON_PORTS.len() } else { 0 }
+                                                            );
+                                                            assert_eq!(
+                                                                filter.enable_ping_event(),
+                                                                enable_ping_start
+                                                                    || report_ping_start
+                                                                    || report_ping_success
+                                                                    || report_ping_failure
+                                                                    || enable_failure
+                                                            );
+                                                            assert_eq!(
+                                                                filter.report_ping_start(),
+                                                                enable_ping_start || report_ping_start
+                                                            );
+                                                            assert_eq!(
+                                                                filter.report_ping_success(),
+                                                                report_ping_success
+                                                            );
+                                                            assert_eq!(
+                                                                filter.report_ping_failure(),
+                                                                report_ping_failure || enable_failure
+                                                            );
+                                                            assert_eq!(filter.report_tcp_failure(), report_tcp_failure);
+                                                            assert_eq!(
+                                                                filter.include_host_results(),
+                                                                include_host_results
+                                                            );
+                                                            assert_eq!(filter.response_format(), expected_format);
                                                         }
                                                     }
                                                 }
@@ -1549,7 +1614,6 @@ mod tests {
             enable_netbios: true,
             enable_resolve_dns: true,
             include_host_results: true,
-            report_ping_status: false,
             report_ping_start: false,
             report_ping_success: false,
             report_ping_failure: false,
