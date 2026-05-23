@@ -1,4 +1,5 @@
-﻿using DevolutionsAgent.Properties;
+﻿using DevolutionsAgent.Helpers;
+using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
@@ -322,7 +323,12 @@ namespace DevolutionsAgent.Actions
         [CustomAction]
         public static ActionResult EnrollAgentTunnel(Session session)
         {
-            string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
+            // Strip every whitespace character, not just edge whitespace. The MSI session
+            // property may come from the dialog (already sanitized) OR from an unattended
+            // install with `msiexec /qn AGENT_TUNNEL_ENROLLMENT_STRING="..."`, which lets a
+            // wrapped/multiline pasted JWT through with embedded \r\n / spaces.
+            string enrollmentString = EnrollmentStringSanitizer.StripAllWhitespace(
+                session.Property(AgentProperties.AgentTunnelEnrollmentString));
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
             string agentNameArg = session.Property(AgentProperties.AgentTunnelAgentName)?.Trim() ?? string.Empty;

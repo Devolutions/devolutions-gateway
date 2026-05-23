@@ -48,7 +48,7 @@ public partial class AgentTunnelDialog : AgentDialog
     /// the exact same string.
     /// </summary>
     private static string StripAllWhitespace(string value) =>
-        value is null ? string.Empty : Regex.Replace(value, @"\s+", "");
+        DevolutionsAgent.Helpers.EnrollmentStringSanitizer.StripAllWhitespace(value);
 
     public override void OnLoad(object sender, EventArgs e)
     {
