@@ -52,10 +52,21 @@ const START_FAILED_ERR_CODE: u32 = 2;
 
 #[derive(Debug, PartialEq, Eq)]
 struct UpCommand {
+    /// URL the agent POSTs `/jet/tunnel/enroll` to. When `--enrollment-string`
+    /// is provided, `--gateway` may override this to route the enrollment
+    /// transport differently (e.g. through a reverse proxy or an alternate
+    /// reachable address); otherwise it falls back to the JWT's `jet_gw_url`.
     gateway_url: String,
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
+    /// Host used for the persisted QUIC tunnel identity (TLS SNI, SAN match).
+    ///
+    /// `Some(...)` whenever an enrollment JWT is in scope — always the JWT's
+    /// validated `jet_gw_url` host, regardless of any `--gateway` transport
+    /// override. `None` only in the legacy manual `--gateway + --token` mode,
+    /// where the persisted endpoint falls back to `gateway_url`'s host.
+    identity_host: Option<String>,
 }
 
 fn agent_service_main(
@@ -167,8 +178,18 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         index += 1;
     }
 
-    if let Some(enrollment_string) = enrollment_string {
+    let identity_host = if let Some(enrollment_string) = enrollment_string {
         let claims = parse_enrollment_jwt(&enrollment_string)?;
+
+        // The validated `jet_gw_url` is the source of truth for the QUIC
+        // tunnel identity (cert SAN match, TLS SNI). A `--gateway` override
+        // — if any — only affects where the enrollment HTTP request is sent;
+        // it must not bleed into the persisted endpoint.
+        let identity_host = url::Url::parse(&claims.jet_gw_url)
+            .with_context(|| format!("invalid jet_gw_url in enrollment JWT: {:?}", claims.jet_gw_url))?
+            .host_str()
+            .map(str::to_owned)
+            .context("enrollment JWT jet_gw_url has no host component")?;
 
         // The JWT itself is the Bearer token; the Gateway verifies the signature.
         gateway_url.get_or_insert(claims.jet_gw_url);
@@ -177,13 +198,20 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         if agent_name.is_none() {
             agent_name = claims.jet_agent_name;
         }
-    }
+
+        Some(identity_host)
+    } else {
+        // Manual `--gateway + --token` mode: no JWT-validated identity, so we
+        // fall back to the request URL's host downstream.
+        None
+    };
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
+        identity_host,
     })
 }
 
@@ -250,6 +278,7 @@ fn main() {
                         &enrollment_token,
                         &agent_name,
                         advertise_subnets,
+                        None,
                     )
                     .await
                     {
@@ -275,6 +304,7 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
+                        command.identity_host.as_deref(),
                     )
                     .await
                 });
@@ -321,6 +351,8 @@ mod tests {
                 enrollment_token: "bootstrap-token".to_owned(),
                 agent_name: "site-a-agent".to_owned(),
                 advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+                // Manual --gateway + --token mode: no JWT-validated identity.
+                identity_host: None,
             }
         );
     }
@@ -373,5 +405,60 @@ mod tests {
         // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
+        // Identity host comes from the JWT, even though no override was used.
+        assert_eq!(parsed.identity_host.as_deref(), Some("gateway.example.com"));
+    }
+
+    /// `--gateway` may override the enrollment transport URL, but it must NOT
+    /// affect the persisted QUIC tunnel identity. The validated `jet_gw_url`
+    /// host from the JWT remains the source of truth for what the agent
+    /// dials at runtime (and therefore what the Gateway's server cert SAN
+    /// must contain).
+    ///
+    /// Regression test for the codex-flagged P2 finding:
+    ///   "--gateway override is okay, but it must be enrollment-transport-only.
+    ///    The persisted QUIC endpoint must come from the JWT's validated
+    ///    jet_gw_url host, not the override URL."
+    #[test]
+    fn parse_up_command_args_gateway_override_does_not_change_identity_host() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.corp.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
+        let args = vec![
+            "--enrollment-string".to_owned(),
+            jwt,
+            "--gateway".to_owned(),
+            "http://10.10.0.7:7777".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        // Transport URL follows the CLI override.
+        assert_eq!(parsed.gateway_url, "http://10.10.0.7:7777");
+        // Identity stays anchored to the JWT-validated host.
+        assert_eq!(parsed.identity_host.as_deref(), Some("gateway.corp.example.com"));
+    }
+
+    #[test]
+    fn parse_up_command_args_rejects_jwt_without_jet_gw_url_host() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "not a url",
+            "jet_agent_name": "site-a-agent",
+        }));
+        let args = vec!["--enrollment-string".to_owned(), jwt];
+
+        let err = parse_up_command_args(&args).expect_err("malformed jet_gw_url must fail");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("jet_gw_url"),
+            "error should mention the offending field, got: {chain}"
+        );
     }
 }

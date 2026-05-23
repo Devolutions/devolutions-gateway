@@ -107,29 +107,38 @@ pub struct PersistedEnrollment {
 /// Enroll an agent with the Gateway and save the configuration.
 ///
 /// # Arguments
-/// * `gateway_url` - Base Gateway URL (e.g., "https://gateway.example.com:7171")
-/// * `enrollment_token` - JWT token for enrollment
-/// * `agent_name` - Friendly name for this agent
-/// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
+/// * `gateway_url` — URL to POST the enrollment request to (transport).
+///   May be a `--gateway` CLI override; not necessarily the host the agent
+///   will dial for the long-lived QUIC tunnel.
+/// * `enrollment_token` — JWT for `/jet/tunnel/enroll` (Bearer).
+/// * `agent_name` — Friendly name for this agent.
+/// * `advertise_subnets` — List of CIDR subnets to advertise (e.g. `["10.0.0.0/8"]`).
+/// * `identity_host` — Authoritative host for the persisted QUIC tunnel
+///   identity (TLS SNI / SAN match). `Some(...)` when the caller already
+///   knows the validated host (e.g. extracted from `jet_gw_url` after JWT
+///   parsing); `None` falls back to `gateway_url`'s host for legacy manual
+///   `--gateway + --token` flows that have no JWT-side identity to consult.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    identity_host: Option<&str>,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
 
-    // The agent dials the QUIC tunnel at whichever host the operator already
-    // proved is reachable from this agent's network — that's `gateway_url`'s
-    // host. The Gateway tells the agent which *port* to dial (via `quic_port`),
-    // not which host. For older Gateways the host is parsed off the legacy
-    // `quic_endpoint` field.
-    let enrollment_host = url::Url::parse(gateway_url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_owned));
+    // The agent dials the QUIC tunnel at the JWT-validated identity host when
+    // we have one (the gateway anchors its `quic_endpoint` and cert SAN to it).
+    // Only when no JWT identity is in scope (legacy manual enrollment) do we
+    // fall back to deriving the host from the transport URL.
+    let enrollment_host: Option<String> = identity_host.map(str::to_owned).or_else(|| {
+        url::Url::parse(gateway_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+    });
 
     persist_enrollment_response(
         agent_name,
