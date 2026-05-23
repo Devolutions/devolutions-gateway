@@ -25,13 +25,30 @@ public partial class AgentTunnelDialog : AgentDialog
         // is now the single source of truth for the agent-facing URL. Overriding it
         // server-side would defeat the whole point of validating that the agent reached
         // the gateway through one of `AgentTunnel.AdvertisedNames`.
-        Runtime.Session[AgentProperties.AgentTunnelEnrollmentString] = enrollmentString.Text.Trim();
+        //
+        // Important: the enrollment string is persisted with ALL internal whitespace
+        // removed — not just edge `.Trim()`. The validation in `DoValidate` already
+        // works on the whitespace-stripped form (browsers and password managers
+        // routinely wrap long JWTs across lines on paste), so the value handed off
+        // to `agent.exe up --enrollment-string` must match what was validated.
+        // Otherwise a multiline pasted JWT passes validation here and then fails at
+        // enrollment with an opaque error from the agent's JWT parser.
+        Runtime.Session[AgentProperties.AgentTunnelEnrollmentString] = StripAllWhitespace(enrollmentString.Text);
         Runtime.Session[AgentProperties.AgentTunnelAgentName] = agentName.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseSubnets] = advertiseSubnets.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseDomains] = advertiseDomains.Text.Trim();
 
         return true;
     }
+
+    /// <summary>
+    /// Strip every whitespace character from <paramref name="value"/>. Used to
+    /// canonicalize pasted JWTs (which often arrive wrapped onto multiple lines)
+    /// so that validation and the value persisted into the MSI session refer to
+    /// the exact same string.
+    /// </summary>
+    private static string StripAllWhitespace(string value) =>
+        value is null ? string.Empty : Regex.Replace(value, @"\s+", "");
 
     public override void OnLoad(object sender, EventArgs e)
     {
@@ -58,7 +75,10 @@ public partial class AgentTunnelDialog : AgentDialog
         // JWT shape: three base64url segments separated by dots. The agent's `up --enrollment-string`
         // parses the JWT claims for jet_gw_url / jet_agent_name, so the dialog only sanity-checks
         // shape and base64url decodability here; signature verification happens at the gateway.
-        string text = Regex.Replace(enrollmentString.Text, @"\s+", "");
+        //
+        // Use the same whitespace-stripping helper as `ToProperties` so validation and
+        // persistence operate on byte-identical input.
+        string text = StripAllWhitespace(enrollmentString.Text);
         string[] parts = text.Split('.');
         if (parts.Length != 3 || parts.Any(string.IsNullOrEmpty))
         {
