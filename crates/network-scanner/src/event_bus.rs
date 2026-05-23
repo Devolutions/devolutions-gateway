@@ -75,6 +75,17 @@ impl TryFrom<ScannerEvent> for TcpKnockEvent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AnyScannerEvent(pub ScannerEvent);
+
+impl TryFrom<ScannerEvent> for AnyScannerEvent {
+    type Error = ();
+
+    fn try_from(value: ScannerEvent) -> Result<Self, Self::Error> {
+        Ok(Self(value))
+    }
+}
+
 define_splitable! {RawIpEvent, DnsEvent, TcpKnockEvent }
 define_splitable! {TcpKnockEvent, TcpKnockWithHost}
 
@@ -94,7 +105,7 @@ impl RawIpEvent {
     pub fn success(&self) -> Option<IpAddr> {
         match self {
             RawIpEvent::Ping(PingEvent::Success { ip, .. }) => Some(*ip),
-            RawIpEvent::Broadcast(BroadcastEvent::Entry { ip }) => Some(IpAddr::V4(*ip)),
+            RawIpEvent::Broadcast(BroadcastEvent::Entry { ip, .. }) => Some(IpAddr::V4(*ip)),
             _ => None,
         }
     }
@@ -111,9 +122,19 @@ impl Default for EventBus {
     }
 }
 
+/// Capacity of the internal broadcast bus.
+///
+/// Sized to comfortably hold a /24 scan: 256 hosts × ~16 ports × a few
+/// per-host events (ping, mDNS, NetBIOS, DNS) without forcing slow
+/// subscribers to lag. The previous value of 255 was a frequent source of
+/// `RecvError::Lagged` during dense scans, which the legacy `while let Ok`
+/// receivers treated as a fatal error and consequently dropped subsequent
+/// events.
+const EVENT_BUS_CAPACITY: usize = 8192;
+
 impl EventBus {
     pub fn new() -> Self {
-        let (sender, _) = broadcast::channel(255);
+        let (sender, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         Self { sender }
     }
 
@@ -163,6 +184,20 @@ where
                     if let Ok(typed_event) = T::try_from(event) {
                         return Ok(typed_event);
                     }
+                }
+                // A slow subscriber that falls behind the channel's ring
+                // buffer would otherwise abort the consumer task. Surface
+                // the loss in logs and resume from the next available
+                // event so a momentary burst (e.g. a wave of TCP timeouts
+                // landing simultaneously) doesn't permanently silence the
+                // stream — which used to drop later `TcpKnockEvent::Success`
+                // events because their forwarder had already exited.
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        skipped,
+                        "Network scan event bus subscriber lagged; some events were dropped"
+                    );
+                    continue;
                 }
                 Err(e) => return Err(e),
             }

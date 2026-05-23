@@ -6,15 +6,37 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::event_bus::EventBus;
-use crate::ip_utils::{IpAddrRange, Subnet, get_subnets};
+use crate::ip_utils::Subnet;
 use crate::mdns::MdnsDaemon;
 use crate::named_port::MaybeNamedPort;
-use crate::scanner::{NetworkScanner, ScannerConfig, ScannerToggles};
+use crate::planner::{NetworkScanPlan, PlannedRange};
+use crate::scanner::{LimitsConfig, NetworkScanner, ScannerConfig, ScannerToggles, TargetingConfig, TimingConfig};
+use crate::sources::ScannerSource;
 
+// Promote a `pub(crate)` item to `pub` only when the `test-utils` feature is on.
+// Used to expose `ContextConfig` / `TaskExecutionContext` constructors to the
+// out-of-crate test suite without leaking them into production builds.
+// `struct` and `fn` arms are matched explicitly so the parser doesn't have to
+// guess where attrs end and the item begins.
+#[cfg(feature = "test-utils")]
+macro_rules! maybe_pub_for_test_utils {
+    ($(#[$attr:meta])* struct $($rest:tt)*) => { $(#[$attr])* pub struct $($rest)* };
+    ($(#[$attr:meta])* fn $($rest:tt)*) => { $(#[$attr])* pub fn $($rest)* };
+}
+#[cfg(not(feature = "test-utils"))]
+macro_rules! maybe_pub_for_test_utils {
+    ($(#[$attr:meta])* struct $($rest:tt)*) => { $(#[$attr])* pub(crate) struct $($rest)* };
+    ($(#[$attr:meta])* fn $($rest:tt)*) => { $(#[$attr])* pub(crate) fn $($rest)* };
+}
+
+maybe_pub_for_test_utils! {
 #[derive(Debug, Clone)]
-pub(crate) struct ContextConfig {
-    pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
-    pub(crate) range_to_ping: Vec<IpAddrRange>,
+struct ContextConfig {
+    pub broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+    pub range_to_ping: Vec<PlannedRange>,
+    /// The full set of selected scan sources, used for per-IP source lookup
+    /// (e.g. picking a TCP-probe socket's interface bind).
+    pub sources: Arc<Vec<ScannerSource>>,
     pub ports: Vec<MaybeNamedPort>,
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
@@ -23,33 +45,50 @@ pub(crate) struct ContextConfig {
     pub netbios_timeout: Duration,
     pub netbios_interval: Duration,
     pub mdns_query_timeout: Duration,
+    pub max_wait_time: Duration,
+    pub max_ping_concurrency: Option<usize>,
+    pub max_tcp_probe_concurrency: Option<usize>,
+    /// When `true`, a socket-bind failure causes the task to abort instead of
+    /// warning and continuing on default routing.
+    pub interface_bind_strict: bool,
+}
 }
 
 impl ContextConfig {
-    pub(crate) fn new(
+    maybe_pub_for_test_utils! {
+    fn from_config_and_plan(
         ScannerConfig {
-            broadcast_timeout,
-            mdns_query_timeout,
-            netbios_timeout,
-            netbios_interval,
-            ping_timeout,
-            ping_interval,
-            port_scan_timeout,
             ports,
-            ip_ranges,
-            ..
+            timing:
+                TimingConfig {
+                    broadcast_timeout,
+                    mdns_query_timeout,
+                    netbios_timeout,
+                    netbios_interval,
+                    ping_timeout,
+                    ping_interval,
+                    port_scan_timeout,
+                    max_wait_time,
+                },
+            limits:
+                LimitsConfig {
+                    max_concurrency,
+                    max_ping_concurrency,
+                    max_tcp_probe_concurrency,
+                },
+            targeting:
+                TargetingConfig {
+                    interface_bind_strict,
+                    // target/interface/policy were consumed by NetworkScanner while building the plan.
+                    ..
+                },
         }: ScannerConfig,
-        toggles: &ScannerToggles,
-        subnet: Vec<Subnet>,
+        plan: NetworkScanPlan,
     ) -> Self {
-        let range_to_ping = match ip_ranges.len() {
-            0 if toggles.enable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
-            _ => ip_ranges,
-        };
-
         Self {
-            broadcast_subnet: subnet,
-            range_to_ping,
+            broadcast_subnet: plan.broadcast_subnet,
+            range_to_ping: plan.range_to_ping,
+            sources: Arc::new(plan.sources),
             ports,
             ping_interval,
             ping_timeout,
@@ -58,12 +97,18 @@ impl ContextConfig {
             netbios_timeout,
             netbios_interval,
             mdns_query_timeout,
+            max_wait_time,
+            max_ping_concurrency: max_ping_concurrency.or(max_concurrency),
+            max_tcp_probe_concurrency: max_tcp_probe_concurrency.or(max_concurrency),
+            interface_bind_strict,
         }
+    }
     }
 }
 
+maybe_pub_for_test_utils! {
 #[derive(Clone)]
-pub(crate) struct TaskExecutionContext {
+struct TaskExecutionContext {
     pub(crate) event_bus: EventBus,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
@@ -71,37 +116,39 @@ pub(crate) struct TaskExecutionContext {
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
     pub(crate) mdns_daemon: Option<MdnsDaemon>,
 
-    pub(crate) configs: ContextConfig,
+    pub configs: ContextConfig,
     pub(crate) toggles: ScannerToggles,
+}
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 type HandlesSender = crossbeam::channel::Sender<tokio::task::JoinHandle<anyhow::Result<()>>>;
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
+    maybe_pub_for_test_utils! {
+    fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
         // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
         let event_bus = EventBus::new();
 
         let NetworkScanner {
             mdns_daemon,
             runtime,
-            config: configs,
+            configs,
             toggle: toggles,
             ..
         } = network_scanner;
 
-        let broadcast_subnet = get_subnets()?;
         let context = Self {
             event_bus,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,
-            configs: ContextConfig::new(configs, &toggles, broadcast_subnet),
+            configs,
             toggles,
         };
 
         Ok(context)
+    }
     }
 }
 

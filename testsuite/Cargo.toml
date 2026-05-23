@@ -35,6 +35,8 @@ base64 = "0.22"
 proxy-socks = { path = "../crates/proxy-socks" }
 libsql = { version = "0.9", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
+network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
+network-scanner-proto = { path = "../crates/network-scanner-proto" }
 rstest = "0.25"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"

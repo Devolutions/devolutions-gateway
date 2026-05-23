@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2026.1.1
+  version: 2026.1.2
 paths:
   /jet/config:
     patch:
@@ -366,6 +366,29 @@ paths:
           description: Unexpected server error
       security:
       - netscan_token: []
+  /jet/net/interfaces:
+    get:
+      tags:
+      - Net
+      summary: Lists Gateway network scan sources.
+      operationId: GetNetInterfaces
+      responses:
+        '200':
+          description: Gateway network scan sources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkInterfacesResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
+      security:
+      - netscan_token: []
   /jet/net/monitor/config:
     post:
       tags:
@@ -431,6 +454,311 @@ paths:
       security:
       - scope_token:
         - gateway.net.monitor.drain
+  /jet/net/scan:
+    get:
+      tags:
+      - Net
+      summary: Stream network scan events over a websocket.
+      description: |-
+        The endpoint is upgraded from HTTP, so OpenAPI describes the **handshake**:
+        the query parameters that drive the scan (validated before upgrade) and
+        the legacy / v1 event payloads streamed back as JSON text frames. See
+        `NetworkScanResultEvent` for the v1 shape and `LegacyScanEvent` for the
+        legacy shape (selected via `response_format`).
+      operationId: GetNetScan
+      parameters:
+      - name: ping_interval
+        in: query
+        description: Interval in milliseconds (default is 200)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: ping_timeout
+        in: query
+        description: Timeout in milliseconds (default is 500)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: broadcast_timeout
+        in: query
+        description: Timeout in milliseconds (default is 1000)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: port_scan_timeout
+        in: query
+        description: Timeout in milliseconds (default is 1000)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: netbios_timeout
+        in: query
+        description: Timeout in milliseconds (default is 1000)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: netbios_interval
+        in: query
+        description: Interval in milliseconds (default is 200)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: mdns_query_timeout
+        in: query
+        description: The maximum time for each mdns query in milliseconds. (default is 5 * 1000)
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: max_wait
+        in: query
+        description: The maximum duration for whole networking scan in milliseconds. Highly suggested!
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: range
+        in: query
+        description: |-
+          The start and end IP address of the range to scan.
+          for example: 10.10.0.0-10.10.0.255
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: target
+        in: query
+        description: |-
+          Explicit single-host targets to scan. Each value must parse as an IPv4
+          or IPv6 address; invalid values yield a structured
+          `{ error: "invalid_target", value: "<raw>" }` 400 rather than a
+          generic serde rejection at extraction time (mirrors the `range=`
+          / `probe=` validation path).
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: interface_id
+        in: query
+        description: Gateway network interface IDs to use as scan sources.
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: probe
+        in: query
+        description: |-
+          The probes to run. Each value is either `ping`, a port number
+          (`22`), or a named service (`rdp`, `https`, …). Validation is
+          deferred to scan-time so failures can be surfaced as a structured
+          400 — naming the offending value — instead of a generic serde
+          rejection at extraction time.
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: enable_ping_start
+        in: query
+        description: |-
+          **Legacy alias** for `report_ping_start`. Prefer the explicit name in
+          new clients; kept so existing consumers don't break.
+        required: false
+        deprecated: true
+        schema:
+          type: boolean
+      - name: enable_broadcast
+        in: query
+        description: Enable the execution of broadcast scan
+        required: false
+        schema:
+          type: boolean
+      - name: enable_subnet_scan
+        in: query
+        description: Enable the ping scan on subnet
+        required: false
+        schema:
+          type: boolean
+      - name: enable_zeroconf
+        in: query
+        description: Enable ZeroConf/mDNS
+        required: false
+        schema:
+          type: boolean
+      - name: enable_netbios
+        in: query
+        description: |-
+          Enable NetBIOS name-service queries. Default `true` for backward
+          compatibility. Set `false` (or pair with explicit `target=`) to
+          keep NetBIOS from sweeping the surrounding subnet when the caller
+          only wants results for the targets they listed.
+        required: false
+        schema:
+          type: boolean
+      - name: enable_resolve_dns
+        in: query
+        description: Enable resolve dns
+        required: false
+        schema:
+          type: boolean
+      - name: include_host_results
+        in: query
+        description: Include host-only results.
+        required: false
+        schema:
+          type: boolean
+      - name: report_ping_start
+        in: query
+        description: Emit ping queued/start host results.
+        required: false
+        schema:
+          type: boolean
+      - name: report_ping_success
+        in: query
+        description: Emit ping success host results.
+        required: false
+        schema:
+          type: boolean
+      - name: report_ping_failure
+        in: query
+        description: Emit ping failure host results.
+        required: false
+        schema:
+          type: boolean
+      - name: enable_tcp_probes
+        in: query
+        description: Enable TCP service probes.
+        required: false
+        schema:
+          type: boolean
+      - name: range_interface_policy
+        in: query
+        description: |-
+          Policy applied when `range=` and `interface_id=` are both provided.
+          Accepted values: `intersect_selected_interfaces` (default) or
+          `allow_cross_interface_range`. Invalid values yield a structured
+          `{ error: "invalid_range_interface_policy", value: "<raw>" }` 400
+          instead of a generic serde rejection (mirrors the `range=` /
+          `probe=` / `target=` validation path).
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: allow_cross_interface_range
+        in: query
+        description: |-
+          **Legacy alias** for `range_interface_policy=allow_cross_interface_range`.
+          Prefer the structured policy in new clients.
+        required: false
+        deprecated: true
+        schema:
+          type: boolean
+      - name: response_format
+        in: query
+        description: |-
+          Response shape emitted on the websocket. Accepted values: `legacy`
+          (default) or `network_scan_result_v1`. Invalid values yield a
+          structured `{ error: "invalid_response_format", value: "<raw>" }`
+          400 instead of a generic serde rejection.
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: max_concurrency
+        in: query
+        description: Maximum scanner concurrency.
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: max_ping_concurrency
+        in: query
+        description: Maximum ping probe concurrency.
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: max_tcp_probe_concurrency
+        in: query
+        description: Maximum TCP probe concurrency.
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: enable_failure
+        in: query
+        description: |-
+          **Legacy alias** for `report_ping_failure`. `enable_failure=true` only
+          opts into ping-failure events; TCP-probe failure events require the
+          explicit `report_tcp_failure=true` and are not affected by this alias.
+
+          **Behavior change:** historically this single flag controlled both
+          ping-failure and TCP-probe-failure reporting. The two are now split:
+          clients that want the old "both at once" semantics must send
+          `enable_failure=true&report_tcp_failure=true` together. The split is
+          intentional — TCP-probe failures are typically high-volume noise that
+          callers were filtering client-side anyway, so the two streams are
+          independently gated.
+        required: false
+        deprecated: true
+        schema:
+          type: boolean
+      - name: report_tcp_failure
+        in: query
+        description: Enable TCP port knocking failure events.
+        required: false
+        schema:
+          type: boolean
+      - name: interface_bind_strict
+        in: query
+        description: |-
+          When `true`, fail with HTTP 400 if a ping/TCP-probe socket cannot be
+          bound to the planner-selected interface. Default `false` (warn and
+          fall back to default routing).
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '101':
+          description: WebSocket upgrade; subsequent text frames carry NetworkScanResultEvent or LegacyScanEvent JSON
+        '400':
+          description: Invalid query, mixed target/range, oversized range, or selected interface error
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
+      security:
+      - netscan_token: []
   /jet/preflight:
     post:
       tags:
@@ -825,6 +1153,8 @@ components:
       - gateway.traffic.ack
       - gateway.net.monitor.config
       - gateway.net.monitor.drain
+      - gateway.agent.enroll
+      - gateway.agent.read
     AckRequest:
       type: object
       required:
@@ -1103,6 +1433,13 @@ components:
         version:
           type: string
           description: Gateway service version.
+    HostScanStateDto:
+      type: string
+      enum:
+      - queued
+      - probing
+      - reachable
+      - unreachable
     Identity:
       type: object
       required:
@@ -1262,6 +1599,162 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MonitorDefinition'
+    NetworkInterfaceDto:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        description:
+          type: string
+          nullable: true
+        id:
+          type: string
+        index:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        isUp:
+          type: boolean
+          nullable: true
+        linkType:
+          type: string
+          description: 'Coarse link type: `ethernet`, `wifi`, `loopback`, `virtual`, `unknown`.'
+          nullable: true
+        macAddress:
+          type: string
+          nullable: true
+        mtu:
+          type: integer
+          format: int32
+          description: MTU in bytes when known.
+          nullable: true
+          minimum: 0
+        name:
+          type: string
+        speedMbps:
+          type: integer
+          format: int64
+          description: Link speed in megabits per second when reported by the OS.
+          nullable: true
+          minimum: 0
+    NetworkInterfacesResponse:
+      type: object
+      required:
+      - interfaces
+      properties:
+        interfaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkScanSourceDto'
+    NetworkScanResultEventDto:
+      type: object
+      required:
+      - kind
+      - address
+      - source
+      - discoverySource
+      properties:
+        address:
+          type: string
+        discoverySource:
+          $ref: '#/components/schemas/ScanResultSourceDto'
+        hostName:
+          type: string
+          nullable: true
+        hostScanState:
+          allOf:
+          - $ref: '#/components/schemas/HostScanStateDto'
+          nullable: true
+        interfaceId:
+          type: string
+          nullable: true
+        interfaceName:
+          type: string
+          nullable: true
+        isReachable:
+          type: boolean
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/NetworkScanResultKindDto'
+        macAddress:
+          type: string
+          nullable: true
+        port:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        responseTimeMs:
+          type: integer
+          nullable: true
+          minimum: 0
+        serviceLabel:
+          type: string
+          nullable: true
+        serviceType:
+          type: string
+          nullable: true
+        source:
+          $ref: '#/components/schemas/ScanOriginDto'
+    NetworkScanResultKindDto:
+      type: string
+      enum:
+      - host
+      - service
+    NetworkScanSourceCapabilitiesDto:
+      type: object
+      required:
+      - ipv4
+      - ipv6
+      - subnet
+      - broadcast
+      - zeroConf
+      - tcpProbe
+      - dnsResolve
+      properties:
+        broadcast:
+          type: boolean
+        dnsResolve:
+          type: boolean
+        ipv4:
+          type: boolean
+        ipv6:
+          type: boolean
+        subnet:
+          type: boolean
+        tcpProbe:
+          type: boolean
+        zeroConf:
+          type: boolean
+    NetworkScanSourceDto:
+      type: object
+      required:
+      - interface
+      - address
+      - startAddress
+      - endAddress
+      - capabilities
+      properties:
+        address:
+          type: string
+        broadcastAddress:
+          type: string
+          nullable: true
+        capabilities:
+          $ref: '#/components/schemas/NetworkScanSourceCapabilitiesDto'
+        endAddress:
+          type: string
+        interface:
+          $ref: '#/components/schemas/NetworkInterfaceDto'
+        prefixLength:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        startAddress:
+          type: string
     PreflightAlertStatus:
       type: string
       enum:
@@ -1426,6 +1919,18 @@ components:
       enum:
       - Spki
       - Pkcs1
+    ScanOriginDto:
+      type: string
+      enum:
+      - gateway
+    ScanResultSourceDto:
+      type: string
+      enum:
+      - subnet
+      - broadcast
+      - tcp_probe
+      - gateway
+      - zero_conf
     SessionInfo:
       type: object
       description: Information about an ongoing Gateway session

@@ -5,8 +5,12 @@ use std::time::Duration;
 use anyhow::Context;
 use network_scanner::event_bus::{ScannerEvent, TypedReceiver};
 use network_scanner::named_port::{MaybeNamedPort, NamedPort};
+use network_scanner::planner::{InterfaceSelector, RangeInterfacePolicy, TargetSelector};
 use network_scanner::port_discovery::TcpKnockEvent;
-use network_scanner::scanner::{DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles};
+use network_scanner::scanner::{
+    DnsEvent, LimitsConfig, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, TargetingConfig,
+    TimingConfig,
+};
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -26,22 +30,31 @@ fn main() -> anyhow::Result<()> {
 
     let params = NetworkScannerParams {
         config: ScannerConfig {
-            ip_ranges: vec![],
             ports,
-            ping_interval: Duration::from_millis(20),
-            ping_timeout: Duration::from_millis(1000),
-            broadcast_timeout: Duration::from_millis(2000),
-            port_scan_timeout: Duration::from_millis(2000),
-            netbios_timeout: Duration::from_millis(1000),
-            netbios_interval: Duration::from_millis(20),
-            mdns_query_timeout: Duration::from_millis(5 * 1000),
-            max_wait_time: Duration::from_millis(10 * 1000),
+            timing: TimingConfig {
+                ping_interval: Duration::from_millis(20),
+                ping_timeout: Duration::from_millis(1000),
+                broadcast_timeout: Duration::from_millis(2000),
+                port_scan_timeout: Duration::from_millis(2000),
+                netbios_timeout: Duration::from_millis(1000),
+                netbios_interval: Duration::from_millis(20),
+                mdns_query_timeout: Duration::from_millis(5 * 1000),
+                max_wait_time: Duration::from_millis(10 * 1000),
+            },
+            limits: LimitsConfig::default(),
+            targeting: TargetingConfig {
+                target_selector: TargetSelector::DefaultSubnets,
+                interface_selector: InterfaceSelector::AllEligible,
+                range_interface_policy: RangeInterfacePolicy::IntersectSelectedInterfaces,
+                interface_bind_strict: false,
+            },
         },
         toggle: ScannerToggles {
             enable_broadcast: true,
             enable_resolve_dns: true,
             enable_subnet_scan: true,
             enable_zeroconf: true,
+            enable_netbios: true,
         },
     };
     let rt = tokio::runtime::Runtime::new()?;

@@ -17,8 +17,11 @@ pub mod mdns;
 pub mod named_port;
 pub mod netbios;
 pub mod ping;
+pub mod planner;
 pub mod port_discovery;
+pub mod results;
 pub mod scanner;
+pub mod sources;
 pub mod task_utils;
 
 #[derive(Debug, thiserror::Error)]
