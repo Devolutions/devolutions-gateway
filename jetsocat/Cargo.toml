@@ -4,6 +4,7 @@ version.workspace = true
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 description = "(Web)Socket toolkit for jet protocol related operations"
+build = "build.rs"
 publish = false
 
 [lints]
@@ -80,4 +81,7 @@ features = [
   "Win32_Security_Credentials",
   "Win32_Globalization",
 ]
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0"
 
