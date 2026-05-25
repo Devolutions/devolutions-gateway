@@ -1,0 +1,53 @@
+"$schema": https://aka.ms/unigetui/package-policy.schema.1.0.json
+policyVersion: 1.0.0
+policyType: packageBrokerPolicy
+metadata:
+  id: contoso.desktop.standard-allowlist-yaml
+  publisher: Contoso IT
+  revision: 1
+  publishedAt: "2026-05-05T00:00:00Z"
+  description: Fail-closed YAML policy for standard workstation package installs.
+enforcement:
+  defaultDecision: deny
+  failureDecision: deny
+  rulePrecedence: priorityThenDeny
+rules:
+  - id: deny.integrity-bypass
+    enabled: true
+    priority: 10
+    decision: deny
+    reason: Integrity and publisher checks cannot be bypassed by brokered requests.
+    match:
+      operations:
+        - install
+        - update
+      skipHashCheck:
+        - true
+  - id: allow.winget.vscode
+    enabled: true
+    priority: 100
+    decision: allow
+    reason: Visual Studio Code is approved for managed workstations.
+    match:
+      operations:
+        - install
+        - update
+      managers:
+        - Winget
+      sources:
+        - winget
+      packageIdentifiers:
+        - Microsoft.VisualStudioCode
+      scopes:
+        - user
+        - machine
+      architectures:
+        - x64
+        - arm64
+    constraints:
+      allowInteractive: false
+      allowSkipHashCheck: false
+      allowPreRelease: false
+      allowCustomParameters: false
+      allowPrePostCommands: false
+      allowKillBeforeOperation: false

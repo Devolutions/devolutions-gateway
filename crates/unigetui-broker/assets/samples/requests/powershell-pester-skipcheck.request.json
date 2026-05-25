@@ -1,0 +1,21 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-powershell-pester-skipcheck",
+  "createdAt": "2026-05-05T12:22:00Z",
+  "operation": "install",
+  "manager": { "name": "PowerShell", "displayName": "PowerShell", "executableFriendlyName": "PowerShellGet" },
+  "source": { "name": "PSGallery", "url": "https://www.powershellgallery.com/api/v2", "isVirtualManager": false },
+  "package": { "id": "Pester", "name": "Pester" },
+  "options": {
+    "scope": "user",
+    "interactive": false,
+    "runAsAdministrator": false,
+    "skipHashCheck": true,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": { "requestedElevation": "standard", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+}

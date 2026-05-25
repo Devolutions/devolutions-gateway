@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 
 use crate::models::PolicyDocument;
-use crate::schema::SchemaValidators;
 
 /// Default policy directory.
 pub fn default_policy_dir() -> PathBuf {
@@ -21,21 +20,15 @@ pub fn default_policy_dir() -> PathBuf {
 /// Default policy file name.
 pub const POLICY_FILE_NAME: &str = "unigetui-policy.json";
 
-/// Load a policy document from a file path, validating against the generated JSON Schema.
-pub fn load_policy(path: &Path, validators: &SchemaValidators) -> anyhow::Result<PolicyDocument> {
+/// Load a policy document from a file path.
+///
+/// Deserialization performs all validation (structure, types, length constraints, patterns).
+pub fn load_policy(path: &Path) -> anyhow::Result<PolicyDocument> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read policy file at {}: {e}", path.display()))?;
 
-    let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("failed to parse policy JSON at {}: {e}", path.display()))?;
-
-    // Validate against generated schema.
-    crate::evaluator::validate_policy(validators, &value)
-        .map_err(|e| anyhow::anyhow!("policy schema validation failed at {}: {e}", path.display()))?;
-
-    // Deserialize into typed struct (this also validates enum values via serde).
-    let policy: PolicyDocument = serde_json::from_value(value)
-        .map_err(|e| anyhow::anyhow!("policy deserialization failed at {}: {e}", path.display()))?;
+    let policy: PolicyDocument =
+        serde_json::from_str(&content).map_err(|e| anyhow::anyhow!("invalid policy at {}: {e}", path.display()))?;
 
     tracing::info!(
         policy_id = %policy.metadata.id,

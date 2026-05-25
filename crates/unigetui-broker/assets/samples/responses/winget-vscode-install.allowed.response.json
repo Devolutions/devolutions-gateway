@@ -1,0 +1,47 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
+  "responseVersion": "1.0.0",
+  "responseType": "packageBrokerResponse",
+  "broker": {
+    "name": "UniGetUI Package Broker",
+    "protocolVersion": "1.0",
+    "transport": "http-named-pipe",
+    "pipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
+    "elevatedSimulation": false
+  },
+  "auditId": "audit-20260505-000001",
+  "requestId": "req-winget-vscode-install",
+  "receivedAt": "2026-05-05T12:00:01Z",
+  "completedAt": "2026-05-05T12:00:01Z",
+  "manager": "Winget",
+  "source": "winget",
+  "packageId": "Microsoft.VisualStudioCode",
+  "operation": "install",
+  "decision": "allow",
+  "ruleId": "allow.winget.vscode",
+  "reason": "Visual Studio Code is approved for managed workstations.",
+  "wouldExecute": true,
+  "policy": {
+    "id": "contoso.desktop.standard-allowlist",
+    "revision": 4,
+    "policyVersion": "1.0.0"
+  },
+  "execution": {
+    "mode": "elevated",
+    "command": [
+      "winget.exe",
+      "install",
+      "--id",
+      "Microsoft.VisualStudioCode",
+      "--exact",
+      "--source",
+      "winget",
+      "--scope",
+      "machine",
+      "--silent",
+      "--architecture",
+      "x64"
+    ],
+    "note": "Command was constructed by the broker from validated request fields."
+  }
+}

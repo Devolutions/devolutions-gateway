@@ -1,92 +1,42 @@
-//! Schema generation and validation using `schemars` + `jsonschema`.
+//! Schema generation using `schemars`.
 //!
-//! Generates JSON schemas from the Rust type definitions and uses them to validate
-//! incoming policy documents and requests at runtime. This ensures validation logic
-//! stays in sync with the type definitions automatically.
+//! Generates JSON schemas from the Rust type definitions for export and diagnostics.
+//! Runtime validation is performed by the type system itself during deserialization.
 
-use jsonschema::Validator;
 use schemars::schema_for;
 
-use crate::models::{PackageRequest, PolicyDocument};
+use crate::models::{BrokerResponse, PackageRequest, PolicyDocument};
 
-/// Compiled schema validators, built once at startup.
-pub struct SchemaValidators {
-    policy_validator: Validator,
-    request_validator: Validator,
+/// Get the generated policy schema as a JSON value (for diagnostics/export).
+pub fn policy_schema_json() -> serde_json::Value {
+    let schema = schema_for!(PolicyDocument);
+    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
 }
 
-/// Error from schema validation.
-#[derive(Debug, thiserror::Error)]
-#[error("schema validation failed: {message}")]
-pub struct ValidationError {
-    pub message: String,
-    pub errors: Vec<String>,
+/// Get the generated request schema as a JSON value (for diagnostics/export).
+pub fn request_schema_json() -> serde_json::Value {
+    let schema = schema_for!(PackageRequest);
+    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
 }
 
-impl SchemaValidators {
-    /// Build validators from the schemars-generated schemas.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the generated schemas are not valid JSON Schema (programming bug).
-    pub fn new() -> Self {
-        let policy_schema = schema_for!(PolicyDocument);
-        let policy_json =
-            serde_json::to_value(&policy_schema).expect("BUG: generated policy schema is not serializable");
-        let policy_validator =
-            Validator::new(&policy_json).expect("BUG: generated policy schema is not a valid JSON Schema");
-
-        let request_schema = schema_for!(PackageRequest);
-        let request_json =
-            serde_json::to_value(&request_schema).expect("BUG: generated request schema is not serializable");
-        let request_validator =
-            Validator::new(&request_json).expect("BUG: generated request schema is not a valid JSON Schema");
-
-        Self {
-            policy_validator,
-            request_validator,
-        }
-    }
-
-    /// Validate a policy document JSON value against the policy schema.
-    pub fn validate_policy(&self, value: &serde_json::Value) -> Result<(), ValidationError> {
-        validate_with(&self.policy_validator, value, "policy")
-    }
-
-    /// Validate a request JSON value against the request schema.
-    pub fn validate_request(&self, value: &serde_json::Value) -> Result<(), ValidationError> {
-        validate_with(&self.request_validator, value, "request")
-    }
-
-    /// Get the generated policy schema as a JSON value (for diagnostics/export).
-    pub fn policy_schema_json() -> serde_json::Value {
-        let schema = schema_for!(PolicyDocument);
-        serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-    }
-
-    /// Get the generated request schema as a JSON value (for diagnostics/export).
-    pub fn request_schema_json() -> serde_json::Value {
-        let schema = schema_for!(PackageRequest);
-        serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-    }
+/// Get the generated response schema as a JSON value (for diagnostics/export).
+pub fn response_schema_json() -> serde_json::Value {
+    let schema = schema_for!(BrokerResponse);
+    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
 }
 
-impl Default for SchemaValidators {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Validate a policy document by deserializing from a JSON value.
+///
+/// Returns the typed struct on success, or a descriptive error on failure.
+pub fn parse_policy(value: serde_json::Value) -> Result<PolicyDocument, String> {
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
-fn validate_with(validator: &Validator, value: &serde_json::Value, context: &str) -> Result<(), ValidationError> {
-    if let Err(error) = validator.validate(value) {
-        let message = format!("{context} validation failed: {error}");
-        return Err(ValidationError {
-            message,
-            errors: vec![error.to_string()],
-        });
-    }
-
-    Ok(())
+/// Validate a request by deserializing from a JSON value.
+///
+/// Returns the typed struct on success, or a descriptive error on failure.
+pub fn parse_request(value: serde_json::Value) -> Result<PackageRequest, String> {
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -95,15 +45,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_validators_build_successfully() {
-        let _validators = SchemaValidators::new();
-    }
-
-    #[test]
     fn policy_schema_generates_valid_json() {
-        let schema = SchemaValidators::policy_schema_json();
+        let schema = policy_schema_json();
         assert!(schema.is_object());
-        // Should have a definitions or $defs section since we have nested types.
         let obj = schema.as_object().unwrap();
         assert!(
             obj.contains_key("definitions") || obj.contains_key("$defs"),
@@ -113,13 +57,12 @@ mod tests {
 
     #[test]
     fn request_schema_generates_valid_json() {
-        let schema = SchemaValidators::request_schema_json();
+        let schema = request_schema_json();
         assert!(schema.is_object());
     }
 
     #[test]
-    fn valid_policy_passes_validation() {
-        let validators = SchemaValidators::new();
+    fn valid_policy_deserializes_successfully() {
         let policy_json = serde_json::json!({
             "policyVersion": "1.0.0",
             "policyType": "packageBrokerPolicy",
@@ -146,24 +89,22 @@ mod tests {
             }]
         });
 
-        validators.validate_policy(&policy_json).unwrap();
+        parse_policy(policy_json).unwrap();
     }
 
     #[test]
-    fn invalid_policy_fails_validation() {
-        let validators = SchemaValidators::new();
+    fn invalid_policy_fails_deserialization() {
         // Missing required fields.
         let bad_policy = serde_json::json!({
             "policyVersion": "1.0.0"
         });
 
-        let result = validators.validate_policy(&bad_policy);
+        let result = parse_policy(bad_policy);
         assert!(result.is_err());
     }
 
     #[test]
-    fn valid_request_passes_validation() {
-        let validators = SchemaValidators::new();
+    fn valid_request_deserializes_successfully() {
         let request_json = serde_json::json!({
             "requestVersion": "1.0.0",
             "requestType": "packageOperation",
@@ -194,26 +135,24 @@ mod tests {
             }
         });
 
-        validators.validate_request(&request_json).unwrap();
+        parse_request(request_json).unwrap();
     }
 
     #[test]
-    fn invalid_request_fails_validation() {
-        let validators = SchemaValidators::new();
-        // Invalid operation enum value.
+    fn invalid_request_missing_package_id_fails() {
         let bad_request = serde_json::json!({
             "requestVersion": "1.0.0",
             "requestType": "packageOperation",
             "requestId": "req-001",
             "createdAt": "2025-01-01T00:00:00Z",
-            "operation": "destroy",
+            "operation": "install",
             "manager": {
                 "name": "Winget",
                 "displayName": "WinGet",
                 "executableFriendlyName": "winget"
             },
             "source": { "name": "winget" },
-            "package": { "id": "X", "name": "X" },
+            "package": { "id": "", "name": "X" },
             "options": {
                 "interactive": false,
                 "runAsAdministrator": false,
@@ -226,7 +165,69 @@ mod tests {
             }
         });
 
-        let result = validators.validate_request(&bad_request);
-        assert!(result.is_err());
+        let result = parse_request(bad_request);
+        assert!(result.is_err(), "empty package ID should fail validation");
+    }
+
+    #[test]
+    fn invalid_semver_fails_deserialization() {
+        let bad_request = serde_json::json!({
+            "requestVersion": "not-a-version",
+            "requestType": "packageOperation",
+            "requestId": "req-001",
+            "createdAt": "2025-01-01T00:00:00Z",
+            "operation": "install",
+            "manager": {
+                "name": "Winget",
+                "displayName": "WinGet",
+                "executableFriendlyName": "winget"
+            },
+            "source": { "name": "winget" },
+            "package": { "id": "X.Y", "name": "X" },
+            "options": {
+                "interactive": false,
+                "runAsAdministrator": false,
+                "skipHashCheck": false,
+                "preRelease": false
+            },
+            "broker": {
+                "requestedElevation": "elevated",
+                "effectiveUser": "user"
+            }
+        });
+
+        let result = parse_request(bad_request);
+        assert!(result.is_err(), "invalid semver should fail");
+    }
+
+    #[test]
+    fn invalid_operation_enum_fails_deserialization() {
+        let bad_request = serde_json::json!({
+            "requestVersion": "1.0.0",
+            "requestType": "packageOperation",
+            "requestId": "req-001",
+            "createdAt": "2025-01-01T00:00:00Z",
+            "operation": "destroy",
+            "manager": {
+                "name": "Winget",
+                "displayName": "WinGet",
+                "executableFriendlyName": "winget"
+            },
+            "source": { "name": "winget" },
+            "package": { "id": "X.Y", "name": "X" },
+            "options": {
+                "interactive": false,
+                "runAsAdministrator": false,
+                "skipHashCheck": false,
+                "preRelease": false
+            },
+            "broker": {
+                "requestedElevation": "elevated",
+                "effectiveUser": "user"
+            }
+        });
+
+        let result = parse_request(bad_request);
+        assert!(result.is_err(), "invalid operation enum should fail");
     }
 }

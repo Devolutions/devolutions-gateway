@@ -1,0 +1,21 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-powershell-pester-poshtestgallery",
+  "createdAt": "2026-05-05T12:21:00Z",
+  "operation": "install",
+  "manager": { "name": "PowerShell", "displayName": "PowerShell", "executableFriendlyName": "pwsh.exe" },
+  "source": { "name": "PoshTestGallery", "url": "https://www.poshtestgallery.com/api/v2", "isVirtualManager": false },
+  "package": { "id": "Pester", "name": "Pester" },
+  "options": {
+    "scope": "user",
+    "interactive": false,
+    "runAsAdministrator": false,
+    "skipHashCheck": false,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": { "requestedElevation": "standard", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+}

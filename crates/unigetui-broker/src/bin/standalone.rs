@@ -24,7 +24,6 @@ use tokio::sync::Notify;
 use unigetui_broker::executor::{CommandExecutor, DryRunExecutor};
 use unigetui_broker::pipe::DEFAULT_PIPE_NAME;
 use unigetui_broker::policy_loader;
-use unigetui_broker::schema::SchemaValidators;
 use unigetui_broker::server::BrokerState;
 
 #[derive(Debug)]
@@ -117,21 +116,18 @@ async fn main() -> anyhow::Result<()> {
 
     let args = parse_args();
 
-    // Build schema validators.
-    let validators = SchemaValidators::new();
-
     // Load policy.
     let policy_path = match args.policy_path {
         Some(p) => p,
         None => policy_loader::find_default_policy()?,
     };
-    let policy = policy_loader::load_policy(&policy_path, &validators)?;
+    let policy = policy_loader::load_policy(&policy_path)?;
 
     let executor: Box<dyn CommandExecutor> = if args.execute {
         tracing::warn!("Running in EXECUTE mode — commands will be run!");
         #[cfg(windows)]
         {
-            Box::new(unigetui_broker::executor::WindowsExecutor)
+            Box::new(unigetui_broker::executor::WindowsExecutor::new())
         }
         #[cfg(not(windows))]
         {
@@ -146,7 +142,6 @@ async fn main() -> anyhow::Result<()> {
         policy,
         executor,
         pipe_name: args.pipe_name.clone(),
-        validators,
     });
 
     let shutdown = Arc::new(Notify::new());

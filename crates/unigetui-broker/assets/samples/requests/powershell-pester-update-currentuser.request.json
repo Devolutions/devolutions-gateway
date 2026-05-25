@@ -1,0 +1,22 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-powershell-pester-update-currentuser",
+  "createdAt": "2026-05-05T12:24:00Z",
+  "operation": "update",
+  "manager": { "name": "PowerShell", "displayName": "PowerShell", "executableFriendlyName": "pwsh.exe" },
+  "source": { "name": "PSGallery", "url": "https://www.powershellgallery.com/api/v2", "isVirtualManager": false },
+  "package": { "id": "Pester", "name": "Pester", "version": "5.4.0", "newVersion": "5.5.0" },
+  "options": {
+    "scope": "user",
+    "version": "5.5.0",
+    "interactive": false,
+    "runAsAdministrator": false,
+    "skipHashCheck": false,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": { "requestedElevation": "standard", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+}

@@ -1,6 +1,6 @@
-//! Integration tests using UniGetUI sample policies, requests, and scenarios.
+//! Integration tests using sample policies, requests, and scenarios.
 //!
-//! These tests load the JSON fixtures from the UniGetUI repository and verify
+//! These tests load the JSON fixtures from `assets/samples/` and verify
 //! that the Rust evaluator produces the exact same decisions as documented in
 //! the scenario files.
 
@@ -11,45 +11,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use unigetui_broker::evaluator;
 use unigetui_broker::models::{Decision, PackageRequest, PolicyDocument};
-use unigetui_broker::schema::SchemaValidators;
 
-/// Root directory for UniGetUI policy samples (relative to this crate's manifest dir).
+/// Local samples directory bundled inside the crate.
 fn samples_dir() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // d:\devolutions-gateway\crates\unigetui-broker -> d:\UniGetUI\policies\samples
-    let candidate = manifest_dir
-        .parent() // crates/
-        .unwrap()
-        .parent() // devolutions-gateway/
-        .unwrap()
-        .parent() // d:\
-        .unwrap()
-        .join("UniGetUI")
-        .join("policies")
-        .join("samples");
-
-    if candidate.exists() {
-        return candidate;
-    }
-
-    // Fallback: try sibling directory pattern (CI might place repos side by side).
-    let alt = manifest_dir
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("..") // one level up from devolutions-gateway
-        .join("UniGetUI")
-        .join("policies")
-        .join("samples");
-
-    assert!(
-        alt.exists(),
-        "UniGetUI samples not found at {} or {}",
-        candidate.display(),
-        alt.display()
-    );
-    alt
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/samples")
 }
 
 // ─── Scenario file structures ────────────────────────────────────────────────
@@ -87,29 +52,7 @@ fn load_request(path: &Path) -> PackageRequest {
     serde_json::from_value(value).unwrap_or_else(|e| panic!("failed to deserialize request {}: {e}", path.display()))
 }
 
-// ─── Schema validation tests ─────────────────────────────────────────────────
-
-#[test]
-fn all_sample_policies_pass_schema_validation() {
-    let validators = SchemaValidators::new();
-    let dir = samples_dir();
-
-    let policy_files = [
-        "corporate-allowlist.policy.json",
-        "deny-risky-options.policy.json",
-        "powershell-advanced.policy.json",
-        "powershell-current-user.policy.json",
-        "scenario-coverage.policy.json",
-    ];
-
-    for file in &policy_files {
-        let path = dir.join(file);
-        let value = load_json_file(&path);
-        validators
-            .validate_policy(&value)
-            .unwrap_or_else(|e| panic!("policy {file} failed schema validation: {e}"));
-    }
-}
+// ─── Deserialization tests ───────────────────────────────────────────────────
 
 #[test]
 fn all_sample_policies_deserialize() {
@@ -126,37 +69,6 @@ fn all_sample_policies_deserialize() {
     for file in &policy_files {
         let path = dir.join(file);
         let _policy = load_policy(&path);
-    }
-}
-
-#[test]
-fn all_sample_requests_pass_schema_validation() {
-    let validators = SchemaValidators::new();
-    let dir = samples_dir().join("requests");
-
-    let request_files: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("failed to read dir {}: {e}", dir.display()))
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".request.json") {
-                Some(entry.path())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    assert!(!request_files.is_empty(), "no request files found in {}", dir.display());
-
-    for path in &request_files {
-        let value = load_json_file(path);
-        validators.validate_request(&value).unwrap_or_else(|e| {
-            panic!(
-                "request {} failed schema validation: {e}",
-                path.file_name().unwrap().to_string_lossy()
-            )
-        });
     }
 }
 
@@ -185,13 +97,13 @@ fn all_sample_requests_deserialize() {
 // ─── Invalid samples ─────────────────────────────────────────────────────────
 
 #[test]
-fn invalid_request_missing_package_id_fails_schema_validation() {
-    let validators = SchemaValidators::new();
+fn invalid_request_missing_package_id_fails_deserialization() {
     let path = samples_dir().join("invalid/requests/missing-package-id.request.json");
-    let value = load_json_file(&path);
+    let content = std::fs::read_to_string(&path).unwrap();
+    let result: Result<PackageRequest, _> = serde_json::from_str(&content);
     assert!(
-        validators.validate_request(&value).is_err(),
-        "request with missing package.id should fail schema validation"
+        result.is_err(),
+        "request with missing package.id should fail deserialization"
     );
 }
 
@@ -217,7 +129,6 @@ fn run_scenarios(scenario_file: &str) {
     let scenario_set: ScenarioSet =
         serde_json::from_str(&content).unwrap_or_else(|e| panic!("failed to parse scenarios: {e}"));
 
-    let validators = SchemaValidators::new();
     let mut failures: Vec<String> = Vec::new();
 
     for scenario in &scenario_set.scenarios {
@@ -226,9 +137,9 @@ fn run_scenarios(scenario_file: &str) {
             continue;
         }
 
-        // Validation-failure scenarios: test that schema/deser rejects the input.
+        // Validation-failure scenarios: test that deserialization rejects the input.
         if scenario.expected_rule_id == "<validation-failure>" {
-            let handled = handle_validation_failure_scenario(&validators, &dir, scenario);
+            let handled = handle_validation_failure_scenario(&dir, scenario);
             if !handled {
                 failures.push(format!("{}: expected validation failure but got success", scenario.id));
             }
@@ -256,13 +167,7 @@ fn run_scenarios(scenario_file: &str) {
         };
 
         // Evaluate.
-        let decision = match evaluator::evaluate(&policy, &request) {
-            Ok(d) => d,
-            Err(e) => {
-                failures.push(format!("{}: evaluator error: {e}", scenario.id));
-                continue;
-            }
-        };
+        let decision = evaluator::evaluate(&policy, &request);
 
         let expected_decision = match scenario.expected_decision.as_str() {
             "allow" => Decision::Allow,
@@ -295,26 +200,19 @@ fn run_scenarios(scenario_file: &str) {
 }
 
 /// Handle a scenario that expects validation failure.
-/// Returns true if the scenario correctly fails validation.
-fn handle_validation_failure_scenario(validators: &SchemaValidators, dir: &Path, scenario: &Scenario) -> bool {
-    // Try policy validation failure first.
+/// Returns true if the scenario correctly fails deserialization.
+fn handle_validation_failure_scenario(dir: &Path, scenario: &Scenario) -> bool {
+    // Try policy deserialization failure.
     let policy_path = dir.join(&scenario.policy);
-    let policy_value = load_json_file(&policy_path);
-    if validators.validate_policy(&policy_value).is_err() {
-        return true;
-    }
-    // If policy validates OK, check if it fails deserialization.
-    if serde_json::from_value::<PolicyDocument>(policy_value).is_err() {
+    let policy_content = std::fs::read_to_string(&policy_path).unwrap();
+    if serde_json::from_str::<PolicyDocument>(&policy_content).is_err() {
         return true;
     }
 
-    // Try request validation failure.
+    // Try request deserialization failure.
     let request_path = dir.join(&scenario.request);
-    let request_value = load_json_file(&request_path);
-    if validators.validate_request(&request_value).is_err() {
-        return true;
-    }
-    if serde_json::from_value::<PackageRequest>(request_value).is_err() {
+    let request_content = std::fs::read_to_string(&request_path).unwrap();
+    if serde_json::from_str::<PackageRequest>(&request_content).is_err() {
         return true;
     }
 

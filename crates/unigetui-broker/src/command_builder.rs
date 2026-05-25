@@ -19,7 +19,7 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         "winget.exe".to_owned(),
         operation.to_owned(),
         "--id".to_owned(),
-        request.package.id.clone(),
+        request.package.id.0.clone(),
         "--exact".to_owned(),
     ];
 
@@ -67,7 +67,7 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
     if let Some(params) = &request.options.custom_parameters {
         for param in params {
             if !param.is_empty() {
-                command.push(param.clone());
+                command.push(param.0.clone());
             }
         }
     }
@@ -98,9 +98,9 @@ mod tests {
     fn make_request() -> PackageRequest {
         PackageRequest {
             schema: None,
-            request_version: "1.0.0".to_owned(),
-            request_type: "packageOperation".to_owned(),
-            request_id: "req-1".to_owned(),
+            request_version: SemanticVersion::from("1.0.0"),
+            request_type: RequestType::PackageOperation,
+            request_id: ResourceId::from("req-1"),
             created_at: "2025-01-01T00:00:00Z".to_owned(),
             operation: Operation::Install,
             manager: RequestManager {
@@ -114,7 +114,7 @@ mod tests {
                 is_virtual_manager: None,
             },
             package: RequestPackage {
-                id: "Mozilla.Firefox".to_owned(),
+                id: PackageIdentifier::from("Mozilla.Firefox".to_owned()),
                 name: "Firefox".to_owned(),
                 version: None,
                 new_version: None,

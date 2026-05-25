@@ -22,20 +22,25 @@ use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::models::{
     BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageRequest, PolicyDocument,
-    ResponsePolicyInfo, Transport,
+    ProtocolVersion, ResourceId, ResponsePolicyInfo, ResponseType, RuleId, SemanticVersion, Transport,
 };
-use crate::schema::SchemaValidators;
 
-const PROTOCOL_VERSION: &str = "1.0";
+const PROTOCOL_VERSION_STR: &str = "1.0";
 
 const RESPONSE_MEDIA_TYPE: &str = "application/vnd.unigetui.package-broker-response+json; version=1.0";
+
+const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024; // 256 KiB per spec.
+
+const ACCEPTED_CONTENT_TYPES: &[&str] = &[
+    "application/vnd.unigetui.package-request+json; version=1.0",
+    "application/json",
+];
 
 /// Shared server state.
 pub struct BrokerState {
     pub policy: PolicyDocument,
     pub executor: Box<dyn CommandExecutor>,
     pub pipe_name: String,
-    pub validators: SchemaValidators,
 }
 
 /// Serve one HTTP connection over an arbitrary async stream.
@@ -49,7 +54,11 @@ where
     });
 
     let io = hyper_util::rt::TokioIo::new(stream);
-    if let Err(error) = http1::Builder::new().serve_connection(io, service).await {
+    if let Err(error) = http1::Builder::new()
+        .max_buf_size(32 * 1024) // 32 KiB max header size per wire protocol spec.
+        .serve_connection(io, service)
+        .await
+    {
         tracing::warn!(%error, "Connection error");
     }
 }
@@ -71,9 +80,9 @@ async fn handle_request(
 fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
     let body = serde_json::json!({
         "status": "ready",
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": PROTOCOL_VERSION_STR,
         "elevatedSimulation": false,
-        "policyId": state.policy.metadata.id,
+        "policyId": &*state.policy.metadata.id,
         "endpoints": [
             "GET /v1/health",
             "GET /v1/capabilities",
@@ -86,7 +95,7 @@ fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
 
 fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
     let body = serde_json::json!({
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": PROTOCOL_VERSION_STR,
         "transports": ["http-named-pipe"],
         "requestMediaTypes": [
             "application/vnd.unigetui.package-request+json; version=1.0",
@@ -108,6 +117,19 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     let received_at = chrono::Utc::now().to_rfc3339();
 
     tracing::trace!(%audit_id, method = %req.method(), path = %req.uri().path(), "Received request");
+
+    // Validate required protocol headers per wire protocol spec.
+    if let Some(err_response) = validate_request_headers(&req, &state.policy, &audit_id, &received_at, &state.pipe_name)
+    {
+        return err_response;
+    }
+
+    // Extract header request-id before consuming the body.
+    let header_request_id = req
+        .headers()
+        .get("UniGetUI-Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
 
     // Read body.
     let body_bytes = match req.collect().await {
@@ -135,71 +157,64 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         );
     }
 
-    // Parse as generic JSON first for schema validation.
-    let request_value: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(error) => {
-            return make_error_response(
-                &state.policy,
-                &audit_id,
-                &received_at,
-                &format!("invalid JSON: {error}"),
-                StatusCode::BAD_REQUEST,
-                &state.pipe_name,
-            );
-        }
-    };
-
-    // Validate request against schema.
-    if let Err(error) = evaluator::validate_request(&state.validators, &request_value) {
+    if body_bytes.len() > MAX_REQUEST_BODY_BYTES {
         return make_error_response(
             &state.policy,
             &audit_id,
             &received_at,
-            &error.to_string(),
-            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!(
+                "request body exceeds maximum size ({} bytes > {} bytes)",
+                body_bytes.len(),
+                MAX_REQUEST_BODY_BYTES
+            ),
+            StatusCode::BAD_REQUEST,
             &state.pipe_name,
         );
     }
 
-    // Deserialize into typed request.
-    let request: PackageRequest = match serde_json::from_value(request_value) {
+    // Deserialize and validate the request (validation happens in custom Deserialize impls).
+    let request: PackageRequest = match serde_json::from_slice(&body_bytes) {
         Ok(req) => req,
         Err(error) => {
             return make_error_response(
                 &state.policy,
                 &audit_id,
                 &received_at,
-                &format!("request deserialization failed: {error}"),
+                &format!("invalid request: {error}"),
                 StatusCode::UNPROCESSABLE_ENTITY,
                 &state.pipe_name,
             );
         }
     };
+
+    // Validate UniGetUI-Request-Id header matches body requestId (spec requirement).
+    if let Some(header_val) = &header_request_id
+        && header_val != &*request.request_id
+    {
+        return make_error_response(
+            &state.policy,
+            &audit_id,
+            &received_at,
+            &format!(
+                "UniGetUI-Request-Id header '{}' does not match body requestId '{}'",
+                header_val, &*request.request_id
+            ),
+            StatusCode::BAD_REQUEST,
+            &state.pipe_name,
+        );
+    }
 
     tracing::trace!(
         %audit_id,
         operation = %request.operation,
         manager = %request.manager.name,
-        package_id = %request.package.id,
-        request_id = %request.request_id,
+        package_id = %*request.package.id,
+        request_id = %*request.request_id,
         "Evaluating policy for request",
     );
 
     // Evaluate policy.
-    let decision = match evaluator::evaluate(&state.policy, &request) {
-        Ok(d) => d,
-        Err(error) => {
-            return make_error_response(
-                &state.policy,
-                &audit_id,
-                &received_at,
-                &error.to_string(),
-                StatusCode::UNPROCESSABLE_ENTITY,
-                &state.pipe_name,
-            );
-        }
-    };
+    let decision = evaluator::evaluate(&state.policy, &request);
 
     let (command, would_execute) = if decision.decision == Decision::Allow {
         if request.manager.name != crate::models::ManagerName::Winget {
@@ -223,7 +238,13 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
 
     // If execute mode and decision is allow, run the command.
     let (execution_mode, note) = if execute && would_execute {
-        match state.executor.execute(&command, &request.broker.effective_user).await {
+        let ctx = crate::executor::ExecutionContext {
+            command: command.clone(),
+            effective_user: request.broker.effective_user.clone(),
+            elevation: request.broker.requested_elevation,
+            run_as_administrator: request.options.run_as_administrator,
+        };
+        match state.executor.execute(&ctx).await {
             Ok(()) => (ExecutionMode::Elevated, "Command executed successfully.".to_owned()),
             Err(error) => {
                 tracing::error!(%error, "Command execution failed");
@@ -242,16 +263,17 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     let completed_at = chrono::Utc::now().to_rfc3339();
 
     let response = BrokerResponse {
-        response_version: "1.0.0".to_owned(),
-        response_type: "packageBrokerResponse".to_owned(),
+        schema: None,
+        response_version: SemanticVersion::from("1.0.0"),
+        response_type: ResponseType::PackageBrokerResponse,
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
-            protocol_version: PROTOCOL_VERSION.to_owned(),
+            protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
             transport: Transport::HttpNamedPipe,
             pipe_name: Some(state.pipe_name.clone()),
             elevated_simulation: !execute,
         },
-        audit_id: audit_id.clone(),
+        audit_id: ResourceId::from(audit_id.clone()),
         request_id: Some(request.request_id.clone()),
         received_at,
         completed_at,
@@ -260,7 +282,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         package_id: Some(request.package.id.clone()),
         operation: Some(request.operation),
         decision: decision.decision,
-        rule_id: decision.rule_id,
+        rule_id: RuleId::from(decision.rule_id),
         reason: decision.reason,
         would_execute,
         policy: ResponsePolicyInfo {
@@ -270,7 +292,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         },
         execution: ExecutionInfo {
             mode: execution_mode,
-            command,
+            command: command.into_iter().map(crate::models::CommandString).collect(),
             note,
         },
     };
@@ -278,7 +300,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     tracing::trace!(
         %audit_id,
         decision = %response.decision,
-        rule_id = %response.rule_id,
+        rule_id = %*response.rule_id,
         reason = %response.reason,
         would_execute = response.would_execute,
         "Sending response",
@@ -290,16 +312,98 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         StatusCode::FORBIDDEN
     };
 
-    let body = serde_json::to_vec_pretty(&response).unwrap_or_default();
+    let body = serde_json::to_vec_pretty(&response).expect("BUG: BrokerResponse serialization");
     Response::builder()
         .status(status)
         .header("Content-Type", RESPONSE_MEDIA_TYPE)
-        .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION)
+        .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
         .header("UniGetUI-Audit-Id", &audit_id)
-        .header("UniGetUI-Policy-Id", &state.policy.metadata.id)
+        .header("UniGetUI-Policy-Id", &*state.policy.metadata.id)
         .header("UniGetUI-Policy-Revision", state.policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
+}
+
+/// Validate required request headers per the wire protocol specification.
+///
+/// Returns `Some(response)` if validation fails, `None` if all checks pass.
+fn validate_request_headers(
+    req: &Request<Incoming>,
+    policy: &PolicyDocument,
+    audit_id: &str,
+    received_at: &str,
+    pipe_name: &str,
+) -> Option<Response<Full<Bytes>>> {
+    // UniGetUI-Protocol-Version header is required.
+    let proto_version = req.headers().get("UniGetUI-Protocol-Version");
+    match proto_version.and_then(|v| v.to_str().ok()) {
+        Some("1.0") => {}
+        Some(other) => {
+            return Some(make_error_response(
+                policy,
+                audit_id,
+                received_at,
+                &format!("unsupported protocol version '{other}', expected '1.0'"),
+                StatusCode::BAD_REQUEST,
+                pipe_name,
+            ));
+        }
+        None => {
+            return Some(make_error_response(
+                policy,
+                audit_id,
+                received_at,
+                "missing required header: UniGetUI-Protocol-Version",
+                StatusCode::BAD_REQUEST,
+                pipe_name,
+            ));
+        }
+    }
+
+    // UniGetUI-Request-Id header is required.
+    if req.headers().get("UniGetUI-Request-Id").is_none() {
+        return Some(make_error_response(
+            policy,
+            audit_id,
+            received_at,
+            "missing required header: UniGetUI-Request-Id",
+            StatusCode::BAD_REQUEST,
+            pipe_name,
+        ));
+    }
+
+    // Content-Type must be an accepted type.
+    let content_type = req.headers().get(hyper::header::CONTENT_TYPE);
+    match content_type.and_then(|v| v.to_str().ok()) {
+        Some(ct) => {
+            let ct_lower = ct.to_lowercase();
+            if !ACCEPTED_CONTENT_TYPES
+                .iter()
+                .any(|accepted| ct_lower.starts_with(accepted))
+            {
+                return Some(make_error_response(
+                    policy,
+                    audit_id,
+                    received_at,
+                    &format!("unsupported Content-Type: '{ct}'"),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    pipe_name,
+                ));
+            }
+        }
+        None => {
+            return Some(make_error_response(
+                policy,
+                audit_id,
+                received_at,
+                "missing required header: Content-Type",
+                StatusCode::BAD_REQUEST,
+                pipe_name,
+            ));
+        }
+    }
+
+    None
 }
 
 fn make_error_response(
@@ -312,16 +416,17 @@ fn make_error_response(
 ) -> Response<Full<Bytes>> {
     let completed_at = chrono::Utc::now().to_rfc3339();
     let response = BrokerResponse {
-        response_version: "1.0.0".to_owned(),
-        response_type: "packageBrokerResponse".to_owned(),
+        schema: None,
+        response_version: SemanticVersion::from("1.0.0"),
+        response_type: ResponseType::PackageBrokerResponse,
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
-            protocol_version: PROTOCOL_VERSION.to_owned(),
+            protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
             transport: Transport::HttpNamedPipe,
             pipe_name: Some(pipe_name.to_owned()),
             elevated_simulation: false,
         },
-        audit_id: audit_id.to_owned(),
+        audit_id: ResourceId::from(audit_id),
         request_id: None,
         received_at: received_at.to_owned(),
         completed_at,
@@ -330,7 +435,7 @@ fn make_error_response(
         package_id: None,
         operation: None,
         decision: Decision::Deny,
-        rule_id: "<validation-failure>".to_owned(),
+        rule_id: RuleId::from("<validation-failure>"),
         reason: reason.to_owned(),
         would_execute: false,
         policy: ResponsePolicyInfo {
@@ -345,13 +450,13 @@ fn make_error_response(
         },
     };
 
-    let body = serde_json::to_vec_pretty(&response).unwrap_or_default();
+    let body = serde_json::to_vec_pretty(&response).expect("BUG: BrokerResponse serialization");
     Response::builder()
         .status(status)
         .header("Content-Type", RESPONSE_MEDIA_TYPE)
-        .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION)
+        .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
         .header("UniGetUI-Audit-Id", audit_id)
-        .header("UniGetUI-Policy-Id", &policy.metadata.id)
+        .header("UniGetUI-Policy-Id", &*policy.metadata.id)
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
@@ -366,7 +471,7 @@ fn not_found() -> Response<Full<Bytes>> {
 }
 
 fn json_response(status: StatusCode, body: &serde_json::Value) -> Response<Full<Bytes>> {
-    let bytes = serde_json::to_vec_pretty(body).unwrap_or_default();
+    let bytes = serde_json::to_vec_pretty(body).expect("BUG: JSON value serialization");
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")

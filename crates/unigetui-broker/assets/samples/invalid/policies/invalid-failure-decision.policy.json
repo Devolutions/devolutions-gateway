@@ -1,0 +1,26 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+  "policyVersion": "1.0.0",
+  "policyType": "packageBrokerPolicy",
+  "metadata": {
+    "id": "contoso.invalid.failure-decision",
+    "publisher": "Contoso IT",
+    "revision": 1,
+    "publishedAt": "2026-05-05T00:00:00Z"
+  },
+  "enforcement": {
+    "defaultDecision": "allow",
+    "failureDecision": "allow",
+    "rulePrecedence": "priorityThenDeny"
+  },
+  "rules": [
+    {
+      "id": "allow.everything",
+      "priority": 100,
+      "decision": "allow",
+      "match": {
+        "packageIdentifiers": ["*"]
+      }
+    }
+  ]
+}

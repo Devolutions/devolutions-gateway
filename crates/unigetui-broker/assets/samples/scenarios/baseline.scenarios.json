@@ -1,0 +1,102 @@
+{
+  "scenarioSet": "baseline",
+  "description": "Existing baseline scenarios for package broker policy simulation.",
+  "scenarios": [
+    {
+      "id": "baseline.winget.vscode.allow",
+      "policy": "corporate-allowlist.policy.json",
+      "request": "requests/winget-vscode-install.request.json",
+      "expectedDecision": "allow",
+      "expectedRuleId": "allow.winget.vscode",
+      "tags": ["baseline", "winget", "allowlist"]
+    },
+    {
+      "id": "baseline.winget.unknown.default-deny",
+      "policy": "corporate-allowlist.policy.json",
+      "request": "requests/winget-unknown-install.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "<default>",
+      "tags": ["baseline", "winget", "default-deny"]
+    },
+    {
+      "id": "baseline.winget.skiphash.deny",
+      "policy": "corporate-allowlist.policy.json",
+      "request": "requests/winget-vscode-skiphash.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.integrity-bypass",
+      "tags": ["baseline", "winget", "risky-options"]
+    },
+    {
+      "id": "baseline.default-allow.normal-install",
+      "policy": "deny-risky-options.policy.json",
+      "request": "requests/winget-vscode-install.request.json",
+      "expectedDecision": "allow",
+      "expectedRuleId": "<default>",
+      "tags": ["baseline", "winget", "default-allow"]
+    },
+    {
+      "id": "baseline.default-allow.skiphash.deny",
+      "policy": "deny-risky-options.policy.json",
+      "request": "requests/winget-vscode-skiphash.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.integrity-bypass",
+      "tags": ["baseline", "winget", "risky-options"]
+    },
+    {
+      "id": "baseline.default-allow.custom-parameters.deny",
+      "policy": "deny-risky-options.policy.json",
+      "request": "requests/winget-vscode-custom-param.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.manager-custom-parameters",
+      "tags": ["baseline", "winget", "risky-options"]
+    },
+    {
+      "id": "baseline.default-allow.msstore.deny",
+      "policy": "deny-risky-options.policy.json",
+      "request": "requests/winget-vscode-msstore.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.unapproved-winget-source",
+      "tags": ["baseline", "winget", "source"]
+    },
+    {
+      "id": "baseline.powershell.pester.currentuser.allow",
+      "policy": "powershell-current-user.policy.json",
+      "request": "requests/powershell-pester-currentuser.request.json",
+      "expectedDecision": "allow",
+      "expectedRuleId": "allow.powershell.pester",
+      "tags": ["baseline", "powershell", "scope"]
+    },
+    {
+      "id": "baseline.powershell.pester.allusers.deny",
+      "policy": "powershell-current-user.policy.json",
+      "request": "requests/powershell-pester-allusers.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.powershell.machine-scope",
+      "tags": ["baseline", "powershell", "scope"]
+    },
+    {
+      "id": "baseline.yaml.policy-yaml.request-yaml.allow",
+      "policy": "corporate-allowlist.policy.yaml",
+      "request": "requests/winget-vscode-install.request.yaml",
+      "expectedDecision": "allow",
+      "expectedRuleId": "allow.winget.vscode",
+      "tags": ["baseline", "yaml", "winget"]
+    },
+    {
+      "id": "baseline.yaml.policy-yaml.request-json.deny",
+      "policy": "corporate-allowlist.policy.yaml",
+      "request": "requests/winget-vscode-skiphash.request.json",
+      "expectedDecision": "deny",
+      "expectedRuleId": "deny.integrity-bypass",
+      "tags": ["baseline", "yaml", "winget", "risky-options"]
+    },
+    {
+      "id": "baseline.yaml.policy-json.request-yaml.allow",
+      "policy": "corporate-allowlist.policy.json",
+      "request": "requests/winget-vscode-install.request.yaml",
+      "expectedDecision": "allow",
+      "expectedRuleId": "allow.winget.vscode",
+      "tags": ["baseline", "yaml", "winget"]
+    }
+  ]
+}

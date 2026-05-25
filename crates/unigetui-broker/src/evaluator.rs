@@ -1,17 +1,15 @@
 //! Policy evaluation engine.
 //!
 //! Implements the broker flow described in the UniGetUI package broker policies spec:
-//! 1. Validate policy via JSON Schema (generated from Rust types via schemars)
-//! 2. Validate request via JSON Schema
-//! 3. Match enabled rules against request
-//! 4. Sort by priority (lowest wins), deny wins on tie
-//! 5. Fall back to `enforcement.defaultDecision`
+//! 1. Deserialize and validate request (type system performs validation)
+//! 2. Match enabled rules against request
+//! 3. Sort by priority (lowest wins), deny wins on tie
+//! 4. Fall back to `enforcement.defaultDecision`
 
 use crate::models::{
     Architecture, Decision, Elevation, ManagerName, Operation, PackageRequest, PolicyConstraints, PolicyDocument,
     PolicyRule, RequestFlags, Scope,
 };
-use crate::schema::SchemaValidators;
 
 /// Result of policy evaluation.
 #[derive(Debug, Clone)]
@@ -21,35 +19,12 @@ pub struct PolicyDecision {
     pub reason: String,
 }
 
-/// Errors from policy or request validation.
-#[derive(Debug, thiserror::Error)]
-pub enum PolicyError {
-    #[error("schema validation failed: {0}")]
-    SchemaValidation(String),
-}
-
-/// Validate a policy document using the generated JSON Schema.
-///
-/// Call this during policy loading to fail early on malformed documents.
-pub fn validate_policy(validators: &SchemaValidators, policy_value: &serde_json::Value) -> Result<(), PolicyError> {
-    validators
-        .validate_policy(policy_value)
-        .map_err(|e| PolicyError::SchemaValidation(e.message))
-}
-
-/// Validate a request using the generated JSON Schema.
-pub fn validate_request(validators: &SchemaValidators, request_value: &serde_json::Value) -> Result<(), PolicyError> {
-    validators
-        .validate_request(request_value)
-        .map_err(|e| PolicyError::SchemaValidation(e.message))
-}
-
 /// Evaluate a parsed request against a parsed policy document.
 ///
-/// Both the policy and request should have already been validated via `validate_policy`
-/// and `validate_request` (schema validation) and then deserialized into typed structs.
+/// Both the policy and request should have already been deserialized into typed structs
+/// (validation happens during deserialization).
 /// This function performs the rule-matching logic only.
-pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> Result<PolicyDecision, PolicyError> {
+pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDecision {
     let flags = RequestFlags::from_request(request);
     let effective_version = get_effective_version(request);
 
@@ -71,14 +46,14 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> Result<Pol
     }
 
     if matched_rules.is_empty() {
-        return Ok(PolicyDecision {
+        return PolicyDecision {
             decision: policy.enforcement.default_decision,
             rule_id: "<default>".to_owned(),
             reason: format!(
                 "No enabled rule matched; using defaultDecision '{}'.",
                 policy.enforcement.default_decision
             ),
-        });
+        };
     }
 
     // Sort: lowest priority first, deny wins on tie.
@@ -91,11 +66,11 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> Result<Pol
     });
 
     let winner = matched_rules[0];
-    Ok(PolicyDecision {
+    PolicyDecision {
         decision: winner.2,
         rule_id: winner.0.to_owned(),
         reason: winner.3.to_owned(),
-    })
+    }
 }
 
 // ─── Rule matching ───────────────────────────────────────────────────────────
@@ -172,7 +147,7 @@ fn bool_in_list(value: bool, list: &Option<Vec<bool>>) -> bool {
     }
 }
 
-fn string_in_list(value: &str, list: &Option<Vec<String>>) -> bool {
+fn string_in_list<S: AsRef<str>>(value: &str, list: &Option<Vec<S>>) -> bool {
     match list {
         None => true,
         Some(items) => {
@@ -180,20 +155,20 @@ fn string_in_list(value: &str, list: &Option<Vec<String>>) -> bool {
                 // If no version specified and list requires specific versions, don't match.
                 return false;
             }
-            items.iter().any(|item| item == value)
+            items.iter().any(|item| item.as_ref() == value)
         }
     }
 }
 
-fn wildcard_any(value: &str, patterns: &Option<Vec<String>>) -> bool {
+fn wildcard_any<S: AsRef<str>>(value: &str, patterns: &Option<Vec<S>>) -> bool {
     match patterns {
         None => true,
-        Some(pats) => pats.iter().any(|pattern| wildcard_match(value, pattern)),
+        Some(pats) => pats.iter().any(|pattern| wildcard_match(value, pattern.as_ref())),
     }
 }
 
-fn wildcard_any_vec(value: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| wildcard_match(value, pattern))
+fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bool {
+    patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
 
 fn wildcard_match(value: &str, pattern: &str) -> bool {
@@ -352,10 +327,10 @@ mod tests {
     fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
         PolicyDocument {
             schema: None,
-            policy_version: "1.0.0".to_owned(),
-            policy_type: "packageBrokerPolicy".to_owned(),
+            policy_version: SemanticVersion::from("1.0.0"),
+            policy_type: PolicyType::PackageBrokerPolicy,
             metadata: PolicyMetadata {
-                id: "test-policy".to_owned(),
+                id: ResourceId::from("test-policy"),
                 publisher: "Test".to_owned(),
                 revision: 1,
                 published_at: "2025-01-01T00:00:00Z".to_owned(),
@@ -377,9 +352,9 @@ mod tests {
     fn make_request(operation: Operation, package_id: &str) -> PackageRequest {
         PackageRequest {
             schema: None,
-            request_version: "1.0.0".to_owned(),
-            request_type: "packageOperation".to_owned(),
-            request_id: "req-1".to_owned(),
+            request_version: SemanticVersion::from("1.0.0"),
+            request_type: RequestType::PackageOperation,
+            request_id: ResourceId::from("req-1"),
             created_at: "2025-01-01T00:00:00Z".to_owned(),
             operation,
             manager: RequestManager {
@@ -393,7 +368,7 @@ mod tests {
                 is_virtual_manager: None,
             },
             package: RequestPackage {
-                id: package_id.to_owned(),
+                id: PackageIdentifier(package_id.to_owned()),
                 name: "Test Package".to_owned(),
                 version: None,
                 new_version: None,
@@ -427,14 +402,14 @@ mod tests {
         let policy = make_policy(
             Decision::Deny,
             vec![PolicyRule {
-                id: "allow-firefox".to_owned(),
+                id: ResourceId::from("allow-firefox"),
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
                 description: None,
                 reason: Some("Firefox is allowed.".to_owned()),
                 match_criteria: PolicyMatch {
-                    package_identifiers: Some(vec!["Mozilla.Firefox".to_owned()]),
+                    package_identifiers: Some(vec![StringPattern("Mozilla.Firefox".to_owned())]),
                     ..Default::default()
                 },
                 constraints: None,
@@ -442,7 +417,7 @@ mod tests {
         );
 
         let request = make_request(Operation::Install, "Mozilla.Firefox");
-        let result = evaluate(&policy, &request).unwrap();
+        let result = evaluate(&policy, &request);
         assert_eq!(result.decision, Decision::Allow);
         assert_eq!(result.rule_id, "allow-firefox");
     }
@@ -452,14 +427,14 @@ mod tests {
         let policy = make_policy(
             Decision::Deny,
             vec![PolicyRule {
-                id: "allow-firefox".to_owned(),
+                id: ResourceId::from("allow-firefox"),
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
                 description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
-                    package_identifiers: Some(vec!["Mozilla.Firefox".to_owned()]),
+                    package_identifiers: Some(vec![StringPattern("Mozilla.Firefox".to_owned())]),
                     ..Default::default()
                 },
                 constraints: None,
@@ -467,7 +442,7 @@ mod tests {
         );
 
         let request = make_request(Operation::Install, "Evil.Malware");
-        let result = evaluate(&policy, &request).unwrap();
+        let result = evaluate(&policy, &request);
         assert_eq!(result.decision, Decision::Deny);
         assert_eq!(result.rule_id, "<default>");
     }
@@ -477,7 +452,7 @@ mod tests {
         let policy = make_policy(
             Decision::Allow,
             vec![PolicyRule {
-                id: "r1".to_owned(),
+                id: ResourceId::from("r1"),
                 enabled: true,
                 priority: 1,
                 decision: Decision::Allow,
@@ -491,17 +466,16 @@ mod tests {
         let mut request = make_request(Operation::Install, "Some.Package");
         request.manager.name = ManagerName::PowerShell;
 
-        let result = evaluate(&policy, &request).unwrap();
+        let result = evaluate(&policy, &request);
         assert_eq!(result.decision, Decision::Allow);
     }
 
     #[test]
-    fn schema_validates_well_formed_policy() {
-        let validators = SchemaValidators::new();
+    fn well_formed_policy_round_trips() {
         let policy = make_policy(
             Decision::Deny,
             vec![PolicyRule {
-                id: "rule-1".to_owned(),
+                id: ResourceId::from("rule-1"),
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
@@ -516,14 +490,13 @@ mod tests {
             }],
         );
 
-        let value = serde_json::to_value(&policy).unwrap();
-        validate_policy(&validators, &value).unwrap();
+        let json = serde_json::to_string(&policy).unwrap();
+        let _roundtripped: PolicyDocument = serde_json::from_str(&json).unwrap();
     }
 
     #[test]
-    fn schema_rejects_malformed_policy() {
-        let validators = SchemaValidators::new();
-        let bad = serde_json::json!({ "policyVersion": "1.0.0" });
-        assert!(validate_policy(&validators, &bad).is_err());
+    fn malformed_policy_fails_deserialization() {
+        let bad = r#"{ "policyVersion": "1.0.0" }"#;
+        assert!(serde_json::from_str::<PolicyDocument>(bad).is_err());
     }
 }

@@ -1,0 +1,363 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "BrokerInfo": {
+      "additionalProperties": false,
+      "description": "Broker identity information in responses.",
+      "properties": {
+        "elevatedSimulation": {
+          "description": "Whether the broker is running in simulated elevation mode.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Broker display name.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "pipeName": {
+          "description": "Named pipe path (when transport is http-named-pipe).",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocolVersion": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProtocolVersion"
+            }
+          ],
+          "description": "Protocol version (e.g., \"1.0\")."
+        },
+        "transport": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Transport"
+            }
+          ],
+          "description": "Transport mechanism."
+        }
+      },
+      "required": [
+        "elevatedSimulation",
+        "name",
+        "protocolVersion",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "CommandString": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "type": "string"
+    },
+    "Decision": {
+      "description": "Policy decision.",
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "ExecutionInfo": {
+      "additionalProperties": false,
+      "description": "Execution outcome details.",
+      "properties": {
+        "command": {
+          "description": "Command that was or would be executed.",
+          "items": {
+            "$ref": "#/definitions/CommandString"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExecutionMode"
+            }
+          ],
+          "description": "Execution mode."
+        },
+        "note": {
+          "description": "Additional note about execution.",
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "mode",
+        "note"
+      ],
+      "type": "object"
+    },
+    "ExecutionMode": {
+      "description": "Execution mode.",
+      "enum": [
+        "simulated-elevated",
+        "elevated"
+      ],
+      "type": "string"
+    },
+    "HttpUrl": {
+      "maxLength": 2048,
+      "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
+      "type": "string"
+    },
+    "Operation": {
+      "description": "Package operation type.",
+      "enum": [
+        "install",
+        "update",
+        "uninstall"
+      ],
+      "type": "string"
+    },
+    "PackageIdentifier": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
+      "type": "string"
+    },
+    "ProtocolVersion": {
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
+    },
+    "ResourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
+    "ResponsePolicyInfo": {
+      "additionalProperties": false,
+      "description": "Summary of policy used for the decision.",
+      "properties": {
+        "id": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ResourceId"
+            }
+          ],
+          "description": "Policy document identifier."
+        },
+        "policyVersion": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SemanticVersion"
+            }
+          ],
+          "description": "Policy syntax version."
+        },
+        "revision": {
+          "description": "Policy revision number.",
+          "format": "uint32",
+          "maximum": 2147483647.0,
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "policyVersion",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "ResponseType": {
+      "description": "Fixed response type value: `\"packageBrokerResponse\"`.",
+      "enum": [
+        "packageBrokerResponse"
+      ],
+      "type": "string"
+    },
+    "RuleId": {
+      "maxLength": 128,
+      "pattern": "^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127})$",
+      "type": "string"
+    },
+    "SemanticVersion": {
+      "maxLength": 128,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
+    "Transport": {
+      "description": "Broker transport type.",
+      "enum": [
+        "http-named-pipe",
+        "http-loopback-simulator"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Canonical response returned by the broker after evaluating a request.",
+  "properties": {
+    "$schema": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HttpUrl"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "JSON Schema URI (ignored at runtime)."
+    },
+    "auditId": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ResourceId"
+        }
+      ],
+      "description": "Server-generated audit identifier."
+    },
+    "broker": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/BrokerInfo"
+        }
+      ],
+      "description": "Broker identity and capabilities."
+    },
+    "completedAt": {
+      "description": "UTC timestamp when broker completed evaluation (RFC 3339).",
+      "format": "date-time",
+      "type": "string"
+    },
+    "decision": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decision"
+        }
+      ],
+      "description": "The evaluation decision."
+    },
+    "execution": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExecutionInfo"
+        }
+      ],
+      "description": "Execution details."
+    },
+    "manager": {
+      "description": "Manager name from the request (null if not parsed).",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Operation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Operation from the request (null if not parsed)."
+    },
+    "packageId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PackageIdentifier"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Package identifier from the request (null if not parsed)."
+    },
+    "policy": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ResponsePolicyInfo"
+        }
+      ],
+      "description": "Summary of the policy used."
+    },
+    "reason": {
+      "description": "Human-readable reason for the decision.",
+      "maxLength": 2048,
+      "minLength": 1,
+      "type": "string"
+    },
+    "receivedAt": {
+      "description": "UTC timestamp when broker received the request (RFC 3339).",
+      "format": "date-time",
+      "type": "string"
+    },
+    "requestId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ResourceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Echoed request id (null if request was invalid)."
+    },
+    "responseType": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ResponseType"
+        }
+      ],
+      "description": "Must be `\"packageBrokerResponse\"`."
+    },
+    "responseVersion": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SemanticVersion"
+        }
+      ],
+      "description": "Response syntax version (semver)."
+    },
+    "ruleId": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/RuleId"
+        }
+      ],
+      "description": "The rule that produced the decision."
+    },
+    "source": {
+      "description": "Source name from the request (null if not parsed).",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "wouldExecute": {
+      "description": "Whether the broker would execute a command for this decision.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "auditId",
+    "broker",
+    "completedAt",
+    "decision",
+    "execution",
+    "policy",
+    "reason",
+    "receivedAt",
+    "responseType",
+    "responseVersion",
+    "ruleId",
+    "wouldExecute"
+  ],
+  "title": "BrokerResponse",
+  "type": "object"
+}
