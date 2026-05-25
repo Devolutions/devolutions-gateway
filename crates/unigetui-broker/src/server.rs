@@ -77,8 +77,8 @@ async fn handle_request(
     let response = match (req.method(), req.uri().path()) {
         (&Method::GET, "/v1/health") => handle_health(&state),
         (&Method::GET, "/v1/capabilities") => handle_capabilities(&state),
-        (&Method::POST, "/v1/package-operations/evaluate") => handle_evaluate(req, &state, false).await,
-        (&Method::POST, "/v1/package-operations") => handle_evaluate(req, &state, true).await,
+        (&Method::POST, "/v1/package-operations/evaluate") => handle_evaluate(req, Arc::clone(&state), false).await,
+        (&Method::POST, "/v1/package-operations") => handle_evaluate(req, Arc::clone(&state), true).await,
         (&Method::POST, "/v1/package-operations/status") => handle_status(req, &state).await,
         _ => not_found(),
     };
@@ -128,7 +128,7 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
     json_response(StatusCode::OK, &body)
 }
 
-async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: bool) -> Response<Full<Bytes>> {
+async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execute: bool) -> Response<Full<Bytes>> {
     let audit_id = generate_audit_id();
     let received_at = Utc::now();
 
@@ -260,7 +260,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         (vec![], false)
     };
 
-    // If execute mode and decision is allow, run the command.
+    // If execute mode and decision is allow, spawn background execution.
     let (execution_mode, note) = if execute && would_execute {
         let ctx = crate::executor::ExecutionContext {
             command: command.clone(),
@@ -269,35 +269,37 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             run_as_administrator: request.options.run_as_administrator,
         };
 
-        // Register the operation for status tracking and spawn execution in background.
+        // Register the operation and spawn execution in background.
         let request_id_str = request.request_id.to_string();
         state.tracker.register(&request.request_id);
         state.tracker.mark_running(&request_id_str);
 
-        let tracker = state.tracker.clone();
-        let rid = request_id_str.clone();
-        let executor: &dyn CommandExecutor = &*state.executor;
-
-        // We need to execute synchronously in the handler for now because the executor
-        // borrows from BrokerState. Spawn a blocking-compatible future.
-        match executor.execute(&ctx).await {
-            Ok(exit_code) => {
-                tracker.mark_completed(&rid, exit_code);
-                if exit_code == 0 {
-                    (ExecutionMode::Elevated, "Command executed successfully.".to_owned())
-                } else {
-                    (
-                        ExecutionMode::Elevated,
-                        format!("Command exited with code {exit_code}."),
-                    )
+        // Spawn background task to wait for process completion.
+        // The response is returned immediately; clients poll /status for result.
+        let bg_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            match bg_state.executor.execute(&ctx).await {
+                Ok(exit_code) => {
+                    bg_state.tracker.mark_completed(&request_id_str, exit_code);
+                    tracing::info!(
+                        request_id = %request_id_str,
+                        exit_code,
+                        "Background execution completed"
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(request_id = %request_id_str, %error, "Background execution failed");
+                    bg_state
+                        .tracker
+                        .mark_failed(&request_id_str, format!("Execution failed: {error}"));
                 }
             }
-            Err(error) => {
-                tracing::error!(%error, "Command execution failed");
-                tracker.mark_failed(&rid, format!("Execution failed: {error}"));
-                (ExecutionMode::Elevated, format!("Execution failed: {error}"))
-            }
-        }
+        });
+
+        (
+            ExecutionMode::Elevated,
+            "Operation submitted for execution. Poll /v1/package-operations/status for result.".to_owned(),
+        )
     } else if execute {
         (ExecutionMode::Elevated, "Denied by policy.".to_owned())
     } else {
