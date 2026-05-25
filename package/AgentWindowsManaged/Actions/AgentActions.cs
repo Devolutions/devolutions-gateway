@@ -279,6 +279,28 @@ internal static class AgentActions
         UsesProperties = UseProperties(new[] { AgentProperties.featuresToConfigure })
     };
 
+    private static readonly ElevatedManagedAction enrollAgentTunnel = new(
+        new Id($"CA.{nameof(enrollAgentTunnel)}"),
+        CustomActions.EnrollAgentTunnel,
+        Return.check,
+        When.Before, Step.StartServices,
+        Features.AGENT_TUNNEL_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        // Deferred CAs only see properties bubbled through CustomActionData. The Set_<CA>_Props
+        // immediate action expands [PROP] for each entry below before the deferred CA runs.
+        UsesProperties = string.Join(";", new[]
+        {
+            AgentProperties.AgentTunnelEnrollmentString,
+            AgentProperties.AgentTunnelAgentName,
+            AgentProperties.AgentTunnelAdvertiseSubnets,
+            AgentProperties.AgentTunnelAdvertiseDomains,
+            AgentProperties.InstallDir,
+        }.Select(p => $"{p}=[{p}]")),
+    };
+
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
         CustomActions.RegisterExplorerCommand
     )
@@ -352,6 +374,7 @@ internal static class AgentActions
         setArpInstallLocation,
         setFeaturesToConfigure,
         configureFeatures,
+        enrollAgentTunnel,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

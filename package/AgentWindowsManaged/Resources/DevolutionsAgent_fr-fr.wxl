@@ -3,6 +3,8 @@
         <!-- metadata -->
                 <String Id="FeatureSessionDescription">Installe l'extension RDP</String>
                 <String Id="FeatureSessionName">Extension RDP</String>
+                <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
+                <String Id="FeatureAgentTunnelDescription">Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle.</String>
                 <String Id="Language">1036</String>
                 <String Id="ProductDescription">Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
@@ -51,6 +53,16 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="VerifyReadyDlgUpdateTitle">Prêt pour la mise à jour de [ProductName]</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
+                    <!-- dialogs.agentTunnel -->
+                <String Id="AgentTunnelDlgTitle">Tunnel d'agent</String>
+                <String Id="AgentTunnelDlgDescription">Connectez cet agent à une passerelle Devolutions.</String>
+                <String Id="AgentTunnelDlgEnrollmentStringLabel">Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :</String>
+                <String Id="AgentTunnelDlgAgentNameLabel">Nom de l'agent (facultatif) :</String>
+                <String Id="AgentTunnelDlgAgentNameHint">Identifie cet agent dans la console de gestion de votre passerelle. Si laissé vide, le nom contenu dans la chaîne d'enrôlement est utilisé, à défaut le nom de cet ordinateur.</String>
+                <String Id="AgentTunnelDlgSubnetsLabel">Sous-réseaux annoncés :</String>
+                <String Id="AgentTunnelDlgSubnetsHint">Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Domaines annoncés :</String>
+                <String Id="AgentTunnelDlgDomainsHint">Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com.</String>
                     <!-- dialogs.firewall -->
                 <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
                 <String Id="WixExecFirewallExceptionsInstall">Installation de la configuration du Pare-feu Windows</String>

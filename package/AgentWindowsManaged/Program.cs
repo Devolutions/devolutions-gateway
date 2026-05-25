@@ -324,6 +324,17 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.AGENT_FEATURE,
+            },
+            // Anchors the AGENT_TUNNEL_FEATURE to a real Component so it shows
+            // up in the Feature table and the Custom Setup tree. The value
+            // itself doubles as a diagnostic marker that the feature was
+            // selected at install time.
+            new (RegistryHive.LocalMachine, $"SOFTWARE\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "TunnelEnabled", "1")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
+                Feature = Features.AGENT_TUNNEL_FEATURE,
             }
         };
 
@@ -337,6 +348,13 @@ internal class Program
         // TODO:
         // - Make DevolutionsDesktopAgent answer WM_CLOSE
         projectProperties.Add(new Property("MSIRESTARTMANAGERCONTROL", "Disable"));
+
+        // Agent tunnel properties: must be declared Secure so the values set in the wizard UI
+        // survive the UAC boundary and reach the deferred CA via CustomActionData.
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelEnrollmentString, "") { Hidden = true, Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAgentName, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseSubnets, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomains, "") { Secure = true });
 
         project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();
