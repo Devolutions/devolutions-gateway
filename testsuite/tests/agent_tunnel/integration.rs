@@ -322,10 +322,11 @@ async fn cert_renewal_preserves_mtls_identity_e2e() {
 
     let renewed_pem = match response {
         ControlMessage::CertRenewalResponse {
-            result: CertRenewalResult::Success {
-                client_cert_pem,
-                gateway_ca_cert_pem,
-            },
+            result:
+                CertRenewalResult::Success {
+                    client_cert_pem,
+                    gateway_ca_cert_pem,
+                },
             ..
         } => {
             assert_eq!(
