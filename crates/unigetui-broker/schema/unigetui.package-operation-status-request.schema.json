@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "brokerContext": {
+      "additionalProperties": false,
+      "description": "Broker context provided by the client.",
+      "properties": {
+        "clientProcessPath": {
+          "description": "File path of the client process.",
+          "maxLength": 2048,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientVersion": {
+          "description": "Version of the UniGetUI client.",
+          "maxLength": 128,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveUser": {
+          "description": "Windows identity of the calling user.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "requestedElevation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/elevation"
+            }
+          ],
+          "description": "Elevation level requested."
+        }
+      },
+      "required": [
+        "effectiveUser",
+        "requestedElevation"
+      ],
+      "type": "object"
+    },
+    "elevation": {
+      "description": "Requested elevation level.",
+      "enum": [
+        "standard",
+        "elevated"
+      ],
+      "type": "string"
+    },
+    "packageOperationStatus": {
+      "enum": [
+        "packageOperationStatus"
+      ],
+      "type": "string"
+    },
+    "resourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
+    "semanticVersion": {
+      "maxLength": 128,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
+    "statusRequestSchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Request to query the status of a previously submitted package operation.",
+  "properties": {
+    "$schema": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/statusRequestSchemaUri"
+        }
+      ],
+      "description": "Status request schema URI constant."
+    },
+    "broker": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/brokerContext"
+        }
+      ],
+      "description": "Broker context from the client."
+    },
+    "requestId": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/resourceId"
+        }
+      ],
+      "description": "The `requestId` of the original package operation to query."
+    },
+    "requestType": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/packageOperationStatus"
+        }
+      ],
+      "description": "Must be `\"packageOperationStatus\"`."
+    },
+    "requestVersion": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/semanticVersion"
+        }
+      ],
+      "description": "Request syntax version (semver)."
+    }
+  },
+  "required": [
+    "$schema",
+    "broker",
+    "requestId",
+    "requestType",
+    "requestVersion"
+  ],
+  "title": "statusRequest",
+  "type": "object"
+}

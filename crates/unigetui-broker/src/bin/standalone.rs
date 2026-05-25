@@ -142,6 +142,7 @@ async fn main() -> anyhow::Result<()> {
         policy: std::sync::RwLock::new(Some(Arc::new(policy))),
         executor,
         pipe_name: args.pipe_name.clone(),
+        tracker: unigetui_broker::operation_tracker::OperationTracker::new(),
     });
 
     let shutdown = Arc::new(Notify::new());

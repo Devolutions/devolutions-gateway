@@ -33,7 +33,6 @@ impl Default for BrokerTaskConfig {
     }
 }
 
-
 pub struct BrokerTask {
     config: BrokerTaskConfig,
 }
@@ -51,7 +50,6 @@ impl Task for BrokerTask {
     const NAME: &'static str = "unigetui-broker";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
-
         // Resolve policy file path.
 
         let policy_path = match &self.config.policy_path {
@@ -93,6 +91,7 @@ impl Task for BrokerTask {
             policy: RwLock::new(initial_policy),
             executor,
             pipe_name: self.config.pipe_name.clone(),
+            tracker: crate::operation_tracker::OperationTracker::new(),
         });
 
         // Bridge the agent's ShutdownSignal to the Notify used by subsystems.

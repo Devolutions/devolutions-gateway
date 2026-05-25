@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{Architecture, Decision, Elevation, ManagerName, Operation, Scope};
 use super::markers::{PackageBrokerPolicy, PolicySchemaUri};
-use super::newtypes::{
-    CustomParameterString, HttpUrl, ResourceId, SemanticVersion, StringPattern, VersionString,
-};
+use super::newtypes::{CustomParameterString, HttpUrl, ResourceId, SemanticVersion, StringPattern, VersionString};
 use super::request::PackageRequest;
 
 /// A policy document governing which package operations are allowed or denied.

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::{watch, Notify};
+use tokio::sync::{Notify, watch};
 
 use crate::model::PolicyDocument;
 use crate::policy_loader;
@@ -41,9 +41,7 @@ impl PolicyWatcher {
     pub fn new(path: PathBuf) -> (Self, watch::Receiver<PolicyState>) {
         let initial_state = match policy_loader::load_policy(&path) {
             Ok(policy) => PolicyState::Active(Arc::new(policy)),
-            Err(e) => PolicyState::Unavailable {
-                reason: e.to_string(),
-            },
+            Err(e) => PolicyState::Unavailable { reason: e.to_string() },
         };
 
         let (state_tx, state_rx) = watch::channel(initial_state);
@@ -74,19 +72,20 @@ impl PolicyWatcher {
         let watch_path = dir.clone();
         let _watcher_handle = tokio::task::spawn_blocking(move || {
             let rt_tx = fs_tx;
-            let mut watcher: RecommendedWatcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = res {
-                    // Only react to modify/create/remove events.
-                    use notify::EventKind;
-                    match event.kind {
-                        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
-                            let _ = rt_tx.blocking_send(());
+            let mut watcher: RecommendedWatcher =
+                notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                    if let Ok(event) = res {
+                        // Only react to modify/create/remove events.
+                        use notify::EventKind;
+                        match event.kind {
+                            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
+                                let _ = rt_tx.blocking_send(());
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
-            })
-            .expect("failed to create file watcher");
+                })
+                .expect("failed to create file watcher");
 
             watcher
                 .watch(&watch_path, RecursiveMode::NonRecursive)

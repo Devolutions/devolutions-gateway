@@ -43,8 +43,7 @@ fn load_json_file(path: &Path) -> serde_json::Value {
 }
 
 fn load_policy(path: &Path) -> PolicyDocument {
-    let content =
-        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let content = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     match ext {
         "yaml" | "yml" => serde_yaml::from_str(&content)
@@ -89,7 +88,7 @@ fn all_sample_requests_deserialize() {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".request.json") {
+            if name.ends_with(".request.json") && !name.starts_with("status-") {
                 Some(entry.path())
             } else {
                 None
@@ -136,10 +135,7 @@ fn invalid_policy_unknown_field_fails_deserialization() {
         "rules": []
     });
     let result: Result<PolicyDocument, _> = serde_json::from_value(value);
-    assert!(
-        result.is_err(),
-        "policy with unknown field should fail deserialization"
-    );
+    assert!(result.is_err(), "policy with unknown field should fail deserialization");
 }
 
 // ─── Scenario-driven evaluation tests ────────────────────────────────────────
@@ -267,7 +263,7 @@ fn sample_responses_deserialize() {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".response.json") {
+            if name.ends_with(".response.json") && !name.starts_with("status-") {
                 Some(entry.path())
             } else {
                 None

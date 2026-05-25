@@ -7,6 +7,7 @@ pub mod command_builder;
 pub mod evaluator;
 pub mod executor;
 pub mod model;
+pub mod operation_tracker;
 pub mod pipe;
 pub mod policy_loader;
 pub mod policy_watcher;

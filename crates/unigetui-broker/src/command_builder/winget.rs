@@ -1,8 +1,7 @@
 //! WinGet command-line builder.
 
-use crate::model::{Architecture, Operation, PackageRequest, Scope};
-
 use super::{set_if_specified, set_if_true};
+use crate::model::{Architecture, Operation, PackageRequest, Scope};
 
 /// Build the WinGet command line from a validated request.
 ///

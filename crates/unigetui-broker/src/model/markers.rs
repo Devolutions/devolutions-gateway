@@ -260,3 +260,176 @@ impl JsonSchema for PolicySchemaUri {
         .into()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PackageOperationStatus (request type marker)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Marker type for status query request type: serializes to `"packageOperationStatus"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageOperationStatusType;
+
+impl Serialize for PackageOperationStatusType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("packageOperationStatus")
+    }
+}
+
+impl<'de> Deserialize<'de> for PackageOperationStatusType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == "packageOperationStatus" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"packageOperationStatus\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for PackageOperationStatusType {
+    fn schema_name() -> String {
+        "packageOperationStatus".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String("packageOperationStatus".to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PackageOperationStatusResponse (response type marker)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Marker type for status response type: serializes to `"packageOperationStatusResponse"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageOperationStatusResponse;
+
+impl Serialize for PackageOperationStatusResponse {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("packageOperationStatusResponse")
+    }
+}
+
+impl<'de> Deserialize<'de> for PackageOperationStatusResponse {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == "packageOperationStatusResponse" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"packageOperationStatusResponse\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for PackageOperationStatusResponse {
+    fn schema_name() -> String {
+        "packageOperationStatusResponse".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(
+                "packageOperationStatusResponse".to_owned(),
+            )]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Status Schema URI markers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Schema URI for status request documents.
+pub const STATUS_REQUEST_SCHEMA_URI: &str = "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json";
+
+/// Marker type for the status request `$schema` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusRequestSchemaUri;
+
+impl Serialize for StatusRequestSchemaUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(STATUS_REQUEST_SCHEMA_URI)
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusRequestSchemaUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == STATUS_REQUEST_SCHEMA_URI {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"{STATUS_REQUEST_SCHEMA_URI}\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for StatusRequestSchemaUri {
+    fn schema_name() -> String {
+        "statusRequestSchemaUri".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(STATUS_REQUEST_SCHEMA_URI.to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Schema URI for status response documents.
+pub const STATUS_RESPONSE_SCHEMA_URI: &str =
+    "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json";
+
+/// Marker type for the status response `$schema` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusResponseSchemaUri;
+
+impl Serialize for StatusResponseSchemaUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(STATUS_RESPONSE_SCHEMA_URI)
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusResponseSchemaUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == STATUS_RESPONSE_SCHEMA_URI {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"{STATUS_RESPONSE_SCHEMA_URI}\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for StatusResponseSchemaUri {
+    fn schema_name() -> String {
+        "statusResponseSchemaUri".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(STATUS_RESPONSE_SCHEMA_URI.to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}

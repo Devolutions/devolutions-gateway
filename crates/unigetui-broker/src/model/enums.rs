@@ -77,6 +77,21 @@ pub enum ExecutionMode {
     Elevated,
 }
 
+/// Status of an asynchronous package operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "operationStatus")]
+#[serde(rename_all = "camelCase")]
+pub enum OperationStatus {
+    /// Process is being prepared/started.
+    Starting,
+    /// Process is running.
+    Running,
+    /// Process exited successfully (exit code 0).
+    Completed,
+    /// Process failed (non-zero exit, timeout, or launch failure).
+    Failed,
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Display implementations
 // ═══════════════════════════════════════════════════════════════════════════════

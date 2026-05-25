@@ -5,7 +5,7 @@
 
 use schemars::schema_for;
 
-use crate::model::{BrokerResponse, PackageRequest, PolicyDocument};
+use crate::model::{BrokerResponse, PackageRequest, PolicyDocument, StatusRequest, StatusResponse};
 
 /// Get the generated policy schema as a JSON value (for diagnostics/export).
 pub fn policy_schema_json() -> serde_json::Value {
@@ -22,6 +22,18 @@ pub fn request_schema_json() -> serde_json::Value {
 /// Get the generated response schema as a JSON value (for diagnostics/export).
 pub fn response_schema_json() -> serde_json::Value {
     let schema = schema_for!(BrokerResponse);
+    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
+}
+
+/// Get the generated status request schema as a JSON value (for diagnostics/export).
+pub fn status_request_schema_json() -> serde_json::Value {
+    let schema = schema_for!(StatusRequest);
+    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
+}
+
+/// Get the generated status response schema as a JSON value (for diagnostics/export).
+pub fn status_response_schema_json() -> serde_json::Value {
+    let schema = schema_for!(StatusResponse);
     serde_json::to_value(&schema).expect("BUG: schema serialization failed")
 }
 

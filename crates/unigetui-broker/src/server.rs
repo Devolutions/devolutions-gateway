@@ -22,14 +22,17 @@ use crate::command_builder::winget::build_winget_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::model::{
-    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageBrokerResponse, PackageRequest,
-    PolicyDocument, ProtocolVersion, ResourceId, ResponsePolicyInfo, ResponseSchemaUri, RuleId, SemanticVersion,
-    Transport,
+    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, OperationStatus, PackageBrokerResponse,
+    PackageOperationStatusResponse, PackageRequest, PolicyDocument, ProtocolVersion, ResourceId, ResponsePolicyInfo,
+    ResponseSchemaUri, RuleId, SemanticVersion, StatusRequest, StatusResponse, StatusResponseSchemaUri, Transport,
 };
+use crate::operation_tracker::OperationTracker;
 
 const PROTOCOL_VERSION_STR: &str = "1.0";
 
 const RESPONSE_MEDIA_TYPE: &str = "application/vnd.unigetui.package-broker-response+json; version=1.0";
+
+const STATUS_RESPONSE_MEDIA_TYPE: &str = "application/vnd.unigetui.package-operation-status-response+json; version=1.0";
 
 const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024; // 256 KiB per spec.
 
@@ -44,6 +47,7 @@ pub struct BrokerState {
     pub policy: RwLock<Option<Arc<PolicyDocument>>>,
     pub executor: Box<dyn CommandExecutor>,
     pub pipe_name: String,
+    pub tracker: OperationTracker,
 }
 
 /// Serve one HTTP connection over an arbitrary async stream.
@@ -75,6 +79,7 @@ async fn handle_request(
         (&Method::GET, "/v1/capabilities") => handle_capabilities(&state),
         (&Method::POST, "/v1/package-operations/evaluate") => handle_evaluate(req, &state, false).await,
         (&Method::POST, "/v1/package-operations") => handle_evaluate(req, &state, true).await,
+        (&Method::POST, "/v1/package-operations/status") => handle_status(req, &state).await,
         _ => not_found(),
     };
     Ok(response)
@@ -97,7 +102,8 @@ fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
             "GET /v1/health",
             "GET /v1/capabilities",
             "POST /v1/package-operations/evaluate",
-            "POST /v1/package-operations"
+            "POST /v1/package-operations",
+            "POST /v1/package-operations/status"
         ]
     });
     json_response(StatusCode::OK, &body)
@@ -138,8 +144,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     };
 
     // Validate required protocol headers per wire protocol spec.
-    if let Some(err_response) = validate_request_headers(&req, &policy, &audit_id, received_at, &state.pipe_name)
-    {
+    if let Some(err_response) = validate_request_headers(&req, &policy, &audit_id, received_at, &state.pipe_name) {
         return err_response;
     }
 
@@ -263,10 +268,33 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             elevation: request.broker.requested_elevation,
             run_as_administrator: request.options.run_as_administrator,
         };
-        match state.executor.execute(&ctx).await {
-            Ok(()) => (ExecutionMode::Elevated, "Command executed successfully.".to_owned()),
+
+        // Register the operation for status tracking and spawn execution in background.
+        let request_id_str = request.request_id.to_string();
+        state.tracker.register(&request.request_id);
+        state.tracker.mark_running(&request_id_str);
+
+        let tracker = state.tracker.clone();
+        let rid = request_id_str.clone();
+        let executor: &dyn CommandExecutor = &*state.executor;
+
+        // We need to execute synchronously in the handler for now because the executor
+        // borrows from BrokerState. Spawn a blocking-compatible future.
+        match executor.execute(&ctx).await {
+            Ok(exit_code) => {
+                tracker.mark_completed(&rid, exit_code);
+                if exit_code == 0 {
+                    (ExecutionMode::Elevated, "Command executed successfully.".to_owned())
+                } else {
+                    (
+                        ExecutionMode::Elevated,
+                        format!("Command exited with code {exit_code}."),
+                    )
+                }
+            }
             Err(error) => {
                 tracing::error!(%error, "Command execution failed");
+                tracker.mark_failed(&rid, format!("Execution failed: {error}"));
                 (ExecutionMode::Elevated, format!("Execution failed: {error}"))
             }
         }
@@ -341,6 +369,108 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Status endpoint
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async fn handle_status(req: Request<Incoming>, state: &BrokerState) -> Response<Full<Bytes>> {
+    // Read body.
+    let body_bytes = match req.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(_) => {
+            return json_error_response(StatusCode::BAD_REQUEST, "failed to read request body");
+        }
+    };
+
+    if body_bytes.is_empty() {
+        return json_error_response(StatusCode::BAD_REQUEST, "request body is required");
+    }
+
+    // Deserialize the status request.
+    let status_req: StatusRequest = match serde_json::from_slice(&body_bytes) {
+        Ok(r) => r,
+        Err(error) => {
+            return json_error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &format!("invalid status request: {error}"),
+            );
+        }
+    };
+
+    // Look up the tracked operation.
+    let tracked = state.tracker.get(&status_req.request_id);
+
+    match tracked {
+        Some(op) => {
+            let response = StatusResponse {
+                _schema: StatusResponseSchemaUri,
+                response_version: SemanticVersion::from("1.0.0"),
+                response_type: PackageOperationStatusResponse,
+                broker: BrokerInfo {
+                    name: "Devolutions Agent UniGetUI Broker".to_owned(),
+                    protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
+                    transport: Transport::HttpNamedPipe,
+                    pipe_name: Some(state.pipe_name.clone()),
+                    elevated_simulation: false,
+                },
+                request_id: status_req.request_id,
+                status: op.status,
+                started_at: op.started_at,
+                completed_at: op.completed_at,
+                exit_code: op.exit_code,
+                note: op.note,
+            };
+
+            let body = serde_json::to_vec_pretty(&response).expect("BUG: StatusResponse serialization");
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", STATUS_RESPONSE_MEDIA_TYPE)
+                .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
+                .body(Full::new(Bytes::from(body)))
+                .expect("BUG: response builder with valid status and ASCII headers")
+        }
+        None => {
+            // Operation not found — either it never existed or it was evicted.
+            let response = StatusResponse {
+                _schema: StatusResponseSchemaUri,
+                response_version: SemanticVersion::from("1.0.0"),
+                response_type: PackageOperationStatusResponse,
+                broker: BrokerInfo {
+                    name: "Devolutions Agent UniGetUI Broker".to_owned(),
+                    protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
+                    transport: Transport::HttpNamedPipe,
+                    pipe_name: Some(state.pipe_name.clone()),
+                    elevated_simulation: false,
+                },
+                request_id: status_req.request_id,
+                status: OperationStatus::Failed,
+                started_at: None,
+                completed_at: None,
+                exit_code: None,
+                note: Some("Operation not found (never submitted or already evicted).".to_owned()),
+            };
+
+            let body = serde_json::to_vec_pretty(&response).expect("BUG: StatusResponse serialization");
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("Content-Type", STATUS_RESPONSE_MEDIA_TYPE)
+                .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
+                .body(Full::new(Bytes::from(body)))
+                .expect("BUG: response builder with valid status and ASCII headers")
+        }
+    }
+}
+
+fn json_error_response(status: StatusCode, message: &str) -> Response<Full<Bytes>> {
+    let body = serde_json::json!({ "error": message });
+    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: JSON value serialization");
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Full::new(Bytes::from(bytes)))
+        .expect("BUG: static response builder")
 }
 
 /// Validate required request headers per the wire protocol specification.

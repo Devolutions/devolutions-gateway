@@ -56,10 +56,12 @@ fn deserialize_policy(content: &str, path: &Path) -> anyhow::Result<PolicyDocume
         .to_ascii_lowercase();
 
     match ext.as_str() {
-        "yaml" | "yml" => serde_yaml::from_str(content)
-            .map_err(|e| anyhow::anyhow!("invalid YAML policy at {}: {e}", path.display())),
-        _ => serde_json::from_str(content)
-            .map_err(|e| anyhow::anyhow!("invalid JSON policy at {}: {e}", path.display())),
+        "yaml" | "yml" => {
+            serde_yaml::from_str(content).map_err(|e| anyhow::anyhow!("invalid YAML policy at {}: {e}", path.display()))
+        }
+        _ => {
+            serde_json::from_str(content).map_err(|e| anyhow::anyhow!("invalid JSON policy at {}: {e}", path.display()))
+        }
     }
 }
 

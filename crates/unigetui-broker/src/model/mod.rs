@@ -19,6 +19,7 @@ pub mod newtypes;
 pub mod policy;
 pub mod request;
 pub mod response;
+pub mod status;
 
 /// Error returned when a newtype fails deserialization validation.
 #[derive(Debug, thiserror::Error)]
@@ -34,3 +35,4 @@ pub use newtypes::*;
 pub use policy::*;
 pub use request::*;
 pub use response::*;
+pub use status::*;

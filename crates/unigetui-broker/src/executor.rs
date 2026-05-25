@@ -33,7 +33,10 @@ pub struct ExecutionContext {
 #[async_trait]
 pub trait CommandExecutor: Send + Sync {
     /// Execute a command under the given context.
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<()>;
+    ///
+    /// Returns the process exit code on success. The method blocks (async) until
+    /// the spawned process exits or a fatal error occurs during launch.
+    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32>;
 }
 
 /// Dry-run executor that only logs commands without running them.
@@ -41,7 +44,7 @@ pub struct DryRunExecutor;
 
 #[async_trait]
 impl CommandExecutor for DryRunExecutor {
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<()> {
+    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
         tracing::info!(
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
@@ -49,7 +52,7 @@ impl CommandExecutor for DryRunExecutor {
             run_as_administrator = ctx.run_as_administrator,
             "Dry-run: would execute command"
         );
-        Ok(())
+        Ok(0)
     }
 }
 
@@ -94,8 +97,8 @@ mod win {
         WTSQuerySessionInformationW, WTSUserName,
     };
     use windows::Win32::System::Threading::{
-        CreateProcessAsUserW, GetCurrentProcess, OpenProcessToken, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
-        STARTUPINFOW,
+        CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
+        PROCESS_INFORMATION, STARTUPINFOW, WaitForSingleObject,
     };
     use windows::core::{PWSTR, w};
 
@@ -152,7 +155,7 @@ mod win {
 
     #[async_trait]
     impl CommandExecutor for WindowsExecutor {
-        async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<()> {
+        async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
             let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.run_as_administrator;
 
             if !self.is_system && requires_elevation {
@@ -221,7 +224,8 @@ mod win {
     /// 2. Get the session token.
     /// 3. If elevated execution is requested, obtain the linked elevated token.
     /// 4. Create a process under that token using `CreateProcessAsUserW`.
-    async fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<()> {
+    /// 5. Wait for the process to exit and return the exit code.
+    async fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<i32> {
         let effective_user = ctx.effective_user.clone();
         let command = ctx.command.clone();
         let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.run_as_administrator;
@@ -255,15 +259,17 @@ mod win {
                 primary_token
             };
 
-            create_process_as_user(&execution_token, &command, session_id).context("CreateProcessAsUserW failed")?;
+            let exit_code = create_process_and_wait(&execution_token, &command, session_id)
+                .context("CreateProcessAsUserW failed")?;
 
             tracing::info!(
                 %effective_user,
                 command = %command.join(" "),
-                "Process created successfully under user token"
+                exit_code,
+                "Process completed under user token"
             );
 
-            Ok(())
+            Ok(exit_code)
         })
         .await
         .context("blocking task panicked")?
@@ -272,7 +278,7 @@ mod win {
     /// Execute a command directly as the current user (development mode).
     ///
     /// Does not impersonate or elevate. Useful for quick testing without a service.
-    async fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<()> {
+    async fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<i32> {
         use std::process::Stdio;
 
         use tokio::process::Command;
@@ -294,16 +300,17 @@ mod win {
             .await
             .context("failed to spawn process")?;
 
+        let code = output.status.code().unwrap_or(-1);
+
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             tracing::info!(stdout = %stdout, "Command completed successfully");
-            Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let code = output.status.code().unwrap_or(-1);
-            tracing::error!(%stderr, exit_code = code, "Command failed");
-            bail!("command exited with code {code}: {stderr}")
+            tracing::error!(%stderr, exit_code = code, "Command exited with non-zero code");
         }
+
+        Ok(code)
     }
 
     /// Enumerate WTS sessions to find one belonging to `effective_user`.
@@ -436,9 +443,11 @@ mod win {
         }
     }
 
-    /// Create a process under the given token using `CreateProcessAsUserW`.
-    #[allow(clippy::cast_possible_truncation)]
-    fn create_process_as_user(token: &SafeHandle, command: &[String], session_id: u32) -> anyhow::Result<()> {
+    /// Create a process under the given token and wait for it to exit.
+    ///
+    /// Returns the process exit code.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    fn create_process_and_wait(token: &SafeHandle, command: &[String], session_id: u32) -> anyhow::Result<i32> {
         // SAFETY: Token handle is valid. Command line is null-terminated UTF-16.
         // STARTUPINFOW is initialized with correct cb size. Process/thread handles are closed.
         unsafe {
@@ -479,10 +488,22 @@ mod win {
             )
             .context("CreateProcessAsUserW failed")?;
 
-            let _ = CloseHandle(pi.hProcess);
+            // Close the thread handle immediately; we only need the process handle.
             let _ = CloseHandle(pi.hThread);
 
-            Ok(())
+            // Wait for the process to exit (INFINITE timeout).
+            let process = SafeHandle::new(pi.hProcess);
+            let wait_result = WaitForSingleObject(process.raw(), u32::MAX);
+
+            if wait_result.0 != 0 {
+                // WAIT_OBJECT_0 is 0. Anything else is an error.
+                bail!("WaitForSingleObject returned unexpected value: {}", wait_result.0);
+            }
+
+            let mut exit_code: u32 = 0;
+            GetExitCodeProcess(process.raw(), &mut exit_code).context("GetExitCodeProcess failed")?;
+
+            Ok(exit_code as i32)
         }
     }
 
