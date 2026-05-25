@@ -25,7 +25,6 @@ public partial class AgentTunnelDialog : AgentDialog
         Runtime.Session[AgentProperties.AgentTunnelAgentName] = agentName.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseSubnets] = advertiseSubnets.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseDomains] = advertiseDomains.Text.Trim();
-        Runtime.Session[AgentProperties.AgentTunnelGatewayUrl] = gatewayUrl.Text.Trim();
 
         return true;
     }
@@ -38,7 +37,6 @@ public partial class AgentTunnelDialog : AgentDialog
         agentName.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAgentName);
         advertiseSubnets.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseSubnets);
         advertiseDomains.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
-        gatewayUrl.Text = Runtime.Session.Property(AgentProperties.AgentTunnelGatewayUrl);
 
         base.OnLoad(sender, e);
     }

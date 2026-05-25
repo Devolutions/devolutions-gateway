@@ -325,7 +325,6 @@ namespace DevolutionsAgent.Actions
             string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
-            string gatewayUrlArg = session.Property(AgentProperties.AgentTunnelGatewayUrl)?.Trim() ?? string.Empty;
             string agentNameArg = session.Property(AgentProperties.AgentTunnelAgentName)?.Trim() ?? string.Empty;
 
             ActionResult Fail(string msg)
@@ -361,7 +360,6 @@ namespace DevolutionsAgent.Actions
                 }
 
                 string arguments = $"up --enrollment-string \"{enrollmentString}\"";
-                if (gatewayUrlArg.Length != 0) arguments += $" --gateway \"{gatewayUrlArg}\"";
                 if (resolvedName.Length != 0) arguments += $" --name \"{resolvedName}\"";
                 if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
 
