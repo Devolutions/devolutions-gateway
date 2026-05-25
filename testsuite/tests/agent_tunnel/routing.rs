@@ -2,10 +2,12 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use agent_tunnel::registry::{AgentPeer, AgentRegistry};
-use agent_tunnel::routing::{RouteTarget, RoutingDecision, resolve_route, try_route};
+use agent_tunnel::routing::{RouteTarget, RoutingDecision, resolve_route, route_and_connect, try_route};
 use agent_tunnel_proto::{DomainAdvertisement, DomainName};
 use ipnetwork::Ipv4Network;
 use uuid::Uuid;
+
+use super::common::bind_test_listener;
 
 fn ip(s: &str) -> RouteTarget {
     RouteTarget::Ip(IpAddr::V4(s.parse::<Ipv4Addr>().expect("valid test ipv4")))
@@ -200,4 +202,82 @@ async fn try_route_without_explicit_agent_falls_through_when_handle_missing() {
         Ok(Some(_)) => panic!("expected Ok(None), got Ok(Some(_))"),
         Err(e) => panic!("expected Ok(None), got Err: {e:#}"),
     }
+}
+
+#[tokio::test]
+async fn route_and_connect_with_empty_candidates_errors() {
+    let listener = bind_test_listener().await;
+
+    let err = match route_and_connect(&listener.handle, &[], Uuid::new_v4(), "10.1.1.1:22").await {
+        Ok(_) => panic!("expected Err for empty candidate list"),
+        Err(e) => e,
+    };
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("empty candidates"),
+        "error should mention empty candidates, got: {msg}"
+    );
+
+    listener.shutdown().await;
+}
+
+// With a real handle but a target that no registered agent can reach,
+// `try_route` must return `Ok(None)` so the caller falls through to a
+// direct connection — without ever attempting QUIC traffic.
+#[tokio::test]
+async fn try_route_falls_through_when_no_agent_matches() {
+    let listener = bind_test_listener().await;
+
+    let peer = make_peer("agent-a");
+    let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
+    peer.update_routes(1, vec![subnet], vec![domain("contoso.local")]);
+    listener.handle.registry().register(peer).await;
+
+    let result = try_route(
+        Some(&listener.handle),
+        None,
+        &host("external.example.com"),
+        Uuid::new_v4(),
+        "external.example.com:443",
+    )
+    .await;
+
+    match result {
+        Ok(None) => {}
+        Ok(Some(_)) => panic!("expected Ok(None), got Ok(Some(_))"),
+        Err(e) => panic!("expected Ok(None), got Err: {e:#}"),
+    }
+
+    listener.shutdown().await;
+}
+
+// With a real handle but an explicit `jet_agent_id` that no agent in the
+// registry can satisfy, `try_route` must error rather than silently fall
+// back to a direct connection — the explicit claim is a security boundary.
+#[tokio::test]
+async fn try_route_errors_on_explicit_agent_not_found() {
+    let listener = bind_test_listener().await;
+
+    let bogus_id = Uuid::new_v4();
+    let err = match try_route(
+        Some(&listener.handle),
+        Some(bogus_id),
+        &host("anywhere.example.com"),
+        Uuid::new_v4(),
+        "anywhere.example.com:443",
+    )
+    .await
+    {
+        Ok(_) => panic!("expected Err for explicit agent_id not in registry"),
+        Err(e) => e,
+    };
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("not found in registry"),
+        "error should mention the missing agent, got: {msg}"
+    );
+
+    listener.shutdown().await;
 }
