@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
@@ -21,8 +22,9 @@ use crate::command_builder::build_winget_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::models::{
-    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageRequest, PolicyDocument,
-    ProtocolVersion, ResourceId, ResponsePolicyInfo, ResponseType, RuleId, SemanticVersion, Transport,
+    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageBrokerResponse, PackageRequest,
+    PolicyDocument, ProtocolVersion, ResourceId, ResponsePolicyInfo, ResponseSchemaUri, RuleId, SemanticVersion,
+    Transport,
 };
 
 const PROTOCOL_VERSION_STR: &str = "1.0";
@@ -114,12 +116,12 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
 
 async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: bool) -> Response<Full<Bytes>> {
     let audit_id = generate_audit_id();
-    let received_at = chrono::Utc::now().to_rfc3339();
+    let received_at = Utc::now();
 
     tracing::trace!(%audit_id, method = %req.method(), path = %req.uri().path(), "Received request");
 
     // Validate required protocol headers per wire protocol spec.
-    if let Some(err_response) = validate_request_headers(&req, &state.policy, &audit_id, &received_at, &state.pipe_name)
+    if let Some(err_response) = validate_request_headers(&req, &state.policy, &audit_id, received_at, &state.pipe_name)
     {
         return err_response;
     }
@@ -138,7 +140,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             return make_error_response(
                 &state.policy,
                 &audit_id,
-                &received_at,
+                received_at,
                 "failed to read request body",
                 StatusCode::BAD_REQUEST,
                 &state.pipe_name,
@@ -150,7 +152,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         return make_error_response(
             &state.policy,
             &audit_id,
-            &received_at,
+            received_at,
             "request body is required",
             StatusCode::BAD_REQUEST,
             &state.pipe_name,
@@ -161,7 +163,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         return make_error_response(
             &state.policy,
             &audit_id,
-            &received_at,
+            received_at,
             &format!(
                 "request body exceeds maximum size ({} bytes > {} bytes)",
                 body_bytes.len(),
@@ -179,7 +181,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             return make_error_response(
                 &state.policy,
                 &audit_id,
-                &received_at,
+                received_at,
                 &format!("invalid request: {error}"),
                 StatusCode::UNPROCESSABLE_ENTITY,
                 &state.pipe_name,
@@ -194,7 +196,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         return make_error_response(
             &state.policy,
             &audit_id,
-            &received_at,
+            received_at,
             &format!(
                 "UniGetUI-Request-Id header '{}' does not match body requestId '{}'",
                 header_val, &*request.request_id
@@ -221,7 +223,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             return make_error_response(
                 &state.policy,
                 &audit_id,
-                &received_at,
+                received_at,
                 &format!(
                     "manager '{}' is not supported for command execution",
                     request.manager.name
@@ -260,12 +262,12 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         )
     };
 
-    let completed_at = chrono::Utc::now().to_rfc3339();
+    let completed_at = Utc::now();
 
     let response = BrokerResponse {
-        schema: None,
+        schema: ResponseSchemaUri,
         response_version: SemanticVersion::from("1.0.0"),
-        response_type: ResponseType::PackageBrokerResponse,
+        response_type: PackageBrokerResponse,
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
@@ -274,7 +276,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             elevated_simulation: !execute,
         },
         audit_id: ResourceId::from(audit_id.clone()),
-        request_id: Some(request.request_id.clone()),
+        request_id: request.request_id.clone(),
         received_at,
         completed_at,
         manager: Some(request.manager.name.to_string()),
@@ -331,7 +333,7 @@ fn validate_request_headers(
     req: &Request<Incoming>,
     policy: &PolicyDocument,
     audit_id: &str,
-    received_at: &str,
+    received_at: DateTime<Utc>,
     pipe_name: &str,
 ) -> Option<Response<Full<Bytes>>> {
     // UniGetUI-Protocol-Version header is required.
@@ -409,16 +411,16 @@ fn validate_request_headers(
 fn make_error_response(
     policy: &PolicyDocument,
     audit_id: &str,
-    received_at: &str,
+    received_at: DateTime<Utc>,
     reason: &str,
     status: StatusCode,
     pipe_name: &str,
 ) -> Response<Full<Bytes>> {
-    let completed_at = chrono::Utc::now().to_rfc3339();
+    let completed_at = Utc::now();
     let response = BrokerResponse {
-        schema: None,
+        schema: ResponseSchemaUri,
         response_version: SemanticVersion::from("1.0.0"),
-        response_type: ResponseType::PackageBrokerResponse,
+        response_type: PackageBrokerResponse,
         broker: BrokerInfo {
             name: "Devolutions Agent UniGetUI Broker".to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
@@ -427,8 +429,8 @@ fn make_error_response(
             elevated_simulation: false,
         },
         audit_id: ResourceId::from(audit_id),
-        request_id: None,
-        received_at: received_at.to_owned(),
+        request_id: ResourceId::from("unknown"),
+        received_at,
         completed_at,
         manager: None,
         source: None,

@@ -7,7 +7,7 @@
   "operation": "update",
   "manager": { "name": "Winget", "displayName": "WinGet", "executableFriendlyName": "winget.exe" },
   "source": { "name": "winget", "url": "https://cdn.winget.microsoft.com/cache", "isVirtualManager": false },
-  "package": { "id": "Microsoft.VisualStudioCode", "name": "Microsoft Visual Studio Code", "version": "1.94.0", "newVersion": "1.96.0" },
+  "package": { "id": "Microsoft.VisualStudioCode", "name": "Microsoft Visual Studio Code", "currentVersion": "1.94.0", "newVersion": "1.96.0" },
   "options": {
     "scope": "machine",
     "architecture": "x64",

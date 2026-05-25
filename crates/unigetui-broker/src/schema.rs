@@ -64,6 +64,7 @@ mod tests {
     #[test]
     fn valid_policy_deserializes_successfully() {
         let policy_json = serde_json::json!({
+            "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
             "policyVersion": "1.0.0",
             "policyType": "packageBrokerPolicy",
             "metadata": {
@@ -106,6 +107,7 @@ mod tests {
     #[test]
     fn valid_request_deserializes_successfully() {
         let request_json = serde_json::json!({
+            "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
             "requestVersion": "1.0.0",
             "requestType": "packageOperation",
             "requestId": "req-001",

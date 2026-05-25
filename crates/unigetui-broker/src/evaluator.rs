@@ -6,6 +6,8 @@
 //! 3. Sort by priority (lowest wins), deny wins on tie
 //! 4. Fall back to `enforcement.defaultDecision`
 
+use std::collections::BTreeSet;
+
 use crate::models::{
     Architecture, Decision, Elevation, ManagerName, Operation, PackageRequest, PolicyConstraints, PolicyDocument,
     PolicyRule, RequestFlags, Scope,
@@ -83,88 +85,71 @@ fn rule_matches(rule: &PolicyRule, request: &PackageRequest, flags: &RequestFlag
         && wildcard_any(&request.source.name, &m.sources)
         && wildcard_any(&request.package.id, &m.package_identifiers)
         && wildcard_any(&request.package.name, &m.package_names)
-        && string_in_list(effective_version, &m.versions)
+        && string_in_set(effective_version, &m.versions)
         && version_range_matches(effective_version, &m.version_range)
         && scopes_match(request.options.scope, &m.scopes)
         && architectures_match(request.options.architecture, &m.architectures)
         && elevation_match(request.broker.requested_elevation, &m.elevation)
-        && bool_in_list(request.options.run_as_administrator, &m.run_as_administrator)
-        && bool_in_list(request.options.interactive, &m.interactive)
-        && bool_in_list(request.options.skip_hash_check, &m.skip_hash_check)
-        && bool_in_list(request.options.pre_release, &m.pre_release)
-        && bool_in_list(flags.has_custom_parameters, &m.has_custom_parameters)
-        && bool_in_list(flags.has_custom_install_location, &m.has_custom_install_location)
-        && bool_in_list(flags.has_pre_post_commands, &m.has_pre_post_commands)
-        && bool_in_list(flags.has_kill_before_operation, &m.has_kill_before_operation)
+        && bool_in_set(request.options.run_as_administrator, &m.run_as_administrator)
+        && bool_in_set(request.options.interactive, &m.interactive)
+        && bool_in_set(request.options.skip_hash_check, &m.skip_hash_check)
+        && bool_in_set(request.options.pre_release, &m.pre_release)
+        && bool_in_set(flags.has_custom_parameters, &m.has_custom_parameters)
+        && bool_in_set(flags.has_custom_install_location, &m.has_custom_install_location)
+        && bool_in_set(flags.has_pre_post_commands, &m.has_pre_post_commands)
+        && bool_in_set(flags.has_kill_before_operation, &m.has_kill_before_operation)
         && constraints_pass(&rule.constraints, request, flags)
 }
 
-fn operations_match(op: Operation, allowed: &Option<Vec<Operation>>) -> bool {
-    match allowed {
-        None => true,
-        Some(list) => list.contains(&op),
+fn operations_match(op: Operation, allowed: &BTreeSet<Operation>) -> bool {
+    allowed.is_empty() || allowed.contains(&op)
+}
+
+fn managers_match(name: ManagerName, allowed: &BTreeSet<ManagerName>) -> bool {
+    allowed.is_empty() || allowed.contains(&name)
+}
+
+fn scopes_match(scope: Option<Scope>, allowed: &BTreeSet<Scope>) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    match scope {
+        Some(s) => allowed.contains(&s),
+        None => true, // No scope specified = don't restrict.
     }
 }
 
-fn managers_match(name: ManagerName, allowed: &Option<Vec<ManagerName>>) -> bool {
-    match allowed {
-        None => true,
-        Some(list) => list.contains(&name),
+fn architectures_match(arch: Option<Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    match arch {
+        Some(a) => allowed.contains(&a),
+        None => true, // No architecture specified = don't restrict.
     }
 }
 
-fn scopes_match(scope: Option<Scope>, allowed: &Option<Vec<Scope>>) -> bool {
-    match allowed {
-        None => true,
-        Some(list) => match scope {
-            Some(s) => list.contains(&s),
-            None => true, // No scope specified = don't restrict.
-        },
-    }
+fn elevation_match(elev: Elevation, allowed: &BTreeSet<Elevation>) -> bool {
+    allowed.is_empty() || allowed.contains(&elev)
 }
 
-fn architectures_match(arch: Option<Architecture>, allowed: &Option<Vec<Architecture>>) -> bool {
-    match allowed {
-        None => true,
-        Some(list) => match arch {
-            Some(a) => list.contains(&a),
-            None => true, // No architecture specified = don't restrict.
-        },
-    }
+fn bool_in_set(value: bool, set: &BTreeSet<bool>) -> bool {
+    set.is_empty() || set.contains(&value)
 }
 
-fn elevation_match(elev: Elevation, allowed: &Option<Vec<Elevation>>) -> bool {
-    match allowed {
-        None => true,
-        Some(list) => list.contains(&elev),
+fn string_in_set<S: AsRef<str>>(value: &str, set: &BTreeSet<S>) -> bool {
+    if set.is_empty() {
+        return true;
     }
+    if value.is_empty() {
+        // If no version specified and set requires specific versions, don't match.
+        return false;
+    }
+    set.iter().any(|item| item.as_ref() == value)
 }
 
-fn bool_in_list(value: bool, list: &Option<Vec<bool>>) -> bool {
-    match list {
-        None => true,
-        Some(items) => items.contains(&value),
-    }
-}
-
-fn string_in_list<S: AsRef<str>>(value: &str, list: &Option<Vec<S>>) -> bool {
-    match list {
-        None => true,
-        Some(items) => {
-            if value.is_empty() {
-                // If no version specified and list requires specific versions, don't match.
-                return false;
-            }
-            items.iter().any(|item| item.as_ref() == value)
-        }
-    }
-}
-
-fn wildcard_any<S: AsRef<str>>(value: &str, patterns: &Option<Vec<S>>) -> bool {
-    match patterns {
-        None => true,
-        Some(pats) => pats.iter().any(|pattern| wildcard_match(value, pattern.as_ref())),
-    }
+fn wildcard_any<S: AsRef<str>>(value: &str, patterns: &BTreeSet<S>) -> bool {
+    patterns.is_empty() || patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
 
 fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bool {
@@ -187,55 +172,50 @@ fn constraints_pass(constraints: &Option<PolicyConstraints>, request: &PackageRe
         return true;
     };
 
-    if c.allow_interactive == Some(false) && request.options.interactive {
+    if !c.allow_interactive && request.options.interactive {
         return false;
     }
-    if c.allow_run_as_administrator == Some(false) && request.options.run_as_administrator {
+    if !c.allow_run_as_administrator && request.options.run_as_administrator {
         return false;
     }
-    if c.allow_skip_hash_check == Some(false) && request.options.skip_hash_check {
+    if !c.allow_skip_hash_check && request.options.skip_hash_check {
         return false;
     }
-    if c.allow_pre_release == Some(false) && request.options.pre_release {
+    if !c.allow_pre_release && request.options.pre_release {
         return false;
     }
-    if c.allow_custom_install_location == Some(false) && flags.has_custom_install_location {
+    if !c.allow_custom_install_location && flags.has_custom_install_location {
         return false;
     }
-    if c.allow_custom_parameters == Some(false) && flags.has_custom_parameters {
+    if !c.allow_custom_parameters && flags.has_custom_parameters {
         return false;
     }
-    if c.allow_pre_post_commands == Some(false) && flags.has_pre_post_commands {
+    if !c.allow_pre_post_commands && flags.has_pre_post_commands {
         return false;
     }
-    if c.allow_kill_before_operation == Some(false) && flags.has_kill_before_operation {
+    if !c.allow_kill_before_operation && flags.has_kill_before_operation {
         return false;
     }
 
     // Check install location patterns.
     if flags.has_custom_install_location
-        && let Some(patterns) = &c.allowed_install_location_patterns
-        && !wildcard_any_vec(&flags.custom_install_location, patterns)
+        && !c.allowed_install_location_patterns.is_empty()
+        && !wildcard_any_vec(&flags.custom_install_location, &c.allowed_install_location_patterns)
     {
         return false;
     }
 
     // Check custom parameters.
     for param in &flags.custom_parameters {
-        if let Some(denied) = &c.denied_custom_parameters
-            && wildcard_any_vec(param, denied)
-        {
+        if !c.denied_custom_parameters.is_empty() && wildcard_any_vec(param, &c.denied_custom_parameters) {
             return false;
         }
-        if c.allowed_custom_parameters.is_some() || c.allowed_custom_parameter_patterns.is_some() {
+        if !c.allowed_custom_parameters.is_empty() || !c.allowed_custom_parameter_patterns.is_empty() {
             let exact_allowed = c
                 .allowed_custom_parameters
-                .as_ref()
-                .is_some_and(|list| list.iter().any(|v| v.eq_ignore_ascii_case(param)));
-            let pattern_allowed = c
-                .allowed_custom_parameter_patterns
-                .as_ref()
-                .is_some_and(|patterns| wildcard_any_vec(param, patterns));
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case(param));
+            let pattern_allowed = wildcard_any_vec(param, &c.allowed_custom_parameter_patterns);
             if !exact_allowed && !pattern_allowed {
                 return false;
             }
@@ -248,20 +228,14 @@ fn constraints_pass(constraints: &Option<PolicyConstraints>, request: &PackageRe
 // ─── Version helpers ─────────────────────────────────────────────────────────
 
 fn get_effective_version(request: &PackageRequest) -> String {
-    if let Some(v) = &request.options.version
-        && !v.is_empty()
-    {
-        return v.clone();
+    if let Some(v) = &request.options.version {
+        return v.0.clone();
     }
-    if let Some(v) = &request.package.new_version
-        && !v.is_empty()
-    {
-        return v.clone();
+    if let Some(v) = &request.package.new_version {
+        return v.0.clone();
     }
-    if let Some(v) = &request.package.version
-        && !v.is_empty()
-    {
-        return v.clone();
+    if let Some(v) = &request.package.current_version {
+        return v.0.clone();
     }
     String::new()
 }
@@ -321,19 +295,21 @@ fn compare_versions(a: &str, b: &str) -> i32 {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use chrono::Utc;
+
     use super::*;
     use crate::models::*;
 
     fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
         PolicyDocument {
-            schema: None,
+            schema: PolicySchemaUri,
             policy_version: SemanticVersion::from("1.0.0"),
-            policy_type: PolicyType::PackageBrokerPolicy,
+            policy_type: PackageBrokerPolicy,
             metadata: PolicyMetadata {
                 id: ResourceId::from("test-policy"),
                 publisher: "Test".to_owned(),
                 revision: 1,
-                published_at: "2025-01-01T00:00:00Z".to_owned(),
+                published_at: Utc::now(),
                 valid_from: None,
                 valid_until: None,
                 description: None,
@@ -351,11 +327,11 @@ mod tests {
 
     fn make_request(operation: Operation, package_id: &str) -> PackageRequest {
         PackageRequest {
-            schema: None,
+            schema: RequestSchemaUri,
             request_version: SemanticVersion::from("1.0.0"),
-            request_type: RequestType::PackageOperation,
+            request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
-            created_at: "2025-01-01T00:00:00Z".to_owned(),
+            created_at: Utc::now(),
             operation,
             manager: RequestManager {
                 name: ManagerName::Winget,
@@ -370,7 +346,7 @@ mod tests {
             package: RequestPackage {
                 id: PackageIdentifier(package_id.to_owned()),
                 name: "Test Package".to_owned(),
-                version: None,
+                current_version: None,
                 new_version: None,
                 channel: None,
             },
@@ -383,10 +359,10 @@ mod tests {
                 skip_hash_check: false,
                 pre_release: false,
                 custom_install_location: None,
-                custom_parameters: None,
+                custom_parameters: Vec::new(),
                 pre_operation_command: None,
                 post_operation_command: None,
-                kill_before_operation: None,
+                kill_before_operation: Vec::new(),
             },
             broker: BrokerContext {
                 requested_elevation: Elevation::Elevated,
@@ -409,7 +385,7 @@ mod tests {
                 description: None,
                 reason: Some("Firefox is allowed.".to_owned()),
                 match_criteria: PolicyMatch {
-                    package_identifiers: Some(vec![StringPattern("Mozilla.Firefox".to_owned())]),
+                    package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
                     ..Default::default()
                 },
                 constraints: None,
@@ -434,7 +410,7 @@ mod tests {
                 description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
-                    package_identifiers: Some(vec![StringPattern("Mozilla.Firefox".to_owned())]),
+                    package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
                     ..Default::default()
                 },
                 constraints: None,
@@ -458,7 +434,10 @@ mod tests {
                 decision: Decision::Allow,
                 description: None,
                 reason: None,
-                match_criteria: PolicyMatch::default(),
+                match_criteria: PolicyMatch {
+                    operations: BTreeSet::from([Operation::Install]),
+                    ..Default::default()
+                },
                 constraints: None,
             }],
         );
@@ -482,8 +461,8 @@ mod tests {
                 description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
-                    operations: Some(vec![Operation::Install]),
-                    managers: Some(vec![ManagerName::Winget]),
+                    operations: BTreeSet::from([Operation::Install]),
+                    managers: BTreeSet::from([ManagerName::Winget]),
                     ..Default::default()
                 },
                 constraints: None,

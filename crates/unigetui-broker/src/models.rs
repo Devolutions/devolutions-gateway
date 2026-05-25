@@ -13,6 +13,9 @@
 // False positive: lint fires on schemars `schema_with = "fn_name"` attribute strings.
 #![allow(unused_qualifications)]
 
+use std::collections::BTreeSet;
+
+use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec, StringValidation};
@@ -118,7 +121,7 @@ impl From<&str> for SemanticVersion {
 ///
 /// Pattern: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 /// Max length: 128
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct ResourceId(pub String);
 
@@ -374,7 +377,7 @@ impl From<String> for HttpUrl {
 ///
 /// Must not contain `\/:*?"<>|` or control characters.
 /// Min length: 1, Max length: 256
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct PackageIdentifier(pub String);
 
@@ -465,7 +468,7 @@ impl From<String> for PackageIdentifier {
 /// Case-insensitive exact value or wildcard pattern.
 ///
 /// Min length: 1, Max length: 256
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct StringPattern(pub String);
 
@@ -603,7 +606,7 @@ impl From<&str> for ProtocolVersion {
 }
 
 /// A short constrained string for version values (max 128 chars).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct VersionString(pub String);
 
@@ -656,7 +659,7 @@ impl AsRef<str> for VersionString {
 }
 
 /// A custom parameter string (max 512 chars).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct CustomParameterString(pub String);
 
@@ -709,7 +712,7 @@ impl AsRef<str> for CustomParameterString {
 }
 
 /// A process name string (max 128 chars).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct ProcessName(pub String);
 
@@ -833,7 +836,7 @@ impl std::ops::Deref for CommandString {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Package operation type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
     Install,
@@ -842,7 +845,7 @@ pub enum Operation {
 }
 
 /// Package installation scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     User,
@@ -850,7 +853,7 @@ pub enum Scope {
 }
 
 /// Target architecture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Architecture {
     X86,
@@ -861,7 +864,7 @@ pub enum Architecture {
 }
 
 /// Supported package manager names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub enum ManagerName {
     Winget,
     PowerShell,
@@ -876,7 +879,7 @@ pub enum Decision {
 }
 
 /// Requested elevation level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Elevation {
     Standard,
@@ -899,25 +902,248 @@ pub enum ExecutionMode {
     Elevated,
 }
 
-/// Fixed request type value: `"packageOperation"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum RequestType {
-    #[serde(rename = "packageOperation")]
-    PackageOperation,
+// ═══════════════════════════════════════════════════════════════════════════════
+// Marker types — zero-size structs that serialize to a fixed string constant
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Marker type for request type: serializes to `"packageOperation"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageOperation;
+
+impl Serialize for PackageOperation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("packageOperation")
+    }
 }
 
-/// Fixed policy type value: `"packageBrokerPolicy"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum PolicyType {
-    #[serde(rename = "packageBrokerPolicy")]
-    PackageBrokerPolicy,
+impl<'de> Deserialize<'de> for PackageOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == "packageOperation" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"packageOperation\", got \"{s}\""
+            )))
+        }
+    }
 }
 
-/// Fixed response type value: `"packageBrokerResponse"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum ResponseType {
-    #[serde(rename = "packageBrokerResponse")]
-    PackageBrokerResponse,
+impl JsonSchema for PackageOperation {
+    fn schema_name() -> String {
+        "PackageOperation".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String("packageOperation".to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Marker type for policy type: serializes to `"packageBrokerPolicy"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageBrokerPolicy;
+
+impl Serialize for PackageBrokerPolicy {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("packageBrokerPolicy")
+    }
+}
+
+impl<'de> Deserialize<'de> for PackageBrokerPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == "packageBrokerPolicy" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"packageBrokerPolicy\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for PackageBrokerPolicy {
+    fn schema_name() -> String {
+        "PackageBrokerPolicy".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String("packageBrokerPolicy".to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Marker type for response type: serializes to `"packageBrokerResponse"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageBrokerResponse;
+
+impl Serialize for PackageBrokerResponse {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("packageBrokerResponse")
+    }
+}
+
+impl<'de> Deserialize<'de> for PackageBrokerResponse {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == "packageBrokerResponse" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"packageBrokerResponse\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for PackageBrokerResponse {
+    fn schema_name() -> String {
+        "PackageBrokerResponse".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String("packageBrokerResponse".to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Schema URI for package request documents.
+pub const REQUEST_SCHEMA_URI: &str = "https://aka.ms/unigetui/package-request.schema.1.0.json";
+
+/// Marker type for the request `$schema` field.
+/// Serializes to the canonical request schema URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestSchemaUri;
+
+impl Serialize for RequestSchemaUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(REQUEST_SCHEMA_URI)
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestSchemaUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == REQUEST_SCHEMA_URI {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"{REQUEST_SCHEMA_URI}\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for RequestSchemaUri {
+    fn schema_name() -> String {
+        "RequestSchemaUri".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(REQUEST_SCHEMA_URI.to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Schema URI for package broker response documents.
+pub const RESPONSE_SCHEMA_URI: &str = "https://aka.ms/unigetui/package-broker-response.schema.1.0.json";
+
+/// Marker type for the response `$schema` field.
+/// Serializes to the canonical response schema URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponseSchemaUri;
+
+impl Serialize for ResponseSchemaUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(RESPONSE_SCHEMA_URI)
+    }
+}
+
+impl<'de> Deserialize<'de> for ResponseSchemaUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == RESPONSE_SCHEMA_URI {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"{RESPONSE_SCHEMA_URI}\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for ResponseSchemaUri {
+    fn schema_name() -> String {
+        "ResponseSchemaUri".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(RESPONSE_SCHEMA_URI.to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Schema URI for package policy documents.
+pub const POLICY_SCHEMA_URI: &str = "https://aka.ms/unigetui/package-policy.schema.1.0.json";
+
+/// Marker type for the policy `$schema` field.
+/// Serializes to the canonical policy schema URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicySchemaUri;
+
+impl Serialize for PolicySchemaUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(POLICY_SCHEMA_URI)
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicySchemaUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == POLICY_SCHEMA_URI {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"{POLICY_SCHEMA_URI}\", got \"{s}\""
+            )))
+        }
+    }
+}
+
+impl JsonSchema for PolicySchemaUri {
+    fn schema_name() -> String {
+        "PolicySchemaUri".to_owned()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::Value::String(POLICY_SCHEMA_URI.to_owned())]),
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -929,22 +1155,21 @@ pub enum ResponseType {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PackageRequest {
-    /// JSON Schema URI (ignored at runtime).
-    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<HttpUrl>,
+    /// Request schema URI constant.
+    #[serde(rename = "$schema")]
+    pub schema: RequestSchemaUri,
 
     /// The request syntax version (semver).
     pub request_version: SemanticVersion,
 
     /// Must be `"packageOperation"`.
-    pub request_type: RequestType,
+    pub request_type: PackageOperation,
 
     /// Unique client-generated request id for audit correlation.
     pub request_id: ResourceId,
 
     /// UTC timestamp when the client created the request (RFC 3339).
-    #[schemars(schema_with = "datetime_schema")]
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 
     /// The package operation to perform.
     pub operation: Operation,
@@ -1014,13 +1239,11 @@ pub struct RequestPackage {
 
     /// Currently installed version (for update/uninstall).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 128))]
-    pub version: Option<String>,
+    pub current_version: Option<SemanticVersion>,
 
     /// Target version (for update operations).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 128))]
-    pub new_version: Option<String>,
+    pub new_version: Option<SemanticVersion>,
 
     /// Release channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1043,8 +1266,7 @@ pub struct RequestOptions {
 
     /// Requested install version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 128))]
-    pub version: Option<String>,
+    pub version: Option<SemanticVersion>,
 
     /// Run interactively (show installer UI).
     pub interactive: bool,
@@ -1064,9 +1286,9 @@ pub struct RequestOptions {
     pub custom_install_location: Option<String>,
 
     /// Additional command-line parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64))]
-    pub custom_parameters: Option<Vec<CustomParameterString>>,
+    pub custom_parameters: Vec<CustomParameterString>,
 
     /// Command to execute before the package operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1079,9 +1301,9 @@ pub struct RequestOptions {
     pub post_operation_command: Option<String>,
 
     /// Processes to kill before running the operation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64))]
-    pub kill_before_operation: Option<Vec<ProcessName>>,
+    pub kill_before_operation: Vec<ProcessName>,
 }
 
 /// Broker context provided by the client.
@@ -1116,15 +1338,15 @@ pub struct BrokerContext {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BrokerResponse {
-    /// JSON Schema URI (ignored at runtime).
-    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<HttpUrl>,
+    /// Response schema URI constant.
+    #[serde(rename = "$schema")]
+    pub schema: ResponseSchemaUri,
 
     /// Response syntax version (semver).
     pub response_version: SemanticVersion,
 
     /// Must be `"packageBrokerResponse"`.
-    pub response_type: ResponseType,
+    pub response_type: PackageBrokerResponse,
 
     /// Broker identity and capabilities.
     pub broker: BrokerInfo,
@@ -1132,16 +1354,14 @@ pub struct BrokerResponse {
     /// Server-generated audit identifier.
     pub audit_id: ResourceId,
 
-    /// Echoed request id (null if request was invalid).
-    pub request_id: Option<ResourceId>,
+    /// Echoed request id.
+    pub request_id: ResourceId,
 
     /// UTC timestamp when broker received the request (RFC 3339).
-    #[schemars(schema_with = "datetime_schema")]
-    pub received_at: String,
+    pub received_at: DateTime<Utc>,
 
     /// UTC timestamp when broker completed evaluation (RFC 3339).
-    #[schemars(schema_with = "datetime_schema")]
-    pub completed_at: String,
+    pub completed_at: DateTime<Utc>,
 
     /// Manager name from the request (null if not parsed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1247,15 +1467,15 @@ pub struct ExecutionInfo {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyDocument {
-    /// JSON Schema URI (ignored at runtime).
-    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<HttpUrl>,
+    /// Policy schema URI constant.
+    #[serde(rename = "$schema")]
+    pub schema: PolicySchemaUri,
 
     /// Policy syntax version (semver).
     pub policy_version: SemanticVersion,
 
     /// Must be `"packageBrokerPolicy"`.
-    pub policy_type: PolicyType,
+    pub policy_type: PackageBrokerPolicy,
 
     /// Policy metadata.
     pub metadata: PolicyMetadata,
@@ -1263,8 +1483,8 @@ pub struct PolicyDocument {
     /// Enforcement configuration.
     pub enforcement: PolicyEnforcement,
 
-    /// Ordered list of policy rules.
-    #[schemars(length(min = 1, max = 1024))]
+    /// Ordered list of policy rules (may be empty; enforcement defaults apply).
+    #[schemars(length(max = 1024))]
     pub rules: Vec<PolicyRule>,
 }
 
@@ -1285,18 +1505,15 @@ pub struct PolicyMetadata {
     pub revision: u32,
 
     /// ISO 8601 publication timestamp (RFC 3339).
-    #[schemars(schema_with = "datetime_schema")]
-    pub published_at: String,
+    pub published_at: DateTime<Utc>,
 
     /// Policy becomes active at this time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "optional_datetime_schema")]
-    pub valid_from: Option<String>,
+    pub valid_from: Option<DateTime<Utc>>,
 
     /// Policy expires at this time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "optional_datetime_schema")]
-    pub valid_until: Option<String>,
+    pub valid_until: Option<DateTime<Utc>>,
 
     /// Human-readable description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1371,16 +1588,27 @@ pub struct PolicyRule {
     pub reason: Option<String>,
 
     /// Match criteria — request must satisfy all specified fields.
-    #[serde(rename = "match")]
+    /// At least one criterion must be present.
+    #[serde(rename = "match", deserialize_with = "deserialize_non_empty_match")]
     pub match_criteria: PolicyMatch,
 
     /// Additional constraints applied after matching.
+    /// When absent, no constraints are enforced beyond the match criteria.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<PolicyConstraints>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// Custom deserializer that rejects an empty match block.
+fn deserialize_non_empty_match<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<PolicyMatch, D::Error> {
+    let m = PolicyMatch::deserialize(deserializer)?;
+    if m.is_empty() {
+        return Err(serde::de::Error::custom("match must contain at least one criterion"));
+    }
+    Ok(m)
 }
 
 /// Match criteria for a policy rule. All specified fields must match.
@@ -1390,93 +1618,117 @@ fn default_true() -> bool {
 #[serde(deny_unknown_fields)]
 pub struct PolicyMatch {
     /// Allowed operations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 3))]
-    pub operations: Option<Vec<Operation>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 3))]
+    pub operations: BTreeSet<Operation>,
 
     /// Allowed managers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 16))]
-    pub managers: Option<Vec<ManagerName>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 16))]
+    pub managers: BTreeSet<ManagerName>,
 
     /// Source patterns (wildcard).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 128))]
-    pub sources: Option<Vec<StringPattern>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 128))]
+    pub sources: BTreeSet<StringPattern>,
 
     /// Package identifier patterns (wildcard).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 1024))]
-    pub package_identifiers: Option<Vec<StringPattern>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 1024))]
+    pub package_identifiers: BTreeSet<StringPattern>,
 
     /// Package name patterns (wildcard).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 1024))]
-    pub package_names: Option<Vec<StringPattern>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 1024))]
+    pub package_names: BTreeSet<StringPattern>,
 
     /// Exact version list.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 256))]
-    pub versions: Option<Vec<VersionString>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 256))]
+    pub versions: BTreeSet<VersionString>,
 
     /// Semantic version range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_range: Option<VersionRange>,
 
     /// Allowed scopes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub scopes: Option<Vec<Scope>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub scopes: BTreeSet<Scope>,
 
     /// Allowed architectures.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 5))]
-    pub architectures: Option<Vec<Architecture>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 5))]
+    pub architectures: BTreeSet<Architecture>,
 
     /// Allowed elevation levels.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub elevation: Option<Vec<Elevation>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub elevation: BTreeSet<Elevation>,
 
     /// Allowed runAsAdministrator values.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub run_as_administrator: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub run_as_administrator: BTreeSet<bool>,
 
     /// Allowed interactive values.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub interactive: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub interactive: BTreeSet<bool>,
 
     /// Allowed skipHashCheck values.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub skip_hash_check: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub skip_hash_check: BTreeSet<bool>,
 
     /// Allowed preRelease values.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub pre_release: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub pre_release: BTreeSet<bool>,
 
     /// Whether request has custom parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub has_custom_parameters: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub has_custom_parameters: BTreeSet<bool>,
 
     /// Whether request has custom install location.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub has_custom_install_location: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub has_custom_install_location: BTreeSet<bool>,
 
     /// Whether request has pre/post operation commands.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub has_pre_post_commands: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub has_pre_post_commands: BTreeSet<bool>,
 
     /// Whether request has kill-before-operation entries.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(min = 1, max = 2))]
-    pub has_kill_before_operation: Option<Vec<bool>>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[schemars(length(max = 2))]
+    pub has_kill_before_operation: BTreeSet<bool>,
+}
+
+impl PolicyMatch {
+    /// Returns true if no criteria are specified.
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+            && self.managers.is_empty()
+            && self.sources.is_empty()
+            && self.package_identifiers.is_empty()
+            && self.package_names.is_empty()
+            && self.versions.is_empty()
+            && self.version_range.is_none()
+            && self.scopes.is_empty()
+            && self.architectures.is_empty()
+            && self.elevation.is_empty()
+            && self.run_as_administrator.is_empty()
+            && self.interactive.is_empty()
+            && self.skip_hash_check.is_empty()
+            && self.pre_release.is_empty()
+            && self.has_custom_parameters.is_empty()
+            && self.has_custom_install_location.is_empty()
+            && self.has_pre_post_commands.is_empty()
+            && self.has_kill_before_operation.is_empty()
+    }
 }
 
 /// Semantic version range for matching.
@@ -1500,85 +1752,91 @@ pub struct VersionRange {
 }
 
 /// Constraints applied after a rule matches.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyConstraints {
     /// Allow interactive mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_interactive: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_interactive: bool,
 
     /// Allow running as administrator.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_run_as_administrator: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_run_as_administrator: bool,
 
     /// Allow skipping hash verification.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_skip_hash_check: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_skip_hash_check: bool,
 
     /// Allow pre-release versions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_pre_release: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_pre_release: bool,
 
     /// Allow custom install location.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_custom_install_location: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_custom_install_location: bool,
 
     /// Glob patterns for allowed install locations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64))]
-    pub allowed_install_location_patterns: Option<Vec<StringPattern>>,
+    pub allowed_install_location_patterns: Vec<StringPattern>,
 
     /// Allow custom parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_custom_parameters: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_custom_parameters: bool,
 
     /// Exact allowed custom parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 128))]
-    pub allowed_custom_parameters: Option<Vec<CustomParameterString>>,
+    pub allowed_custom_parameters: Vec<CustomParameterString>,
 
     /// Glob patterns for allowed custom parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 128))]
-    pub allowed_custom_parameter_patterns: Option<Vec<CustomParameterString>>,
+    pub allowed_custom_parameter_patterns: Vec<CustomParameterString>,
 
     /// Denied custom parameters (deny takes precedence over allow).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 128))]
-    pub denied_custom_parameters: Option<Vec<CustomParameterString>>,
+    pub denied_custom_parameters: Vec<CustomParameterString>,
 
     /// Allow pre/post operation commands.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_pre_post_commands: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_pre_post_commands: bool,
 
     /// Allow killing processes before operation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_kill_before_operation: Option<bool>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_kill_before_operation: bool,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Schema helper functions
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// Generates a JSON Schema for a `date-time` formatted string.
-fn datetime_schema(_gen: &mut SchemaGenerator) -> Schema {
-    SchemaObject {
-        instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-        format: Some("date-time".to_owned()),
-        ..Default::default()
+impl Default for PolicyConstraints {
+    fn default() -> Self {
+        Self {
+            allow_interactive: true,
+            allow_run_as_administrator: true,
+            allow_skip_hash_check: true,
+            allow_pre_release: true,
+            allow_custom_install_location: true,
+            allowed_install_location_patterns: Vec::new(),
+            allow_custom_parameters: true,
+            allowed_custom_parameters: Vec::new(),
+            allowed_custom_parameter_patterns: Vec::new(),
+            denied_custom_parameters: Vec::new(),
+            allow_pre_post_commands: true,
+            allow_kill_before_operation: true,
+        }
     }
-    .into()
 }
 
-/// Generates a JSON Schema for an optional `date-time` formatted string.
-fn optional_datetime_schema(_gen: &mut SchemaGenerator) -> Schema {
-    SchemaObject {
-        instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-        format: Some("date-time".to_owned()),
-        ..Default::default()
+impl PolicyConstraints {
+    /// Returns true if all fields are at their defaults (fully permissive).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
-    .into()
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1597,11 +1855,11 @@ pub struct RequestFlags {
 
 impl RequestFlags {
     pub fn from_request(request: &PackageRequest) -> Self {
-        let custom_params = request.options.custom_parameters.clone().unwrap_or_default();
+        let custom_params = request.options.custom_parameters.clone();
         let custom_location = request.options.custom_install_location.clone().unwrap_or_default();
         let has_pre_post =
             request.options.pre_operation_command.is_some() || request.options.post_operation_command.is_some();
-        let kill_before = request.options.kill_before_operation.clone().unwrap_or_default();
+        let kill_before = &request.options.kill_before_operation;
 
         Self {
             has_custom_parameters: !custom_params.is_empty(),

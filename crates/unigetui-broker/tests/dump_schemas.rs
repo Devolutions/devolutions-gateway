@@ -39,8 +39,7 @@ fn dump_response_schema() {
 #[test]
 fn sample_requests_pass_deserialization() {
     let requests_dir = samples_dir().join("requests");
-    let dir = std::fs::read_dir(&requests_dir)
-        .unwrap_or_else(|e| panic!("failed to read {requests_dir:?}: {e}"));
+    let dir = std::fs::read_dir(&requests_dir).unwrap_or_else(|e| panic!("failed to read {requests_dir:?}: {e}"));
 
     let mut tested = 0;
     for entry in dir.flatten() {
@@ -62,8 +61,7 @@ fn sample_requests_pass_deserialization() {
 
 #[test]
 fn sample_policies_pass_deserialization() {
-    let dir = std::fs::read_dir(samples_dir())
-        .unwrap_or_else(|e| panic!("failed to read samples dir: {e}"));
+    let dir = std::fs::read_dir(samples_dir()).unwrap_or_else(|e| panic!("failed to read samples dir: {e}"));
 
     let mut tested = 0;
     for entry in dir.flatten() {
@@ -86,8 +84,7 @@ fn sample_policies_pass_deserialization() {
 #[test]
 fn sample_responses_pass_deserialization() {
     let responses_dir = samples_dir().join("responses");
-    let dir = std::fs::read_dir(&responses_dir)
-        .unwrap_or_else(|e| panic!("failed to read {responses_dir:?}: {e}"));
+    let dir = std::fs::read_dir(&responses_dir).unwrap_or_else(|e| panic!("failed to read {responses_dir:?}: {e}"));
 
     let mut tested = 0;
     for entry in dir.flatten() {

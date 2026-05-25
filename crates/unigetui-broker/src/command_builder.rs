@@ -64,11 +64,9 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
     );
 
     // Append any custom parameters.
-    if let Some(params) = &request.options.custom_parameters {
-        for param in params {
-            if !param.is_empty() {
-                command.push(param.0.clone());
-            }
+    for param in &request.options.custom_parameters {
+        if !param.is_empty() {
+            command.push(param.0.clone());
         }
     }
 
@@ -92,16 +90,18 @@ fn add_pair(command: &mut Vec<String>, flag: &str, value: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+
     use super::*;
     use crate::models::*;
 
     fn make_request() -> PackageRequest {
         PackageRequest {
-            schema: None,
+            schema: RequestSchemaUri,
             request_version: SemanticVersion::from("1.0.0"),
-            request_type: RequestType::PackageOperation,
+            request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
-            created_at: "2025-01-01T00:00:00Z".to_owned(),
+            created_at: Utc::now(),
             operation: Operation::Install,
             manager: RequestManager {
                 name: ManagerName::Winget,
@@ -116,7 +116,7 @@ mod tests {
             package: RequestPackage {
                 id: PackageIdentifier::from("Mozilla.Firefox".to_owned()),
                 name: "Firefox".to_owned(),
-                version: None,
+                current_version: None,
                 new_version: None,
                 channel: None,
             },
@@ -129,10 +129,10 @@ mod tests {
                 skip_hash_check: false,
                 pre_release: false,
                 custom_install_location: None,
-                custom_parameters: None,
+                custom_parameters: Vec::new(),
                 pre_operation_command: None,
                 post_operation_command: None,
-                kill_before_operation: None,
+                kill_before_operation: Vec::new(),
             },
             broker: BrokerContext {
                 requested_elevation: Elevation::Elevated,
@@ -159,11 +159,11 @@ mod tests {
     fn test_upgrade_command() {
         let mut request = make_request();
         request.operation = Operation::Update;
-        request.package.new_version = Some("120.0".to_owned());
+        request.package.new_version = Some(SemanticVersion::from("120.0.0"));
 
         let cmd = build_winget_command(&request);
         assert_eq!(cmd[1], "upgrade");
         assert!(cmd.contains(&"--version".to_owned()));
-        assert!(cmd.contains(&"120.0".to_owned()));
+        assert!(cmd.contains(&"120.0.0".to_owned()));
     }
 }
