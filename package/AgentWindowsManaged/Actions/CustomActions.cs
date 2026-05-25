@@ -337,16 +337,15 @@ namespace DevolutionsAgent.Actions
 
             if (enrollmentString.Length == 0)
             {
-                return Fail("Agent tunnel feature was selected but no enrollment string was provided. " +
-                    "Paste a JWT from Devolutions Server, Hub, or Gateway, or deselect the Agent Tunnel feature.");
+                return Fail("An enrollment string is required. Paste the enrollment string provided by your gateway operator, or deselect the Agent Tunnel feature.");
             }
 
             try
             {
-                // The enrollment string is the DVLS-signed JWT verbatim. The agent's
-                // `up --enrollment-string` parses `jet_gw_url` and `jet_agent_name` from the JWT
-                // claims itself, so we just hand the JWT through. Advertise domains aren't a CLI
-                // flag — agent.json carries them — so we patch that after enrollment succeeds.
+                // Hand the enrollment string through verbatim. The agent's
+                // `up --enrollment-string` parses the gateway URL and agent name out of it.
+                // Advertise domains aren't a CLI flag — agent.json carries them — so we patch
+                // that after enrollment succeeds.
                 string installDir = session.Property(AgentProperties.InstallDir);
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
 
@@ -379,7 +378,7 @@ namespace DevolutionsAgent.Actions
                 if (!process.WaitForExit(60_000))
                 {
                     try { process.Kill(); } catch { /* already gone */ }
-                    return Fail("Agent tunnel enrollment timed out after 60 seconds.");
+                    return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
                 string stdout = process.StandardOutput.ReadToEnd();
                 string stderr = process.StandardError.ReadToEnd();

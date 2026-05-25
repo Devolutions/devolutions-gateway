@@ -2,8 +2,6 @@ using DevolutionsAgent.Dialogs;
 using DevolutionsAgent.Properties;
 
 using System;
-using System.Linq;
-using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 using WixSharp;
@@ -43,34 +41,16 @@ public partial class AgentTunnelDialog : AgentDialog
 
     public override bool DoValidate()
     {
-        // The dialog is only reached when the Agent Tunnel feature is selected (see Wizard.ShouldSkip),
-        // so an enrollment string is required at this point.
+        // The dialog is only reached when the Agent Tunnel feature is selected
+        // (see Wizard.ShouldSkip), so an enrollment string is required here.
+        // Structural validation of the string itself happens server-side at
+        // enrollment time — surface that gateway error verbatim rather than
+        // half-validating implementation details (signature, encoding, etc.)
+        // here.
         if (string.IsNullOrWhiteSpace(enrollmentString.Text))
         {
-            ShowValidationErrorString("Enrollment string is required. Paste a JWT from Devolutions Server, Hub, or Gateway, or go back and deselect the Agent Tunnel feature.");
+            ShowValidationErrorString("An enrollment string is required. Paste the enrollment string provided by your gateway operator, or go back and deselect the Agent Tunnel feature.");
             return false;
-        }
-
-        // JWT shape: three base64url segments separated by dots. The agent's `up --enrollment-string`
-        // parses the JWT claims for jet_gw_url / jet_agent_name, so the dialog only sanity-checks
-        // shape and base64url decodability here; signature verification happens at the gateway.
-        string text = Regex.Replace(enrollmentString.Text, @"\s+", "");
-        string[] parts = text.Split('.');
-        if (parts.Length != 3 || parts.Any(string.IsNullOrEmpty))
-        {
-            ShowValidationErrorString("Enrollment string must be a JWT (three base64url segments separated by dots).");
-            return false;
-        }
-        foreach (string seg in parts)
-        {
-            string b64 = seg.Replace('-', '+').Replace('_', '/');
-            b64 = b64.PadRight((b64.Length + 3) & ~3, '=');
-            try { _ = Convert.FromBase64String(b64); }
-            catch (FormatException)
-            {
-                ShowValidationErrorString("Enrollment string is not valid base64url.");
-                return false;
-            }
         }
 
         return true;
