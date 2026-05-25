@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use unigetui_broker::evaluator;
-use unigetui_broker::models::{Decision, PackageRequest, PolicyDocument};
+use unigetui_broker::model::{Decision, PackageRequest, PolicyDocument};
 
 /// Local samples directory bundled inside the crate.
 fn samples_dir() -> PathBuf {
@@ -43,8 +43,15 @@ fn load_json_file(path: &Path) -> serde_json::Value {
 }
 
 fn load_policy(path: &Path) -> PolicyDocument {
-    let value = load_json_file(path);
-    serde_json::from_value(value).unwrap_or_else(|e| panic!("failed to deserialize policy {}: {e}", path.display()))
+    let content =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match ext {
+        "yaml" | "yml" => serde_yaml::from_str(&content)
+            .unwrap_or_else(|e| panic!("failed to deserialize YAML policy {}: {e}", path.display())),
+        _ => serde_json::from_str(&content)
+            .unwrap_or_else(|e| panic!("failed to deserialize policy {}: {e}", path.display())),
+    }
 }
 
 fn load_request(path: &Path) -> PackageRequest {
@@ -60,6 +67,7 @@ fn all_sample_policies_deserialize() {
 
     let policy_files = [
         "corporate-allowlist.policy.json",
+        "corporate-allowlist.policy.yaml",
         "deny-risky-options.policy.json",
         "powershell-advanced.policy.json",
         "powershell-current-user.policy.json",
@@ -108,14 +116,29 @@ fn invalid_request_missing_package_id_fails_deserialization() {
 }
 
 #[test]
-fn invalid_policy_bad_failure_decision_fails_deserialization() {
-    let path = samples_dir().join("invalid/policies/invalid-failure-decision.policy.json");
-    let value = load_json_file(&path);
-    // "failureDecision": "allow" is not a valid variant (only "deny" is accepted).
+fn invalid_policy_unknown_field_fails_deserialization() {
+    // Policy with unknown field should fail due to deny_unknown_fields.
+    let value = serde_json::json!({
+        "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+        "policyVersion": "1.0.0",
+        "policyType": "packageBrokerPolicy",
+        "metadata": {
+            "id": "test",
+            "publisher": "Test",
+            "revision": 1,
+            "publishedAt": "2026-01-01T00:00:00Z"
+        },
+        "enforcement": {
+            "defaultDecision": "deny",
+            "rulePrecedence": "priorityThenDeny",
+            "unknownField": true
+        },
+        "rules": []
+    });
     let result: Result<PolicyDocument, _> = serde_json::from_value(value);
     assert!(
         result.is_err(),
-        "policy with failureDecision='allow' should fail deserialization"
+        "policy with unknown field should fail deserialization"
     );
 }
 

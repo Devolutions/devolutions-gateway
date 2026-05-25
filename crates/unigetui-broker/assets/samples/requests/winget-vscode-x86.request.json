@@ -5,13 +5,24 @@
   "requestId": "req-winget-vscode-x86",
   "createdAt": "2026-05-05T12:15:00Z",
   "operation": "install",
-  "manager": { "name": "Winget", "displayName": "WinGet", "executableFriendlyName": "winget.exe" },
-  "source": { "name": "winget", "url": "https://cdn.winget.microsoft.com/cache", "isVirtualManager": false },
-  "package": { "id": "Microsoft.VisualStudioCode", "name": "Microsoft Visual Studio Code" },
+  "manager": {
+    "name": "Winget",
+    "displayName": "WinGet",
+    "executableFriendlyName": "winget.exe"
+  },
+  "source": {
+    "name": "winget",
+    "url": "https://cdn.winget.microsoft.com/cache",
+    "isVirtualManager": false
+  },
+  "package": {
+    "id": "Microsoft.VisualStudioCode",
+    "name": "Microsoft Visual Studio Code",
+    "architecture": "x86",
+    "version": "1.95.0"
+  },
   "options": {
     "scope": "machine",
-    "architecture": "x86",
-    "version": "1.95.0",
     "interactive": false,
     "runAsAdministrator": true,
     "skipHashCheck": false,
@@ -19,5 +30,9 @@
     "customParameters": [],
     "killBeforeOperation": []
   },
-  "broker": { "requestedElevation": "elevated", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+  "broker": {
+    "requestedElevation": "elevated",
+    "effectiveUser": "CONTOSO\\alice",
+    "clientVersion": "3.2.0"
+  }
 }

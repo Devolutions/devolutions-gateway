@@ -5,18 +5,35 @@
   "requestId": "req-winget-git-custom-param-denied",
   "createdAt": "2026-05-05T12:18:00Z",
   "operation": "install",
-  "manager": { "name": "Winget", "displayName": "WinGet", "executableFriendlyName": "winget.exe" },
-  "source": { "name": "winget", "url": "https://cdn.winget.microsoft.com/cache", "isVirtualManager": false },
-  "package": { "id": "Git.Git", "name": "Git" },
+  "manager": {
+    "name": "Winget",
+    "displayName": "WinGet",
+    "executableFriendlyName": "winget.exe"
+  },
+  "source": {
+    "name": "winget",
+    "url": "https://cdn.winget.microsoft.com/cache",
+    "isVirtualManager": false
+  },
+  "package": {
+    "id": "Git.Git",
+    "name": "Git",
+    "architecture": "x64"
+  },
   "options": {
     "scope": "machine",
-    "architecture": "x64",
     "interactive": false,
     "runAsAdministrator": true,
     "skipHashCheck": false,
     "preRelease": false,
-    "customParameters": ["--override"],
+    "customParameters": [
+      "--override"
+    ],
     "killBeforeOperation": []
   },
-  "broker": { "requestedElevation": "elevated", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+  "broker": {
+    "requestedElevation": "elevated",
+    "effectiveUser": "CONTOSO\\alice",
+    "clientVersion": "3.2.0"
+  }
 }

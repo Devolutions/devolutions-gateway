@@ -5,7 +5,7 @@
 
 use schemars::schema_for;
 
-use crate::models::{BrokerResponse, PackageRequest, PolicyDocument};
+use crate::model::{BrokerResponse, PackageRequest, PolicyDocument};
 
 /// Get the generated policy schema as a JSON value (for diagnostics/export).
 pub fn policy_schema_json() -> serde_json::Value {
@@ -75,7 +75,6 @@ mod tests {
             },
             "enforcement": {
                 "defaultDecision": "deny",
-                "failureDecision": "deny",
                 "rulePrecedence": "priorityThenDeny"
             },
             "rules": [{

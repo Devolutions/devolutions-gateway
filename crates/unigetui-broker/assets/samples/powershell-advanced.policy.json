@@ -11,7 +11,6 @@
   },
   "enforcement": {
     "defaultDecision": "deny",
-    "failureDecision": "deny",
     "rulePrecedence": "priorityThenDeny"
   },
   "rules": [
@@ -21,8 +20,12 @@
       "decision": "deny",
       "reason": "Only PSGallery is approved for brokered PowerShell module operations.",
       "match": {
-        "managers": ["PowerShell"],
-        "sources": ["PoshTestGallery"]
+        "managers": [
+          "PowerShell"
+        ],
+        "sources": [
+          "PoshTestGallery"
+        ]
       }
     },
     {
@@ -31,8 +34,12 @@
       "decision": "deny",
       "reason": "Prerelease PowerShell modules are not approved in advanced scenarios.",
       "match": {
-        "managers": ["PowerShell"],
-        "preRelease": [true]
+        "managers": [
+          "PowerShell"
+        ],
+        "preRelease": [
+          true
+        ]
       }
     },
     {
@@ -41,17 +48,30 @@
       "decision": "allow",
       "reason": "Pester is approved from PSGallery for CurrentUser install and update operations within the supported version range.",
       "match": {
-        "operations": ["install", "update"],
-        "managers": ["PowerShell"],
-        "sources": ["PSGallery"],
-        "packageIdentifiers": ["Pester"],
+        "operations": [
+          "install",
+          "update"
+        ],
+        "managers": [
+          "PowerShell"
+        ],
+        "sources": [
+          "PSGallery"
+        ],
+        "packageIdentifiers": [
+          "Pester"
+        ],
         "versionRange": {
           "minVersion": "5.0.0",
           "maxVersion": "6.0.0",
           "includePrerelease": false
         },
-        "scopes": ["user"],
-        "runAsAdministrator": [false]
+        "scopes": [
+          "user"
+        ],
+        "runAsAdministrator": [
+          false
+        ]
       },
       "constraints": {
         "allowSkipHashCheck": false,

@@ -2,23 +2,22 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
-    "Architecture": {
+    "architecture": {
       "description": "Target architecture.",
       "enum": [
         "x86",
         "x64",
-        "arm32",
         "arm64",
         "neutral"
       ],
       "type": "string"
     },
-    "CustomParameterString": {
+    "customParameterString": {
       "maxLength": 512,
       "minLength": 1,
       "type": "string"
     },
-    "Decision": {
+    "decision": {
       "description": "Policy decision.",
       "enum": [
         "allow",
@@ -26,7 +25,7 @@
       ],
       "type": "string"
     },
-    "Elevation": {
+    "elevation": {
       "description": "Requested elevation level.",
       "enum": [
         "standard",
@@ -34,19 +33,12 @@
       ],
       "type": "string"
     },
-    "FailureDecision": {
-      "description": "Failure decision — always deny.",
-      "enum": [
-        "deny"
-      ],
-      "type": "string"
-    },
-    "HttpUrl": {
+    "httpUrl": {
       "maxLength": 2048,
       "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
       "type": "string"
     },
-    "ManagerName": {
+    "managerName": {
       "description": "Supported package manager names.",
       "enum": [
         "Winget",
@@ -54,7 +46,7 @@
       ],
       "type": "string"
     },
-    "Operation": {
+    "operation": {
       "description": "Package operation type.",
       "enum": [
         "install",
@@ -63,114 +55,92 @@
       ],
       "type": "string"
     },
-    "PolicyConstraints": {
+    "packageBrokerPolicy": {
+      "enum": [
+        "packageBrokerPolicy"
+      ],
+      "type": "string"
+    },
+    "policyConstraints": {
       "additionalProperties": false,
       "description": "Constraints applied after a rule matches.",
       "properties": {
         "allowCustomInstallLocation": {
           "description": "Allow custom install location.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowCustomParameters": {
           "description": "Allow custom parameters.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowInteractive": {
           "description": "Allow interactive mode.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowKillBeforeOperation": {
           "description": "Allow killing processes before operation.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowPrePostCommands": {
           "description": "Allow pre/post operation commands.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowPreRelease": {
           "description": "Allow pre-release versions.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowRunAsAdministrator": {
           "description": "Allow running as administrator.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "allowSkipHashCheck": {
           "description": "Allow skipping hash verification.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
+        },
+        "allowUninstallPrevious": {
+          "description": "Allow uninstalling previous version before installing update.",
+          "type": "boolean"
+        },
+        "allowUpgrade": {
+          "description": "Allow skipping upgrade on install operations if an existing version is detected (for install operations).",
+          "type": "boolean"
         },
         "allowedCustomParameterPatterns": {
           "description": "Glob patterns for allowed custom parameters.",
           "items": {
-            "$ref": "#/definitions/CustomParameterString"
+            "$ref": "#/definitions/customParameterString"
           },
           "maxItems": 128,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         },
         "allowedCustomParameters": {
           "description": "Exact allowed custom parameters.",
           "items": {
-            "$ref": "#/definitions/CustomParameterString"
+            "$ref": "#/definitions/customParameterString"
           },
           "maxItems": 128,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         },
         "allowedInstallLocationPatterns": {
           "description": "Glob patterns for allowed install locations.",
           "items": {
-            "$ref": "#/definitions/StringPattern"
+            "$ref": "#/definitions/stringPattern"
           },
           "maxItems": 64,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         },
         "deniedCustomParameters": {
           "description": "Denied custom parameters (deny takes precedence over allow).",
           "items": {
-            "$ref": "#/definitions/CustomParameterString"
+            "$ref": "#/definitions/customParameterString"
           },
           "maxItems": 128,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         }
       },
       "type": "object"
     },
-    "PolicyEnforcement": {
+    "policyEnforcement": {
       "additionalProperties": false,
       "description": "Enforcement configuration.",
       "properties": {
@@ -184,23 +154,15 @@
         "defaultDecision": {
           "allOf": [
             {
-              "$ref": "#/definitions/Decision"
+              "$ref": "#/definitions/decision"
             }
           ],
           "description": "Decision when no rule matches."
         },
-        "failureDecision": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FailureDecision"
-            }
-          ],
-          "description": "Decision on validation/parsing failure (must be \"deny\")."
-        },
         "rulePrecedence": {
           "allOf": [
             {
-              "$ref": "#/definitions/RulePrecedence"
+              "$ref": "#/definitions/rulePrecedence"
             }
           ],
           "description": "Rule precedence strategy (must be \"priorityThenDeny\")."
@@ -208,38 +170,31 @@
       },
       "required": [
         "defaultDecision",
-        "failureDecision",
         "rulePrecedence"
       ],
       "type": "object"
     },
-    "PolicyMatch": {
+    "policyMatch": {
       "additionalProperties": false,
       "description": "Match criteria for a policy rule. All specified fields must match. At least one field must be present.",
       "properties": {
         "architectures": {
           "description": "Allowed architectures.",
           "items": {
-            "$ref": "#/definitions/Architecture"
+            "$ref": "#/definitions/architecture"
           },
           "maxItems": 5,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "elevation": {
           "description": "Allowed elevation levels.",
           "items": {
-            "$ref": "#/definitions/Elevation"
+            "$ref": "#/definitions/elevation"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "hasCustomInstallLocation": {
           "description": "Whether request has custom install location.",
@@ -247,11 +202,8 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "hasCustomParameters": {
           "description": "Whether request has custom parameters.",
@@ -259,11 +211,8 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "hasKillBeforeOperation": {
           "description": "Whether request has kill-before-operation entries.",
@@ -271,11 +220,8 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "hasPrePostCommands": {
           "description": "Whether request has pre/post operation commands.",
@@ -283,11 +229,16 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
+        },
+        "hasUninstallPrevious": {
+          "description": "Whether request has uninstall-previous flag set.",
+          "items": {
+            "type": "boolean"
+          },
+          "type": "array",
+          "uniqueItems": true
         },
         "interactive": {
           "description": "Allowed interactive values.",
@@ -295,59 +246,44 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "managers": {
           "description": "Allowed managers.",
           "items": {
-            "$ref": "#/definitions/ManagerName"
+            "$ref": "#/definitions/managerName"
           },
           "maxItems": 16,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "operations": {
           "description": "Allowed operations.",
           "items": {
-            "$ref": "#/definitions/Operation"
+            "$ref": "#/definitions/operation"
           },
           "maxItems": 3,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "packageIdentifiers": {
           "description": "Package identifier patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/StringPattern"
+            "$ref": "#/definitions/stringPattern"
           },
           "maxItems": 1024,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "packageNames": {
           "description": "Package name patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/StringPattern"
+            "$ref": "#/definitions/stringPattern"
           },
           "maxItems": 1024,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "preRelease": {
           "description": "Allowed preRelease values.",
@@ -355,11 +291,8 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "runAsAdministrator": {
           "description": "Allowed runAsAdministrator values.",
@@ -367,23 +300,17 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "scopes": {
           "description": "Allowed scopes.",
           "items": {
-            "$ref": "#/definitions/Scope"
+            "$ref": "#/definitions/scope"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "skipHashCheck": {
           "description": "Allowed skipHashCheck values.",
@@ -391,28 +318,22 @@
             "type": "boolean"
           },
           "maxItems": 2,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "sources": {
           "description": "Source patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/StringPattern"
+            "$ref": "#/definitions/stringPattern"
           },
           "maxItems": 128,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "versionRange": {
           "anyOf": [
             {
-              "$ref": "#/definitions/VersionRange"
+              "$ref": "#/definitions/versionRange"
             },
             {
               "type": "null"
@@ -423,19 +344,16 @@
         "versions": {
           "description": "Exact version list.",
           "items": {
-            "$ref": "#/definitions/VersionString"
+            "$ref": "#/definitions/versionString"
           },
           "maxItems": 256,
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         }
       },
       "type": "object"
     },
-    "PolicyMetadata": {
+    "policyMetadata": {
       "additionalProperties": false,
       "description": "Policy metadata.",
       "properties": {
@@ -450,7 +368,7 @@
         "id": {
           "allOf": [
             {
-              "$ref": "#/definitions/ResourceId"
+              "$ref": "#/definitions/resourceId"
             }
           ],
           "description": "Unique policy identifier."
@@ -476,7 +394,7 @@
         "supportUrl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HttpUrl"
+              "$ref": "#/definitions/httpUrl"
             },
             {
               "type": "null"
@@ -487,12 +405,18 @@
         "validFrom": {
           "description": "Policy becomes active at this time.",
           "format": "date-time",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "validUntil": {
           "description": "Policy expires at this time.",
           "format": "date-time",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -503,36 +427,28 @@
       ],
       "type": "object"
     },
-    "PolicyRule": {
+    "policyRule": {
       "additionalProperties": false,
       "description": "A single policy rule.",
       "properties": {
         "constraints": {
           "anyOf": [
             {
-              "$ref": "#/definitions/PolicyConstraints"
+              "$ref": "#/definitions/policyConstraints"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Additional constraints applied after matching."
+          "description": "Additional constraints applied after matching. When absent, no constraints are enforced beyond the match criteria."
         },
         "decision": {
           "allOf": [
             {
-              "$ref": "#/definitions/Decision"
+              "$ref": "#/definitions/decision"
             }
           ],
           "description": "Decision if this rule matches."
-        },
-        "description": {
-          "description": "Human-readable description.",
-          "maxLength": 512,
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "enabled": {
           "default": true,
@@ -542,7 +458,7 @@
         "id": {
           "allOf": [
             {
-              "$ref": "#/definitions/ResourceId"
+              "$ref": "#/definitions/resourceId"
             }
           ],
           "description": "Unique rule identifier."
@@ -550,10 +466,10 @@
         "match": {
           "allOf": [
             {
-              "$ref": "#/definitions/PolicyMatch"
+              "$ref": "#/definitions/policyMatch"
             }
           ],
-          "description": "Match criteria — request must satisfy all specified fields."
+          "description": "Match criteria — request must satisfy all specified fields. At least one criterion must be present."
         },
         "priority": {
           "description": "Priority (lower = higher precedence).",
@@ -579,26 +495,25 @@
       ],
       "type": "object"
     },
-    "PolicyType": {
-      "description": "Fixed policy type value: `\"packageBrokerPolicy\"`.",
+    "policySchemaUri": {
       "enum": [
-        "packageBrokerPolicy"
+        "https://aka.ms/unigetui/package-policy.schema.1.0.json"
       ],
       "type": "string"
     },
-    "ResourceId": {
+    "resourceId": {
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
       "type": "string"
     },
-    "RulePrecedence": {
+    "rulePrecedence": {
       "description": "Rule precedence strategy — always priorityThenDeny.",
       "enum": [
         "priorityThenDeny"
       ],
       "type": "string"
     },
-    "Scope": {
+    "scope": {
       "description": "Package installation scope.",
       "enum": [
         "user",
@@ -606,17 +521,17 @@
       ],
       "type": "string"
     },
-    "SemanticVersion": {
+    "semanticVersion": {
       "maxLength": 128,
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
       "type": "string"
     },
-    "StringPattern": {
+    "stringPattern": {
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
     },
-    "VersionRange": {
+    "versionRange": {
       "additionalProperties": false,
       "description": "Semantic version range for matching.",
       "properties": {
@@ -646,7 +561,7 @@
       },
       "type": "object"
     },
-    "VersionString": {
+    "versionString": {
       "maxLength": 128,
       "minLength": 1,
       "type": "string"
@@ -655,20 +570,17 @@
   "description": "A policy document governing which package operations are allowed or denied.",
   "properties": {
     "$schema": {
-      "anyOf": [
+      "allOf": [
         {
-          "$ref": "#/definitions/HttpUrl"
-        },
-        {
-          "type": "null"
+          "$ref": "#/definitions/policySchemaUri"
         }
       ],
-      "description": "JSON Schema URI (ignored at runtime)."
+      "description": "Policy schema URI constant."
     },
     "enforcement": {
       "allOf": [
         {
-          "$ref": "#/definitions/PolicyEnforcement"
+          "$ref": "#/definitions/policyEnforcement"
         }
       ],
       "description": "Enforcement configuration."
@@ -676,7 +588,7 @@
     "metadata": {
       "allOf": [
         {
-          "$ref": "#/definitions/PolicyMetadata"
+          "$ref": "#/definitions/policyMetadata"
         }
       ],
       "description": "Policy metadata."
@@ -684,7 +596,7 @@
     "policyType": {
       "allOf": [
         {
-          "$ref": "#/definitions/PolicyType"
+          "$ref": "#/definitions/packageBrokerPolicy"
         }
       ],
       "description": "Must be `\"packageBrokerPolicy\"`."
@@ -692,28 +604,28 @@
     "policyVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/SemanticVersion"
+          "$ref": "#/definitions/semanticVersion"
         }
       ],
       "description": "Policy syntax version (semver)."
     },
     "rules": {
-      "description": "Ordered list of policy rules.",
+      "description": "Ordered list of policy rules (may be empty; enforcement defaults apply).",
       "items": {
-        "$ref": "#/definitions/PolicyRule"
+        "$ref": "#/definitions/policyRule"
       },
       "maxItems": 1024,
-      "minItems": 1,
       "type": "array"
     }
   },
   "required": [
+    "$schema",
     "enforcement",
     "metadata",
     "policyType",
     "policyVersion",
     "rules"
   ],
-  "title": "PolicyDocument",
+  "title": "policyDocument",
   "type": "object"
 }

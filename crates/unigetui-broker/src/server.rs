@@ -7,7 +7,7 @@
 //! - `POST /v1/package-operations/evaluate` — evaluate policy (dry-run)
 //! - `POST /v1/package-operations` — evaluate and execute
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -18,10 +18,10 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::command_builder::build_winget_command;
+use crate::command_builder::winget::build_winget_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
-use crate::models::{
+use crate::model::{
     BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, PackageBrokerResponse, PackageRequest,
     PolicyDocument, ProtocolVersion, ResourceId, ResponsePolicyInfo, ResponseSchemaUri, RuleId, SemanticVersion,
     Transport,
@@ -40,7 +40,8 @@ const ACCEPTED_CONTENT_TYPES: &[&str] = &[
 
 /// Shared server state.
 pub struct BrokerState {
-    pub policy: PolicyDocument,
+    /// Current policy. `None` means the broker is paused (policy file missing or corrupted).
+    pub policy: RwLock<Option<Arc<PolicyDocument>>>,
     pub executor: Box<dyn CommandExecutor>,
     pub pipe_name: String,
 }
@@ -80,11 +81,18 @@ async fn handle_request(
 }
 
 fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
+    let policy_guard = state.policy.read().expect("policy lock poisoned");
+    let status = if policy_guard.is_some() { "ready" } else { "paused" };
+    let policy_id = policy_guard
+        .as_ref()
+        .map(|p| p.metadata.id.to_string())
+        .unwrap_or_default();
+
     let body = serde_json::json!({
-        "status": "ready",
+        "status": status,
         "protocolVersion": PROTOCOL_VERSION_STR,
         "elevatedSimulation": false,
-        "policyId": &*state.policy.metadata.id,
+        "policyId": policy_id,
         "endpoints": [
             "GET /v1/health",
             "GET /v1/capabilities",
@@ -109,7 +117,7 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
         "supportedManagers": ["Winget"],
         "supportedOperations": ["install", "update", "uninstall"],
         "maxRequestBodyBytes": 262144,
-        "pipeName": state.pipe_name
+        "pipeName": &state.pipe_name
     });
     json_response(StatusCode::OK, &body)
 }
@@ -120,8 +128,17 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
 
     tracing::trace!(%audit_id, method = %req.method(), path = %req.uri().path(), "Received request");
 
+    // Acquire policy; return 503 if broker is paused.
+    let policy = {
+        let guard = state.policy.read().expect("policy lock poisoned");
+        match guard.as_ref() {
+            Some(p) => Arc::clone(p),
+            None => return service_unavailable(&audit_id),
+        }
+    };
+
     // Validate required protocol headers per wire protocol spec.
-    if let Some(err_response) = validate_request_headers(&req, &state.policy, &audit_id, received_at, &state.pipe_name)
+    if let Some(err_response) = validate_request_headers(&req, &policy, &audit_id, received_at, &state.pipe_name)
     {
         return err_response;
     }
@@ -138,7 +155,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         Ok(collected) => collected.to_bytes(),
         Err(_) => {
             return make_error_response(
-                &state.policy,
+                &policy,
                 &audit_id,
                 received_at,
                 "failed to read request body",
@@ -150,7 +167,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
 
     if body_bytes.is_empty() {
         return make_error_response(
-            &state.policy,
+            &policy,
             &audit_id,
             received_at,
             "request body is required",
@@ -161,7 +178,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
 
     if body_bytes.len() > MAX_REQUEST_BODY_BYTES {
         return make_error_response(
-            &state.policy,
+            &policy,
             &audit_id,
             received_at,
             &format!(
@@ -179,7 +196,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         Ok(req) => req,
         Err(error) => {
             return make_error_response(
-                &state.policy,
+                &policy,
                 &audit_id,
                 received_at,
                 &format!("invalid request: {error}"),
@@ -194,7 +211,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         && header_val != &*request.request_id
     {
         return make_error_response(
-            &state.policy,
+            &policy,
             &audit_id,
             received_at,
             &format!(
@@ -216,12 +233,12 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     );
 
     // Evaluate policy.
-    let decision = evaluator::evaluate(&state.policy, &request);
+    let decision = evaluator::evaluate(&policy, &request);
 
     let (command, would_execute) = if decision.decision == Decision::Allow {
-        if request.manager.name != crate::models::ManagerName::Winget {
+        if request.manager.name != crate::model::ManagerName::Winget {
             return make_error_response(
-                &state.policy,
+                &policy,
                 &audit_id,
                 received_at,
                 &format!(
@@ -265,7 +282,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     let completed_at = Utc::now();
 
     let response = BrokerResponse {
-        schema: ResponseSchemaUri,
+        _schema: ResponseSchemaUri,
         response_version: SemanticVersion::from("1.0.0"),
         response_type: PackageBrokerResponse,
         broker: BrokerInfo {
@@ -288,13 +305,13 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         reason: decision.reason,
         would_execute,
         policy: ResponsePolicyInfo {
-            id: state.policy.metadata.id.clone(),
-            revision: state.policy.metadata.revision,
-            policy_version: state.policy.policy_version.clone(),
+            id: policy.metadata.id.clone(),
+            revision: policy.metadata.revision,
+            policy_version: policy.policy_version.clone(),
         },
         execution: ExecutionInfo {
             mode: execution_mode,
-            command: command.into_iter().map(crate::models::CommandString).collect(),
+            command: command.into_iter().map(crate::model::CommandString).collect(),
             note,
         },
     };
@@ -320,8 +337,8 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
         .header("Content-Type", RESPONSE_MEDIA_TYPE)
         .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
         .header("UniGetUI-Audit-Id", &audit_id)
-        .header("UniGetUI-Policy-Id", &*state.policy.metadata.id)
-        .header("UniGetUI-Policy-Revision", state.policy.metadata.revision.to_string())
+        .header("UniGetUI-Policy-Id", &*policy.metadata.id)
+        .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
 }
@@ -418,7 +435,7 @@ fn make_error_response(
 ) -> Response<Full<Bytes>> {
     let completed_at = Utc::now();
     let response = BrokerResponse {
-        schema: ResponseSchemaUri,
+        _schema: ResponseSchemaUri,
         response_version: SemanticVersion::from("1.0.0"),
         response_type: PackageBrokerResponse,
         broker: BrokerInfo {
@@ -462,6 +479,21 @@ fn make_error_response(
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
         .body(Full::new(Bytes::from(body)))
         .expect("BUG: response builder with valid status and ASCII headers")
+}
+
+fn service_unavailable(audit_id: &str) -> Response<Full<Bytes>> {
+    let body = serde_json::json!({
+        "error": "broker paused",
+        "reason": "policy file is unavailable or corrupted; waiting for a valid policy",
+        "auditId": audit_id,
+    });
+    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: JSON value serialization");
+    Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header("Content-Type", "application/json")
+        .header("Retry-After", "5")
+        .body(Full::new(Bytes::from(bytes)))
+        .expect("BUG: static response builder")
 }
 
 fn not_found() -> Response<Full<Bytes>> {

@@ -6,9 +6,10 @@
 pub mod command_builder;
 pub mod evaluator;
 pub mod executor;
-pub mod models;
+pub mod model;
 pub mod pipe;
 pub mod policy_loader;
+pub mod policy_watcher;
 pub mod schema;
 pub mod server;
 pub mod task;

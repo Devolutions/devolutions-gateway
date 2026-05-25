@@ -17,11 +17,11 @@
   },
   "package": {
     "id": "Example.UnapprovedTool",
-    "name": "Unapproved Tool"
+    "name": "Unapproved Tool",
+    "architecture": "x64"
   },
   "options": {
     "scope": "user",
-    "architecture": "x64",
     "interactive": false,
     "runAsAdministrator": false,
     "skipHashCheck": false,

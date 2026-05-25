@@ -139,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let state = Arc::new(BrokerState {
-        policy,
+        policy: std::sync::RwLock::new(Some(Arc::new(policy))),
         executor,
         pipe_name: args.pipe_name.clone(),
     });

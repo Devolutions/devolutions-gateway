@@ -9,7 +9,6 @@ metadata:
   description: Fail-closed YAML policy for standard workstation package installs.
 enforcement:
   defaultDecision: deny
-  failureDecision: deny
   rulePrecedence: priorityThenDeny
 rules:
   - id: deny.integrity-bypass

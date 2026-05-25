@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 
-use crate::models::Elevation;
+use crate::model::Elevation;
 
 /// Execution context passed from the server to the executor.
 #[derive(Debug, Clone)]

@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::models::{
+use crate::model::{
     Architecture, Decision, Elevation, ManagerName, Operation, PackageRequest, PolicyConstraints, PolicyDocument,
     PolicyRule, RequestFlags, Scope,
 };
@@ -88,7 +88,7 @@ fn rule_matches(rule: &PolicyRule, request: &PackageRequest, flags: &RequestFlag
         && string_in_set(effective_version, &m.versions)
         && version_range_matches(effective_version, &m.version_range)
         && scopes_match(request.options.scope, &m.scopes)
-        && architectures_match(request.options.architecture, &m.architectures)
+        && architectures_match(request.package.architecture, &m.architectures)
         && elevation_match(request.broker.requested_elevation, &m.elevation)
         && bool_in_set(request.options.run_as_administrator, &m.run_as_administrator)
         && bool_in_set(request.options.interactive, &m.interactive)
@@ -228,19 +228,13 @@ fn constraints_pass(constraints: &Option<PolicyConstraints>, request: &PackageRe
 // ─── Version helpers ─────────────────────────────────────────────────────────
 
 fn get_effective_version(request: &PackageRequest) -> String {
-    if let Some(v) = &request.options.version {
-        return v.0.clone();
+    match &request.package.version {
+        Some(v) => v.0.clone(),
+        None => String::new(),
     }
-    if let Some(v) = &request.package.new_version {
-        return v.0.clone();
-    }
-    if let Some(v) = &request.package.current_version {
-        return v.0.clone();
-    }
-    String::new()
 }
 
-fn version_range_matches(version: &str, range: &Option<crate::models::VersionRange>) -> bool {
+fn version_range_matches(version: &str, range: &Option<crate::model::VersionRange>) -> bool {
     let Some(range) = range else {
         return true;
     };
@@ -298,11 +292,11 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::models::*;
+    use crate::model::*;
 
     fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
         PolicyDocument {
-            schema: PolicySchemaUri,
+            _schema: PolicySchemaUri,
             policy_version: SemanticVersion::from("1.0.0"),
             policy_type: PackageBrokerPolicy,
             metadata: PolicyMetadata {
@@ -317,7 +311,6 @@ mod tests {
             },
             enforcement: PolicyEnforcement {
                 default_decision,
-                failure_decision: FailureDecision::Deny,
                 rule_precedence: RulePrecedence::PriorityThenDeny,
                 audit_mode: None,
             },
@@ -327,7 +320,7 @@ mod tests {
 
     fn make_request(operation: Operation, package_id: &str) -> PackageRequest {
         PackageRequest {
-            schema: RequestSchemaUri,
+            _schema: RequestSchemaUri,
             request_version: SemanticVersion::from("1.0.0"),
             request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
@@ -346,14 +339,12 @@ mod tests {
             package: RequestPackage {
                 id: PackageIdentifier(package_id.to_owned()),
                 name: "Test Package".to_owned(),
-                current_version: None,
-                new_version: None,
+                version: None,
+                architecture: None,
                 channel: None,
             },
             options: RequestOptions {
                 scope: None,
-                architecture: None,
-                version: None,
                 interactive: false,
                 run_as_administrator: false,
                 skip_hash_check: false,
@@ -363,6 +354,8 @@ mod tests {
                 pre_operation_command: None,
                 post_operation_command: None,
                 kill_before_operation: Vec::new(),
+                uninstall_previous: false,
+                no_upgrade: false,
             },
             broker: BrokerContext {
                 requested_elevation: Elevation::Elevated,
@@ -382,7 +375,6 @@ mod tests {
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
-                description: None,
                 reason: Some("Firefox is allowed.".to_owned()),
                 match_criteria: PolicyMatch {
                     package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
@@ -407,7 +399,6 @@ mod tests {
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
-                description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
                     package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
@@ -432,7 +423,6 @@ mod tests {
                 enabled: true,
                 priority: 1,
                 decision: Decision::Allow,
-                description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
                     operations: BTreeSet::from([Operation::Install]),
@@ -458,7 +448,6 @@ mod tests {
                 enabled: true,
                 priority: 100,
                 decision: Decision::Allow,
-                description: None,
                 reason: None,
                 match_criteria: PolicyMatch {
                     operations: BTreeSet::from([Operation::Install]),

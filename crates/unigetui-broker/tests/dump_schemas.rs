@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use schemars::schema_for;
-use unigetui_broker::models::{BrokerResponse, PackageRequest, PolicyDocument};
+use unigetui_broker::model::{BrokerResponse, PackageRequest, PolicyDocument};
 
 /// Local samples directory bundled inside the crate.
 fn samples_dir() -> PathBuf {
@@ -66,14 +66,30 @@ fn sample_policies_pass_deserialization() {
     let mut tested = 0;
     for entry in dir.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json") && path.to_str().unwrap_or_default().contains(".policy.") {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        let name = path.to_str().unwrap_or_default();
+
+        if name.contains(".policy.") {
             let content = std::fs::read_to_string(&path).unwrap();
-            let _policy: PolicyDocument = serde_json::from_str(&content).unwrap_or_else(|e| {
-                panic!(
-                    "Policy sample {:?} failed deserialization: {e}",
-                    path.file_name().unwrap()
-                );
-            });
+            match ext {
+                "json" => {
+                    let _policy: PolicyDocument = serde_json::from_str(&content).unwrap_or_else(|e| {
+                        panic!(
+                            "Policy sample {:?} failed deserialization: {e}",
+                            path.file_name().unwrap()
+                        );
+                    });
+                }
+                "yaml" | "yml" => {
+                    let _policy: PolicyDocument = serde_yaml::from_str(&content).unwrap_or_else(|e| {
+                        panic!(
+                            "YAML policy sample {:?} failed deserialization: {e}",
+                            path.file_name().unwrap()
+                        );
+                    });
+                }
+                _ => continue,
+            }
             tested += 1;
         }
     }

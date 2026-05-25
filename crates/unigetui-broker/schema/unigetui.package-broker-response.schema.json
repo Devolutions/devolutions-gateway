@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
-    "BrokerInfo": {
+    "brokerInfo": {
       "additionalProperties": false,
       "description": "Broker identity information in responses.",
       "properties": {
@@ -28,7 +28,7 @@
         "protocolVersion": {
           "allOf": [
             {
-              "$ref": "#/definitions/ProtocolVersion"
+              "$ref": "#/definitions/protocolVersion"
             }
           ],
           "description": "Protocol version (e.g., \"1.0\")."
@@ -36,7 +36,7 @@
         "transport": {
           "allOf": [
             {
-              "$ref": "#/definitions/Transport"
+              "$ref": "#/definitions/transport"
             }
           ],
           "description": "Transport mechanism."
@@ -50,12 +50,12 @@
       ],
       "type": "object"
     },
-    "CommandString": {
+    "commandString": {
       "maxLength": 2048,
       "minLength": 1,
       "type": "string"
     },
-    "Decision": {
+    "decision": {
       "description": "Policy decision.",
       "enum": [
         "allow",
@@ -63,14 +63,14 @@
       ],
       "type": "string"
     },
-    "ExecutionInfo": {
+    "executionInfo": {
       "additionalProperties": false,
       "description": "Execution outcome details.",
       "properties": {
         "command": {
           "description": "Command that was or would be executed.",
           "items": {
-            "$ref": "#/definitions/CommandString"
+            "$ref": "#/definitions/commandString"
           },
           "maxItems": 256,
           "type": "array"
@@ -78,7 +78,7 @@
         "mode": {
           "allOf": [
             {
-              "$ref": "#/definitions/ExecutionMode"
+              "$ref": "#/definitions/executionMode"
             }
           ],
           "description": "Execution mode."
@@ -97,7 +97,7 @@
       ],
       "type": "object"
     },
-    "ExecutionMode": {
+    "executionMode": {
       "description": "Execution mode.",
       "enum": [
         "simulated-elevated",
@@ -105,12 +105,7 @@
       ],
       "type": "string"
     },
-    "HttpUrl": {
-      "maxLength": 2048,
-      "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
-      "type": "string"
-    },
-    "Operation": {
+    "operation": {
       "description": "Package operation type.",
       "enum": [
         "install",
@@ -119,29 +114,35 @@
       ],
       "type": "string"
     },
-    "PackageIdentifier": {
+    "packageBrokerResponse": {
+      "enum": [
+        "packageBrokerResponse"
+      ],
+      "type": "string"
+    },
+    "packageIdentifier": {
       "maxLength": 256,
       "minLength": 1,
       "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
       "type": "string"
     },
-    "ProtocolVersion": {
+    "protocolVersion": {
       "pattern": "^[0-9]+\\.[0-9]+$",
       "type": "string"
     },
-    "ResourceId": {
+    "resourceId": {
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
       "type": "string"
     },
-    "ResponsePolicyInfo": {
+    "responsePolicyInfo": {
       "additionalProperties": false,
       "description": "Summary of policy used for the decision.",
       "properties": {
         "id": {
           "allOf": [
             {
-              "$ref": "#/definitions/ResourceId"
+              "$ref": "#/definitions/resourceId"
             }
           ],
           "description": "Policy document identifier."
@@ -149,7 +150,7 @@
         "policyVersion": {
           "allOf": [
             {
-              "$ref": "#/definitions/SemanticVersion"
+              "$ref": "#/definitions/semanticVersion"
             }
           ],
           "description": "Policy syntax version."
@@ -169,24 +170,23 @@
       ],
       "type": "object"
     },
-    "ResponseType": {
-      "description": "Fixed response type value: `\"packageBrokerResponse\"`.",
+    "responseSchemaUri": {
       "enum": [
-        "packageBrokerResponse"
+        "https://aka.ms/unigetui/package-broker-response.schema.1.0.json"
       ],
       "type": "string"
     },
-    "RuleId": {
+    "ruleId": {
       "maxLength": 128,
       "pattern": "^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127})$",
       "type": "string"
     },
-    "SemanticVersion": {
+    "semanticVersion": {
       "maxLength": 128,
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
       "type": "string"
     },
-    "Transport": {
+    "transport": {
       "description": "Broker transport type.",
       "enum": [
         "http-named-pipe",
@@ -198,20 +198,17 @@
   "description": "Canonical response returned by the broker after evaluating a request.",
   "properties": {
     "$schema": {
-      "anyOf": [
+      "allOf": [
         {
-          "$ref": "#/definitions/HttpUrl"
-        },
-        {
-          "type": "null"
+          "$ref": "#/definitions/responseSchemaUri"
         }
       ],
-      "description": "JSON Schema URI (ignored at runtime)."
+      "description": "Response schema URI constant."
     },
     "auditId": {
       "allOf": [
         {
-          "$ref": "#/definitions/ResourceId"
+          "$ref": "#/definitions/resourceId"
         }
       ],
       "description": "Server-generated audit identifier."
@@ -219,7 +216,7 @@
     "broker": {
       "allOf": [
         {
-          "$ref": "#/definitions/BrokerInfo"
+          "$ref": "#/definitions/brokerInfo"
         }
       ],
       "description": "Broker identity and capabilities."
@@ -232,7 +229,7 @@
     "decision": {
       "allOf": [
         {
-          "$ref": "#/definitions/Decision"
+          "$ref": "#/definitions/decision"
         }
       ],
       "description": "The evaluation decision."
@@ -240,7 +237,7 @@
     "execution": {
       "allOf": [
         {
-          "$ref": "#/definitions/ExecutionInfo"
+          "$ref": "#/definitions/executionInfo"
         }
       ],
       "description": "Execution details."
@@ -257,7 +254,7 @@
     "operation": {
       "anyOf": [
         {
-          "$ref": "#/definitions/Operation"
+          "$ref": "#/definitions/operation"
         },
         {
           "type": "null"
@@ -268,7 +265,7 @@
     "packageId": {
       "anyOf": [
         {
-          "$ref": "#/definitions/PackageIdentifier"
+          "$ref": "#/definitions/packageIdentifier"
         },
         {
           "type": "null"
@@ -279,7 +276,7 @@
     "policy": {
       "allOf": [
         {
-          "$ref": "#/definitions/ResponsePolicyInfo"
+          "$ref": "#/definitions/responsePolicyInfo"
         }
       ],
       "description": "Summary of the policy used."
@@ -296,20 +293,17 @@
       "type": "string"
     },
     "requestId": {
-      "anyOf": [
+      "allOf": [
         {
-          "$ref": "#/definitions/ResourceId"
-        },
-        {
-          "type": "null"
+          "$ref": "#/definitions/resourceId"
         }
       ],
-      "description": "Echoed request id (null if request was invalid)."
+      "description": "Echoed request id."
     },
     "responseType": {
       "allOf": [
         {
-          "$ref": "#/definitions/ResponseType"
+          "$ref": "#/definitions/packageBrokerResponse"
         }
       ],
       "description": "Must be `\"packageBrokerResponse\"`."
@@ -317,7 +311,7 @@
     "responseVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/SemanticVersion"
+          "$ref": "#/definitions/semanticVersion"
         }
       ],
       "description": "Response syntax version (semver)."
@@ -325,7 +319,7 @@
     "ruleId": {
       "allOf": [
         {
-          "$ref": "#/definitions/RuleId"
+          "$ref": "#/definitions/ruleId"
         }
       ],
       "description": "The rule that produced the decision."
@@ -345,6 +339,7 @@
     }
   },
   "required": [
+    "$schema",
     "auditId",
     "broker",
     "completedAt",
@@ -353,11 +348,12 @@
     "policy",
     "reason",
     "receivedAt",
+    "requestId",
     "responseType",
     "responseVersion",
     "ruleId",
     "wouldExecute"
   ],
-  "title": "BrokerResponse",
+  "title": "brokerResponse",
   "type": "object"
 }

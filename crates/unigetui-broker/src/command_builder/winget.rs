@@ -1,9 +1,8 @@
-//! Command-line builder for WinGet operations.
-//!
-//! Constructs the command the broker would execute from validated request fields.
-//! The broker never executes client-supplied commands directly.
+//! WinGet command-line builder.
 
-use crate::models::{Operation, PackageRequest, Scope};
+use crate::model::{Architecture, Operation, PackageRequest, Scope};
+
+use super::{set_if_specified, set_if_true};
 
 /// Build the WinGet command line from a validated request.
 ///
@@ -20,44 +19,43 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         operation.to_owned(),
         "--id".to_owned(),
         request.package.id.0.clone(),
+        "--source".to_owned(),
+        request.source.name.clone(),
         "--exact".to_owned(),
+        "--accept-source-agreements".to_owned(),
     ];
 
-    add_pair(&mut command, "--source", Some(&request.source.name));
+    set_if_specified(&mut command, "--version", request.package.version.as_deref());
 
-    if let Some(scope) = &request.options.scope {
-        let scope_str = match scope {
-            Scope::User => "user",
-            Scope::Machine => "machine",
-        };
-        command.push("--scope".to_owned());
-        command.push(scope_str.to_owned());
-    }
+    set_if_specified(
+        &mut command,
+        "--architecture",
+        request.package.architecture.map(|arch| match arch {
+            Architecture::X86 => "x86",
+            Architecture::X64 => "x64",
+            Architecture::Arm64 => "arm64",
+            Architecture::Neutral => "neutral",
+        }),
+    );
 
-    // Version: use explicit version option first, then package new_version for updates.
-    let version = request
-        .options
-        .version
-        .as_deref()
-        .or(request.package.new_version.as_deref());
-    add_pair(&mut command, "--version", version);
+    set_if_specified(
+        &mut command,
+        "--scope",
+        match request.options.scope {
+            Some(Scope::User) => Some("user"),
+            Some(Scope::Machine) => Some("machine"),
+            None => None,
+        },
+    );
 
-    if request.options.interactive {
-        command.push("--interactive".to_owned());
-    } else {
-        command.push("--silent".to_owned());
-    }
+    set_if_true(&mut command, "--interactive", request.options.interactive);
 
-    if let Some(arch) = &request.options.architecture {
-        command.push("--architecture".to_owned());
-        command.push(arch.to_string());
-    }
+    set_if_true(&mut command, "--silent", !request.options.interactive);
+    set_if_true(&mut command, "--disable-interactivity", !request.options.interactive);
 
-    if request.options.skip_hash_check {
-        command.push("--ignore-security-hash".to_owned());
-    }
+    set_if_true(&mut command, "--ignore-security-hash", request.options.skip_hash_check);
 
-    add_pair(
+    set_if_specified(
         &mut command,
         "--location",
         request.options.custom_install_location.as_deref(),
@@ -70,8 +68,6 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         }
     }
 
-    // Accept agreements non-interactively.
-    command.push("--accept-source-agreements".to_owned());
     if matches!(request.operation, Operation::Install | Operation::Update) {
         command.push("--accept-package-agreements".to_owned());
     }
@@ -79,25 +75,16 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
     command
 }
 
-fn add_pair(command: &mut Vec<String>, flag: &str, value: Option<&str>) {
-    if let Some(v) = value
-        && !v.is_empty()
-    {
-        command.push(flag.to_owned());
-        command.push(v.to_owned());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::models::*;
+    use crate::model::*;
 
     fn make_request() -> PackageRequest {
         PackageRequest {
-            schema: RequestSchemaUri,
+            _schema: RequestSchemaUri,
             request_version: SemanticVersion::from("1.0.0"),
             request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
@@ -116,14 +103,12 @@ mod tests {
             package: RequestPackage {
                 id: PackageIdentifier::from("Mozilla.Firefox".to_owned()),
                 name: "Firefox".to_owned(),
-                current_version: None,
-                new_version: None,
+                version: None,
+                architecture: None,
                 channel: None,
             },
             options: RequestOptions {
                 scope: None,
-                architecture: None,
-                version: None,
                 interactive: false,
                 run_as_administrator: false,
                 skip_hash_check: false,
@@ -133,6 +118,8 @@ mod tests {
                 pre_operation_command: None,
                 post_operation_command: None,
                 kill_before_operation: Vec::new(),
+                uninstall_previous: false,
+                no_upgrade: false,
             },
             broker: BrokerContext {
                 requested_elevation: Elevation::Elevated,
@@ -159,7 +146,7 @@ mod tests {
     fn test_upgrade_command() {
         let mut request = make_request();
         request.operation = Operation::Update;
-        request.package.new_version = Some(SemanticVersion::from("120.0.0"));
+        request.package.version = Some(SemanticVersion::from("120.0.0"));
 
         let cmd = build_winget_command(&request);
         assert_eq!(cmd[1], "upgrade");

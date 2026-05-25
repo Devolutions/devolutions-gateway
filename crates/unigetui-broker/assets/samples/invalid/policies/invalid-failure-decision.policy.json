@@ -19,7 +19,9 @@
       "priority": 100,
       "decision": "allow",
       "match": {
-        "packageIdentifiers": ["*"]
+        "packageIdentifiers": [
+          "*"
+        ]
       }
     }
   ]

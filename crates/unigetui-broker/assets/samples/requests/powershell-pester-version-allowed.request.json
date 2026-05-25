@@ -5,12 +5,23 @@
   "requestId": "req-powershell-pester-version-allowed",
   "createdAt": "2026-05-05T12:22:00Z",
   "operation": "install",
-  "manager": { "name": "PowerShell", "displayName": "PowerShell", "executableFriendlyName": "pwsh.exe" },
-  "source": { "name": "PSGallery", "url": "https://www.powershellgallery.com/api/v2", "isVirtualManager": false },
-  "package": { "id": "Pester", "name": "Pester" },
+  "manager": {
+    "name": "PowerShell",
+    "displayName": "PowerShell",
+    "executableFriendlyName": "pwsh.exe"
+  },
+  "source": {
+    "name": "PSGallery",
+    "url": "https://www.powershellgallery.com/api/v2",
+    "isVirtualManager": false
+  },
+  "package": {
+    "id": "Pester",
+    "name": "Pester",
+    "version": "5.5.0"
+  },
   "options": {
     "scope": "user",
-    "version": "5.5.0",
     "interactive": false,
     "runAsAdministrator": false,
     "skipHashCheck": false,
@@ -18,5 +29,9 @@
     "customParameters": [],
     "killBeforeOperation": []
   },
-  "broker": { "requestedElevation": "standard", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+  "broker": {
+    "requestedElevation": "standard",
+    "effectiveUser": "CONTOSO\\alice",
+    "clientVersion": "3.2.0"
+  }
 }
