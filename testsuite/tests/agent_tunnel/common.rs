@@ -6,17 +6,19 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_tunnel::AgentTunnelHandle;
 use agent_tunnel::cert::CaManager;
 use agent_tunnel::listener::AgentTunnelListener;
+use agent_tunnel::registry::AgentRegistry;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::ShutdownHandle;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 /// Start a TCP echo server that echoes back whatever it receives.
 pub(super) async fn start_echo_server() -> (SocketAddr, JoinHandle<()>) {
@@ -164,5 +166,27 @@ pub(super) async fn bind_test_listener() -> TestListener {
         shutdown,
         task,
         _temp_dir: temp_dir,
+    }
+}
+
+/// Poll the registry until `agent_id` is present and has applied at least one
+/// route advertisement with epoch ≥ `min_epoch`, or panic after 5 seconds.
+///
+/// Replaces the older fixed-sleep pattern that raced on slow CI runners:
+/// `ctrl.send(&RouteAdvertise)` only guarantees the message is on the wire,
+/// not that the gateway has processed it. Default `RouteAdvertisementState`
+/// starts at epoch 0, so any successful RouteAdvertise bumps it to ≥ 1.
+pub(super) async fn wait_for_route_advertised(registry: &AgentRegistry, agent_id: Uuid, min_epoch: u64) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(peer) = registry.get(&agent_id).await
+            && peer.route_state().epoch >= min_epoch
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("agent {agent_id} did not advertise route at epoch >= {min_epoch} within 5s");
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }

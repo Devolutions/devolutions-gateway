@@ -20,7 +20,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
-use super::common::{connect_quinn_client, generate_csr_with_cn, generate_test_key_and_csr, start_echo_server};
+use super::common::{
+    connect_quinn_client, generate_csr_with_cn, generate_test_key_and_csr, start_echo_server, wait_for_route_advertised,
+};
 
 /// Full E2E integration test.
 ///
@@ -87,8 +89,8 @@ async fn quic_agent_tunnel_e2e() {
     let route_msg = ControlMessage::route_advertise(1, vec![echo_subnet], vec![]);
     ctrl.send(&route_msg).await.expect("send RouteAdvertise");
 
-    // Give gateway time to process.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Wait for the gateway to actually process the RouteAdvertise.
+    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
 
     // Verify agent is registered.
     assert!(
@@ -239,7 +241,7 @@ async fn quic_agent_tunnel_domain_routing_e2e() {
     let route_msg = ControlMessage::route_advertise(1, vec![echo_subnet], domains);
     ctrl.send(&route_msg).await.expect("send RouteAdvertise");
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
 
     // Verify agent + domain registered.
     let peer = handle
@@ -307,8 +309,7 @@ async fn cert_renewal_preserves_mtls_identity_e2e() {
     // Agent must announce routes first so the control loop is established.
     let route_msg = ControlMessage::route_advertise(1, vec![], vec![]);
     ctrl.send(&route_msg).await.expect("send RouteAdvertise");
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(handle.registry().get(&agent_id).await.is_some());
+    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
 
     // Build the renewal CSR with an attacker-chosen Common Name.
     let (_renewal_key, evil_csr_pem) = generate_csr_with_cn("evil-impersonator");
