@@ -28,9 +28,11 @@ mod windows_pipe {
                 result = server.connect() => {
                     match result {
                         Ok(()) => {
+                            tracing::info!("Client connected to named pipe");
                             let state = Arc::clone(&state);
                             tokio::spawn(async move {
                                 serve_connection(server, state).await;
+                                tracing::info!("Client disconnected from named pipe");
                             });
                         }
                         Err(error) => {

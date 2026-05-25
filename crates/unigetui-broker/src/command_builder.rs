@@ -72,9 +72,11 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         }
     }
 
-    // Accept source agreements non-interactively.
+    // Accept agreements non-interactively.
     command.push("--accept-source-agreements".to_owned());
-    command.push("--accept-package-agreements".to_owned());
+    if matches!(request.operation, Operation::Install | Operation::Update) {
+        command.push("--accept-package-agreements".to_owned());
+    }
 
     command
 }

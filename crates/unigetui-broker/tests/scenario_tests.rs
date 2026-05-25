@@ -178,7 +178,7 @@ fn all_sample_requests_deserialize() {
         .collect();
 
     for path in &request_files {
-        let _request: PackageRequest = load_request(&path);
+        let _request: PackageRequest = load_request(path);
     }
 }
 

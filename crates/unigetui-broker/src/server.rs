@@ -107,6 +107,8 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
     let audit_id = generate_audit_id();
     let received_at = chrono::Utc::now().to_rfc3339();
 
+    tracing::trace!(%audit_id, method = %req.method(), path = %req.uri().path(), "Received request");
+
     // Read body.
     let body_bytes = match req.collect().await {
         Ok(collected) => collected.to_bytes(),
@@ -174,6 +176,15 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             );
         }
     };
+
+    tracing::trace!(
+        %audit_id,
+        operation = %request.operation,
+        manager = %request.manager.name,
+        package_id = %request.package.id,
+        request_id = %request.request_id,
+        "Evaluating policy for request",
+    );
 
     // Evaluate policy.
     let decision = match evaluator::evaluate(&state.policy, &request) {
@@ -263,6 +274,15 @@ async fn handle_evaluate(req: Request<Incoming>, state: &BrokerState, execute: b
             note,
         },
     };
+
+    tracing::trace!(
+        %audit_id,
+        decision = %response.decision,
+        rule_id = %response.rule_id,
+        reason = %response.reason,
+        would_execute = response.would_execute,
+        "Sending response",
+    );
 
     let status = if decision.decision == Decision::Allow {
         StatusCode::OK
