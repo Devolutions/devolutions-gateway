@@ -56,6 +56,11 @@ public partial class AgentTunnelDialog : AgentDialog
         return true;
     }
 
+    // WixSharp's ManagedForm wires Back/Next/Cancel button clicks via reflection on the
+    // *concrete* dialog type rather than the base class, so each leaf dialog must surface
+    // these three overrides even when they only delegate to base. The ReSharper hint
+    // suppresses the noise flag.
+
     // ReSharper disable once RedundantOverriddenMember
     protected override void Back_Click(object sender, EventArgs e) => base.Back_Click(sender, e);
 

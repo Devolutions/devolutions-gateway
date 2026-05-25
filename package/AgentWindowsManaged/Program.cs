@@ -329,7 +329,7 @@ internal class Program
             // up in the Feature table and the Custom Setup tree. The value
             // itself doubles as a diagnostic marker that the feature was
             // selected at install time.
-            new (RegistryHive.LocalMachine, $"Software\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "TunnelEnabled", "1")
+            new (RegistryHive.LocalMachine, $"SOFTWARE\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "TunnelEnabled", "1")
             {
                 AttributesDefinition = "Type=string",
                 Win64 = project.Platform == Platform.x64,

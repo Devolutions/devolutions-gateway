@@ -13,6 +13,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Claims;
+using System.Text;
 using System.Threading;
 using WixSharp;
 using File = System.IO.File;
@@ -358,9 +359,18 @@ namespace DevolutionsAgent.Actions
                     session.Log($"JWT carried no jet_agent_name and no name was provided in the wizard; falling back to computer name '{resolvedName}'");
                 }
 
+                // Only `--enrollment-string` is mandatory at enroll time — the gateway needs the
+                // JWT to authenticate. `--name` is conditionally passed because the gateway
+                // embeds it in the issued client cert and registers the agent under it; agent.json
+                // can't carry it before `up` runs because the file doesn't exist yet. Everything
+                // else (advertise subnets, advertise domains) is patched into agent.json *after*
+                // enrollment, so we don't accumulate parallel CLI surfaces for what is ultimately
+                // configuration data.
                 string arguments = $"up --enrollment-string \"{enrollmentString}\"";
-                if (resolvedName.Length != 0) arguments += $" --name \"{resolvedName}\"";
-                if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
+                if (resolvedName.Length != 0)
+                {
+                    arguments += $" --name \"{resolvedName}\"";
+                }
 
                 string Redact(string s) => s.Replace(enrollmentString, "***");
                 session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
@@ -377,14 +387,27 @@ namespace DevolutionsAgent.Actions
                 using Process process = Process.Start(startInfo);
                 if (!process.WaitForExit(60_000))
                 {
-                    try { process.Kill(); } catch { /* already gone */ }
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                        // Already exited between WaitForExit timing out and Kill firing.
+                    }
                     return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
                 string stdout = process.StandardOutput.ReadToEnd();
                 string stderr = process.StandardError.ReadToEnd();
 
-                if (!string.IsNullOrEmpty(stdout)) session.Log($"enrollment stdout: {Redact(stdout)}");
-                if (!string.IsNullOrEmpty(stderr)) session.Log($"enrollment stderr: {Redact(stderr)}");
+                if (!string.IsNullOrEmpty(stdout))
+                {
+                    session.Log($"enrollment stdout: {Redact(stdout)}");
+                }
+                if (!string.IsNullOrEmpty(stderr))
+                {
+                    session.Log($"enrollment stderr: {Redact(stderr)}");
+                }
 
                 if (process.ExitCode != 0)
                 {
@@ -392,9 +415,9 @@ namespace DevolutionsAgent.Actions
                     return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
 
-                if (domainsArg.Length != 0)
+                if (subnetsArg.Length != 0 || domainsArg.Length != 0)
                 {
-                    WriteAdvertiseDomainsToConfig(session, domainsArg);
+                    WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
                 }
 
                 session.Log("Agent tunnel enrollment completed successfully");
@@ -414,7 +437,7 @@ namespace DevolutionsAgent.Actions
                 if (parts.Length != 3) return false;
                 string payload = parts[1].Replace('-', '+').Replace('_', '/');
                 payload = payload.PadRight((payload.Length + 3) & ~3, '=');
-                string json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+                string json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
                 string name = JObject.Parse(json)["jet_agent_name"]?.ToString();
                 return !string.IsNullOrWhiteSpace(name);
             }
@@ -424,24 +447,28 @@ namespace DevolutionsAgent.Actions
             }
         }
 
-        private static void WriteAdvertiseDomainsToConfig(Session session, string domainsCsv)
+        /// <summary>
+        /// Patch the freshly-written agent.json's <c>Tunnel</c> section with the operator's
+        /// advertised subnets and DNS suffixes from the wizard. Keeping this out of the
+        /// <c>agent.exe up</c> command line means we only carry mandatory enroll inputs on the
+        /// CLI; everything else flows through the same configuration file the agent reads at
+        /// runtime.
+        /// </summary>
+        private static void WriteTunnelAdvertisementsToConfig(Session session, string subnetsCsv, string domainsCsv)
         {
             string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
             if (!File.Exists(configPath))
             {
-                session.Log($"agent.json not found at {configPath}; cannot persist advertise_domains");
+                session.Log($"agent.json not found at {configPath}; cannot persist tunnel advertisements");
                 return;
             }
 
             try
             {
-                string[] domains = domainsCsv
-                    .Split(',')
-                    .Select(d => d.Trim())
-                    .Where(d => !string.IsNullOrEmpty(d))
-                    .ToArray();
+                string[] subnets = SplitCsv(subnetsCsv);
+                string[] domains = SplitCsv(domainsCsv);
 
-                if (domains.Length == 0)
+                if (subnets.Length == 0 && domains.Length == 0)
                 {
                     return;
                 }
@@ -449,25 +476,39 @@ namespace DevolutionsAgent.Actions
                 JObject root = JObject.Parse(File.ReadAllText(configPath));
 
                 // ConfFile uses serde rename_all = "PascalCase", so the tunnel section is keyed
-                // "Tunnel" and the field is "AdvertiseDomains".
+                // "Tunnel" and the fields are "AdvertiseSubnets" / "AdvertiseDomains".
                 if (root["Tunnel"] is not JObject tunnel)
                 {
-                    session.Log("agent.json has no Tunnel section after enrollment; skipping advertise_domains write");
+                    session.Log("agent.json has no Tunnel section after enrollment; skipping tunnel advertisements write");
                     return;
                 }
 
-                tunnel["AdvertiseDomains"] = new JArray(domains);
+                if (subnets.Length != 0)
+                {
+                    tunnel["AdvertiseSubnets"] = new JArray(subnets);
+                }
+                if (domains.Length != 0)
+                {
+                    tunnel["AdvertiseDomains"] = new JArray(domains);
+                }
 
                 File.WriteAllText(configPath, root.ToString(Formatting.Indented));
-                session.Log($"Wrote {domains.Length} advertise_domains entries to agent.json");
+                session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} advertise_domains entries to agent.json");
             }
             catch (Exception e)
             {
-                // Don't fail the install over this — the tunnel works fine without domain
-                // advertisements (subnets cover IP routing on their own).
-                session.Log($"Failed to write advertise_domains to agent.json: {e}");
+                // Don't fail the install over this — the tunnel works fine without these
+                // advertisements; the agent simply won't route additional traffic for them.
+                session.Log($"Failed to write tunnel advertisements to agent.json: {e}");
             }
         }
+
+        private static string[] SplitCsv(string csv) =>
+            (csv ?? string.Empty)
+                .Split(',')
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
 
         [CustomAction]
         public static ActionResult ConfigureFeatures(Session session)
