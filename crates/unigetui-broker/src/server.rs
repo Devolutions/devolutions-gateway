@@ -266,7 +266,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
             command: command.clone(),
             effective_user: request.broker.effective_user.clone(),
             elevation: request.broker.requested_elevation,
-            run_as_administrator: request.options.run_as_administrator,
+            scope: request.options.scope,
         };
 
         // Register the operation and spawn execution in background.
@@ -291,7 +291,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
                     tracing::error!(request_id = %request_id_str, %error, "Background execution failed");
                     bg_state
                         .tracker
-                        .mark_failed(&request_id_str, format!("Execution failed: {error}"));
+                        .mark_failed(&request_id_str, format!("Execution failed: {error:#}"));
                 }
             }
         });

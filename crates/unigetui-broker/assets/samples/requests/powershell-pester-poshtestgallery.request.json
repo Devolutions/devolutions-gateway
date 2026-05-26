@@ -22,7 +22,6 @@
   "options": {
     "scope": "user",
     "interactive": false,
-    "runAsAdministrator": false,
     "skipHashCheck": false,
     "preRelease": false,
     "customParameters": [],

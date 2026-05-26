@@ -189,10 +189,6 @@
           "description": "Allow pre-release versions.",
           "type": "boolean"
         },
-        "runAsAdministrator": {
-          "description": "Run the process as administrator.",
-          "type": "boolean"
-        },
         "scope": {
           "anyOf": [
             {
@@ -217,7 +213,6 @@
       "required": [
         "interactive",
         "preRelease",
-        "runAsAdministrator",
         "skipHashCheck"
       ],
       "type": "object"

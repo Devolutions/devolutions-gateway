@@ -23,7 +23,6 @@
   "options": {
     "scope": "machine",
     "interactive": false,
-    "runAsAdministrator": true,
     "skipHashCheck": true,
     "preRelease": false,
     "customParameters": [],

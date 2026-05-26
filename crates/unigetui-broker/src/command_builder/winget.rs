@@ -109,7 +109,6 @@ mod tests {
             options: RequestOptions {
                 scope: None,
                 interactive: false,
-                run_as_administrator: false,
                 skip_hash_check: false,
                 pre_release: false,
                 custom_install_location: None,

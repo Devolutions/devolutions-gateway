@@ -206,11 +206,6 @@ pub struct PolicyMatch {
     #[schemars(length(max = 2))]
     pub elevation: BTreeSet<Elevation>,
 
-    /// Allowed runAsAdministrator values.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    #[schemars(length(max = 2))]
-    pub run_as_administrator: BTreeSet<bool>,
-
     /// Allowed interactive values.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     #[schemars(length(max = 2))]
@@ -264,7 +259,6 @@ impl PolicyMatch {
             && self.scopes.is_empty()
             && self.architectures.is_empty()
             && self.elevation.is_empty()
-            && self.run_as_administrator.is_empty()
             && self.interactive.is_empty()
             && self.skip_hash_check.is_empty()
             && self.pre_release.is_empty()
@@ -306,10 +300,6 @@ pub struct PolicyConstraints {
     /// Allow interactive mode.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub allow_interactive: bool,
-
-    /// Allow running as administrator.
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
-    pub allow_run_as_administrator: bool,
 
     /// Allow skipping hash verification.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
@@ -369,7 +359,6 @@ impl Default for PolicyConstraints {
     fn default() -> Self {
         Self {
             allow_interactive: true,
-            allow_run_as_administrator: true,
             allow_skip_hash_check: true,
             allow_pre_release: true,
             allow_custom_install_location: true,

@@ -89,10 +89,6 @@
           "description": "Allow pre-release versions.",
           "type": "boolean"
         },
-        "allowRunAsAdministrator": {
-          "description": "Allow running as administrator.",
-          "type": "boolean"
-        },
         "allowSkipHashCheck": {
           "description": "Allow skipping hash verification.",
           "type": "boolean"
@@ -287,15 +283,6 @@
         },
         "preRelease": {
           "description": "Allowed preRelease values.",
-          "items": {
-            "type": "boolean"
-          },
-          "maxItems": 2,
-          "type": "array",
-          "uniqueItems": true
-        },
-        "runAsAdministrator": {
-          "description": "Allowed runAsAdministrator values.",
           "items": {
             "type": "boolean"
           },

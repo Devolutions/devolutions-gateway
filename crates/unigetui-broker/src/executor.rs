@@ -1,20 +1,27 @@
 //! Command execution module.
 //!
-//! Handles running WinGet commands under the specified user identity.
+//! Handles running commands (primarily WinGet) under the specified user identity.
+//!
+//! Uses a unified `CreateProcessAsUserW` code path for both SYSTEM (service) and
+//! current-user (development) modes. This ensures consistent behavior regarding:
+//! - User environment block (`CreateEnvironmentBlock`)
+//! - Interactive desktop assignment (`WinSta0\Default`)
+//! - Process creation flags (`CREATE_NEW_CONSOLE`, `CREATE_UNICODE_ENVIRONMENT`)
+//! - Token session assignment
 //!
 //! When the broker runs as SYSTEM (production service context), the executor:
 //! 1. Enumerates sessions to find the target user's logon session.
 //! 2. Obtains and duplicates their token.
-//! 3. Optionally creates an elevated token (linked token) for `elevated` mode.
-//! 4. Creates a process with `CreateProcessAsUserW` under that token.
+//! 3. Optionally retrieves the linked elevated token for `elevated` mode.
+//! 4. Loads the user's environment block and creates the process.
 //!
 //! When running as a normal user (development/debug), the executor:
-//! - Runs commands directly under the current process identity.
-//! - Rejects `elevated` / `runAsAdministrator` requests (cannot elevate without SYSTEM).
+//! - Opens the current process token and uses it directly.
+//! - Rejects `elevated` requests (cannot elevate without SYSTEM).
 
 use async_trait::async_trait;
 
-use crate::model::Elevation;
+use crate::model::{Elevation, Scope};
 
 /// Execution context passed from the server to the executor.
 #[derive(Debug, Clone)]
@@ -25,8 +32,8 @@ pub struct ExecutionContext {
     pub effective_user: String,
     /// Requested elevation level.
     pub elevation: Elevation,
-    /// Whether the client requested `runAsAdministrator` in options.
-    pub run_as_administrator: bool,
+    /// Installation scope (machine scope requires elevation).
+    pub scope: Option<Scope>,
 }
 
 /// Trait for command execution strategies.
@@ -49,7 +56,6 @@ impl CommandExecutor for DryRunExecutor {
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
             elevation = %ctx.elevation,
-            run_as_administrator = ctx.run_as_administrator,
             "Dry-run: would execute command"
         );
         Ok(0)
@@ -77,60 +83,27 @@ pub fn create_platform_executor() -> Box<dyn CommandExecutor> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(windows)]
-// SAFETY: This module implements Win32 security token manipulation for process creation.
-// All unsafe blocks call documented Win32 APIs with validated parameters.
-// Handle lifetime is managed by SafeHandle (RAII). Memory is freed via WTSFreeMemory/LocalFree.
-#[allow(clippy::multiple_unsafe_ops_per_block)]
 mod win {
-    use std::ptr;
+    use std::path::{Path, PathBuf};
 
     use anyhow::{Context as _, bail};
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
+    use win_api_wrappers::identity::sid::Sid;
+    use win_api_wrappers::process::{self, Process, StartupInfo};
+    use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
+    use win_api_wrappers::token::{Token, TokenElevationType};
+    use win_api_wrappers::utils::{self, CommandLine, WideString};
+    use win_api_wrappers::wts;
     use windows::Win32::Security::{
-        DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TOKEN_ALL_ACCESS, TOKEN_ELEVATION_TYPE,
-        TOKEN_LINKED_TOKEN, TOKEN_QUERY, TOKEN_USER, TokenElevationType, TokenElevationTypeFull,
-        TokenElevationTypeLimited, TokenLinkedToken, TokenSessionId, TokenUser,
+        SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TokenPrimary,
     };
-    use windows::Win32::System::RemoteDesktop::{
-        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSEnumerateSessionsW, WTSFreeMemory,
-        WTSQuerySessionInformationW, WTSUserName,
-    };
-    use windows::Win32::System::Threading::{
-        CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
-        PROCESS_INFORMATION, STARTUPINFOW, WaitForSingleObject,
-    };
-    use windows::core::{PWSTR, w};
+    use windows::Win32::System::Threading::{CREATE_NEW_CONSOLE, NORMAL_PRIORITY_CLASS};
 
     use super::*;
 
-    /// RAII wrapper for Win32 handles.
-    struct SafeHandle(HANDLE);
-
-    impl SafeHandle {
-        fn new(h: HANDLE) -> Self {
-            Self(h)
-        }
-
-        fn raw(&self) -> HANDLE {
-            self.0
-        }
-    }
-
-    impl Drop for SafeHandle {
-        fn drop(&mut self) {
-            if !self.0.is_invalid() {
-                // SAFETY: Handle is valid and owned by this wrapper.
-                unsafe {
-                    let _ = CloseHandle(self.0);
-                }
-            }
-        }
-    }
-
-    /// Windows command executor using raw Win32 APIs.
+    /// Windows command executor using `win-api-wrappers` safe abstractions.
     ///
     /// Detects whether it runs as SYSTEM (service mode) or as a normal user (dev mode).
+    /// Both modes use a unified `create_process_as_user` code path.
     pub struct WindowsExecutor {
         is_system: bool,
     }
@@ -156,7 +129,7 @@ mod win {
     #[async_trait]
     impl CommandExecutor for WindowsExecutor {
         async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
-            let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.run_as_administrator;
+            let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
             if !self.is_system && requires_elevation {
                 bail!(
@@ -165,56 +138,39 @@ mod win {
                 );
             }
 
-            if self.is_system {
-                execute_as_system(ctx).await
-            } else {
-                execute_as_current_user(ctx).await
-            }
+            let is_system = self.is_system;
+            let ctx = ctx.clone();
+
+            // All Win32 calls are blocking — run in a blocking thread.
+            tokio::task::spawn_blocking(move || {
+                if is_system {
+                    execute_as_system(&ctx)
+                } else {
+                    execute_as_current_user(&ctx)
+                }
+            })
+            .await
+            .context("blocking task panicked")?
         }
     }
 
     /// Detect whether the current process is running under the SYSTEM account.
     ///
     /// Compares the process token SID against S-1-5-18 (LocalSystem).
-    #[allow(clippy::cast_possible_truncation)]
     fn detect_running_as_system() -> bool {
-        // SAFETY: All Win32 calls use valid handles and buffers allocated with sufficient size.
-        // SafeHandle ensures token is closed on all paths. LocalFree releases the SID memory.
-        unsafe {
-            let process = GetCurrentProcess();
-            let mut token = HANDLE::default();
-            if OpenProcessToken(process, TOKEN_QUERY, &mut token).is_err() {
-                return false;
-            }
-            let token = SafeHandle::new(token);
+        let Ok(token) = Process::current_process().token(TOKEN_QUERY) else {
+            return false;
+        };
 
-            let mut buf = vec![0u8; 256];
-            let mut returned = 0u32;
-            if GetTokenInformation(
-                token.raw(),
-                TokenUser,
-                Some(buf.as_mut_ptr().cast()),
-                buf.len() as u32,
-                &mut returned,
-            )
-            .is_err()
-            {
-                return false;
-            }
+        let Ok(sid_and_attrs) = token.sid_and_attributes() else {
+            return false;
+        };
 
-            let token_user: &TOKEN_USER = &*(buf.as_ptr().cast());
-            let user_sid = token_user.User.Sid;
+        let Ok(system_sid) = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None) else {
+            return false;
+        };
 
-            // Compare against the well-known SYSTEM SID (S-1-5-18).
-            let mut system_sid = windows::Win32::Security::PSID::default();
-            if ConvertStringSidToSidW(w!("S-1-5-18"), &mut system_sid).is_err() {
-                return false;
-            }
-
-            let equal = windows::Win32::Security::EqualSid(user_sid, system_sid).is_ok();
-            let _ = windows::Win32::Foundation::LocalFree(Some(windows::Win32::Foundation::HLOCAL(system_sid.0)));
-            equal
-        }
+        sid_and_attrs.sid == system_sid
     }
 
     /// Execute a command in the context of the target user's session (SYSTEM mode).
@@ -223,94 +179,122 @@ mod win {
     /// 1. Find the user's active session via WTS enumeration.
     /// 2. Get the session token.
     /// 3. If elevated execution is requested, obtain the linked elevated token.
-    /// 4. Create a process under that token using `CreateProcessAsUserW`.
+    /// 4. Set the token session ID and create the process.
     /// 5. Wait for the process to exit and return the exit code.
-    async fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<i32> {
-        let effective_user = ctx.effective_user.clone();
-        let command = ctx.command.clone();
-        let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.run_as_administrator;
+    fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<i32> {
+        let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
-        // Blocking Win32 calls — run in a blocking thread.
-        tokio::task::spawn_blocking(move || {
-            let session_id = find_user_session(&effective_user).context("failed to find active session for user")?;
+        tracing::info!(
+            effective_user = %ctx.effective_user,
+            command = %ctx.command.join(" "),
+            requires_elevation,
+            "Starting SYSTEM-mode execution"
+        );
 
-            tracing::debug!(
-                %effective_user,
-                session_id,
-                "Found user session"
-            );
+        // Enable privileges required by CreateProcessAsUserW when running as SYSTEM.
+        // These are held by SYSTEM but not enabled by default.
+        let mut process_token = Process::current_process()
+            .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)
+            .context("failed to open process token for privilege adjustment")?;
 
-            let user_token = query_user_token(session_id).context("failed to obtain user token for session")?;
+        tracing::debug!("Enabling SeTcb privilege");
+        let mut _priv_tcb =
+            ScopedPrivileges::enter(&mut process_token, &[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
 
-            let primary_token = duplicate_token_primary(&user_token).context("failed to duplicate token as primary")?;
+        tracing::debug!("Enabling SeAssignPrimaryToken privilege");
+        let mut _priv_primary =
+            ScopedPrivileges::enter(_priv_tcb.token_mut(), &[privilege::SE_ASSIGNPRIMARYTOKEN_NAME])
+                .context("failed to enable SeAssignPrimaryToken")?;
 
-            let execution_token = if requires_elevation {
-                match get_elevated_token(&primary_token) {
-                    Ok(elevated) => {
-                        tracing::debug!("Using elevated (linked) token");
-                        elevated
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "Could not obtain elevated token, using primary");
-                        primary_token
-                    }
+        tracing::debug!("Enabling SeIncreaseQuota privilege");
+        let _priv_quota = ScopedPrivileges::enter(_priv_primary.token_mut(), &[privilege::SE_INCREASE_QUOTA_NAME])
+            .context("failed to enable SeIncreaseQuota")?;
+
+        tracing::debug!("All privileges enabled, finding user session");
+
+        let session_id = find_user_session(&ctx.effective_user).context("failed to find active session for user")?;
+
+        tracing::info!(
+            effective_user = %ctx.effective_user,
+            session_id,
+            "Found user session"
+        );
+
+        tracing::debug!(session_id, "Calling Token::for_session");
+        let user_token = Token::for_session(session_id).context("failed to obtain user token for session")?;
+
+        tracing::debug!("Duplicating user token as primary");
+        let primary_token = user_token
+            .duplicate(TOKEN_ALL_ACCESS, None, SecurityImpersonation, TokenPrimary)
+            .context("failed to duplicate token as primary")?;
+
+        let mut execution_token = if requires_elevation {
+            tracing::debug!("Attempting to get elevated token");
+            match get_elevated_token(&primary_token) {
+                Ok(elevated) => {
+                    tracing::info!("Using elevated (linked) token");
+                    elevated
                 }
-            } else {
-                primary_token
-            };
+                Err(error) => {
+                    tracing::warn!(%error, "Could not obtain elevated token, using primary");
+                    primary_token
+                }
+            }
+        } else {
+            tracing::debug!("Using non-elevated primary token");
+            primary_token
+        };
 
-            let exit_code = create_process_and_wait(&execution_token, &command, session_id)
-                .context("CreateProcessAsUserW failed")?;
+        // Assign the target session to the token before process creation.
+        tracing::debug!(session_id, "Setting token session ID");
+        execution_token
+            .set_session_id(session_id)
+            .context("failed to set token session ID")?;
 
-            tracing::info!(
-                %effective_user,
-                command = %command.join(" "),
-                exit_code,
-                "Process completed under user token"
-            );
+        tracing::info!(
+            command = %ctx.command.join(" "),
+            session_id,
+            "Calling create_process_and_wait"
+        );
 
-            Ok(exit_code)
-        })
-        .await
-        .context("blocking task panicked")?
+        let exit_code = create_process_and_wait(&execution_token, &ctx.command, session_id)?;
+
+        tracing::info!(
+            effective_user = %ctx.effective_user,
+            command = %ctx.command.join(" "),
+            exit_code,
+            "Process completed under user token"
+        );
+
+        Ok(exit_code)
     }
 
-    /// Execute a command directly as the current user (development mode).
+    /// Execute a command as the current user (development mode).
     ///
-    /// Does not impersonate or elevate. Useful for quick testing without a service.
-    async fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<i32> {
-        use std::process::Stdio;
-
-        use tokio::process::Command;
-
+    /// Opens the current process token and uses the same `create_process_as_user`
+    /// code path as SYSTEM mode, ensuring consistent behavior (environment, desktop, flags).
+    fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<i32> {
         tracing::info!(
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
             "Executing command as current user (dev mode)"
         );
 
-        let exe = &ctx.command[0];
-        let args = &ctx.command[1..];
+        let token = Process::current_process()
+            .token(TOKEN_ALL_ACCESS)
+            .context("failed to open current process token")?;
 
-        let output = Command::new(exe)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .context("failed to spawn process")?;
+        let session_id = token.session_id().context("failed to query token session ID")?;
 
-        let code = output.status.code().unwrap_or(-1);
+        let exit_code = create_process_and_wait(&token, &ctx.command, session_id)?;
 
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            tracing::info!(stdout = %stdout, "Command completed successfully");
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::error!(%stderr, exit_code = code, "Command exited with non-zero code");
-        }
+        tracing::info!(
+            command = %ctx.command.join(" "),
+            exit_code,
+            "Process completed under current user token"
+        );
 
-        Ok(code)
+        Ok(exit_code)
     }
 
     /// Enumerate WTS sessions to find one belonging to `effective_user`.
@@ -323,205 +307,195 @@ mod win {
             .unwrap_or(effective_user)
             .to_lowercase();
 
-        // SAFETY: WTS functions are called with valid server handle (current server).
-        // session_info pointer is freed via WTSFreeMemory. PWSTR lifetime is valid
-        // for the duration of string extraction.
-        unsafe {
-            let mut session_info: *mut WTS_SESSION_INFOW = ptr::null_mut();
-            let mut count = 0u32;
+        let sessions = wts::get_sessions().context("failed to enumerate WTS sessions")?;
 
-            WTSEnumerateSessionsW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut session_info, &mut count)
-                .context("WTSEnumerateSessionsW failed")?;
-
-            let sessions = std::slice::from_raw_parts(session_info, count as usize);
-
-            let mut found_session = None;
-
-            for session in sessions {
-                if session.SessionId == 0 {
-                    continue;
-                }
-
-                let mut buf: PWSTR = PWSTR::null();
-                let mut bytes_returned = 0u32;
-
-                if WTSQuerySessionInformationW(
-                    Some(WTS_CURRENT_SERVER_HANDLE),
-                    session.SessionId,
-                    WTSUserName,
-                    &mut buf,
-                    &mut bytes_returned,
-                )
-                .is_ok()
-                    && !buf.is_null()
-                {
-                    let session_user = buf.to_string().unwrap_or_default().to_lowercase();
-                    WTSFreeMemory(buf.as_ptr().cast());
-
-                    if session_user == target_username {
-                        found_session = Some(session.SessionId);
-                        break;
-                    }
-                }
+        for session in &sessions {
+            if session.session_id == 0 {
+                continue;
             }
 
-            WTSFreeMemory(session_info.cast());
-
-            found_session.ok_or_else(|| anyhow::anyhow!("no active session found for user '{effective_user}'"))
+            if let Ok(session_user) = wts::get_session_user_name(session.session_id)
+                && session_user.to_lowercase() == target_username
+            {
+                return Ok(session.session_id);
+            }
         }
-    }
 
-    /// Get the user token for a given session using `WTSQueryUserToken`.
-    fn query_user_token(session_id: u32) -> anyhow::Result<SafeHandle> {
-        // SAFETY: WTSQueryUserToken writes to a valid HANDLE pointer.
-        // Requires SeTcbPrivilege (available to SYSTEM).
-        unsafe {
-            let mut token = HANDLE::default();
-            windows::Win32::System::RemoteDesktop::WTSQueryUserToken(session_id, &mut token)
-                .context("WTSQueryUserToken failed (requires SYSTEM privilege)")?;
-            Ok(SafeHandle::new(token))
-        }
-    }
-
-    /// Duplicate a token as a primary token suitable for `CreateProcessAsUserW`.
-    fn duplicate_token_primary(source: &SafeHandle) -> anyhow::Result<SafeHandle> {
-        // SAFETY: source handle is valid (from SafeHandle). Output handle is wrapped in SafeHandle.
-        unsafe {
-            let mut dup = HANDLE::default();
-            DuplicateTokenEx(
-                source.raw(),
-                TOKEN_ALL_ACCESS,
-                None,
-                SecurityImpersonation,
-                windows::Win32::Security::TokenPrimary,
-                &mut dup,
-            )
-            .context("DuplicateTokenEx failed")?;
-            Ok(SafeHandle::new(dup))
-        }
+        anyhow::bail!("no active session found for user '{effective_user}'")
     }
 
     /// Attempt to obtain an elevated (linked) token from a filtered/limited token.
     ///
     /// On UAC-enabled systems with split tokens, the standard user token has a linked
     /// elevated token. This function retrieves it when elevation is requested.
-    #[allow(clippy::cast_possible_truncation)]
-    fn get_elevated_token(token: &SafeHandle) -> anyhow::Result<SafeHandle> {
-        // SAFETY: GetTokenInformation is called with correctly-sized output buffers.
-        // The linked token handle is wrapped in SafeHandle for cleanup.
-        unsafe {
-            let mut elevation_type: TOKEN_ELEVATION_TYPE = TOKEN_ELEVATION_TYPE(0);
-            let mut returned = 0u32;
-            GetTokenInformation(
-                token.raw(),
-                TokenElevationType,
-                Some(ptr::addr_of_mut!(elevation_type).cast()),
-                size_of::<TOKEN_ELEVATION_TYPE>() as u32,
-                &mut returned,
-            )
-            .context("GetTokenInformation(TokenElevationType) failed")?;
+    fn get_elevated_token(token: &Token) -> anyhow::Result<Token> {
+        let elevation_type = token.elevation_type().context("failed to query elevation type")?;
 
-            if elevation_type == TokenElevationTypeFull {
-                duplicate_token_primary(token)
-            } else if elevation_type == TokenElevationTypeLimited {
-                let mut linked = TOKEN_LINKED_TOKEN::default();
-                let mut returned = 0u32;
-                GetTokenInformation(
-                    token.raw(),
-                    TokenLinkedToken,
-                    Some(ptr::addr_of_mut!(linked).cast()),
-                    size_of::<TOKEN_LINKED_TOKEN>() as u32,
-                    &mut returned,
-                )
-                .context("GetTokenInformation(TokenLinkedToken) failed")?;
-
-                let linked_handle = SafeHandle::new(linked.LinkedToken);
-                duplicate_token_primary(&linked_handle)
-            } else {
-                bail!("token elevation type is neither full nor limited; cannot elevate");
+        match elevation_type {
+            TokenElevationType::Full => {
+                // Already elevated — duplicate as primary.
+                token
+                    .duplicate(TOKEN_ALL_ACCESS, None, SecurityImpersonation, TokenPrimary)
+                    .context("failed to duplicate full token")
+            }
+            TokenElevationType::Limited => {
+                // Obtain the linked (elevated) token and duplicate as primary.
+                let linked = token.linked_token().context("failed to get linked token")?;
+                linked
+                    .duplicate(TOKEN_ALL_ACCESS, None, SecurityImpersonation, TokenPrimary)
+                    .context("failed to duplicate linked token")
+            }
+            TokenElevationType::Default => {
+                bail!("token elevation type is Default; cannot elevate (UAC may be disabled)");
             }
         }
     }
 
     /// Create a process under the given token and wait for it to exit.
     ///
+    /// This is the unified process-creation path used by both SYSTEM and current-user modes.
+    /// It:
+    /// - Sets `lpDesktop` to `WinSta0\Default` so the process can interact with the user desktop.
+    /// - Passes `None` for environment so `create_process_as_user` loads the user's environment
+    ///   block via `CreateEnvironmentBlock` automatically.
+    /// - Uses `CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS` (plus `CREATE_UNICODE_ENVIRONMENT`
+    ///   which is always added by the wrapper).
+    ///
     /// Returns the process exit code.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    fn create_process_and_wait(token: &SafeHandle, command: &[String], session_id: u32) -> anyhow::Result<i32> {
-        // SAFETY: Token handle is valid. Command line is null-terminated UTF-16.
-        // STARTUPINFOW is initialized with correct cb size. Process/thread handles are closed.
-        unsafe {
-            let cmd_line = build_command_line(command);
-            let mut cmd_wide: Vec<u16> = cmd_line.encode_utf16().chain(std::iter::once(0)).collect();
+    #[allow(clippy::cast_possible_wrap)]
+    fn create_process_and_wait(token: &Token, command: &[String], session_id: u32) -> anyhow::Result<i32> {
+        let cmd_line = CommandLine::new(command.to_vec());
 
-            let mut desktop: Vec<u16> = "WinSta0\\Default\0".encode_utf16().collect();
-            let si = STARTUPINFOW {
-                cb: size_of::<STARTUPINFOW>() as u32,
-                lpDesktop: PWSTR(desktop.as_mut_ptr()),
-                ..Default::default()
-            };
+        tracing::debug!(
+            command_line = %command.join(" "),
+            session_id,
+            "Building process creation parameters"
+        );
 
-            let mut pi = PROCESS_INFORMATION::default();
+        // Resolve the executable using the user's environment PATH.
+        // CreateProcessAsUserW searches the CALLING process's PATH (SYSTEM) to find the
+        // executable, not the child's environment block. Since tools like winget.exe live
+        // in per-user directories (e.g. %LOCALAPPDATA%\Microsoft\WindowsApps), we must
+        // resolve the full path ourselves using the user's environment.
+        let user_env = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
 
-            // Assign the target session to the token.
-            let mut sid = session_id;
-            windows::Win32::Security::SetTokenInformation(
-                token.raw(),
-                TokenSessionId,
-                ptr::addr_of_mut!(sid).cast(),
-                size_of::<u32>() as u32,
+        let exe_name = command.first().context("empty command")?;
+        let resolved_exe = resolve_executable(exe_name, &user_env).with_context(|| {
+            format!(
+                "could not find '{}' in user's PATH: {:?}",
+                exe_name,
+                user_env.get("Path").or_else(|| user_env.get("PATH"))
             )
-            .context("SetTokenInformation(TokenSessionId) failed")?;
+        })?;
 
-            CreateProcessAsUserW(
-                Some(token.raw()),
-                None,
-                Some(PWSTR(cmd_wide.as_mut_ptr())),
-                None,
-                None,
-                false,
-                PROCESS_CREATION_FLAGS(0),
-                None,
-                None,
-                &si,
-                &mut pi,
-            )
-            .context("CreateProcessAsUserW failed")?;
+        tracing::info!(
+            exe = %resolved_exe.display(),
+            "Resolved executable path from user environment"
+        );
 
-            // Close the thread handle immediately; we only need the process handle.
-            let _ = CloseHandle(pi.hThread);
+        // Desktop string: enables the process to interact with the interactive desktop.
+        // Required for GUI installers and many silent installers that create windows.
+        let mut startup_info = StartupInfo {
+            desktop: WideString::from("WinSta0\\Default"),
+            ..Default::default()
+        };
 
-            // Wait for the process to exit (INFINITE timeout).
-            let process = SafeHandle::new(pi.hProcess);
-            let wait_result = WaitForSingleObject(process.raw(), u32::MAX);
+        let creation_flags = CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS;
 
-            if wait_result.0 != 0 {
-                // WAIT_OBJECT_0 is 0. Anything else is an error.
-                bail!("WaitForSingleObject returned unexpected value: {}", wait_result.0);
+        tracing::debug!("Calling process::create_process_as_user");
+
+        let process_info = match process::create_process_as_user(
+            Some(token),
+            Some(&resolved_exe),
+            Some(&cmd_line),
+            None,
+            None,
+            false,
+            creation_flags,
+            Some(&user_env),
+            None,
+            &mut startup_info,
+        ) {
+            Ok(info) => info,
+            Err(error) => {
+                tracing::error!(
+                    error = format!("{error:#}"),
+                    command_line = %command.join(" "),
+                    exe = %resolved_exe.display(),
+                    session_id,
+                    "create_process_as_user failed"
+                );
+                return Err(error).with_context(|| {
+                    format!(
+                        "CreateProcessAsUserW failed for '{}' (session {})",
+                        resolved_exe.display(),
+                        session_id
+                    )
+                });
             }
+        };
 
-            let mut exit_code: u32 = 0;
-            GetExitCodeProcess(process.raw(), &mut exit_code).context("GetExitCodeProcess failed")?;
+        tracing::info!(
+            session_id,
+            pid = process_info.process_id,
+            "Process spawned, waiting for exit"
+        );
 
-            Ok(exit_code as i32)
-        }
+        // Wait for the process to exit (no timeout).
+        process_info.process.wait(None).context("failed to wait for process")?;
+
+        let exit_code = process_info
+            .process
+            .exit_code()
+            .context("failed to get process exit code")?;
+
+        Ok(exit_code as i32)
     }
 
-    /// Build a Windows command line string from arguments.
+    /// Resolve an executable name to its full path using the given environment's PATH.
     ///
-    /// Follows Windows quoting rules: arguments containing spaces are wrapped in double quotes.
-    fn build_command_line(command: &[String]) -> String {
-        command
+    /// Handles both absolute paths and bare names (e.g., `winget.exe`).
+    /// Appends `.exe` if no extension is present and the file is not found as-is.
+    fn resolve_executable(exe_name: &str, env: &std::collections::HashMap<String, String>) -> anyhow::Result<PathBuf> {
+        let exe_path = Path::new(exe_name);
+
+        // If already an absolute path, just verify it exists.
+        if exe_path.is_absolute() {
+            if exe_path.exists() {
+                return Ok(exe_path.to_owned());
+            }
+            bail!("executable not found at absolute path: {}", exe_path.display());
+        }
+
+        // Get PATH from environment (case-insensitive key lookup).
+        let path_var = env
             .iter()
-            .map(|arg| {
-                if arg.contains(' ') || arg.contains('"') {
-                    format!("\"{}\"", arg.replace('"', "\\\""))
-                } else {
-                    arg.clone()
+            .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+            .map(|(_, v)| v.as_str())
+            .unwrap_or_default();
+
+        let extensions: &[&str] = if exe_path.extension().is_some() {
+            &[""]
+        } else {
+            &["", ".exe", ".cmd", ".bat", ".com"]
+        };
+
+        for dir in path_var.split(';') {
+            let dir = dir.trim();
+            if dir.is_empty() {
+                continue;
+            }
+            for ext in extensions {
+                let mut candidate = PathBuf::from(dir);
+                let file_name = format!("{}{}", exe_name, ext);
+                candidate.push(&file_name);
+                if candidate.exists() {
+                    return Ok(candidate);
                 }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
+            }
+        }
+
+        bail!("executable '{}' not found in PATH", exe_name);
     }
 }
 

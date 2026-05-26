@@ -68,9 +68,6 @@
         },
         "scopes": [
           "user"
-        ],
-        "runAsAdministrator": [
-          false
         ]
       },
       "constraints": {

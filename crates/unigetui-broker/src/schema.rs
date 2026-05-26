@@ -138,7 +138,6 @@ mod tests {
             },
             "options": {
                 "interactive": false,
-                "runAsAdministrator": false,
                 "skipHashCheck": false,
                 "preRelease": false
             },
@@ -168,7 +167,6 @@ mod tests {
             "package": { "id": "", "name": "X" },
             "options": {
                 "interactive": false,
-                "runAsAdministrator": false,
                 "skipHashCheck": false,
                 "preRelease": false
             },
@@ -199,7 +197,6 @@ mod tests {
             "package": { "id": "X.Y", "name": "X" },
             "options": {
                 "interactive": false,
-                "runAsAdministrator": false,
                 "skipHashCheck": false,
                 "preRelease": false
             },
@@ -230,7 +227,6 @@ mod tests {
             "package": { "id": "X.Y", "name": "X" },
             "options": {
                 "interactive": false,
-                "runAsAdministrator": false,
                 "skipHashCheck": false,
                 "preRelease": false
             },

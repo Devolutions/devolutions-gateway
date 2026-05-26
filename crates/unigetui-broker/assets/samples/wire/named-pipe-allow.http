@@ -19,7 +19,6 @@ Content-Length: <computed-by-client>
     "scope": "machine",
     "architecture": "x64",
     "interactive": false,
-    "runAsAdministrator": true,
     "skipHashCheck": false,
     "preRelease": false,
     "customParameters": [],

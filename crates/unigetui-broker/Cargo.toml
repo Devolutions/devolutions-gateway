@@ -33,6 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 
 [target.'cfg(windows)'.dependencies]
+win-api-wrappers = { path = "../win-api-wrappers" }
 windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",

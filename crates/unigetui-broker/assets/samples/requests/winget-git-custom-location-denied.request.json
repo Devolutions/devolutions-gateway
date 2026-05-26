@@ -23,7 +23,6 @@
   "options": {
     "scope": "machine",
     "interactive": false,
-    "runAsAdministrator": true,
     "skipHashCheck": false,
     "preRelease": false,
     "customInstallLocation": "C:\\Temp\\Git",

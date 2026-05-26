@@ -127,9 +127,6 @@ pub struct RequestOptions {
     /// Run interactively (show installer UI).
     pub interactive: bool,
 
-    /// Run the process as administrator.
-    pub run_as_administrator: bool,
-
     /// Skip package hash verification.
     pub skip_hash_check: bool,
 

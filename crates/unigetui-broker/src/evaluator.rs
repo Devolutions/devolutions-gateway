@@ -90,7 +90,6 @@ fn rule_matches(rule: &PolicyRule, request: &PackageRequest, flags: &RequestFlag
         && scopes_match(request.options.scope, &m.scopes)
         && architectures_match(request.package.architecture, &m.architectures)
         && elevation_match(request.broker.requested_elevation, &m.elevation)
-        && bool_in_set(request.options.run_as_administrator, &m.run_as_administrator)
         && bool_in_set(request.options.interactive, &m.interactive)
         && bool_in_set(request.options.skip_hash_check, &m.skip_hash_check)
         && bool_in_set(request.options.pre_release, &m.pre_release)
@@ -173,9 +172,6 @@ fn constraints_pass(constraints: &Option<PolicyConstraints>, request: &PackageRe
     };
 
     if !c.allow_interactive && request.options.interactive {
-        return false;
-    }
-    if !c.allow_run_as_administrator && request.options.run_as_administrator {
         return false;
     }
     if !c.allow_skip_hash_check && request.options.skip_hash_check {
@@ -346,7 +342,6 @@ mod tests {
             options: RequestOptions {
                 scope: None,
                 interactive: false,
-                run_as_administrator: false,
                 skip_hash_check: false,
                 pre_release: false,
                 custom_install_location: None,

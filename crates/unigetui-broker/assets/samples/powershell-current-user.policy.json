@@ -37,8 +37,8 @@
         "managers": [
           "PowerShell"
         ],
-        "runAsAdministrator": [
-          true
+        "elevation": [
+          "elevated"
         ]
       }
     },
@@ -77,9 +77,6 @@
         ],
         "scopes": [
           "user"
-        ],
-        "runAsAdministrator": [
-          false
         ]
       },
       "constraints": {
