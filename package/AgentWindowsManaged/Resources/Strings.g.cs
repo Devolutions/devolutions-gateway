@@ -57,6 +57,14 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureSessionDescription = "FeatureSessionDescription";		
 		/// <summary>
+		/// Agent Tunnel
+		/// </summary>
+		public const string FeatureAgentTunnelName = "FeatureAgentTunnelName";		
+		/// <summary>
+		/// Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator.
+		/// </summary>
+		public const string FeatureAgentTunnelDescription = "FeatureAgentTunnelDescription";		
+		/// <summary>
 		/// There is a problem with the entered data. Please correct the issue and try again.
 		/// </summary>
 		public const string ThereIsAProblemWithTheEnteredData = "ThereIsAProblemWithTheEnteredData";		
@@ -176,5 +184,41 @@ namespace DevolutionsAgent.Resources
 		/// Welcome to the [ProductName] 20[ProductVersion] Setup Wizard
 		/// </summary>
 		public const string WelcomeDlgTitle = "WelcomeDlgTitle";		
+		/// <summary>
+		/// Agent Tunnel
+		/// </summary>
+		public const string AgentTunnelDlgTitle = "AgentTunnelDlgTitle";		
+		/// <summary>
+		/// Connect this agent to a Devolutions Gateway.
+		/// </summary>
+		public const string AgentTunnelDlgDescription = "AgentTunnelDlgDescription";		
+		/// <summary>
+		/// Enrollment String (provided by your gateway operator):
+		/// </summary>
+		public const string AgentTunnelDlgEnrollmentStringLabel = "AgentTunnelDlgEnrollmentStringLabel";		
+		/// <summary>
+		/// Agent Name (Optional):
+		/// </summary>
+		public const string AgentTunnelDlgAgentNameLabel = "AgentTunnelDlgAgentNameLabel";		
+		/// <summary>
+		/// Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name.
+		/// </summary>
+		public const string AgentTunnelDlgAgentNameHint = "AgentTunnelDlgAgentNameHint";		
+		/// <summary>
+		/// Advertise Subnets:
+		/// </summary>
+		public const string AgentTunnelDlgSubnetsLabel = "AgentTunnelDlgSubnetsLabel";		
+		/// <summary>
+		/// Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically.
+		/// </summary>
+		public const string AgentTunnelDlgSubnetsHint = "AgentTunnelDlgSubnetsHint";		
+		/// <summary>
+		/// Advertise Domains:
+		/// </summary>
+		public const string AgentTunnelDlgDomainsLabel = "AgentTunnelDlgDomainsLabel";		
+		/// <summary>
+		/// Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.
+		/// </summary>
+		public const string AgentTunnelDlgDomainsHint = "AgentTunnelDlgDomainsHint";		
 	}
 }

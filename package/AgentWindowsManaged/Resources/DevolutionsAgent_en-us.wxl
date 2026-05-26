@@ -3,14 +3,14 @@
         <!-- metadata -->
                 <String Id="FeatureAgentDescription">Installs the Devolutions Agent service</String>
                 <String Id="FeatureAgentName">Devolutions Agent</String>
+                <String Id="FeatureAgentTunnelDescription">Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator.</String>
+                <String Id="FeatureAgentTunnelName">Agent Tunnel</String>
                 <String Id="FeatureAgentUpdaterDescription">Enables the Devolutions Gateway updater</String>
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                 <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
                 <String Id="FeatureSessionName">RDP Extension</String>
-                <String Id="FeatureAgentTunnelName">Agent Tunnel</String>
-                <String Id="FeatureAgentTunnelDescription">Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator.</String>
                 <String Id="Language">1033</String>
                 <String Id="ProductDescription">System-wide service for extending Devolutions Gateway functionality.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
@@ -60,13 +60,13 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
                     <!-- dialogs.agentTunnel -->
-                <String Id="AgentTunnelDlgTitle">Agent Tunnel</String>
-                <String Id="AgentTunnelDlgDescription">Connect this agent to a Devolutions Gateway.</String>
-                <String Id="AgentTunnelDlgEnrollmentStringLabel">Enrollment String (provided by your gateway operator):</String>
-                <String Id="AgentTunnelDlgAgentNameLabel">Agent Name (Optional):</String>
                 <String Id="AgentTunnelDlgAgentNameHint">Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name.</String>
-                <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>
-                <String Id="AgentTunnelDlgSubnetsHint">Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically.</String>
-                <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>
+                <String Id="AgentTunnelDlgAgentNameLabel">Agent Name (Optional):</String>
+                <String Id="AgentTunnelDlgDescription">Connect this agent to a Devolutions Gateway.</String>
                 <String Id="AgentTunnelDlgDomainsHint">Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>
+                <String Id="AgentTunnelDlgEnrollmentStringLabel">Enrollment String (provided by your gateway operator):</String>
+                <String Id="AgentTunnelDlgSubnetsHint">Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically.</String>
+                <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>
+                <String Id="AgentTunnelDlgTitle">Agent Tunnel</String>
                     </WixLocalization>
