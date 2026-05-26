@@ -7109,7 +7109,6 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "typed-builder",
- "uuid",
 ]
 
 [[package]]

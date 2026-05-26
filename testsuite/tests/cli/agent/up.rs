@@ -148,7 +148,7 @@ Z/fDKMxHxeXla54kfV+HiGkH
             "scope": "gateway.agent.enroll",
             "nbf": now - 60,
             "exp": now + 3600,
-            "jti": uuid::Uuid::new_v4(),
+            "jti": "b1e2c3d4-5678-9abc-def0-123456789abc",
             "jet_gw_url": format!("http://127.0.0.1:{}", config_handle.http_port()),
             "jet_agent_name": "test-agent",
         }),

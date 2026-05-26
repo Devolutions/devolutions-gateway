@@ -45,7 +45,7 @@ tempfile = "3"
 test-utils.path = "../crates/test-utils"
 time = "0.3"
 tokio-rustls = { version = "0.26", features = ["ring"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
