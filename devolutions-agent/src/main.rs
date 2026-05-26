@@ -391,7 +391,7 @@ mod tests {
         let parsed = parse_up_command_args(&args).expect("parse up args");
 
         assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
-        // The JWT itself is used as the ****** for /jet/tunnel/enroll.
+        // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
     }
