@@ -36,6 +36,7 @@ extern crate tracing;
 mod service;
 
 use std::env;
+use std::io::{self, BufRead};
 use std::sync::mpsc;
 
 use anyhow::{Context as _, Result, bail};
@@ -143,6 +144,10 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
 }
 
 fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
+    parse_up_command_args_with_reader(args, io::stdin().lock())
+}
+
+fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], stdin_reader: R) -> Result<UpCommand> {
     let mut gateway_url = None;
     let mut enrollment_token = None;
     let mut agent_name = None;
@@ -168,6 +173,22 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     }
 
     if let Some(enrollment_string) = enrollment_string {
+        // A single hyphen means "read the enrollment string from stdin".
+        let enrollment_string = if enrollment_string == "-" {
+            let mut buf = String::new();
+            for line in stdin_reader.lines() {
+                let line = line.context("failed to read enrollment string from stdin")?;
+                buf.push_str(&line);
+            }
+            let trimmed = buf.trim().to_owned();
+            if trimmed.is_empty() {
+                bail!("enrollment string read from stdin is empty");
+            }
+            trimmed
+        } else {
+            enrollment_string
+        };
+
         let claims = parse_enrollment_jwt(&enrollment_string)?;
 
         // The JWT itself is the Bearer token; the Gateway verifies the signature.
@@ -373,5 +394,35 @@ mod tests {
         // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
+    }
+
+    #[test]
+    fn parse_up_command_args_reads_enrollment_string_from_stdin() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
+        let args = vec!["--enrollment-string".to_owned(), "-".to_owned()];
+
+        // Simulate stdin by providing the JWT through a reader.
+        let fake_stdin = io::Cursor::new(jwt.clone());
+        let parsed = parse_up_command_args_with_reader(&args, fake_stdin).expect("parse up args from stdin");
+
+        assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
+        assert_eq!(parsed.enrollment_token, jwt);
+        assert_eq!(parsed.agent_name, "site-a-agent");
+    }
+
+    #[test]
+    fn parse_up_command_args_stdin_empty_is_error() {
+        let args = vec!["--enrollment-string".to_owned(), "-".to_owned()];
+        let fake_stdin = io::Cursor::new("");
+        let result = parse_up_command_args_with_reader(&args, fake_stdin);
+        assert!(result.is_err());
+        let err = result.expect_err("expected error for empty stdin");
+        assert!(err.to_string().contains("empty"), "error should mention empty stdin");
     }
 }
