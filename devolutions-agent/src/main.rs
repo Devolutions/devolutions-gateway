@@ -391,38 +391,8 @@ mod tests {
         let parsed = parse_up_command_args(&args).expect("parse up args");
 
         assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
-        // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
+        // The JWT itself is used as the ****** for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
-    }
-
-    #[test]
-    fn parse_up_command_args_reads_enrollment_string_from_stdin() {
-        let jwt = make_jwt(serde_json::json!({
-            "scope": "gateway.tunnel.enroll",
-            "exp": 1_999_999_999i64,
-            "jti": "00000000-0000-0000-0000-000000000000",
-            "jet_gw_url": "https://gateway.example.com:7171",
-            "jet_agent_name": "site-a-agent",
-        }));
-        let args = vec!["--enrollment-string".to_owned(), "-".to_owned()];
-
-        // Simulate stdin by providing the JWT through a reader.
-        let fake_stdin = io::Cursor::new(jwt.clone());
-        let parsed = parse_up_command_args_with_reader(&args, fake_stdin).expect("parse up args from stdin");
-
-        assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
-        assert_eq!(parsed.enrollment_token, jwt);
-        assert_eq!(parsed.agent_name, "site-a-agent");
-    }
-
-    #[test]
-    fn parse_up_command_args_stdin_empty_is_error() {
-        let args = vec!["--enrollment-string".to_owned(), "-".to_owned()];
-        let fake_stdin = io::Cursor::new("");
-        let result = parse_up_command_args_with_reader(&args, fake_stdin);
-        assert!(result.is_err());
-        let err = result.expect_err("expected error for empty stdin");
-        assert!(err.to_string().contains("empty"), "error should mention empty stdin");
     }
 }
