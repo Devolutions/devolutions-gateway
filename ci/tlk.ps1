@@ -756,17 +756,12 @@ class TlkRecipe
         $RulesFile = Join-Path $OutputDebianPath "rules"
         $RulesTemplate = Join-Path $InputPackagePath "$($this.Product)/template/rules"
 
-        $DhShLibDepsOverride = "";
-        if ($this.Target.DebianArchitecture() -Eq "amd64") {
-            $DhShLibDepsOverride = "dh_shlibdeps"
-        }
-
         $DebUpstreamChangelogFile = Join-Path $OutputPath "changelog_deb_upstream"
 
         Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-            dh_shlibdeps = $DhShLibDepsOverride
             upstream_changelog = $DebUpstreamChangelogFile
         } -OutputFile $RulesFile
+        chmod +x $RulesFile
 
         # debian/control
         $ControlFile = Join-Path $OutputDebianPath "control"
@@ -886,10 +881,13 @@ class TlkRecipe
             '--after-remove', "$InputPackagePath/$($this.Product)/rpm/postrm"
         )
 
+        $RpmCopyrightFile = Join-Path $OutputPath "copyright_rpm"
+        "Copyright $($(Get-Date).Year) Devolutions Inc. All rights reserved." | Set-Content -Path $RpmCopyrightFile
+
         $FpmFiles = @(
             "$Executable=/usr/bin/$PkgName"
             "$RpmUpstreamChangelogFile=/usr/share/doc/$PkgName/ChangeLog"
-            "$CopyrightFile=/usr/share/doc/$PkgName/copyright"
+            "$RpmCopyrightFile=/usr/share/doc/$PkgName/copyright"
         )
 
         if ($this.Product -eq "gateway") {
