@@ -38,6 +38,17 @@ pub struct AiGatewayConfig {
     pub openai_api_key: Option<String>,
 }
 
+/// Configuration for the agent tunnel feature in tests.
+#[derive(Clone, TypedBuilder)]
+pub struct AgentTunnelConfig {
+    /// Whether the agent tunnel is enabled.
+    #[builder(default = true)]
+    pub enabled: bool,
+    /// UDP port for the QUIC listener.
+    #[builder(default, setter(into))]
+    pub listen_port: Option<u16>,
+}
+
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
     #[builder(default, setter(into))]
@@ -60,6 +71,15 @@ pub struct DgwConfig {
     /// Pass a path that does not yet exist to test behaviour before the folder is created.
     #[builder(default, setter(into))]
     recording_path: Option<std::path::PathBuf>,
+    /// Base64-encoded DER provisioner public key.
+    ///
+    /// When `Some`, replaces the default test provisioner key. Used by tests that
+    /// need to sign JWTs with a matching private key (e.g. enrollment tests).
+    #[builder(default, setter(into))]
+    provisioner_public_key_base64: Option<String>,
+    /// Agent tunnel (QUIC) configuration.
+    #[builder(default, setter(into))]
+    agent_tunnel: Option<AgentTunnelConfig>,
 }
 
 fn find_unused_port() -> u16 {
@@ -92,6 +112,8 @@ impl DgwConfigHandle {
             ai_gateway,
             enable_unstable,
             recording_path,
+            provisioner_public_key_base64,
+            agent_tunnel,
         } = config;
 
         let tempdir = tempfile::tempdir().context("create tempdir")?;
@@ -155,10 +177,28 @@ impl DgwConfigHandle {
             String::new()
         };
 
+        let provisioner_key_value = provisioner_public_key_base64.unwrap_or_else(|| {
+            "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HgjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB".to_owned()
+        });
+
+        let agent_tunnel_json = if let Some(at_config) = agent_tunnel {
+            let listen_port = at_config.listen_port.unwrap_or_else(find_unused_port);
+            format!(
+                r#",
+    "AgentTunnel": {{
+        "Enabled": {},
+        "ListenPort": {listen_port}
+    }}"#,
+                at_config.enabled
+            )
+        } else {
+            String::new()
+        };
+
         let config = format!(
             r#"{{
     "ProvisionerPublicKeyData": {{
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HgjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        "Value": "{provisioner_key_value}"
     }},
     "Listeners": [
         {{
@@ -174,7 +214,7 @@ impl DgwConfigHandle {
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
         "enable_unstable": {enable_unstable}
-    }}{ai_gateway_json}{recording_path_json}
+    }}{ai_gateway_json}{recording_path_json}{agent_tunnel_json}
 }}"#
         );
 

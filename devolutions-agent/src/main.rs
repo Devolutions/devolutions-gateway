@@ -147,7 +147,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     parse_up_command_args_with_reader(args, io::stdin().lock())
 }
 
-fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], stdin_reader: R) -> Result<UpCommand> {
+fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_reader: R) -> Result<UpCommand> {
     let mut gateway_url = None;
     let mut enrollment_token = None;
     let mut agent_name = None;
@@ -175,12 +175,11 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], stdin_reader: 
     if let Some(enrollment_string) = enrollment_string {
         // A single hyphen means "read the enrollment string from stdin".
         let enrollment_string = if enrollment_string == "-" {
-            let mut buf = String::new();
-            for line in stdin_reader.lines() {
-                let line = line.context("failed to read enrollment string from stdin")?;
-                buf.push_str(&line);
-            }
-            let trimmed = buf.trim().to_owned();
+            let mut line = String::new();
+            stdin_reader
+                .read_line(&mut line)
+                .context("failed to read enrollment string from stdin")?;
+            let trimmed = line.trim().to_owned();
             if trimmed.is_empty() {
                 bail!("enrollment string read from stdin is empty");
             }

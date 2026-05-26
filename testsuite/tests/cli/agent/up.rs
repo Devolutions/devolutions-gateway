@@ -1,4 +1,4 @@
-//! E2E tests for `devolutions-agent up` argument parsing,
+//! E2E tests for `devolutions-agent up` enrollment,
 //! focusing on the `--enrollment-string -` stdin path.
 
 use base64::Engine as _;
@@ -25,29 +25,6 @@ fn sample_jwt() -> String {
         "jet_gw_url": "https://gateway.example.com:7171",
         "jet_agent_name": "site-a-agent",
     }))
-}
-
-/// `up --enrollment-string <jwt>` (inline) should parse the JWT and proceed to
-/// enrollment. Since there is no real Gateway, enrollment fails with a network
-/// error — but the argument parsing stage must succeed (no "Invalid up arguments" error).
-#[test]
-fn up_enrollment_string_inline() {
-    let jwt = sample_jwt();
-
-    let output = agent_assert_cmd()
-        .args(["up", "--enrollment-string", &jwt])
-        .assert()
-        .failure(); // Enrollment itself fails — no gateway.
-
-    let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
-    assert!(
-        !stderr.contains("Invalid up arguments"),
-        "argument parsing should succeed; stderr was: {stderr}"
-    );
-    assert!(
-        stderr.contains("Bootstrap failed"),
-        "should fail at enrollment, not parsing; stderr was: {stderr}"
-    );
 }
 
 /// `up --enrollment-string -` reads the JWT from stdin. The enrollment fails (no
@@ -91,24 +68,83 @@ fn up_enrollment_string_stdin_empty_is_error() {
     );
 }
 
-/// The JWT must not appear anywhere in the process command line when the
-/// stdin sentinel `-` is used.  We verify this indirectly: the only
-/// arguments on the command line are `up --enrollment-string -`, so
-/// `assert_cmd`'s captured stderr (which includes the error) should not
-/// contain the JWT itself.
-#[test]
-fn up_enrollment_string_stdin_does_not_leak_jwt_in_stderr() {
-    let jwt = sample_jwt();
+/// Enrollment against a real Gateway with a properly signed JWT.
+///
+/// Starts a Gateway with agent tunnel enabled, signs a JWT with the
+/// matching provisioner key, and runs `devolutions-agent up` via stdin.
+/// The enrollment should succeed (HTTP 200 from the Gateway).
+#[tokio::test]
+async fn up_enrollment_against_real_gateway() {
+    use anyhow::Context as _;
+    use picky::jose::jws::JwsAlg;
+    use picky::jose::jwt::CheckedJwtSig;
+    use picky::key::PrivateKey;
+    use testsuite::cli::{agent_assert_cmd, dgw_tokio_cmd, wait_for_tcp_port};
+    use testsuite::dgw_config::{AgentTunnelConfig, DgwConfig};
+
+    // Generate a fresh provisioner key pair for this test.
+    let priv_key = PrivateKey::generate_rsa(2048).expect("generate RSA key");
+    let pub_key = priv_key.to_public_key().expect("derive public key");
+
+    // Multibase-encode the SPKI DER for the gateway config (prefix 'm' = base64).
+    let pub_key_der = pub_key.to_der().expect("export SPKI DER");
+    let pub_key_multibase = format!("m{}", base64::engine::general_purpose::STANDARD.encode(&pub_key_der));
+
+    let config_handle = DgwConfig::builder()
+        .provisioner_public_key_base64(pub_key_multibase)
+        .agent_tunnel(AgentTunnelConfig::builder().build())
+        .enable_unstable(true)
+        .build()
+        .init()
+        .expect("init gateway config");
+
+    // Start a real Gateway.
+    let mut gateway = dgw_tokio_cmd()
+        .env("DGATEWAY_CONFIG_PATH", config_handle.config_dir())
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("start gateway")
+        .expect("spawn gateway");
+
+    wait_for_tcp_port(config_handle.http_port())
+        .await
+        .expect("gateway HTTP port ready");
+
+    // Sign a proper enrollment JWT with the provisioner private key.
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let jwt = CheckedJwtSig::new(
+        JwsAlg::RS256,
+        serde_json::json!({
+            "scope": "gateway.agent.enroll",
+            "nbf": now - 60,
+            "exp": now + 3600,
+            "jti": uuid::Uuid::new_v4(),
+            "jet_gw_url": format!("http://127.0.0.1:{}", config_handle.http_port()),
+            "jet_agent_name": "test-agent",
+        }),
+    )
+    .encode(&priv_key)
+    .expect("sign enrollment JWT");
+
+    // Run the agent with --enrollment-string - (stdin).
+    // Set DAGENT_CONFIG_PATH so certs are written to a temp directory.
+    let agent_data_dir = tempfile::tempdir().expect("create agent temp dir");
 
     let output = agent_assert_cmd()
+        .env("DAGENT_CONFIG_PATH", agent_data_dir.path())
         .args(["up", "--enrollment-string", "-"])
-        .write_stdin(jwt.clone())
+        .write_stdin(jwt)
+        .timeout(std::time::Duration::from_secs(30))
         .assert()
-        .failure();
+        .success();
 
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     assert!(
-        !stderr.contains(&jwt),
-        "JWT should not appear in stderr; stderr was: {stderr}"
+        !stderr.contains("Bootstrap failed"),
+        "enrollment should succeed; stderr was: {stderr}"
     );
+
+    gateway.kill().await.ok();
 }

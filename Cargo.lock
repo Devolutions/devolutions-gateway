@@ -7093,6 +7093,7 @@ dependencies = [
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
+ "picky",
  "proxy-socks",
  "rstest",
  "serde",
@@ -7102,11 +7103,13 @@ dependencies = [
  "sysevent-winevent",
  "tempfile",
  "test-utils",
+ "time",
  "tokio 1.52.3",
  "tokio-rustls",
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "typed-builder",
+ "uuid",
 ]
 
 [[package]]
