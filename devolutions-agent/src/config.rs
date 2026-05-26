@@ -237,7 +237,25 @@ impl ConfHandle {
 pub fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
+
+    // Ensure the parent directory exists — a fresh machine (standalone `agent.exe up`, no MSI) may
+    // not have the data directory yet, and a bare write would fail before any config is created.
+    if let Some(parent) = conf_file_path.parent().filter(|parent| !parent.as_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create configuration directory: {parent}"))?;
+    }
+
+    // Write atomically: serialize to a sibling temp file, then rename over the target. A failure
+    // mid-write therefore never truncates or corrupts an existing agent.json — the original stays
+    // intact until the rename atomically replaces it (std::fs::rename replaces on Windows too).
+    let tmp_path = Utf8PathBuf::from(format!("{conf_file_path}.tmp"));
+    std::fs::write(&tmp_path, json).with_context(|| format!("failed to write temporary config at {tmp_path}"))?;
+    if let Err(e) = std::fs::rename(&tmp_path, &conf_file_path) {
+        // Rename failed: don't leave the temp file lingering next to agent.json.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(anyhow::Error::new(e).context(format!("failed to replace config at {conf_file_path}")));
+    }
+
     Ok(())
 }
 

@@ -298,7 +298,36 @@ internal static class AgentActions
             AgentProperties.AgentTunnelAdvertiseSubnets,
             AgentProperties.AgentTunnelAdvertiseDomains,
             AgentProperties.InstallDir,
+            // installId is a typed WixProperty<Guid>, so reference its string Id; the rollback CA
+            // reads it to locate the per-install tunnel rollback marker.
+            AgentProperties.installId.Id,
         }.Select(p => $"{p}=[{p}]")),
+    };
+
+    /// <summary>
+    /// Undo a successful agent tunnel enrollment if a later install action triggers an MSI rollback.
+    /// </summary>
+    /// <remarks>
+    /// The enrollment writes cert/key files and a Tunnel section into agent.json that aren't
+    /// MSI-managed components, so MSI's own rollback leaves them orphaned. The condition mirrors
+    /// <see cref="enrollAgentTunnel"/> exactly (the feature being installed) so the rollback covers
+    /// every path the forward action can run — including adding the feature during a maintenance or
+    /// upgrade transition, not just first install. The rollback is marker-driven: it only deletes
+    /// and restores when EnrollAgentTunnel recorded a per-install marker, so it never touches a
+    /// pre-existing Tunnel section or certs left by a failed/partial enrollment.
+    /// </remarks>
+    private static readonly ElevatedManagedAction rollbackEnrollAgentTunnel = new(
+        new Id($"CA.{nameof(rollbackEnrollAgentTunnel)}"),
+        CustomActions.RollbackEnrollAgentTunnel,
+        Return.ignore,
+        When.Before, new Step(enrollAgentTunnel.Id),
+        Features.AGENT_TUNNEL_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.rollback,
+        Impersonate = false,
+        // installId locates the per-install tunnel rollback marker EnrollAgentTunnel writes.
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
@@ -375,6 +404,7 @@ internal static class AgentActions
         setFeaturesToConfigure,
         configureFeatures,
         enrollAgentTunnel,
+        rollbackEnrollAgentTunnel,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

@@ -15,6 +15,7 @@ using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using WixSharp;
 using File = System.IO.File;
 
@@ -320,6 +321,43 @@ namespace DevolutionsAgent.Actions
             return ActionResult.Success;
         }
 
+        /// <summary>
+        /// Best-effort read of the freshly-written agent.json Tunnel section, collecting the
+        /// non-empty <c>ClientCertPath</c> / <c>ClientKeyPath</c> / <c>GatewayCaCertPath</c> values
+        /// into a list. Never throws: a missing/locked/partial agent.json or missing Tunnel section
+        /// just yields whatever (possibly nothing) was found. Shared by EnrollAgentTunnel's marker
+        /// block and its timeout-path inline cleanup.
+        /// </summary>
+        private static List<string> ReadTunnelCertPaths(string agentJsonPath)
+        {
+            List<string> paths = new();
+            try
+            {
+                if (File.Exists(agentJsonPath))
+                {
+                    JObject root = JObject.Parse(File.ReadAllText(agentJsonPath));
+                    if (root["Tunnel"] is JObject tunnel)
+                    {
+                        foreach (string field in new[] { "ClientCertPath", "ClientKeyPath", "GatewayCaCertPath" })
+                        {
+                            string value = tunnel[field]?.Value<string>();
+                            if (!string.IsNullOrEmpty(value))
+                            {
+                                paths.Add(value);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort: return whatever was collected so far. agent.json may be locked,
+                // absent, or partially written (e.g. on the timeout path).
+            }
+
+            return paths;
+        }
+
         [CustomAction]
         public static ActionResult EnrollAgentTunnel(Session session)
         {
@@ -349,6 +387,50 @@ namespace DevolutionsAgent.Actions
                 // that after enrollment succeeds.
                 string installDir = session.Property(AgentProperties.InstallDir);
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
+
+                // The rollback CA (RollbackEnrollAgentTunnel) is marker-driven: it only touches
+                // disk if this forward action got far enough to write the marker. The marker is
+                // keyed by installId (bubbled through CustomActionData) and carries enough state to
+                // both clean up what `up` wrote and restore anything it overwrote.
+                string installId = session.Get(AgentProperties.installId).ToString();
+                string markerPath = Path.Combine(Path.GetTempPath(), $"{installId}-tunnel-rollback.json");
+
+                // Snapshot the pre-enrollment state BEFORE `up` runs so rollback can restore it.
+                // Best-effort: any failure here just leaves the snapshot null, which means rollback
+                // will delete (rather than restore) — the safe direction is no false restore.
+                string agentJsonPath = Path.Combine(ProgramDataDirectory, "agent.json");
+                string gatewayCaPath = Path.Combine(ProgramDataDirectory, "certs", "gateway-ca.pem");
+                JToken originalTunnel = null;
+                string originalGatewayCaB64 = null;
+                // Distinguishes "snapshot succeeded and found nothing" (safe to delete on rollback)
+                // from "snapshot threw and we don't know what was there" (must NOT delete). Only set
+                // true once BOTH reads below complete, so a mid-snapshot throw leaves it false.
+                bool originalStateCaptured = false;
+                try
+                {
+                    if (File.Exists(agentJsonPath))
+                    {
+                        JObject preRoot = JObject.Parse(File.ReadAllText(agentJsonPath));
+                        if (preRoot["Tunnel"] is JObject preTunnel)
+                        {
+                            originalTunnel = preTunnel.DeepClone();
+                        }
+                    }
+
+                    // gateway-ca.pem is a FIXED filename that `up` overwrites, so we must preserve
+                    // any pre-existing copy. The {uuid}-cert.pem / {uuid}-key.pem files are uniquely
+                    // named per enrollment, so they can never collide with a pre-existing config.
+                    if (File.Exists(gatewayCaPath))
+                    {
+                        originalGatewayCaB64 = Convert.ToBase64String(File.ReadAllBytes(gatewayCaPath));
+                    }
+
+                    originalStateCaptured = true;
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to snapshot pre-enrollment tunnel state (rollback will not restore): {e}");
+                }
 
                 // agent.exe `up` requires an agent name. Resolution: dialog value > JWT's
                 // jet_agent_name (left to the agent CLI by omitting --name) > local computer name.
@@ -390,9 +472,20 @@ namespace DevolutionsAgent.Actions
 
                 using Process process = Process.Start(startInfo);
 
-                // Write the JWT to stdin and close it so the child sees EOF.
+                // Write the JWT to stdin and close it so the child sees EOF. Passing it via stdin
+                // (sentinel `-` in the args) instead of the command line keeps the bearer token out
+                // of the process cmdline. The JWT is small and stdin is closed immediately, so this
+                // write can't block before we start draining stdout/stderr below.
                 process.StandardInput.Write(enrollmentString);
                 process.StandardInput.Close();
+
+                // Drain stdout/stderr concurrently with the wait. The Windows anonymous-pipe
+                // buffer is ~4 KB; if the child writes more than that (verbose logs, cert dumps)
+                // while we block in WaitForExit before reading, the child blocks on write(), the
+                // wait never returns, and we'd Kill() a healthy process — a spurious install
+                // failure. Starting the async readers up front keeps the pipes drained.
+                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
 
                 if (!process.WaitForExit(60_000))
                 {
@@ -404,10 +497,40 @@ namespace DevolutionsAgent.Actions
                     {
                         // Already exited between WaitForExit timing out and Kill firing.
                     }
+
+                    // The async readers may still be running against the (now disposing) streams.
+                    // Observe them with a bounded wait so their exceptions don't surface later as
+                    // unobserved task exceptions; swallow whatever they throw — we're already failing.
+                    try
+                    {
+                        Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 5000);
+                    }
+                    catch
+                    {
+                        // Observed.
+                    }
+
+                    // A hard Kill() bypasses BOTH recovery layers: the agent's transactional
+                    // rollback never runs (we killed it, it didn't gracefully error), and no marker
+                    // has been written yet (the marker write happens after the exit-code-0 check
+                    // below). So if `up` wrote agent.json + cert files but then hung, those would be
+                    // orphaned. Mirror the marker-failure path: best-effort read whatever cert paths
+                    // landed in agent.json and clean them up + restore the pre-snapshot state. The
+                    // snapshot locals (originalTunnel/originalGatewayCaB64/originalStateCaptured) were
+                    // captured before `up` started, so they're valid here. ReadTunnelCertPaths can't
+                    // throw, so this can't escape the timeout path.
+                    List<string> timeoutCertPaths = ReadTunnelCertPaths(agentJsonPath);
+                    CleanUpEnrollmentArtifacts(session, timeoutCertPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+
                     return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
-                string stdout = process.StandardOutput.ReadToEnd();
-                string stderr = process.StandardError.ReadToEnd();
+
+                // Parameterless WaitForExit ensures the async stdout/stderr readers have fully
+                // flushed before we read their results. GetAwaiter().GetResult() unwraps IO errors
+                // instead of wrapping them in an AggregateException ("One or more errors occurred.").
+                process.WaitForExit();
+                string stdout = stdoutTask.GetAwaiter().GetResult();
+                string stderr = stderrTask.GetAwaiter().GetResult();
 
                 if (!string.IsNullOrEmpty(stdout))
                 {
@@ -424,8 +547,80 @@ namespace DevolutionsAgent.Actions
                     return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
 
+                // Enrollment succeeded and the agent has written agent.json + cert files. Record a
+                // rollback marker capturing (a) the newly-written cert paths to clean up and (b) the
+                // pre-enrollment Tunnel section / gateway-ca to restore. Written BEFORE
+                // WriteTunnelAdvertisementsToConfig so that if that call throws (and triggers a
+                // rollback), the marker already exists and rollback can undo what `up` wrote.
+                //
+                // The marker is REQUIRED for safe rollback — it's how the rollback CA knows what
+                // THIS install wrote versus pre-existing state. So if we can't record it, we undo
+                // the enrollment inline and fail now, rather than leaving artifacts a later rollback
+                // (which keys off the marker) couldn't clean up.
+                // Declared OUTSIDE the try so the catch can still pass whatever was collected
+                // (possibly empty) to the inline cleanup.
+                List<string> newCertPaths = new();
+                try
+                {
+                    // Parse the freshly-written agent.json to learn what `up` wrote. This MUST live
+                    // inside the same try as the marker write: if the read/parse throws and we let it
+                    // fall through to the outer catch, we'd Fail() with neither a marker NOR an inline
+                    // cleanup, orphaning the just-written cert/key/tunnel artifacts.
+                    //
+                    // Collect whatever the (best-effort) helper finds FIRST, so that if the
+                    // completeness check below throws, the surrounding catch's inline cleanup gets
+                    // whatever cert paths WERE written.
+                    newCertPaths = ReadTunnelCertPaths(agentJsonPath);
+
+                    // A successful `up` (exit 0) is a contract: agent.json MUST exist with a Tunnel
+                    // section carrying all three cert paths. If any is missing the agent's behavior
+                    // diverged — proceeding would write a marker whose NewCertPaths can't delete the
+                    // cert/key, and (with no subnets/domains) the install would "succeed" with an
+                    // unusable marker. ReadTunnelCertPaths only adds the three non-empty path fields,
+                    // so fewer than three means agent.json/Tunnel/a path field was missing. Throw so
+                    // the surrounding catch rolls back inline and Fail()s.
+                    if (newCertPaths.Count != 3)
+                    {
+                        throw new Exception("agent tunnel enrollment reported success but agent.json is missing the expected Tunnel cert paths");
+                    }
+
+                    JArray markerCertPaths = new();
+                    foreach (string p in newCertPaths)
+                    {
+                        markerCertPaths.Add(p);
+                    }
+
+                    JObject marker = new()
+                    {
+                        ["NewCertPaths"] = markerCertPaths,
+                        ["OriginalTunnel"] = originalTunnel,
+                        ["OriginalGatewayCaB64"] = originalGatewayCaB64,
+                        ["OriginalStateCaptured"] = originalStateCaptured,
+                    };
+
+                    // Atomic write: a half-written marker is worse than none — rollback would fail
+                    // to parse it and leave artifacts behind. WriteFileAtomic guarantees the marker
+                    // is either fully present or absent.
+                    WriteFileAtomic(markerPath, marker.ToString());
+
+                    // Mirror CleanAgentConfig: schedule the marker for deletion at reboot so a
+                    // successful install doesn't leave it lingering. Rollback deletes it eagerly.
+                    WinAPI.MoveFileEx(markerPath, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to record tunnel rollback marker: {e}");
+                    // No reliable marker => a later MSI rollback couldn't clean this enrollment up.
+                    // Undo it inline and fail now so the machine is left as it was before enroll.
+                    CleanUpEnrollmentArtifacts(session, newCertPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+                    return Fail("Failed to record the agent tunnel rollback marker; the enrollment was rolled back.");
+                }
+
                 if (subnetsArg.Length != 0 || domainsArg.Length != 0)
                 {
+                    // Throws on a missing Tunnel section or write failure; the surrounding
+                    // catch converts that into Fail(...) so we never report success while
+                    // silently discarding operator-supplied subnets/domains.
                     WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
                 }
 
@@ -510,50 +705,114 @@ namespace DevolutionsAgent.Actions
         /// </summary>
         private static void WriteTunnelAdvertisementsToConfig(Session session, string subnetsCsv, string domainsCsv)
         {
-            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
-            if (!File.Exists(configPath))
+            string[] subnets = SplitCsv(subnetsCsv);
+            string[] domains = SplitCsv(domainsCsv);
+
+            // Nothing operator-supplied to persist: stay a no-op. This path must never fail.
+            if (subnets.Length == 0 && domains.Length == 0)
             {
-                session.Log($"agent.json not found at {configPath}; cannot persist tunnel advertisements");
                 return;
             }
 
+            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+            if (!File.Exists(configPath))
+            {
+                // The operator supplied subnets/domains but agent.json doesn't exist after a
+                // successful `up`. Throwing surfaces this as a CA failure rather than silently
+                // dropping their input and reporting install success.
+                throw new Exception($"agent.json not found at {configPath}; cannot persist advertised subnets/domains");
+            }
+
+            JObject root = JObject.Parse(File.ReadAllText(configPath));
+
+            // ConfFile uses serde rename_all = "PascalCase", so the tunnel section is keyed
+            // "Tunnel" and the fields are "AdvertiseSubnets" / "AdvertiseDomains".
+            if (root["Tunnel"] is not JObject tunnel)
+            {
+                // Fail loud: a missing Tunnel section after a successful `up` means the agent's
+                // enrollment behavior diverged from what this CA assumes. Silently skipping the
+                // write here would discard operator-supplied advertisements while reporting
+                // install success — we want to catch the divergence, not hide it.
+                throw new Exception("agent.json has no Tunnel section after enrollment; cannot persist advertised subnets/domains");
+            }
+
+            if (subnets.Length != 0)
+            {
+                tunnel["AdvertiseSubnets"] = new JArray(subnets);
+            }
+            if (domains.Length != 0)
+            {
+                tunnel["AdvertiseDomains"] = new JArray(domains);
+            }
+
+            // Let genuine IO/parse errors propagate too: swallowing them would also lose the
+            // operator's data while falsely reporting success. Write atomically so a mid-write
+            // failure can't truncate agent.json — the rollback path re-parses it to restore the
+            // original Tunnel section, which a half-written file would make impossible.
+            WriteFileAtomic(configPath, root.ToString(Formatting.Indented));
+            session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} advertise_domains entries to agent.json");
+        }
+
+        /// <summary>
+        /// Write a file atomically: serialize to a sibling temp file, then replace the target in
+        /// one step. A failure mid-write never truncates or corrupts the existing file — the
+        /// original stays intact until the atomic replace. Used for every agent.json write on the
+        /// enrollment/rollback path so the rollback can always re-parse agent.json.
+        /// </summary>
+        private static void WriteFileAtomic(string path, string contents)
+        {
+            WriteFileAtomicCore(path, tmpPath => File.WriteAllText(tmpPath, contents));
+        }
+
+        /// <summary>
+        /// Byte-oriented sibling of <see cref="WriteFileAtomic(string, string)"/>. Used to restore
+        /// the snapshotted gateway-ca.pem during rollback so the restore can't truncate the target
+        /// if it fails mid-write.
+        /// </summary>
+        private static void WriteFileAtomic(string path, byte[] contents)
+        {
+            WriteFileAtomicCore(path, tmpPath => File.WriteAllBytes(tmpPath, contents));
+        }
+
+        /// <summary>
+        /// Shared atomic-write core: write to a sibling temp file via <paramref name="writeTemp"/>,
+        /// then atomically replace (or move) onto the target. If anything after the temp write
+        /// fails, the temp file is deleted before the exception propagates so we never leave a
+        /// stray <c>.tmp</c> behind.
+        /// </summary>
+        private static void WriteFileAtomicCore(string path, Action<string> writeTemp)
+        {
+            string tmpPath = path + ".tmp";
+
             try
             {
-                string[] subnets = SplitCsv(subnetsCsv);
-                string[] domains = SplitCsv(domainsCsv);
+                writeTemp(tmpPath);
 
-                if (subnets.Length == 0 && domains.Length == 0)
+                if (File.Exists(path))
                 {
-                    return;
+                    // File.Replace performs an atomic NTFS replace (no backup file requested).
+                    File.Replace(tmpPath, path, null);
                 }
-
-                JObject root = JObject.Parse(File.ReadAllText(configPath));
-
-                // ConfFile uses serde rename_all = "PascalCase", so the tunnel section is keyed
-                // "Tunnel" and the fields are "AdvertiseSubnets" / "AdvertiseDomains".
-                if (root["Tunnel"] is not JObject tunnel)
+                else
                 {
-                    session.Log("agent.json has no Tunnel section after enrollment; skipping tunnel advertisements write");
-                    return;
+                    File.Move(tmpPath, path);
                 }
-
-                if (subnets.Length != 0)
-                {
-                    tunnel["AdvertiseSubnets"] = new JArray(subnets);
-                }
-                if (domains.Length != 0)
-                {
-                    tunnel["AdvertiseDomains"] = new JArray(domains);
-                }
-
-                File.WriteAllText(configPath, root.ToString(Formatting.Indented));
-                session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} advertise_domains entries to agent.json");
             }
-            catch (Exception e)
+            catch
             {
-                // Don't fail the install over this — the tunnel works fine without these
-                // advertisements; the agent simply won't route additional traffic for them.
-                session.Log($"Failed to write tunnel advertisements to agent.json: {e}");
+                try
+                {
+                    if (File.Exists(tmpPath))
+                    {
+                        File.Delete(tmpPath);
+                    }
+                }
+                catch
+                {
+                    // Best-effort cleanup; surface the original failure below.
+                }
+
+                throw;
             }
         }
 
@@ -716,6 +975,199 @@ namespace DevolutionsAgent.Actions
                 {
                     session.Log($"failed to rollback file {configFile}: {e}");
                 }
+            }
+
+            // Best effort, always return success
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Undo a completed tunnel enrollment: delete the uniquely-named client cert/key, restore
+        /// (or delete) the fixed-name gateway-ca.pem, and restore (or remove) the Tunnel section in
+        /// agent.json. Shared by the marker-driven rollback CA and by EnrollAgentTunnel's inline
+        /// cleanup when it cannot record the rollback marker. Best-effort: logs and continues past
+        /// individual failures so it never aborts a rollback.
+        /// </summary>
+        private static void CleanUpEnrollmentArtifacts(Session session, List<string> newCertPaths, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
+        {
+            // The client cert/key are uniquely named per enrollment, so they're always deleted —
+            // they can't collide with pre-existing state. gateway-ca.pem and the Tunnel section are
+            // fixed-name/shared, so they're only touched when we actually captured the pre-enrollment
+            // state; if the snapshot threw (originalStateCaptured == false), null is ambiguous
+            // (absent vs failed-to-read) and we must leave those shared artifacts untouched rather
+            // than delete state we never observed.
+            foreach (string certPath in newCertPaths)
+            {
+                if (string.IsNullOrEmpty(certPath))
+                {
+                    continue;
+                }
+
+                bool isGatewayCa = certPath.EndsWith("gateway-ca.pem", StringComparison.OrdinalIgnoreCase);
+
+                if (isGatewayCa)
+                {
+                    if (!originalStateCaptured)
+                    {
+                        // Snapshot failed: we don't know whether a pre-existing gateway-ca.pem was
+                        // here, so leave it untouched (neither restore nor delete).
+                        session.Log($"skipping gateway-ca cleanup at {certPath}; pre-enrollment state was not captured");
+                        continue;
+                    }
+
+                    if (originalGatewayCaB64 != null)
+                    {
+                        // Restore to the ACTUAL path `up` wrote (from the marker), atomically so a
+                        // failed restore can't truncate it.
+                        try
+                        {
+                            WriteFileAtomic(certPath, Convert.FromBase64String(originalGatewayCaB64));
+                            session.Log($"restored pre-existing gateway-ca.pem at {certPath}");
+                        }
+                        catch (Exception e)
+                        {
+                            session.Log($"failed to restore gateway-ca.pem at {certPath}: {e}");
+                        }
+                    }
+                    else
+                    {
+                        // Captured, and there was no pre-existing copy: delete what `up` wrote.
+                        try
+                        {
+                            if (File.Exists(certPath))
+                            {
+                                File.Delete(certPath);
+                                session.Log($"removed orphaned gateway-ca.pem {certPath}");
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            session.Log($"failed to delete gateway-ca.pem {certPath}: {e}");
+                        }
+                    }
+
+                    continue;
+                }
+
+                try
+                {
+                    if (File.Exists(certPath))
+                    {
+                        File.Delete(certPath);
+                        session.Log($"removed orphaned enrollment artifact {certPath}");
+                    }
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to delete enrollment artifact {certPath}: {e}");
+                }
+            }
+
+            // Tunnel section in agent.json: only touch it when the pre-enrollment state was
+            // captured. If the snapshot threw, a null originalTunnel is ambiguous (no Tunnel vs
+            // failed-to-read) and removing it could destroy a pre-existing section, so skip the
+            // read/modify/write entirely.
+            if (!originalStateCaptured)
+            {
+                session.Log("skipping Tunnel section cleanup in agent.json; pre-enrollment state was not captured");
+                return;
+            }
+
+            // Restore the pre-enrollment Tunnel section: put back the original if one was
+            // snapshotted, otherwise remove the section the enrollment introduced. The agent.json
+            // write is atomic so a mid-write failure can't corrupt it.
+            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+            try
+            {
+                if (File.Exists(configPath))
+                {
+                    JObject root = JObject.Parse(File.ReadAllText(configPath));
+
+                    if (originalTunnel != null && originalTunnel.Type != JTokenType.Null)
+                    {
+                        root["Tunnel"] = originalTunnel.DeepClone();
+                        session.Log("restored pre-enrollment Tunnel section in agent.json");
+                    }
+                    else
+                    {
+                        root.Remove("Tunnel");
+                        session.Log("removed Tunnel section from agent.json during enrollment rollback");
+                    }
+
+                    WriteFileAtomic(configPath, root.ToString(Formatting.Indented));
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to restore Tunnel section in agent.json: {e}");
+            }
+        }
+
+        // Pairs with EnrollAgentTunnel. On a successful enrollment the agent writes cert/key files
+        // into %ProgramData%\Devolutions\Agent\certs\ and a Tunnel section into agent.json. None of
+        // these are MSI-managed components, so if a later install action fails and MSI rolls back,
+        // those artifacts would be orphaned on disk.
+        //
+        // This rollback CA is MARKER-DRIVEN. EnrollAgentTunnel only writes the marker once
+        // enrollment succeeds, and it snapshots the pre-enrollment Tunnel section + the fixed-name
+        // gateway-ca.pem into that marker first. That distinction matters: rollback fires for ANY
+        // MSI rollback, including when the forward action failed BEFORE writing anything (empty
+        // enrollment string, or `agent.exe up` returning non-zero). In those cases the current
+        // Tunnel section / certs are PRE-EXISTING (manual config or old residue) and must NOT be
+        // touched — the absence of the marker is exactly what tells us that. When the marker is
+        // present we delete the freshly-written {uuid}-cert/key.pem, restore-or-delete the
+        // fixed-name gateway-ca.pem, and restore-or-remove the Tunnel section. Everything is
+        // best-effort and always returns Success so it never aborts the rollback chain.
+        [CustomAction]
+        public static ActionResult RollbackEnrollAgentTunnel(Session session)
+        {
+            string installId = session.Get(AgentProperties.installId).ToString();
+            string markerPath = Path.Combine(Path.GetTempPath(), $"{installId}-tunnel-rollback.json");
+
+            // No marker => the forward action never reached its write phase, so the current Tunnel
+            // section / certs are pre-existing and we must leave them untouched. This is the core
+            // fix for the over-eager deletion the reviewer flagged.
+            if (!File.Exists(markerPath))
+            {
+                session.Log($"no tunnel rollback marker at {markerPath}; enrollment never completed its write phase, nothing to roll back");
+                return ActionResult.Success;
+            }
+
+            JObject marker;
+            try
+            {
+                marker = JObject.Parse(File.ReadAllText(markerPath));
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to parse tunnel rollback marker at {markerPath}: {e}");
+                return ActionResult.Success;
+            }
+
+            List<string> newCertPaths = new();
+            if (marker["NewCertPaths"] is JArray markerCertPaths)
+            {
+                foreach (JToken entry in markerCertPaths)
+                {
+                    string certPath = entry?.Value<string>();
+                    if (!string.IsNullOrEmpty(certPath))
+                    {
+                        newCertPaths.Add(certPath);
+                    }
+                }
+            }
+
+            bool originalStateCaptured = marker["OriginalStateCaptured"]?.Value<bool>() ?? false;
+
+            CleanUpEnrollmentArtifacts(session, newCertPaths, marker["OriginalTunnel"], marker["OriginalGatewayCaB64"]?.Value<string>(), originalStateCaptured);
+
+            try
+            {
+                File.Delete(markerPath);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to delete tunnel rollback marker at {markerPath}: {e}");
             }
 
             // Best effort, always return success
