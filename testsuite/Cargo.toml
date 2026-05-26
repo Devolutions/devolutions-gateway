@@ -38,12 +38,10 @@ mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
 rstest = "0.25"
-picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose"] }
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
-time = "0.3"
 tokio-rustls = { version = "0.26", features = ["ring"] }
 
 
