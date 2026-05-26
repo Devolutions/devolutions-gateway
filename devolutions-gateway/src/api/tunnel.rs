@@ -61,7 +61,7 @@ mod unsafe_debug {
     /// Skips signature verification and `exp`/`nbf` checks. Only the scope
     /// (`AgentEnroll` or `Wildcard`) is still enforced, so test tokens still
     /// have to carry the right intent.
-    pub fn dangerous_validate_enrollment_jwt(token: &str) -> bool {
+    pub(super) fn dangerous_validate_enrollment_jwt(token: &str) -> bool {
         warn!(
             "**DEBUG OPTION** Using dangerous enrollment token validation for testing purposes. Make sure this is not happening in production!"
         );
