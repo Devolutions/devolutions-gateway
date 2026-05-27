@@ -1,10 +1,12 @@
 use std::ffi::OsString;
 use std::process::Stdio;
+use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::Serialize;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::config::dto::PsuPowerShellConf;
@@ -146,6 +148,14 @@ try {
                 $response.data = [System.Management.Automation.PSSerializer]::Serialize($pipeline)
             }
         }
+    } elseif ($request.kind -eq 'secret') {
+        $secretName = [string] $request.data
+        $secret = Get-Secret -Name $secretName -AsPlainText -ErrorAction Stop
+        if ($null -eq $secret) {
+            $response.terminatingError = "Secret not found: $secretName"
+        } else {
+            $response.data = [string] $secret
+        }
     } else {
         $response.terminatingError = "Unknown PSU worker request kind: $($request.kind)"
     }
@@ -159,11 +169,32 @@ $response | ConvertTo-Json -Compress -Depth 16
 #[derive(Debug, Clone)]
 pub(super) struct PowerShellWorker {
     conf: PsuPowerShellConf,
+    permits: Arc<Semaphore>,
 }
 
 impl PowerShellWorker {
     pub(super) fn new(conf: PsuPowerShellConf) -> Self {
-        Self { conf }
+        let worker_limit = effective_worker_limit(&conf);
+        Self {
+            conf,
+            permits: Arc::new(Semaphore::new(worker_limit)),
+        }
+    }
+
+    pub(super) async fn resolve_app_token(&self, app_token: &str) -> anyhow::Result<String> {
+        let Some(secret_name) = secret_reference_name(app_token) else {
+            return Ok(app_token.to_owned());
+        };
+
+        let response = self.run_request(WorkerRequest::secret(secret_name.to_owned())).await?;
+        if let Some(error) = response.terminating_error {
+            bail!("failed to resolve PSU AppToken secret {secret_name}: {error}");
+        }
+
+        response
+            .data
+            .filter(|secret| !secret.is_empty())
+            .with_context(|| format!("PSU AppToken secret {secret_name} resolved to an empty value"))
     }
 
     pub(super) async fn execute_command(
@@ -187,6 +218,11 @@ impl PowerShellWorker {
     }
 
     async fn run_request(&self, request: WorkerRequest) -> anyhow::Result<WebsocketEventResponse> {
+        let _permit = self
+            .permits
+            .acquire()
+            .await
+            .context("PSU PowerShell worker pool is closed")?;
         let temp_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
             .map_err(|path| anyhow::anyhow!("non-UTF-8 temp path: {path:?}"))?;
         let request_path = temp_dir.join(format!("devolutions-agent-psu-{}.json", Uuid::new_v4()));
@@ -284,6 +320,37 @@ impl WorkerRequest {
             return_result,
         }
     }
+
+    fn secret(secret_name: String) -> Self {
+        Self {
+            kind: "secret",
+            command: None,
+            script_path: None,
+            data: secret_name,
+            return_result: true,
+        }
+    }
+}
+
+fn secret_reference_name(app_token: &str) -> Option<&str> {
+    let prefix = "$secret:";
+    app_token
+        .get(..prefix.len())
+        .filter(|candidate| candidate.eq_ignore_ascii_case(prefix))
+        .and_then(|_| app_token.get(prefix.len()..))
+        .filter(|name| !name.is_empty())
+}
+
+fn effective_worker_limit(conf: &PsuPowerShellConf) -> usize {
+    let max_worker_pool_size = conf.max_worker_pool_size.max(1);
+    if conf.worker_pool_size > max_worker_pool_size {
+        warn!(
+            worker_pool_size = conf.worker_pool_size,
+            max_worker_pool_size,
+            "PSU worker pool size exceeds maximum, limiting concurrent workers to MaxWorkerPoolSize"
+        );
+    }
+    max_worker_pool_size
 }
 
 fn resolve_powershell_executable(conf: &PsuPowerShellConf) -> OsString {
@@ -385,5 +452,34 @@ mod tests {
                 .unwrap_or_default()
                 .contains("Hello World")
         );
+    }
+
+    #[tokio::test]
+    async fn literal_app_token_does_not_require_secret_resolution() {
+        let worker = PowerShellWorker::new(PsuPowerShellConf {
+            executable_path: Some(Utf8PathBuf::from("missing-pwsh")),
+            ..PsuPowerShellConf::default()
+        });
+
+        let token = worker.resolve_app_token("literal-token").await.expect("resolve token");
+
+        assert_eq!(token, "literal-token");
+    }
+
+    #[test]
+    fn secret_reference_name_is_case_insensitive() {
+        assert_eq!(secret_reference_name("$secret:AppToken"), Some("AppToken"));
+        assert_eq!(secret_reference_name("$SECRET:AppToken"), Some("AppToken"));
+        assert_eq!(secret_reference_name("literal-token"), None);
+    }
+
+    #[test]
+    fn effective_worker_limit_uses_configured_maximum() {
+        let conf = PsuPowerShellConf {
+            max_worker_pool_size: 3,
+            ..PsuPowerShellConf::default()
+        };
+
+        assert_eq!(effective_worker_limit(&conf), 3);
     }
 }

@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 
 use crate::config::ConfHandle;
 use crate::psu_event_hub::executor::EventHubExecutor;
+use crate::psu_event_hub::powershell_worker::PowerShellWorker;
 
 pub struct PsuEventHubTask {
     conf_handle: ConfHandle,
@@ -43,10 +44,26 @@ impl Task for PsuEventHubTask {
 
         let mut join_set = JoinSet::new();
 
-        for connection in psu_conf.connections {
+        let secret_resolver = PowerShellWorker::new(psu_conf.power_shell.clone());
+
+        for mut connection in psu_conf.connections {
             if connection.hub.trim().is_empty() {
                 warn!(url = %connection.url, "Skipping PSU Event Hub connection without a hub name");
                 continue;
+            }
+
+            if let Some(app_token) = connection.app_token.as_deref() {
+                match secret_resolver.resolve_app_token(app_token).await {
+                    Ok(resolved) => connection.app_token = Some(resolved),
+                    Err(error) => {
+                        error!(
+                            hub = %connection.hub,
+                            error = format!("{error:#}"),
+                            "Skipping PSU Event Hub connection because AppToken secret resolution failed"
+                        );
+                        continue;
+                    }
+                }
             }
 
             let executor = EventHubExecutor::new(&connection, psu_conf.power_shell.clone());

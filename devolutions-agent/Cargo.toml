@@ -68,6 +68,7 @@ features = [
     "parking_lot",
     "fs",
     "process",
+    "sync",
 ]
 
 [target.'cfg(windows)'.dependencies]
