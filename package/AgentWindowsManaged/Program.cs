@@ -349,11 +349,6 @@ internal class Program
         // - Make DevolutionsDesktopAgent answer WM_CLOSE
         projectProperties.Add(new Property("MSIRESTARTMANAGERCONTROL", "Disable"));
 
-        // Prevent the enrollment JWT from being logged in verbose MSI logs (/L*v).
-        // `Hidden = true` only suppresses the property table dump; MsiHiddenProperties
-        // controls masking of CustomActionData expansion in verbose logs.
-        projectProperties.Add(new Property("MsiHiddenProperties", AgentProperties.AgentTunnelEnrollmentString));
-
         // Agent tunnel properties: must be declared Secure so the values set in the wizard UI
         // survive the UAC boundary and reach the deferred CA via CustomActionData.
         projectProperties.Add(new Property(AgentProperties.AgentTunnelEnrollmentString, "") { Hidden = true, Secure = true });
