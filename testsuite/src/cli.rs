@@ -65,6 +65,24 @@ pub fn dgw_tokio_cmd() -> tokio::process::Command {
     cmd
 }
 
+static AGENT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../devolutions-agent/Cargo.toml")
+        .bin("devolutions-agent")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Devolutions Agent")
+        .path()
+        .to_path_buf()
+});
+
+pub fn agent_assert_cmd() -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::new(&*AGENT_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);

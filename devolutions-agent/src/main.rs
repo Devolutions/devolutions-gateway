@@ -36,6 +36,7 @@ extern crate tracing;
 mod service;
 
 use std::env;
+use std::io::{self, BufRead};
 use std::sync::mpsc;
 
 use anyhow::{Context as _, Result, bail};
@@ -143,6 +144,10 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
 }
 
 fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
+    parse_up_command_args_with_reader(args, io::stdin().lock())
+}
+
+fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_reader: R) -> Result<UpCommand> {
     let mut gateway_url = None;
     let mut enrollment_token = None;
     let mut agent_name = None;
@@ -168,6 +173,21 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     }
 
     if let Some(enrollment_string) = enrollment_string {
+        // A single hyphen means "read the enrollment string from stdin".
+        let enrollment_string = if enrollment_string == "-" {
+            let mut line = String::new();
+            stdin_reader
+                .read_line(&mut line)
+                .context("failed to read enrollment string from stdin")?;
+            let trimmed = line.trim().to_owned();
+            if trimmed.is_empty() {
+                bail!("enrollment string read from stdin is empty");
+            }
+            trimmed
+        } else {
+            enrollment_string
+        };
+
         let claims = parse_enrollment_jwt(&enrollment_string)?;
 
         // The JWT itself is the Bearer token; the Gateway verifies the signature.

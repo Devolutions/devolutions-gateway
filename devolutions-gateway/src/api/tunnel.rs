@@ -44,6 +44,43 @@ fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey)
     )
 }
 
+#[deprecated = "make sure this is never used without a deliberate action"]
+mod unsafe_debug {
+    // Any function in this module should only be used at development stage when deliberately
+    // enabling debugging options.
+
+    use picky::jose::jws::RawJws;
+    use picky::jose::jwt::{self, JwtSig};
+
+    use crate::token::{AccessScope, EnrollmentTokenClaims};
+
+    /// Dangerous enrollment token validation procedure.
+    ///
+    /// Like [`validate_enrollment_jwt`], but skips signature and `exp`/`nbf` checks.
+    ///
+    /// Skips signature verification and `exp`/`nbf` checks. Only the scope
+    /// (`AgentEnroll` or `Wildcard`) is still enforced, so test tokens still
+    /// have to carry the right intent.
+    pub(super) fn dangerous_validate_enrollment_jwt(token: &str) -> bool {
+        warn!(
+            "**DEBUG OPTION** Using dangerous enrollment token validation for testing purposes. Make sure this is not happening in production!"
+        );
+
+        let Ok(jwt) = RawJws::decode(token).map(RawJws::discard_signature).map(JwtSig::from) else {
+            return false;
+        };
+
+        let Ok(validated) = jwt.validate::<EnrollmentTokenClaims>(&jwt::NO_CHECK_VALIDATOR) else {
+            return false;
+        };
+
+        matches!(
+            validated.state.claims.scope,
+            AccessScope::AgentEnroll | AccessScope::Wildcard
+        )
+    }
+}
+
 #[derive(Deserialize)]
 pub struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity).
@@ -122,7 +159,14 @@ async fn enroll_agent(
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-    if !validate_enrollment_jwt(provided_token, &conf.provisioner_public_key) {
+    let token_is_valid = if conf.debug.disable_token_validation {
+        #[allow(deprecated, reason = "properly gated by disable_token_validation debug option")]
+        unsafe_debug::dangerous_validate_enrollment_jwt(provided_token)
+    } else {
+        validate_enrollment_jwt(provided_token, &conf.provisioner_public_key)
+    };
+
+    if !token_is_valid {
         return Err(HttpError::forbidden().msg("invalid enrollment token"));
     }
 

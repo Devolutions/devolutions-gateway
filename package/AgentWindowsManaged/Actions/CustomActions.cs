@@ -366,10 +366,13 @@ namespace DevolutionsAgent.Actions
                 // else (advertise subnets, advertise domains) is patched into agent.json *after*
                 // enrollment, so we don't accumulate parallel CLI surfaces for what is ultimately
                 // configuration data.
-                string arguments = $"up --enrollment-string \"{enrollmentString}\"";
+                //
+                // The JWT is passed via stdin (sentinel `-`) to avoid exposing it in the process
+                // command line (visible to any local process via WMI / Process Explorer / ETW).
+                string arguments = "up --enrollment-string -";
                 if (resolvedName.Length != 0)
                 {
-                    arguments += $" --name \"{resolvedName}\"";
+                    arguments += $" --name {EscapeArg(resolvedName)}";
                 }
 
                 string Redact(string s) => s.Replace(enrollmentString, "***");
@@ -380,11 +383,17 @@ namespace DevolutionsAgent.Actions
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    RedirectStandardInput = true,
                     CreateNoWindow = true,
                     WorkingDirectory = ProgramDataDirectory,
                 };
 
                 using Process process = Process.Start(startInfo);
+
+                // Write the JWT to stdin and close it so the child sees EOF.
+                process.StandardInput.Write(enrollmentString);
+                process.StandardInput.Close();
+
                 if (!process.WaitForExit(60_000))
                 {
                     try
@@ -445,6 +454,51 @@ namespace DevolutionsAgent.Actions
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Escape a single argument for the Windows command line using the
+        /// <c>CommandLineToArgvW</c> rules: internal double-quotes are escaped
+        /// as <c>\"</c>, backslash runs immediately before a quote are doubled,
+        /// and the whole value is wrapped in double quotes.
+        /// </summary>
+        private static string EscapeArg(string arg)
+        {
+            StringBuilder sb = new();
+            sb.Append('"');
+
+            for (int i = 0; i < arg.Length; i++)
+            {
+                int backslashes = 0;
+                while (i < arg.Length && arg[i] == '\\')
+                {
+                    backslashes++;
+                    i++;
+                }
+
+                if (i == arg.Length)
+                {
+                    // Trailing backslashes must be doubled because the
+                    // closing quote follows immediately.
+                    sb.Append('\\', backslashes * 2);
+                    break;
+                }
+                else if (arg[i] == '"')
+                {
+                    // Backslashes before a double-quote must be doubled,
+                    // plus one extra to escape the quote itself.
+                    sb.Append('\\', backslashes * 2 + 1);
+                    sb.Append('"');
+                }
+                else
+                {
+                    sb.Append('\\', backslashes);
+                    sb.Append(arg[i]);
+                }
+            }
+
+            sb.Append('"');
+            return sb.ToString();
         }
 
         /// <summary>
