@@ -49,6 +49,14 @@
         {
           "id": "FeatureSessionDescription",
           "text": "Installs the RDP Extension"
+        },
+        {
+          "id": "FeatureAgentTunnelName",
+          "text": "Agent Tunnel"
+        },
+        {
+          "id": "FeatureAgentTunnelDescription",
+          "text": "Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator."
         }
       ],
       "messages": [
@@ -195,6 +203,44 @@
             "id": "WelcomeDlgTitle",
             "overridable": "yes",
             "text": "Welcome to the [ProductName] 20[ProductVersion] Setup Wizard"
+          }
+        ],
+        "agentTunnel": [
+          {
+            "id": "AgentTunnelDlgTitle",
+            "text": "Agent Tunnel"
+          },
+          {
+            "id": "AgentTunnelDlgDescription",
+            "text": "Connect this agent to a Devolutions Gateway."
+          },
+          {
+            "id": "AgentTunnelDlgEnrollmentStringLabel",
+            "text": "Enrollment String (provided by your gateway operator):"
+          },
+          {
+            "id": "AgentTunnelDlgAgentNameLabel",
+            "text": "Agent Name (Optional):"
+          },
+          {
+            "id": "AgentTunnelDlgAgentNameHint",
+            "text": "Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name."
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsLabel",
+            "text": "Advertise Subnets:"
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsHint",
+            "text": "Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically."
+          },
+          {
+            "id": "AgentTunnelDlgDomainsLabel",
+            "text": "Advertise Domains:"
+          },
+          {
+            "id": "AgentTunnelDlgDomainsHint",
+            "text": "Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com."
           }
         ]
       }

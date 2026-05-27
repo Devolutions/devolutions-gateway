@@ -25,6 +25,14 @@
         {
           "id": "FeatureSessionDescription",
           "text": "Installe l'extension RDP"
+        },
+        {
+          "id": "FeatureAgentTunnelName",
+          "text": "Tunnel d'agent"
+        },
+        {
+          "id": "FeatureAgentTunnelDescription",
+          "text": "Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle."
         }
       ],
       "messages": [
@@ -171,6 +179,44 @@
             "id": "WelcomeDlgTitle",
             "overridable": "yes",
             "text": "Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]"
+          }
+        ],
+        "agentTunnel": [
+          {
+            "id": "AgentTunnelDlgTitle",
+            "text": "Tunnel d'agent"
+          },
+          {
+            "id": "AgentTunnelDlgDescription",
+            "text": "Connectez cet agent à une passerelle Devolutions."
+          },
+          {
+            "id": "AgentTunnelDlgEnrollmentStringLabel",
+            "text": "Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :"
+          },
+          {
+            "id": "AgentTunnelDlgAgentNameLabel",
+            "text": "Nom de l'agent (facultatif) :"
+          },
+          {
+            "id": "AgentTunnelDlgAgentNameHint",
+            "text": "Identifie cet agent dans la console de gestion de votre passerelle. Si laissé vide, le nom contenu dans la chaîne d'enrôlement est utilisé, à défaut le nom de cet ordinateur."
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsLabel",
+            "text": "Sous-réseaux annoncés :"
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsHint",
+            "text": "Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement."
+          },
+          {
+            "id": "AgentTunnelDlgDomainsLabel",
+            "text": "Domaines annoncés :"
+          },
+          {
+            "id": "AgentTunnelDlgDomainsHint",
+            "text": "Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com."
           }
         ],
         "firewall": [
