@@ -3,6 +3,8 @@
         <!-- metadata -->
                 <String Id="FeatureAgentTunnelDescription">Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle.</String>
                 <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
+                <String Id="FeaturePsuEventHubDescription">Active la compatibilité d'agent distant pour PowerShell Universal Event Hub.</String>
+                <String Id="FeaturePsuEventHubName">PowerShell Universal Event Hub</String>
                 <String Id="FeatureSessionDescription">Installe l'extension RDP</String>
                 <String Id="FeatureSessionName">Extension RDP</String>
                 <String Id="Language">1036</String>

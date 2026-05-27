@@ -21,6 +21,7 @@ pub struct Conf {
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
     pub tunnel: TunnelConf,
+    pub psu_event_hub: dto::PsuEventHubConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -122,6 +123,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            psu_event_hub: conf_file.psu_event_hub.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -286,7 +288,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
-    let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
+    let mut conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
         Some(conf_file) => conf_file,
         None => {
             let defaults = dto::ConfFile::generate_new();
@@ -296,7 +298,66 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
         }
     };
 
+    if conf_file.psu_event_hub.is_none()
+        && let Some(psu_event_hub) =
+            load_psu_event_hub_compat_config().context("failed to load PowerShell Universal agent configuration")?
+    {
+        conf_file.psu_event_hub = Some(psu_event_hub);
+    }
+
     Ok(conf_file)
+}
+
+fn load_psu_event_hub_compat_config() -> anyhow::Result<Option<dto::PsuEventHubConf>> {
+    let mut compat_conf = None;
+
+    for path in psu_event_hub_compat_config_paths() {
+        let Some(file) = load_psu_event_hub_compat_file(&path)? else {
+            continue;
+        };
+
+        if !file.connections.is_empty() {
+            compat_conf = Some(dto::PsuEventHubConf {
+                enabled: true,
+                connections: file.connections,
+                power_shell: dto::PsuPowerShellConf::default(),
+            });
+        }
+    }
+
+    Ok(compat_conf)
+}
+
+fn load_psu_event_hub_compat_file(path: &Utf8Path) -> anyhow::Result<Option<dto::PsuEventHubCompatFile>> {
+    match File::open(path) {
+        Ok(file) => BufReader::new(file)
+            .pipe(serde_json::from_reader)
+            .map(Some)
+            .with_context(|| format!("invalid PowerShell Universal agent config file at {path}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(anyhow::anyhow!(error).context(format!(
+            "couldn't open PowerShell Universal agent config file at {path}"
+        ))),
+    }
+}
+
+fn psu_event_hub_compat_config_paths() -> Vec<Utf8PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(program_data) = env_path("ProgramData") {
+        paths.push(program_data.join("PowerShellUniversal").join("eventHubClient.json"));
+        paths.push(program_data.join("PowerShellUniversal").join("agent.json"));
+    }
+
+    if let Some(app_data) = env_path("APPDATA") {
+        paths.push(app_data.join("PowerShellUniversal").join("agent.json"));
+    }
+
+    paths
+}
+
+fn env_path(name: &str) -> Option<Utf8PathBuf> {
+    std::env::var_os(name).and_then(|path| Utf8PathBuf::from_path_buf(path.into()).ok())
 }
 
 pub mod dto {
@@ -499,6 +560,98 @@ pub mod dto {
         pub server_spki_sha256: Option<String>,
     }
 
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubConf {
+        /// Enable PowerShell Universal Event Hub compatibility.
+        pub enabled: bool,
+
+        /// Event Hub connections to maintain.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub connections: Vec<PsuEventHubConnectionConf>,
+
+        /// PowerShell worker process configuration.
+        #[serde(default, skip_serializing_if = "PsuPowerShellConf::is_default")]
+        pub power_shell: PsuPowerShellConf,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubCompatFile {
+        #[serde(default)]
+        pub connections: Vec<PsuEventHubConnectionConf>,
+    }
+
+    #[allow(clippy::derivable_impls)] // Just to be explicit about default disabled behavior.
+    impl Default for PsuEventHubConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                connections: Vec::new(),
+                power_shell: PsuPowerShellConf::default(),
+            }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubConnectionConf {
+        pub hub: String,
+        pub url: Url,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub app_token: Option<String>,
+        #[serde(default)]
+        pub use_default_credentials: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub script_path: Option<Utf8PathBuf>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub description: Option<String>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuPowerShellConf {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub executable_path: Option<Utf8PathBuf>,
+        #[serde(default)]
+        pub use_windows_power_shell: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub version_selector: Option<String>,
+        #[serde(default = "default_worker_pool_size")]
+        pub worker_pool_size: usize,
+        #[serde(default = "default_max_worker_pool_size")]
+        pub max_worker_pool_size: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub virtual_environment: Option<String>,
+    }
+
+    impl Default for PsuPowerShellConf {
+        fn default() -> Self {
+            Self {
+                executable_path: None,
+                use_windows_power_shell: false,
+                version_selector: None,
+                worker_pool_size: default_worker_pool_size(),
+                max_worker_pool_size: default_max_worker_pool_size(),
+                virtual_environment: None,
+            }
+        }
+    }
+
+    impl PsuPowerShellConf {
+        pub fn is_default(&self) -> bool {
+            Self::default().eq(self)
+        }
+    }
+
+    fn default_worker_pool_size() -> usize {
+        1
+    }
+
+    fn default_max_worker_pool_size() -> usize {
+        25
+    }
+
     fn default_true() -> bool {
         true
     }
@@ -556,6 +709,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
 
+        /// PowerShell Universal Event Hub compatibility.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub psu_event_hub: Option<PsuEventHubConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -586,6 +743,7 @@ pub mod dto {
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
                 tunnel: None,
+                psu_event_hub: None,
                 rest: serde_json::Map::new(),
             }
         }
@@ -765,4 +923,46 @@ pub fn handle_cli(command: &str) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn psu_event_hub_config_is_disabled_by_default() {
+        let conf = Conf::from_conf_file(&dto::ConfFile::generate_new()).expect("load generated config");
+        assert!(!conf.psu_event_hub.enabled);
+        assert!(conf.psu_event_hub.connections.is_empty());
+    }
+
+    #[test]
+    fn psu_event_hub_config_deserializes() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuEventHub": {
+                "Enabled": true,
+                "Connections": [
+                    {
+                        "Hub": "Hub",
+                        "Url": "http://localhost:5000",
+                        "AppToken": "token",
+                        "UseDefaultCredentials": false,
+                        "ScriptPath": "event.ps1",
+                        "Description": "test agent"
+                    }
+                ],
+                "PowerShell": {
+                    "VersionSelector": "7.4",
+                    "WorkerPoolSize": 1,
+                    "MaxWorkerPoolSize": 25
+                }
+            }
+        }))
+        .expect("deserialize config");
+
+        let conf = Conf::from_conf_file(&conf_file).expect("load config");
+        assert!(conf.psu_event_hub.enabled);
+        assert_eq!(conf.psu_event_hub.connections[0].hub, "Hub");
+        assert_eq!(conf.psu_event_hub.power_shell.version_selector.as_deref(), Some("7.4"));
+    }
 }

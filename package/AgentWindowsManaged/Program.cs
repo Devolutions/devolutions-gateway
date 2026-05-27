@@ -335,6 +335,13 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.AGENT_TUNNEL_FEATURE,
+            },
+            new (RegistryHive.LocalMachine, $"SOFTWARE\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "PsuEventHubEnabled", "1")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
+                Feature = Features.PSU_EVENT_HUB_FEATURE,
             }
         };
 

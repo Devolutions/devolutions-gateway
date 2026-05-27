@@ -302,6 +302,7 @@ namespace DevolutionsAgent.Actions
             [
                 (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.PSU_EVENT_HUB_FEATURE.Id, Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
             ];
 
@@ -752,6 +753,7 @@ namespace DevolutionsAgent.Actions
             [
                 Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
             ];
 
