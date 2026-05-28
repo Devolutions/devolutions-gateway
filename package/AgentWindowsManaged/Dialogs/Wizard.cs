@@ -54,7 +54,16 @@ internal static class Wizard
         if (dialogType == typeof(AgentTunnelDialog))
         {
             string addlocal = (current as WixSharp.UI.Forms.ManagedForm)?.MsiRuntime?.Session?["ADDLOCAL"] ?? string.Empty;
-            return !addlocal.Split(',').Select(s => s.Trim()).Contains(Features.AGENT_TUNNEL_FEATURE.Id);
+            // ADDLOCAL=ALL installs every feature (Agent Tunnel included) without naming them, so a
+            // literal feature-id match would miss it and wrongly skip the dialog. Tokens are matched
+            // case-sensitively because Windows Installer treats the ALL keyword and feature names as
+            // case-sensitive; matching the same way keeps this decision in lockstep with whether MSI
+            // will actually install the feature (and therefore run EnrollAgentTunnel).
+            bool installsTunnel = addlocal
+                .Split(',')
+                .Select(s => s.Trim())
+                .Any(f => f == "ALL" || f == Features.AGENT_TUNNEL_FEATURE.Id);
+            return !installsTunnel;
         }
         return false;
     }
