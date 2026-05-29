@@ -181,6 +181,13 @@ fn persist_enrollment_response(
         .unwrap_or_else(|| Utf8PathBuf::from("."));
     let cert_dir = config_dir.join("certs");
 
+    // Load (and validate) the existing config BEFORE writing anything to disk. A corrupt
+    // agent.json must fail the enrollment here — while nothing has been written yet — rather than
+    // after we've already overwritten the fixed-name gateway-ca.pem and dropped the new cert/key.
+    // This preserves other settings (Updater, Session, PEDM, etc.) configured by the MSI installer
+    // or admin.
+    let mut conf_file = config::load_conf_file_or_generate_new().context("failed to load existing configuration")?;
+
     std::fs::create_dir_all(&cert_dir)
         .with_context(|| format!("failed to create certificate directory: {}", cert_dir))?;
 
@@ -188,52 +195,92 @@ fn persist_enrollment_response(
     let client_key_path = cert_dir.join(format!("{agent_id}-key.pem"));
     let gateway_ca_path = cert_dir.join("gateway-ca.pem");
 
-    // Write the locally-generated private key first (before cert/CA from the network).
-    std::fs::write(&client_key_path, key_pem)
-        .with_context(|| format!("failed to write client private key: {client_key_path}"))?;
-
-    std::fs::write(&client_cert_path, &client_cert_pem)
-        .with_context(|| format!("failed to write client certificate: {client_cert_path}"))?;
-
-    std::fs::write(&gateway_ca_path, &gateway_ca_cert_pem)
-        .with_context(|| format!("failed to write gateway CA certificate: {gateway_ca_path}"))?;
-
-    // Restrict permissions on cert/key files (owner-only on Unix).
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let restricted = std::fs::Permissions::from_mode(0o600);
-        for path in [&client_cert_path, &client_key_path, &gateway_ca_path] {
-            std::fs::set_permissions(path, restricted.clone())
-                .with_context(|| format!("failed to set permissions on {path}"))?;
-        }
-    }
-
-    // Load existing config and update only the Tunnel section.
-    // This preserves other settings (Updater, Session, PEDM, etc.) that may have been
-    // configured by the MSI installer or admin.
-    let mut conf_file = config::load_conf_file_or_generate_new().context("failed to load existing configuration")?;
-
-    // Preserve existing domain config from previous enrollment/manual configuration.
-    let existing_tunnel = conf_file.tunnel.as_ref();
-
-    let tunnel_conf = config::dto::TunnelConf {
-        enabled: true,
-        gateway_endpoint: quic_endpoint.clone(),
-        client_cert_path: Some(client_cert_path.clone()),
-        client_key_path: Some(client_key_path.clone()),
-        gateway_ca_cert_path: Some(gateway_ca_path.clone()),
-        advertise_subnets,
-        advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
-        auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
-        heartbeat_interval_secs: Some(60),
-        route_advertise_interval_secs: Some(30),
-        server_spki_sha256: Some(server_spki_sha256),
+    // gateway-ca.pem is a fixed filename we are about to overwrite. Back up any existing copy so a
+    // later failure can restore it. The {agent_id}-prefixed cert/key files are uniquely named, so
+    // a rollback just removes them.
+    let gateway_ca_backup = if gateway_ca_path.exists() {
+        Some(
+            std::fs::read(&gateway_ca_path)
+                .with_context(|| format!("failed to back up existing gateway CA certificate: {gateway_ca_path}"))?,
+        )
+    } else {
+        None
     };
 
-    conf_file.tunnel = Some(tunnel_conf);
+    // All the destructive writes happen inside this single fallible step. `up` is otherwise
+    // non-transactional: if it wrote the cert files (and clobbered gateway-ca.pem) and then failed
+    // at config save, a non-zero exit would leave partial, orphaned state behind. On any failure we
+    // roll that partial state back below so the machine is left exactly as it was before enroll.
+    let persist = || -> Result<()> {
+        // Write the locally-generated private key first (before cert/CA from the network).
+        std::fs::write(&client_key_path, key_pem)
+            .with_context(|| format!("failed to write client private key: {client_key_path}"))?;
 
-    config::save_config(&conf_file)?;
+        std::fs::write(&client_cert_path, &client_cert_pem)
+            .with_context(|| format!("failed to write client certificate: {client_cert_path}"))?;
+
+        std::fs::write(&gateway_ca_path, &gateway_ca_cert_pem)
+            .with_context(|| format!("failed to write gateway CA certificate: {gateway_ca_path}"))?;
+
+        // Restrict permissions on cert/key files (owner-only on Unix).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let restricted = std::fs::Permissions::from_mode(0o600);
+            for path in [&client_cert_path, &client_key_path, &gateway_ca_path] {
+                std::fs::set_permissions(path, restricted.clone())
+                    .with_context(|| format!("failed to set permissions on {path}"))?;
+            }
+        }
+
+        // Preserve existing domain config from previous enrollment/manual configuration.
+        let existing_tunnel = conf_file.tunnel.as_ref();
+
+        let tunnel_conf = config::dto::TunnelConf {
+            enabled: true,
+            gateway_endpoint: quic_endpoint.clone(),
+            client_cert_path: Some(client_cert_path.clone()),
+            client_key_path: Some(client_key_path.clone()),
+            gateway_ca_cert_path: Some(gateway_ca_path.clone()),
+            advertise_subnets,
+            advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
+            auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
+            heartbeat_interval_secs: Some(60),
+            route_advertise_interval_secs: Some(30),
+            server_spki_sha256: Some(server_spki_sha256),
+        };
+
+        conf_file.tunnel = Some(tunnel_conf);
+
+        config::save_config(&conf_file)?;
+
+        Ok(())
+    };
+
+    if let Err(error) = persist() {
+        // Roll back the partial writes: remove the uniquely-named cert/key, and restore (or remove)
+        // the overwritten fixed-name gateway-ca.pem so a failed enroll never destroys or orphans state.
+        let _ = std::fs::remove_file(&client_key_path);
+        let _ = std::fs::remove_file(&client_cert_path);
+        match &gateway_ca_backup {
+            Some(original) => {
+                // Atomic restore: write to a sibling temp then rename over the target so a failed
+                // restore mid-write can't truncate the previous CA. Best-effort like the rest of
+                // this rollback block; clean up the temp if either step fails.
+                let tmp = Utf8PathBuf::from(format!("{gateway_ca_path}.tmp"));
+                if std::fs::write(&tmp, original)
+                    .and_then(|_| std::fs::rename(&tmp, &gateway_ca_path))
+                    .is_err()
+                {
+                    let _ = std::fs::remove_file(&tmp);
+                }
+            }
+            None => {
+                let _ = std::fs::remove_file(&gateway_ca_path);
+            }
+        }
+        return Err(error);
+    }
 
     Ok(PersistedEnrollment {
         agent_id,
