@@ -1,14 +1,15 @@
 pub mod server;
 
+use std::collections::HashMap;
+use std::error::Error;
+use std::time::SystemTime;
+
 use picky::jose::jwe::{Jwe, JweAlg, JweEnc};
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::error::Error;
-use std::time::SystemTime;
 use tap::prelude::*;
 use uuid::Uuid;
 
@@ -51,6 +52,18 @@ pub struct ScopeClaims<'a> {
     pub nbf: i64,
     pub jti: Uuid,
     pub scope: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_gw_id: Option<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct EnrollmentClaims<'a> {
+    pub exp: i64,
+    pub nbf: i64,
+    pub jti: Uuid,
+    pub jet_gw_url: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_name: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_gw_id: Option<Uuid>,
 }
@@ -240,6 +253,10 @@ pub enum SubCommandArgs {
     Scope {
         scope: String,
     },
+    Enrollment {
+        jet_gw_url: String,
+        jet_agent_name: Option<String>,
+    },
     Bridge {
         target_host: String,
         jet_aid: Option<Uuid>,
@@ -385,6 +402,20 @@ pub fn generate_token(
                 jet_gw_id,
             };
             ("SCOPE", serde_json::to_value(claims)?)
+        }
+        SubCommandArgs::Enrollment {
+            jet_gw_url,
+            jet_agent_name,
+        } => {
+            let claims = EnrollmentClaims {
+                exp,
+                nbf,
+                jti,
+                jet_gw_url: &jet_gw_url,
+                jet_agent_name: jet_agent_name.as_deref(),
+                jet_gw_id,
+            };
+            ("ENROLLMENT", serde_json::to_value(claims)?)
         }
         SubCommandArgs::Bridge {
             target_host,

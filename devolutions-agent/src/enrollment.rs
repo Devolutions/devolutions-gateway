@@ -17,7 +17,7 @@ use crate::config;
 /// the JWT (the operator). The Gateway verifies the signature when the JWT is
 /// presented as the Bearer token on `/jet/tunnel/enroll`.
 ///
-/// Additional standard claims (`exp`, `jti`, `scope`, ...) are ignored here.
+/// Additional standard claims (`exp`, `jti`, ...) are ignored here.
 #[derive(Debug, serde::Deserialize)]
 pub struct EnrollmentJwtClaims {
     /// Gateway URL to connect to for enrollment.
@@ -371,7 +371,7 @@ mod tests {
     /// Build a JWT with arbitrary header/signature placeholders. The parser never
     /// verifies the signature, so the content of those two segments is irrelevant.
     fn make_jwt(payload: serde_json::Value) -> String {
-        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
+        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT", "cty": "ENROLLMENT" });
         let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         format!(
             "{}.{}.{}",
@@ -391,7 +391,6 @@ mod tests {
     #[test]
     fn parse_enrollment_jwt_requires_gw_url() {
         let jwt = make_jwt(serde_json::json!({
-            "scope": "gateway.tunnel.enroll",
             "jet_agent_name": "agent-a",
         }));
         assert!(parse_enrollment_jwt(&jwt).is_err());

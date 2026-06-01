@@ -96,6 +96,7 @@ Supported content types includes:
 - `JMUX`
 - `JRL`
 - `JREC`
+- `ENROLLMENT`
 
 ## Global private claims
 

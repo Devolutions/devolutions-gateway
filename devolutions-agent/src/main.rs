@@ -366,7 +366,7 @@ mod tests {
     /// Build a JWT with the given payload. The header and signature are placeholders —
     /// the agent does not verify them; only the Gateway does.
     fn make_jwt(payload: serde_json::Value) -> String {
-        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
+        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT", "cty": "ENROLLMENT" });
         let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         format!(
             "{}.{}.{}",
@@ -379,7 +379,6 @@ mod tests {
     #[test]
     fn parse_up_command_args_accepts_enrollment_string() {
         let jwt = make_jwt(serde_json::json!({
-            "scope": "gateway.tunnel.enroll",
             "exp": 1_999_999_999i64,
             "jti": "00000000-0000-0000-0000-000000000000",
             "jet_gw_url": "https://gateway.example.com:7171",

@@ -167,11 +167,11 @@ public class JsonSerializationTests
     }
 
     [Fact]
-    public void ScopeClaimsAgentEnroll()
+    public void ScopeClaimsAgentDelete()
     {
-        const string EXPECTED = """{"scope":"gateway.agent.enroll","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+        const string EXPECTED = """{"scope":"gateway.agent.delete","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
 
-        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayAgentEnroll);
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayAgentDelete);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
@@ -189,7 +189,7 @@ public class JsonSerializationTests
     [Fact]
     public void EnrollmentClaimsAllFields()
     {
-        const string EXPECTED = """{"scope":"gateway.agent.enroll","jet_gw_url":"http://gw.example.com:7777","jet_agent_name":"site-a"}""";
+        const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777","jet_agent_name":"site-a"}""";
 
         var claims = new EnrollmentClaims("http://gw.example.com:7777", "site-a");
         string result = JsonSerializer.Serialize(claims);
@@ -199,7 +199,7 @@ public class JsonSerializationTests
     [Fact]
     public void EnrollmentClaimsOmitsNullOptionals()
     {
-        const string EXPECTED = """{"scope":"gateway.agent.enroll","jet_gw_url":"http://gw.example.com:7777"}""";
+        const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777"}""";
 
         var claims = new EnrollmentClaims("http://gw.example.com:7777");
         string result = JsonSerializer.Serialize(claims);

@@ -25,6 +25,7 @@ pub fn token_content_type() -> impl Strategy<Value = token::ContentType> {
         Just(token::ContentType::Jmux),
         Just(token::ContentType::Kdc),
         Just(token::ContentType::Jrl),
+        Just(token::ContentType::Enrollment),
     ]
     .no_shrink()
 }
@@ -319,6 +320,31 @@ pub fn any_kdc_claims(now: i64, validity_duration: i64) -> impl Strategy<Value =
         })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EnrollmentClaims {
+    pub jet_gw_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_name: Option<String>,
+    pub nbf: i64,
+    pub exp: i64,
+    pub jti: Uuid,
+}
+
+pub fn any_enrollment_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = EnrollmentClaims> {
+    (
+        "https://[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?",
+        option::of("[a-zA-Z0-9_-]{1,25}"),
+        uuid_typed(),
+    )
+        .prop_map(move |(jet_gw_url, jet_agent_name, jti)| EnrollmentClaims {
+            jet_gw_url,
+            jet_agent_name,
+            jti,
+            nbf: now,
+            exp: now + validity_duration,
+        })
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(untagged)]
 pub enum TokenClaims {
@@ -327,6 +353,7 @@ pub enum TokenClaims {
     Bridge(BridgeClaims),
     Jmux(JmuxClaims),
     Kdc(KdcClaims),
+    Enrollment(EnrollmentClaims),
 }
 
 impl TokenClaims {
@@ -337,6 +364,7 @@ impl TokenClaims {
             TokenClaims::Bridge(_) => "BRIDGE",
             TokenClaims::Jmux(_) => "JMUX",
             TokenClaims::Kdc(_) => "KDC",
+            TokenClaims::Enrollment(_) => "ENROLLMENT",
         }
     }
 
@@ -355,6 +383,7 @@ pub fn any_claims_with_validity_duration(now: i64, validity_duration: i64) -> im
         any_kdc_claims(now, validity_duration).prop_map(TokenClaims::Kdc),
         any_jmux_claims(now, validity_duration).prop_map(TokenClaims::Jmux),
         any_association_claims(now, validity_duration).prop_map(TokenClaims::Association),
+        any_enrollment_claims(now, validity_duration).prop_map(TokenClaims::Enrollment),
     ]
 }
 

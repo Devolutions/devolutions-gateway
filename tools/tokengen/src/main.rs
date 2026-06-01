@@ -1,9 +1,9 @@
-use clap::{Parser, Subcommand};
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
-use tokengen::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
+use clap::{Parser, Subcommand};
+use tokengen::{ApplicationProtocol, RecordingOperation, SubCommandArgs, generate_token};
+use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let app = App::parse();
@@ -85,6 +85,13 @@ fn sign(
             jet_aid,
         },
         SignSubCommand::Scope { scope } => SubCommandArgs::Scope { scope },
+        SignSubCommand::Enrollment {
+            jet_gw_url,
+            jet_agent_name,
+        } => SubCommandArgs::Enrollment {
+            jet_gw_url,
+            jet_agent_name,
+        },
         SignSubCommand::Bridge {
             target_host,
             jet_aid,
@@ -226,6 +233,12 @@ enum SignSubCommand {
     },
     Scope {
         scope: String,
+    },
+    Enrollment {
+        #[clap(long)]
+        jet_gw_url: String,
+        #[clap(long)]
+        jet_agent_name: Option<String>,
     },
     Bridge {
         #[clap(long)]

@@ -7,8 +7,8 @@ use axum::http::request::Parts;
 use crate::DgwState;
 use crate::http::HttpError;
 use crate::token::{
-    AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, JmuxTokenClaims, JrecTokenClaims,
-    JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
+    AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, EnrollmentTokenClaims, JmuxTokenClaims,
+    JrecTokenClaims, JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
 
 #[derive(Clone)]
@@ -480,8 +480,7 @@ where
 
 /// Grants write access to agent management endpoints.
 ///
-/// Accepts scope tokens with `AgentEnroll` or `Wildcard` scope. A dedicated
-/// `AgentDelete` scope will replace `AgentEnroll` here in a follow-up PR.
+/// Accepts scope tokens with `AgentDelete` or `Wildcard` scope.
 #[derive(Clone, Copy)]
 pub struct AgentManagementWriteAccess;
 
@@ -499,9 +498,9 @@ where
 
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::AgentEnroll => Ok(Self),
+                AccessScope::Wildcard | AccessScope::AgentDelete => Ok(Self),
                 _ => Err(HttpError::forbidden()
-                    .msg("invalid scope for agent management write (require one of: gateway.agent.enroll, *)")),
+                    .msg("invalid scope for agent management write (require one of: gateway.agent.delete, *)")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
         }
@@ -558,6 +557,25 @@ where
             Ok(Self(claims))
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected BRIDGE)"))
+        }
+    }
+}
+
+/// Extractor for the enrollment route's `ENROLLMENT` token.
+#[derive(Clone)]
+pub struct EnrollmentToken(pub EnrollmentTokenClaims);
+
+impl<S> FromRequestParts<S> for EnrollmentToken
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let AccessTokenClaims::Enrollment(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
+            Ok(Self(claims))
+        } else {
+            Err(HttpError::forbidden().msg("token not allowed (expected ENROLLMENT token)"))
         }
     }
 }
