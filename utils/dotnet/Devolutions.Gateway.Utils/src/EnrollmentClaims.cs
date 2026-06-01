@@ -21,33 +21,21 @@ public class EnrollmentClaims : IGatewayClaims
     public string JetGwUrl { get; set; }
 
     /// <summary>
-    /// Optional agent display-name hint.
+    /// Authoritative agent display name.
     ///
-    /// The gateway never reads this claim — it only verifies the JWT
-    /// signature, content type, and expiry on <c>POST /jet/tunnel/enroll</c>; the
-    /// authoritative agent name is the one the agent sends in its
-    /// <c>EnrollRequest</c> body (which the gateway also stamps into the
-    /// signed client certificate's CN).
+    /// The gateway reads this signed claim on <c>POST /jet/tunnel/enroll</c>
+    /// and stamps it into the signed client certificate's CN.
     ///
     /// The agent-side CLI parses this claim out of the JWT it receives via
-    /// <c>--enrollment-string</c> and uses it as the default for
-    /// <c>--name</c> when the operator did not pass one explicitly. Setting
-    /// it here lets DVLS pre-fill the name the admin typed in the "Generate
-    /// Enrollment String" dialog so the agent shows up under that name in
-    /// the registry without an extra CLI flag.
-    ///
-    /// Name resolution order at install time is: explicit name (CLI
-    /// <c>--name</c> / installer dialog value) &gt; this <c>jet_agent_name</c>
-    /// claim &gt; the local computer name. The computer-name fallback is
-    /// applied by the Windows installer when neither an explicit name nor
-    /// this claim is present; if it is omitted, the agent CLI's own
-    /// <c>up</c> command instead requires <c>--name</c> to be passed.
+    /// <c>--enrollment-string</c> and uses it as the local enrollment name.
+    /// Setting it here lets DVLS bind the name the admin typed in the
+    /// "Generate Enrollment String" dialog so the agent shows up under that
+    /// name in the registry.
     /// </summary>
     [JsonPropertyName("jet_agent_name")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? JetAgentName { get; set; }
+    public string JetAgentName { get; set; }
 
-    public EnrollmentClaims(string jetGwUrl, string? jetAgentName = null)
+    public EnrollmentClaims(string jetGwUrl, string jetAgentName)
     {
         this.JetGwUrl = jetGwUrl;
         this.JetAgentName = jetAgentName;

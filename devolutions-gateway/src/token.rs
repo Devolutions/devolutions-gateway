@@ -504,7 +504,8 @@ pub struct ScopeTokenClaims {
 /// `jet_agent_name` locally (without verifying the signature, since it is
 /// the intended recipient), then sends the JWT as the Bearer token to
 /// `/jet/tunnel/enroll`, where the Gateway verifies the signature, content
-/// type, and expiry against the configured provisioner key.
+/// type, expiry, and authoritative agent name against the configured
+/// provisioner key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrollmentTokenClaims {
     /// JWT expiration time claim.
@@ -516,9 +517,8 @@ pub struct EnrollmentTokenClaims {
     /// Gateway URL the agent should connect to for enrollment.
     pub jet_gw_url: String,
 
-    /// Suggested agent display name (optional hint).
-    #[serde(default)]
-    pub jet_agent_name: Option<String>,
+    /// Authoritative agent display name.
+    pub jet_agent_name: String,
 }
 
 // ----- bridge claims ----- //

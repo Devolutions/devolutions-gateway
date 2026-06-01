@@ -60,8 +60,6 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
                     <!-- dialogs.agentTunnel -->
-                <String Id="AgentTunnelDlgAgentNameHint">Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name.</String>
-                <String Id="AgentTunnelDlgAgentNameLabel">Agent Name (Optional):</String>
                 <String Id="AgentTunnelDlgDescription">Connect this agent to a Devolutions Gateway.</String>
                 <String Id="AgentTunnelDlgDomainsHint">Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.</String>
                 <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>

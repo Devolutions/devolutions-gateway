@@ -62,8 +62,7 @@ pub struct EnrollmentClaims<'a> {
     pub nbf: i64,
     pub jti: Uuid,
     pub jet_gw_url: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jet_agent_name: Option<&'a str>,
+    pub jet_agent_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_gw_id: Option<Uuid>,
 }
@@ -255,7 +254,7 @@ pub enum SubCommandArgs {
     },
     Enrollment {
         jet_gw_url: String,
-        jet_agent_name: Option<String>,
+        jet_agent_name: String,
     },
     Bridge {
         target_host: String,
@@ -412,7 +411,7 @@ pub fn generate_token(
                 nbf,
                 jti,
                 jet_gw_url: &jet_gw_url,
-                jet_agent_name: jet_agent_name.as_deref(),
+                jet_agent_name: &jet_agent_name,
                 jet_gw_id,
             };
             ("ENROLLMENT", serde_json::to_value(claims)?)

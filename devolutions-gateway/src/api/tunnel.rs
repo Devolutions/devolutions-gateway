@@ -11,8 +11,6 @@ use crate::http::HttpError;
 pub struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity).
     pub agent_id: Uuid,
-    /// Friendly name for the agent.
-    pub agent_name: String,
     /// PEM-encoded Certificate Signing Request from the agent.
     pub csr_pem: String,
     /// Optional hostname of the agent machine (added as DNS SAN in the issued certificate).
@@ -51,7 +49,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
 async fn enroll_agent(
-    _: crate::extract::EnrollmentToken,
+    crate::extract::EnrollmentToken(token_claims): crate::extract::EnrollmentToken,
     State(DgwState {
         conf_handle,
         agent_tunnel_handle,
@@ -59,11 +57,12 @@ async fn enroll_agent(
     }): State<DgwState>,
     Json(EnrollRequest {
         agent_id,
-        agent_name,
         csr_pem,
         agent_hostname,
     }): Json<EnrollRequest>,
 ) -> Result<Json<EnrollResponse>, HttpError> {
+    let agent_name = token_claims.jet_agent_name;
+
     // Validate agent name: 1-255 printable ASCII characters.
     if agent_name.is_empty() || 255 < agent_name.len() || agent_name.bytes().any(|b| !(0x20..=0x7E).contains(&b)) {
         return Err(HttpError::bad_request().msg("agent name must be 1-255 printable ASCII characters"));

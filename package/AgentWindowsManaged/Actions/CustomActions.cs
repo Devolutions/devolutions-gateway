@@ -13,7 +13,6 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Claims;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -364,8 +363,6 @@ namespace DevolutionsAgent.Actions
             string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
             string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
             string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
-            string agentNameArg = session.Property(AgentProperties.AgentTunnelAgentName)?.Trim() ?? string.Empty;
-
             ActionResult Fail(string msg)
             {
                 session.Log(msg);
@@ -432,31 +429,15 @@ namespace DevolutionsAgent.Actions
                     session.Log($"failed to snapshot pre-enrollment tunnel state (rollback will not restore): {e}");
                 }
 
-                // agent.exe `up` requires an agent name. Resolution: dialog value > JWT's
-                // jet_agent_name (left to the agent CLI by omitting --name) > local computer name.
-                string resolvedName = agentNameArg;
-                if (resolvedName.Length == 0 && !JwtHasAgentName(enrollmentString))
-                {
-                    resolvedName = Environment.MachineName;
-                    session.Log($"JWT carried no jet_agent_name and no name was provided in the wizard; falling back to computer name '{resolvedName}'");
-                }
-
-                // Only `--enrollment-string` is mandatory at enroll time — the gateway needs the
-                // JWT to authenticate. `--name` is conditionally passed because the gateway
-                // embeds it in the issued client cert and registers the agent under it; agent.json
-                // can't carry it before `up` runs because the file doesn't exist yet. Everything
-                // else (advertise subnets, advertise domains) is patched into agent.json *after*
-                // enrollment, so we don't accumulate parallel CLI surfaces for what is ultimately
-                // configuration data.
+                // Only `--enrollment-string` is mandatory at enroll time. The signed
+                // jet_agent_name claim is authoritative for the CSR, certificate CN, and
+                // persisted config. Everything else (advertise subnets, advertise domains) is
+                // patched into agent.json *after* enrollment, so we don't accumulate parallel CLI
+                // surfaces for what is ultimately configuration data.
                 //
                 // The JWT is passed via stdin (sentinel `-`) to avoid exposing it in the process
                 // command line (visible to any local process via WMI / Process Explorer / ETW).
                 string arguments = "up --enrollment-string -";
-                if (resolvedName.Length != 0)
-                {
-                    arguments += $" --name {EscapeArg(resolvedName)}";
-                }
-
                 string Redact(string s) => s.Replace(enrollmentString, "***");
                 session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
 
@@ -631,69 +612,6 @@ namespace DevolutionsAgent.Actions
             {
                 return Fail($"Agent tunnel enrollment failed: {e.Message}");
             }
-        }
-
-        private static bool JwtHasAgentName(string jwt)
-        {
-            try
-            {
-                string[] parts = jwt.Split('.');
-                if (parts.Length != 3) return false;
-                string payload = parts[1].Replace('-', '+').Replace('_', '/');
-                payload = payload.PadRight((payload.Length + 3) & ~3, '=');
-                string json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
-                string name = JObject.Parse(json)["jet_agent_name"]?.ToString();
-                return !string.IsNullOrWhiteSpace(name);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Escape a single argument for the Windows command line using the
-        /// <c>CommandLineToArgvW</c> rules: internal double-quotes are escaped
-        /// as <c>\"</c>, backslash runs immediately before a quote are doubled,
-        /// and the whole value is wrapped in double quotes.
-        /// </summary>
-        private static string EscapeArg(string arg)
-        {
-            StringBuilder sb = new();
-            sb.Append('"');
-
-            for (int i = 0; i < arg.Length; i++)
-            {
-                int backslashes = 0;
-                while (i < arg.Length && arg[i] == '\\')
-                {
-                    backslashes++;
-                    i++;
-                }
-
-                if (i == arg.Length)
-                {
-                    // Trailing backslashes must be doubled because the
-                    // closing quote follows immediately.
-                    sb.Append('\\', backslashes * 2);
-                    break;
-                }
-                else if (arg[i] == '"')
-                {
-                    // Backslashes before a double-quote must be doubled,
-                    // plus one extra to escape the quote itself.
-                    sb.Append('\\', backslashes * 2 + 1);
-                    sb.Append('"');
-                }
-                else
-                {
-                    sb.Append('\\', backslashes);
-                    sb.Append(arg[i]);
-                }
-            }
-
-            sb.Append('"');
-            return sb.ToString();
         }
 
         /// <summary>

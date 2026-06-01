@@ -55,7 +55,6 @@ const START_FAILED_ERR_CODE: u32 = 2;
 struct UpCommand {
     gateway_url: String,
     enrollment_token: String,
-    agent_name: String,
     advertise_subnets: Vec<String>,
 }
 
@@ -149,8 +148,6 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
 
 fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_reader: R) -> Result<UpCommand> {
     let mut gateway_url = None;
-    let mut enrollment_token = None;
-    let mut agent_name = None;
     let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
 
@@ -160,8 +157,6 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
 
         match arg {
             "--gateway" => gateway_url = Some(parse_required_value(args, &mut index, "--gateway")?),
-            "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
-            "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
             "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
             "--advertise-routes" | "--advertise-subnets" => {
                 advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
@@ -172,37 +167,29 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
         index += 1;
     }
 
-    if let Some(enrollment_string) = enrollment_string {
-        // A single hyphen means "read the enrollment string from stdin".
-        let enrollment_string = if enrollment_string == "-" {
-            let mut line = String::new();
-            stdin_reader
-                .read_line(&mut line)
-                .context("failed to read enrollment string from stdin")?;
-            let trimmed = line.trim().to_owned();
-            if trimmed.is_empty() {
-                bail!("enrollment string read from stdin is empty");
-            }
-            trimmed
-        } else {
-            enrollment_string
-        };
+    let enrollment_string = enrollment_string.context("missing required --enrollment-string")?;
 
-        let claims = parse_enrollment_jwt(&enrollment_string)?;
-
-        // The JWT itself is the Bearer token; the Gateway verifies the signature.
-        gateway_url.get_or_insert(claims.jet_gw_url);
-        enrollment_token.get_or_insert(enrollment_string);
-
-        if agent_name.is_none() {
-            agent_name = claims.jet_agent_name;
+    // A single hyphen means "read the enrollment string from stdin".
+    let enrollment_token = if enrollment_string == "-" {
+        let mut line = String::new();
+        stdin_reader
+            .read_line(&mut line)
+            .context("failed to read enrollment string from stdin")?;
+        let trimmed = line.trim().to_owned();
+        if trimmed.is_empty() {
+            bail!("enrollment string read from stdin is empty");
         }
-    }
+        trimmed
+    } else {
+        enrollment_string
+    };
+
+    let claims = parse_enrollment_jwt(&enrollment_token)?;
+    gateway_url.get_or_insert(claims.jet_gw_url);
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
-        enrollment_token: enrollment_token.context("missing required --token")?,
-        agent_name: agent_name.context("missing required --name")?,
+        enrollment_token,
         advertise_subnets,
     })
 }
@@ -253,9 +240,8 @@ fn main() {
                 let gateway_url = env::args()
                     .nth(2)
                     .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
-                let enrollment_token = env::args().nth(3).expect("missing enrollment token");
-                let agent_name = env::args().nth(4).expect("missing agent name");
-                let subnets_arg = env::args().nth(5).unwrap_or_default();
+                let enrollment_token = env::args().nth(3).expect("missing enrollment string");
+                let subnets_arg = env::args().nth(4).unwrap_or_default();
 
                 let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
                     Vec::new()
@@ -265,13 +251,9 @@ fn main() {
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async {
-                    if let Err(e) = devolutions_agent::enrollment::enroll_agent(
-                        &gateway_url,
-                        &enrollment_token,
-                        &agent_name,
-                        advertise_subnets,
-                    )
-                    .await
+                    if let Err(e) =
+                        devolutions_agent::enrollment::enroll_agent(&gateway_url, &enrollment_token, advertise_subnets)
+                            .await
                     {
                         eprintln!("[ERROR] Enrollment failed: {e:#}");
                         std::process::exit(1);
@@ -293,7 +275,6 @@ fn main() {
                     devolutions_agent::enrollment::enroll_agent(
                         &command.gateway_url,
                         &command.enrollment_token,
-                        &command.agent_name,
                         command.advertise_subnets,
                     )
                     .await
@@ -320,14 +301,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_up_command_args_uses_default_config_path() {
+    fn parse_up_command_args_accepts_advertise_routes() {
+        let jwt = make_jwt(serde_json::json!({
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
         let args = vec![
-            "--gateway".to_owned(),
-            "https://gateway.example.com:7171".to_owned(),
-            "--token".to_owned(),
-            "bootstrap-token".to_owned(),
-            "--name".to_owned(),
-            "site-a-agent".to_owned(),
+            "--enrollment-string".to_owned(),
+            jwt.clone(),
             "--advertise-routes".to_owned(),
             "10.0.0.0/8,192.168.1.0/24".to_owned(),
         ];
@@ -338,22 +321,25 @@ mod tests {
             parsed,
             UpCommand {
                 gateway_url: "https://gateway.example.com:7171".to_owned(),
-                enrollment_token: "bootstrap-token".to_owned(),
-                agent_name: "site-a-agent".to_owned(),
+                enrollment_token: jwt,
                 advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
             }
         );
     }
 
     #[test]
-    fn parse_up_command_args_accepts_aliases() {
+    fn parse_up_command_args_accepts_advertise_subnets_alias() {
+        let jwt = make_jwt(serde_json::json!({
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
         let args = vec![
             "--gateway".to_owned(),
             "https://gateway.example.com:7171".to_owned(),
-            "--enrollment-token".to_owned(),
-            "bootstrap-token".to_owned(),
-            "--agent-name".to_owned(),
-            "site-a-agent".to_owned(),
+            "--enrollment-string".to_owned(),
+            jwt,
             "--advertise-subnets".to_owned(),
             "10.0.0.0/8".to_owned(),
         ];
@@ -391,6 +377,22 @@ mod tests {
         assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
         // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
-        assert_eq!(parsed.agent_name, "site-a-agent");
+    }
+
+    #[test]
+    fn parse_up_command_args_rejects_split_inputs() {
+        for flag in ["--name", "--agent-name", "--token", "--enrollment-token"] {
+            let args = vec![flag.to_owned(), "site-a-agent".to_owned()];
+            let error = parse_up_command_args(&args).expect_err("argument should be rejected");
+
+            assert!(error.to_string().contains("unknown argument"));
+        }
+    }
+
+    #[test]
+    fn parse_up_command_args_requires_enrollment_string() {
+        let args = Vec::new();
+
+        assert!(parse_up_command_args(&args).is_err());
     }
 }

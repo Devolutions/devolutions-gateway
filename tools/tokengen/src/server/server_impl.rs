@@ -339,8 +339,7 @@ pub(crate) struct EnrollRequest {
     #[serde(flatten)]
     common: CommonRequest,
     jet_gw_url: String,
-    #[serde(default)]
-    jet_agent_name: Option<String>,
+    jet_agent_name: String,
 }
 
 #[derive(Deserialize)]
