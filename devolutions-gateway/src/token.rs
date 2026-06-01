@@ -54,6 +54,7 @@ pub enum ContentType {
     Jrl,
     WebApp,
     NetScan,
+    Enrollment,
 }
 
 impl FromStr for ContentType {
@@ -70,6 +71,7 @@ impl FromStr for ContentType {
             "JRL" => Ok(ContentType::Jrl),
             "WEBAPP" => Ok(ContentType::WebApp),
             "NETSCAN" => Ok(ContentType::NetScan),
+            "ENROLLMENT" => Ok(ContentType::Enrollment),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -89,6 +91,7 @@ impl fmt::Display for ContentType {
             ContentType::Jrl => write!(f, "JRL"),
             ContentType::WebApp => write!(f, "WEBAPP"),
             ContentType::NetScan => write!(f, "NETSCAN"),
+            ContentType::Enrollment => write!(f, "ENROLLMENT"),
         }
     }
 }
@@ -121,6 +124,7 @@ pub enum AccessTokenClaims {
     Jrl(JrlTokenClaims),
     WebApp(WebAppTokenClaims),
     NetScan(NetScanClaims),
+    Enrollment(EnrollmentTokenClaims),
 }
 
 impl AccessTokenClaims {
@@ -135,6 +139,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Jrl(_) => false,
             AccessTokenClaims::WebApp(_) => false,
             AccessTokenClaims::NetScan(_) => false,
+            AccessTokenClaims::Enrollment(_) => false,
         }
     }
 }
@@ -473,8 +478,8 @@ pub enum AccessScope {
     NetMonitorConfig,
     #[serde(rename = "gateway.net.monitor.drain")]
     NetMonitorDrain,
-    #[serde(rename = "gateway.agent.enroll")]
-    AgentEnroll,
+    #[serde(rename = "gateway.agent.delete")]
+    AgentDelete,
     #[serde(rename = "gateway.agent.read")]
     AgentRead,
 }
@@ -498,13 +503,10 @@ pub struct ScopeTokenClaims {
 /// `--enrollment-string` argument. Agent reads `jet_gw_url` and
 /// `jet_agent_name` locally (without verifying the signature, since it is
 /// the intended recipient), then sends the JWT as the Bearer token to
-/// `/jet/tunnel/enroll`, where the Gateway verifies the signature, scope,
-/// and expiry against the configured provisioner key.
+/// `/jet/tunnel/enroll`, where the Gateway verifies the signature, content
+/// type, and expiry against the configured provisioner key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrollmentTokenClaims {
-    /// Must be `AccessScope::AgentEnroll` (or `Wildcard`).
-    pub scope: AccessScope,
-
     /// JWT expiration time claim.
     pub exp: i64,
 
@@ -979,7 +981,8 @@ fn validate_token_impl(
             | ContentType::Jrec
             | ContentType::Kdc
             | ContentType::WebApp
-            | ContentType::NetScan => jwt.validate::<Value>(&strict_validator)?.state.claims,
+            | ContentType::NetScan
+            | ContentType::Enrollment => jwt.validate::<Value>(&strict_validator)?.state.claims,
             ContentType::Jrl => {
                 // NOTE: JRL tokens are not expected to expire.
                 // However, `iat` (Issued At) claim is required, and only more recent tokens will
@@ -1065,6 +1068,7 @@ fn validate_token_impl(
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
         ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
         ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
+        ContentType::Enrollment => serde_json::from_value(claims).map(AccessTokenClaims::Enrollment),
     }
     .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
@@ -1149,24 +1153,26 @@ fn validate_token_impl(
             }
         }
 
-        // SCOPE, NETSCAN, and JMUX tokens can never be reused.
+        // SCOPE, NETSCAN, JMUX, and ENROLLMENT tokens can never be reused.
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
-            Entry::Occupied(_) => {
-                warn!("A replay attack may have been attempted");
-                return Err(TokenError::UnexpectedReplay {
-                    reason: "never allowed for this usecase",
-                });
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Enrollment(EnrollmentTokenClaims { jti: id, exp, .. }) => {
+            match token_cache.lock().entry(id) {
+                Entry::Occupied(_) => {
+                    return Err(TokenError::UnexpectedReplay {
+                        reason: "never allowed for this use case",
+                    });
+                }
+                Entry::Vacant(bucket) => {
+                    bucket.insert(TokenSource {
+                        ip: source_ip,
+                        expiration_timestamp: exp,
+                        last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
+                    });
+                }
             }
-            Entry::Vacant(bucket) => {
-                bucket.insert(TokenSource {
-                    ip: source_ip,
-                    expiration_timestamp: exp,
-                    last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
-                });
-            }
-        },
+        }
 
         // JREC push tokens may be re-used as long as recording is considered as ongoing
         AccessTokenClaims::Jrec(JrecTokenClaims {
@@ -1393,6 +1399,7 @@ pub mod unsafe_debug {
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
             ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
             ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
+            ContentType::Enrollment => serde_json::from_value(claims).map(AccessTokenClaims::Enrollment),
         }
         .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 

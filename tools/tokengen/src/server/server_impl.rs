@@ -1,14 +1,15 @@
-use axum::extract::{Extension, Json};
-use axum::routing::post;
-use axum::Router;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use axum::Router;
+use axum::extract::{Extension, Json};
+use axum::routing::post;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
+use crate::{ApplicationProtocol, RecordingOperation, SubCommandArgs, generate_token};
 
 pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_path: Option<PathBuf>) -> Router {
     Router::new()
@@ -16,6 +17,7 @@ pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_p
         .route("/rendezvous", post(rendezvous_handler))
         .route("/rdp_tls", post(rdp_tls_handler))
         .route("/scope", post(scope_handler))
+        .route("/enroll", post(enroll_handler))
         .route("/jmux", post(jmux_handler))
         .route("/jrec", post(jrec_handler))
         .route("/kdc", post(kdc_handler))
@@ -157,6 +159,23 @@ pub(crate) async fn scope_handler(
         delegation_key_path,
         request.common,
         SubCommandArgs::Scope { scope: request.scope },
+    )
+    .await
+}
+
+pub(crate) async fn enroll_handler(
+    Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
+    Json(request): Json<EnrollRequest>,
+) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
+    handle_subcommand(
+        provisioner_key_path,
+        delegation_key_path,
+        request.common,
+        SubCommandArgs::Enrollment {
+            jet_gw_url: request.jet_gw_url,
+            jet_agent_name: request.jet_agent_name,
+        },
     )
     .await
 }
@@ -313,6 +332,15 @@ pub(crate) struct ScopeRequest {
     #[serde(flatten)]
     common: CommonRequest,
     scope: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct EnrollRequest {
+    #[serde(flatten)]
+    common: CommonRequest,
+    jet_gw_url: String,
+    #[serde(default)]
+    jet_agent_name: Option<String>,
 }
 
 #[derive(Deserialize)]

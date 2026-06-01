@@ -1153,7 +1153,7 @@ components:
       - gateway.traffic.ack
       - gateway.net.monitor.config
       - gateway.net.monitor.drain
-      - gateway.agent.enroll
+      - gateway.agent.delete
       - gateway.agent.read
     AckRequest:
       type: object

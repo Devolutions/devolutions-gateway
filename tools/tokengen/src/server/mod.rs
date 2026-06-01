@@ -1,10 +1,11 @@
 mod server_impl;
 
-use axum::http::Method;
-use server_impl::{create_router, get_delegate_key_path, get_provisioner_key_path};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use axum::http::Method;
+use server_impl::{create_router, get_delegate_key_path, get_provisioner_key_path};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::layer::SubscriberExt;
