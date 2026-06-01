@@ -1160,9 +1160,8 @@ fn validate_token_impl(
         | AccessTokenClaims::Enrollment(EnrollmentTokenClaims { jti: id, exp, .. }) => {
             match token_cache.lock().entry(id) {
                 Entry::Occupied(_) => {
-                    warn!("A replay attack may have been attempted");
                     return Err(TokenError::UnexpectedReplay {
-                        reason: "never allowed for this usecase",
+                        reason: "never allowed for this use case",
                     });
                 }
                 Entry::Vacant(bucket) => {
