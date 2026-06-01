@@ -2,3 +2,9 @@ packages:
   - 'packages/*'
   - 'apps/*'
   - 'tools/*'
+allowBuilds:
+  '@biomejs/biome': true
+  '@parcel/watcher': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
