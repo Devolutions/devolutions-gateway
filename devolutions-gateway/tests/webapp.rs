@@ -9,6 +9,7 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
 use axum_extra::headers::{self, HeaderMapExt as _};
 use http_body_util::BodyExt as _;
+use rstest::rstest;
 use serde_json::json;
 use tap::prelude::*;
 use tower::{Service as _, ServiceExt as _};
@@ -164,48 +165,48 @@ async fn custom_authentication_flow() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Both the standalone web application (`/jet/webapp/client`) and the recording player
+// (`/jet/jrec/play`) serve their static assets (JS, CSS, fonts) as sub-resources of a
+// `{*path}` route. This ensures such nested asset paths, including ones in sub-directories,
+// are served correctly rather than failing the request.
+#[rstest]
+#[case::webapp_client("client", "/jet/webapp/client")]
+#[case::recording_player("player", "/jet/jrec/play")]
 #[tokio::test]
-async fn client_static_assets_are_served() -> anyhow::Result<()> {
-    // The standalone web application references its static assets (JS, CSS, fonts) as
-    // sub-resources under `/jet/webapp/client/`. This test ensures such nested asset paths,
-    // including ones in sub-directories, are served correctly rather than failing the request.
-
+async fn static_assets_are_served(#[case] subdir: &str, #[case] uri_prefix: &str) -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
-    let client_dir = tmp.path().join("client");
-    std::fs::create_dir_all(client_dir.join("assets"))?;
-    std::fs::write(client_dir.join("index.html"), b"<html>index</html>")?;
-    std::fs::write(client_dir.join("chunk-DV2Y2PNY.js"), b"console.log('chunk');")?;
-    std::fs::write(client_dir.join("assets").join("styles-6RKIPFC3.css"), b"body{margin:0}")?;
+    let asset_dir = tmp.path().join(subdir);
+    std::fs::create_dir_all(asset_dir.join("assets"))?;
+    std::fs::write(asset_dir.join("index.html"), b"<html>index</html>")?;
+    std::fs::write(asset_dir.join("main-CHUNK42.js"), b"console.log('asset');")?;
+    std::fs::write(asset_dir.join("assets").join("styles-STYLE99.css"), b"body{margin:0}")?;
 
-    let static_root = tmp
-        .path()
-        .to_str()
-        .context("non UTF-8 temporary path")?
-        .replace('\\', "/");
+    let static_root = tmp.path().to_str().context("non UTF-8 temporary path")?;
 
-    // Reuse the provisioner keys from CONFIG, but disable authentication (irrelevant for
-    // serving the public client files) and point the static root at our temporary directory.
-    let config = CONFIG
-        .replace("\"Authentication\": \"Custom\",", "\"Authentication\": \"None\",")
-        .replace(
-            "\"AppTokenMaximumLifetime\": 28800",
-            &format!("\"AppTokenMaximumLifetime\": 28800,\n        \"StaticRootPath\": \"{static_root}\""),
-        );
+    // Reuse CONFIG, but disable authentication (irrelevant for serving the public static files)
+    // and point the static root at our temporary directory. Mutating the parsed JSON avoids
+    // depending on the exact textual formatting of CONFIG.
+    let mut config: serde_json::Value = serde_json::from_str(CONFIG)?;
+    config["WebApp"]["Authentication"] = json!("None");
+    config["WebApp"]["StaticRootPath"] = json!(static_root);
+    let config = config.to_string();
 
     let (state, _handle) = devolutions_gateway::DgwState::mock(&config)?;
 
     let mut app =
         devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
 
-    for (uri, expected_body) in [
-        ("/jet/webapp/client/chunk-DV2Y2PNY.js", "console.log('chunk');"),
-        ("/jet/webapp/client/assets/styles-6RKIPFC3.css", "body{margin:0}"),
+    for (asset_path, expected_body) in [
+        ("main-CHUNK42.js", "console.log('asset');"),
+        ("assets/styles-STYLE99.css", "body{margin:0}"),
     ] {
+        let uri = format!("{uri_prefix}/{asset_path}");
+
         let response = app
             .call(
                 Request::builder()
                     .method(http::Method::GET)
-                    .uri(uri)
+                    .uri(&uri)
                     .body(Body::empty())?,
             )
             .await

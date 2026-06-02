@@ -131,3 +131,38 @@ impl IntoResponse for HttpError {
         self.code.into_response()
     }
 }
+
+/// Serves a static directory for a request whose sub-path was captured by a `{*path}` wildcard.
+pub(crate) async fn serve_dir<ReqBody>(
+    mut request: axum::http::Request<ReqBody>,
+    captured_path: Option<axum::extract::Path<String>>,
+    root: std::path::PathBuf,
+    index: std::path::PathBuf,
+) -> Result<Response<tower_http::services::fs::ServeFileSystemResponseBody>, HttpError>
+where
+    ReqBody: Send + 'static,
+{
+    use tower::ServiceExt as _;
+    use tower_http::services::{ServeDir, ServeFile};
+
+    // The captured wildcard ({*path}) does not include the leading slash,
+    // but `path_and_query` requires the path to start with a slash.
+    let path = format!("/{}", captured_path.map(|path| path.0).unwrap_or_default());
+
+    debug!(path, "Requested static ressource");
+
+    *request.uri_mut() = axum::http::Uri::builder()
+        .path_and_query(path)
+        .build()
+        .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
+
+    match ServeDir::new(root)
+        .fallback(ServeFile::new(index))
+        .append_index_html_on_directories(true)
+        .oneshot(request)
+        .await
+    {
+        Ok(response) => Ok(response),
+        Err(never) => match never {},
+    }
+}

@@ -12,7 +12,6 @@ use axum_extra::headers::{self, HeaderMapExt as _};
 use picky::key::PrivateKey;
 use secrecy::ExposeSecret as _;
 use tap::prelude::*;
-use tower_http::services::ServeFile;
 use uuid::Uuid;
 
 use crate::DgwState;
@@ -462,40 +461,18 @@ pub(crate) async fn sign_session_token(
 async fn get_client<ReqBody>(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     path: Option<extract::Path<String>>,
-    mut request: http::Request<ReqBody>,
+    request: http::Request<ReqBody>,
 ) -> Result<Response<tower_http::services::fs::ServeFileSystemResponseBody>, HttpError>
 where
     ReqBody: Send + 'static,
 {
-    use tower::ServiceExt as _;
-    use tower_http::services::ServeDir;
-
     let conf = conf_handle.get_conf();
     let conf = extract_conf(&conf)?;
-
-    // The captured wildcard ({*path}) does not include the leading slash,
-    // but `path_and_query` requires the path to start with a slash.
-    let path = format!("/{}", path.map(|path| path.0).unwrap_or_default());
-
-    debug!(path, "Requested client ressource");
-
-    *request.uri_mut() = http::Uri::builder()
-        .path_and_query(path)
-        .build()
-        .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
 
     let client_root = conf.static_root_path.join("client/");
     let client_index = conf.static_root_path.join("client/index.html");
 
-    match ServeDir::new(client_root)
-        .fallback(ServeFile::new(client_index))
-        .append_index_html_on_directories(true)
-        .oneshot(request)
-        .await
-    {
-        Ok(response) => Ok(response),
-        Err(never) => match never {},
-    }
+    crate::http::serve_dir(request, path, client_root, client_index).await
 }
 
 fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
