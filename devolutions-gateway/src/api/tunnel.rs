@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::DgwState;
-use crate::extract::{AgentManagementReadAccess, AgentManagementWriteAccess};
+use crate::extract::{AgentManagementDeleteAccess, AgentManagementReadAccess};
 use crate::http::HttpError;
 
 #[derive(Deserialize)]
@@ -148,7 +148,7 @@ async fn get_agent(
 
 /// Delete (unregister) an agent by ID.
 async fn delete_agent(
-    _access: AgentManagementWriteAccess,
+    _access: AgentManagementDeleteAccess,
     State(DgwState {
         agent_tunnel_handle, ..
     }): State<DgwState>,

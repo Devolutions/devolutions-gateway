@@ -478,13 +478,13 @@ where
     }
 }
 
-/// Grants write access to agent management endpoints.
+/// Grants delete access to agent management endpoints.
 ///
 /// Accepts scope tokens with `AgentDelete` or `Wildcard` scope.
 #[derive(Clone, Copy)]
-pub struct AgentManagementWriteAccess;
+pub struct AgentManagementDeleteAccess;
 
-impl<S> FromRequestParts<S> for AgentManagementWriteAccess
+impl<S> FromRequestParts<S> for AgentManagementDeleteAccess
 where
     S: Send + Sync,
 {
@@ -500,9 +500,9 @@ where
             AccessTokenClaims::Scope(scope) => match scope.scope {
                 AccessScope::Wildcard | AccessScope::AgentDelete => Ok(Self),
                 _ => Err(HttpError::forbidden()
-                    .msg("invalid scope for agent management write (require one of: gateway.agent.delete, *)")),
+                    .msg("invalid scope for agent management delete (require one of: gateway.agent.delete, *)")),
             },
-            _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
+            _ => Err(HttpError::forbidden().msg("scope token required for agent management delete")),
         }
     }
 }
