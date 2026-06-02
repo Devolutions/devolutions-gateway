@@ -154,7 +154,7 @@ where
     *request.uri_mut() = axum::http::Uri::builder()
         .path_and_query(path)
         .build()
-        .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
+        .map_err(HttpError::internal().with_msg("invalid resource path").err())?;
 
     match ServeDir::new(root)
         .fallback(ServeFile::new(index))
