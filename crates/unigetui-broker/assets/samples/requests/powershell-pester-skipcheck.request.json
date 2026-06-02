@@ -1,35 +1,35 @@
 {
   "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "requestVersion": "1.0.0",
-  "requestType": "packageOperation",
-  "requestId": "req-powershell-pester-skipcheck",
-  "createdAt": "2026-05-05T12:22:00Z",
-  "operation": "install",
-  "manager": {
-    "name": "PowerShell",
-    "displayName": "PowerShell",
-    "executableFriendlyName": "PowerShellGet"
+  "RequestVersion": "1.0.0",
+  "RequestType": "PackageOperation",
+  "RequestId": "req-powershell-pester-skipcheck",
+  "CreatedAt": "2026-05-05T12:22:00Z",
+  "Operation": "Install",
+  "Manager": {
+    "Name": "PowerShell",
+    "DisplayName": "PowerShell",
+    "ExecutableFriendlyName": "PowerShellGet"
   },
-  "source": {
-    "name": "PSGallery",
-    "url": "https://www.powershellgallery.com/api/v2",
-    "isVirtualManager": false
+  "Source": {
+    "Name": "PSGallery",
+    "Url": "https://www.powershellgallery.com/api/v2",
+    "IsVirtualManager": false
   },
-  "package": {
-    "id": "Pester",
-    "name": "Pester"
+  "Package": {
+    "Id": "Pester",
+    "Name": "Pester"
   },
-  "options": {
-    "scope": "user",
-    "interactive": false,
-    "skipHashCheck": true,
-    "preRelease": false,
-    "customParameters": [],
-    "killBeforeOperation": []
+  "Options": {
+    "Scope": "User",
+    "Interactive": false,
+    "SkipHashCheck": true,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
   },
-  "broker": {
-    "requestedElevation": "standard",
-    "effectiveUser": "CONTOSO\\alice",
-    "clientVersion": "3.2.0"
+  "Broker": {
+    "RequestedElevation": "Standard",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0"
   }
 }

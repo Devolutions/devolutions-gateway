@@ -1,15 +1,15 @@
 {
   "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "responseVersion": "1.0.0",
-  "responseType": "packageOperationStatusResponse",
-  "broker": {
-    "name": "Devolutions Agent UniGetUI Broker",
-    "protocolVersion": "1.0",
-    "transport": "http-named-pipe",
-    "pipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
-    "elevatedSimulation": false
+  "ResponseVersion": "1.0.0",
+  "ResponseType": "PackageOperationStatusResponse",
+  "Broker": {
+    "Name": "Devolutions Agent UniGetUI Broker",
+    "ProtocolVersion": "1.0",
+    "Transport": "HttpNamedPipe",
+    "PipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
+    "ElevatedSimulation": false
   },
-  "requestId": "req-winget-vscode-install",
-  "status": "running",
-  "startedAt": "2026-05-05T12:00:02Z"
+  "RequestId": "req-winget-vscode-install",
+  "Status": "running",
+  "StartedAt": "2026-05-05T12:00:02Z"
 }

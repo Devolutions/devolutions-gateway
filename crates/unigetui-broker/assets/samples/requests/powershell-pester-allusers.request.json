@@ -1,35 +1,35 @@
 {
   "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "requestVersion": "1.0.0",
-  "requestType": "packageOperation",
-  "requestId": "req-powershell-pester-allusers",
-  "createdAt": "2026-05-05T12:25:00Z",
-  "operation": "install",
-  "manager": {
-    "name": "PowerShell",
-    "displayName": "PowerShell 5.x",
-    "executableFriendlyName": "powershell.exe"
+  "RequestVersion": "1.0.0",
+  "RequestType": "PackageOperation",
+  "RequestId": "req-powershell-pester-allusers",
+  "CreatedAt": "2026-05-05T12:25:00Z",
+  "Operation": "Install",
+  "Manager": {
+    "Name": "PowerShell",
+    "DisplayName": "PowerShell 5.x",
+    "ExecutableFriendlyName": "powershell.exe"
   },
-  "source": {
-    "name": "PSGallery",
-    "url": "https://www.powershellgallery.com/api/v2",
-    "isVirtualManager": false
+  "Source": {
+    "Name": "PSGallery",
+    "Url": "https://www.powershellgallery.com/api/v2",
+    "IsVirtualManager": false
   },
-  "package": {
-    "id": "Pester",
-    "name": "Pester"
+  "Package": {
+    "Id": "Pester",
+    "Name": "Pester"
   },
-  "options": {
-    "scope": "machine",
-    "interactive": false,
-    "skipHashCheck": false,
-    "preRelease": false,
-    "customParameters": [],
-    "killBeforeOperation": []
+  "Options": {
+    "Scope": "Machine",
+    "Interactive": false,
+    "SkipHashCheck": false,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
   },
-  "broker": {
-    "requestedElevation": "elevated",
-    "effectiveUser": "CONTOSO\\alice",
-    "clientVersion": "3.2.0"
+  "Broker": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0"
   }
 }

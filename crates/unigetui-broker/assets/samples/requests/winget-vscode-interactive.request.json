@@ -1,36 +1,36 @@
 {
   "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "requestVersion": "1.0.0",
-  "requestType": "packageOperation",
-  "requestId": "req-winget-vscode-interactive",
-  "createdAt": "2026-05-05T12:14:00Z",
-  "operation": "install",
-  "manager": {
-    "name": "Winget",
-    "displayName": "WinGet",
-    "executableFriendlyName": "winget.exe"
+  "RequestVersion": "1.0.0",
+  "RequestType": "PackageOperation",
+  "RequestId": "req-winget-vscode-interactive",
+  "CreatedAt": "2026-05-05T12:14:00Z",
+  "Operation": "Install",
+  "Manager": {
+    "Name": "Winget",
+    "DisplayName": "WinGet",
+    "ExecutableFriendlyName": "winget.exe"
   },
-  "source": {
-    "name": "winget",
-    "url": "https://cdn.winget.microsoft.com/cache",
-    "isVirtualManager": false
+  "Source": {
+    "Name": "winget",
+    "Url": "https://cdn.winget.microsoft.com/cache",
+    "IsVirtualManager": false
   },
-  "package": {
-    "id": "Microsoft.VisualStudioCode",
-    "name": "Microsoft Visual Studio Code",
-    "architecture": "x64"
+  "Package": {
+    "Id": "Microsoft.VisualStudioCode",
+    "Name": "Microsoft Visual Studio Code",
+    "Architecture": "X64"
   },
-  "options": {
-    "scope": "machine",
-    "interactive": true,
-    "skipHashCheck": false,
-    "preRelease": false,
-    "customParameters": [],
-    "killBeforeOperation": []
+  "Options": {
+    "Scope": "Machine",
+    "Interactive": true,
+    "SkipHashCheck": false,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
   },
-  "broker": {
-    "requestedElevation": "elevated",
-    "effectiveUser": "CONTOSO\\alice",
-    "clientVersion": "3.2.0"
+  "Broker": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0"
   }
 }

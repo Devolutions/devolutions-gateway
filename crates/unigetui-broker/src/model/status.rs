@@ -14,8 +14,8 @@ use super::response::BrokerInfo;
 
 /// Request to query the status of a previously submitted package operation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "statusRequest")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "StatusRequest")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct StatusRequest {
     /// Status request schema URI constant.
@@ -37,8 +37,8 @@ pub struct StatusRequest {
 
 /// Response to a status query.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "statusResponse")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "StatusResponse")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct StatusResponse {
     /// Status response schema URI constant.

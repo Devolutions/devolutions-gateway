@@ -10,8 +10,8 @@ use super::newtypes::{CommandString, PackageIdentifier, ProtocolVersion, Resourc
 
 /// Canonical response returned by the broker after evaluating a request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "brokerResponse")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "BrokerResponse")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct BrokerResponse {
     /// Response schema URI constant.
@@ -79,8 +79,8 @@ pub struct BrokerResponse {
 
 /// Broker identity information in responses.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "brokerInfo")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "BrokerInfo")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct BrokerInfo {
     /// Broker display name.
@@ -104,8 +104,8 @@ pub struct BrokerInfo {
 
 /// Summary of policy used for the decision.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "responsePolicyInfo")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "ResponsePolicyInfo")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct ResponsePolicyInfo {
     /// Policy document identifier.
@@ -121,8 +121,8 @@ pub struct ResponsePolicyInfo {
 
 /// Execution outcome details.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "executionInfo")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "ExecutionInfo")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionInfo {
     /// Execution mode.

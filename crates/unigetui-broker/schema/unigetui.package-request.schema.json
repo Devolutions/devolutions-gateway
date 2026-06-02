@@ -2,21 +2,21 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
-    "architecture": {
+    "Architecture": {
       "description": "Target architecture.",
       "enum": [
-        "x86",
-        "x64",
-        "arm64",
-        "neutral"
+        "X86",
+        "X64",
+        "Arm64",
+        "Neutral"
       ],
       "type": "string"
     },
-    "brokerContext": {
+    "BrokerContext": {
       "additionalProperties": false,
       "description": "Broker context provided by the client.",
       "properties": {
-        "clientProcessPath": {
+        "ClientProcessPath": {
           "description": "File path of the client process.",
           "maxLength": 2048,
           "type": [
@@ -24,7 +24,7 @@
             "null"
           ]
         },
-        "clientVersion": {
+        "ClientVersion": {
           "description": "Version of the UniGetUI client.",
           "maxLength": 128,
           "type": [
@@ -32,41 +32,36 @@
             "null"
           ]
         },
-        "effectiveUser": {
+        "EffectiveUser": {
           "description": "Windows identity of the calling user.",
           "maxLength": 256,
           "minLength": 1,
           "type": "string"
         },
-        "requestedElevation": {
+        "RequestedElevation": {
           "allOf": [
             {
-              "$ref": "#/definitions/elevation"
+              "$ref": "#/definitions/Elevation"
             }
           ],
           "description": "Elevation level requested."
         }
       },
       "required": [
-        "effectiveUser",
-        "requestedElevation"
+        "EffectiveUser",
+        "RequestedElevation"
       ],
       "type": "object"
     },
-    "customParameterString": {
-      "maxLength": 512,
-      "minLength": 1,
-      "type": "string"
-    },
-    "elevation": {
+    "Elevation": {
       "description": "Requested elevation level.",
       "enum": [
-        "standard",
-        "elevated"
+        "Standard",
+        "Elevated"
       ],
       "type": "string"
     },
-    "managerName": {
+    "ManagerName": {
       "description": "Supported package manager names.",
       "enum": [
         "Winget",
@@ -74,69 +69,58 @@
       ],
       "type": "string"
     },
-    "operation": {
+    "Operation": {
       "description": "Package operation type.",
       "enum": [
-        "install",
-        "update",
-        "uninstall"
+        "Install",
+        "Update",
+        "Uninstall"
       ],
       "type": "string"
     },
-    "packageIdentifier": {
-      "maxLength": 256,
-      "minLength": 1,
-      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
-      "type": "string"
-    },
-    "packageOperation": {
+    "PackageOperation": {
       "enum": [
-        "packageOperation"
+        "PackageOperation"
       ],
       "type": "string"
     },
-    "processName": {
-      "maxLength": 128,
-      "minLength": 1,
-      "type": "string"
-    },
-    "requestManager": {
+    "RequestManager": {
       "additionalProperties": false,
       "description": "Package manager metadata from the request.",
       "properties": {
-        "displayName": {
+        "DisplayName": {
           "description": "Human-readable display name.",
           "maxLength": 128,
           "minLength": 1,
           "type": "string"
         },
-        "executableFriendlyName": {
+        "ExecutableFriendlyName": {
           "description": "Friendly name of the executable.",
           "maxLength": 128,
           "minLength": 1,
           "type": "string"
         },
-        "name": {
+        "Name": {
           "allOf": [
             {
-              "$ref": "#/definitions/managerName"
+              "$ref": "#/definitions/ManagerName"
             }
           ],
           "description": "Package manager name."
         }
       },
       "required": [
-        "displayName",
-        "executableFriendlyName",
-        "name"
+        "DisplayName",
+        "ExecutableFriendlyName",
+        "Name"
       ],
       "type": "object"
     },
-    "requestOptions": {
+    "RequestOptions": {
       "additionalProperties": false,
       "description": "Options controlling the package operation.",
       "properties": {
-        "customInstallLocation": {
+        "CustomInstallLocation": {
           "description": "Custom install directory path.",
           "maxLength": 2048,
           "type": [
@@ -144,7 +128,7 @@
             "null"
           ]
         },
-        "customParameters": {
+        "CustomParameters": {
           "description": "Additional command-line parameters.",
           "items": {
             "$ref": "#/definitions/customParameterString"
@@ -152,11 +136,11 @@
           "maxItems": 64,
           "type": "array"
         },
-        "interactive": {
+        "Interactive": {
           "description": "Run interactively (show installer UI).",
           "type": "boolean"
         },
-        "killBeforeOperation": {
+        "KillBeforeOperation": {
           "description": "Processes to kill before running the operation.",
           "items": {
             "$ref": "#/definitions/processName"
@@ -164,12 +148,12 @@
           "maxItems": 64,
           "type": "array"
         },
-        "noUpgrade": {
+        "NoUpgrade": {
           "default": false,
           "description": "Whether to skip upgrade if an existing version is detected (for install operations).",
           "type": "boolean"
         },
-        "postOperationCommand": {
+        "PostOperationCommand": {
           "description": "Command to execute after the package operation.",
           "maxLength": 2048,
           "type": [
@@ -177,7 +161,7 @@
             "null"
           ]
         },
-        "preOperationCommand": {
+        "PreOperationCommand": {
           "description": "Command to execute before the package operation.",
           "maxLength": 2048,
           "type": [
@@ -185,14 +169,14 @@
             "null"
           ]
         },
-        "preRelease": {
+        "PreRelease": {
           "description": "Allow pre-release versions.",
           "type": "boolean"
         },
-        "scope": {
+        "Scope": {
           "anyOf": [
             {
-              "$ref": "#/definitions/scope"
+              "$ref": "#/definitions/Scope"
             },
             {
               "type": "null"
@@ -200,31 +184,31 @@
           ],
           "description": "Installation scope."
         },
-        "skipHashCheck": {
+        "SkipHashCheck": {
           "description": "Skip package hash verification.",
           "type": "boolean"
         },
-        "uninstallPrevious": {
+        "UninstallPrevious": {
           "default": false,
           "description": "Whether to uninstall previous version before installing update.",
           "type": "boolean"
         }
       },
       "required": [
-        "interactive",
-        "preRelease",
-        "skipHashCheck"
+        "Interactive",
+        "PreRelease",
+        "SkipHashCheck"
       ],
       "type": "object"
     },
-    "requestPackage": {
+    "RequestPackage": {
       "additionalProperties": false,
       "description": "Package information.",
       "properties": {
-        "architecture": {
+        "Architecture": {
           "anyOf": [
             {
-              "$ref": "#/definitions/architecture"
+              "$ref": "#/definitions/Architecture"
             },
             {
               "type": "null"
@@ -232,7 +216,7 @@
           ],
           "description": "Target architecture."
         },
-        "channel": {
+        "Channel": {
           "description": "Release channel.",
           "maxLength": 16,
           "minLength": 1,
@@ -241,7 +225,7 @@
             "null"
           ]
         },
-        "id": {
+        "Id": {
           "allOf": [
             {
               "$ref": "#/definitions/packageIdentifier"
@@ -249,13 +233,13 @@
           ],
           "description": "Package identifier (e.g., \"Publisher.Package\" for WinGet)."
         },
-        "name": {
+        "Name": {
           "description": "Human-readable package name.",
           "maxLength": 256,
           "minLength": 1,
           "type": "string"
         },
-        "version": {
+        "Version": {
           "anyOf": [
             {
               "$ref": "#/definitions/semanticVersion"
@@ -268,35 +252,29 @@
         }
       },
       "required": [
-        "id",
-        "name"
+        "Id",
+        "Name"
       ],
       "type": "object"
     },
-    "requestSchemaUri": {
-      "enum": [
-        "https://aka.ms/unigetui/package-request.schema.1.0.json"
-      ],
-      "type": "string"
-    },
-    "requestSource": {
+    "RequestSource": {
       "additionalProperties": false,
       "description": "Package source/repository information.",
       "properties": {
-        "isVirtualManager": {
+        "IsVirtualManager": {
           "description": "Whether this is a virtual manager (runs without a real CLI).",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "name": {
+        "Name": {
           "description": "Source name.",
           "maxLength": 128,
           "minLength": 1,
           "type": "string"
         },
-        "url": {
+        "Url": {
           "description": "Optional source URL.",
           "maxLength": 2048,
           "type": [
@@ -306,21 +284,43 @@
         }
       },
       "required": [
-        "name"
+        "Name"
       ],
       "type": "object"
+    },
+    "Scope": {
+      "description": "Package installation scope.",
+      "enum": [
+        "User",
+        "Machine"
+      ],
+      "type": "string"
+    },
+    "customParameterString": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "packageIdentifier": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
+      "type": "string"
+    },
+    "processName": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "requestSchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-request.schema.1.0.json"
+      ],
+      "type": "string"
     },
     "resourceId": {
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-      "type": "string"
-    },
-    "scope": {
-      "description": "Package installation scope.",
-      "enum": [
-        "user",
-        "machine"
-      ],
       "type": "string"
     },
     "semanticVersion": {
@@ -339,52 +339,52 @@
       ],
       "description": "Request schema URI constant."
     },
-    "broker": {
+    "Broker": {
       "allOf": [
         {
-          "$ref": "#/definitions/brokerContext"
+          "$ref": "#/definitions/BrokerContext"
         }
       ],
       "description": "Broker context from the client."
     },
-    "createdAt": {
+    "CreatedAt": {
       "description": "UTC timestamp when the client created the request (RFC 3339).",
       "format": "date-time",
       "type": "string"
     },
-    "manager": {
+    "Manager": {
       "allOf": [
         {
-          "$ref": "#/definitions/requestManager"
+          "$ref": "#/definitions/RequestManager"
         }
       ],
       "description": "Package manager information."
     },
-    "operation": {
+    "Operation": {
       "allOf": [
         {
-          "$ref": "#/definitions/operation"
+          "$ref": "#/definitions/Operation"
         }
       ],
       "description": "The package operation to perform."
     },
-    "options": {
+    "Options": {
       "allOf": [
         {
-          "$ref": "#/definitions/requestOptions"
+          "$ref": "#/definitions/RequestOptions"
         }
       ],
       "description": "Operation options."
     },
-    "package": {
+    "Package": {
       "allOf": [
         {
-          "$ref": "#/definitions/requestPackage"
+          "$ref": "#/definitions/RequestPackage"
         }
       ],
       "description": "Package information."
     },
-    "requestId": {
+    "RequestId": {
       "allOf": [
         {
           "$ref": "#/definitions/resourceId"
@@ -392,15 +392,15 @@
       ],
       "description": "Unique client-generated request id for audit correlation."
     },
-    "requestType": {
+    "RequestType": {
       "allOf": [
         {
-          "$ref": "#/definitions/packageOperation"
+          "$ref": "#/definitions/PackageOperation"
         }
       ],
       "description": "Must be `\"packageOperation\"`."
     },
-    "requestVersion": {
+    "RequestVersion": {
       "allOf": [
         {
           "$ref": "#/definitions/semanticVersion"
@@ -408,10 +408,10 @@
       ],
       "description": "The request syntax version (semver)."
     },
-    "source": {
+    "Source": {
       "allOf": [
         {
-          "$ref": "#/definitions/requestSource"
+          "$ref": "#/definitions/RequestSource"
         }
       ],
       "description": "Source/repository information."
@@ -419,17 +419,17 @@
   },
   "required": [
     "$schema",
-    "broker",
-    "createdAt",
-    "manager",
-    "operation",
-    "options",
-    "package",
-    "requestId",
-    "requestType",
-    "requestVersion",
-    "source"
+    "Broker",
+    "CreatedAt",
+    "Manager",
+    "Operation",
+    "Options",
+    "Package",
+    "RequestId",
+    "RequestType",
+    "RequestVersion",
+    "Source"
   ],
-  "title": "packageRequest",
+  "title": "PackageRequest",
   "type": "object"
 }

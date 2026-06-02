@@ -1,256 +1,256 @@
 {
   "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
-  "policyVersion": "1.0.0",
-  "policyType": "packageBrokerPolicy",
-  "metadata": {
-    "id": "contoso.desktop.scenario-coverage",
-    "publisher": "Contoso IT",
-    "revision": 1,
-    "publishedAt": "2026-05-05T00:00:00Z",
-    "description": "Focused policy used to exercise simulator precedence, version, and constraint behavior."
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.desktop.scenario-coverage",
+    "Publisher": "Contoso IT",
+    "Revision": 1,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "Focused policy used to exercise simulator precedence, version, and constraint behavior."
   },
-  "enforcement": {
-    "defaultDecision": "deny",
-    "rulePrecedence": "priorityThenDeny"
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
   },
-  "rules": [
+  "Rules": [
     {
-      "id": "deny.disabled-powertoys",
-      "enabled": false,
-      "priority": 1,
-      "decision": "deny",
-      "reason": "Disabled rules must not participate in policy decisions.",
-      "match": {
-        "managers": [
+      "Id": "deny.disabled-powertoys",
+      "Enabled": false,
+      "Priority": 1,
+      "Decision": "Deny",
+      "Reason": "Disabled rules must not participate in policy decisions.",
+      "Match": {
+        "Managers": [
           "Winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.PowerToys"
         ]
       }
     },
     {
-      "id": "deny.interactive",
-      "priority": 5,
-      "decision": "deny",
-      "reason": "Interactive brokered installs are not allowed in the scenario coverage policy.",
-      "match": {
-        "interactive": [
+      "Id": "deny.interactive",
+      "Priority": 5,
+      "Decision": "Deny",
+      "Reason": "Interactive brokered installs are not allowed in the scenario coverage policy.",
+      "Match": {
+        "Interactive": [
           true
         ]
       }
     },
     {
-      "id": "deny.tie.custom-parameters",
-      "priority": 10,
-      "decision": "deny",
-      "reason": "Deny must win when allow and deny rules match at the same priority.",
-      "match": {
-        "managers": [
+      "Id": "deny.tie.custom-parameters",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Deny must win when allow and deny rules match at the same priority.",
+      "Match": {
+        "Managers": [
           "Winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.VisualStudioCode"
         ],
-        "hasCustomParameters": [
+        "HasCustomParameters": [
           true
         ]
       }
     },
     {
-      "id": "allow.tie.vscode-custom-parameters",
-      "priority": 10,
-      "decision": "allow",
-      "reason": "This intentionally ties the deny rule to prove deny wins ties.",
-      "match": {
-        "managers": [
+      "Id": "allow.tie.vscode-custom-parameters",
+      "Priority": 10,
+      "Decision": "Allow",
+      "Reason": "This intentionally ties the deny rule to prove deny wins ties.",
+      "Match": {
+        "Managers": [
           "Winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.VisualStudioCode"
         ],
-        "hasCustomParameters": [
+        "HasCustomParameters": [
           true
         ]
       },
-      "constraints": {
-        "allowCustomParameters": true
+      "Constraints": {
+        "AllowCustomParameters": true
       }
     },
     {
-      "id": "deny.prepost-commands",
-      "priority": 20,
-      "decision": "deny",
-      "reason": "Pre and post commands are outside the package manager trust boundary.",
-      "match": {
-        "hasPrePostCommands": [
+      "Id": "deny.prepost-commands",
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "Pre and post commands are outside the package manager trust boundary.",
+      "Match": {
+        "HasPrePostCommands": [
           true
         ]
       }
     },
     {
-      "id": "deny.kill-process-actions",
-      "priority": 30,
-      "decision": "deny",
-      "reason": "Killing processes before a brokered operation is not allowed.",
-      "match": {
-        "hasKillBeforeOperation": [
+      "Id": "deny.kill-process-actions",
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Killing processes before a brokered operation is not allowed.",
+      "Match": {
+        "HasKillBeforeOperation": [
           true
         ]
       }
     },
     {
-      "id": "allow.winget.powertoys",
-      "priority": 100,
-      "decision": "allow",
-      "reason": "PowerToys is allowed and proves disabled deny rules are ignored.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.winget.powertoys",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "PowerToys is allowed and proves disabled deny rules are ignored.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.PowerToys"
         ],
-        "scopes": [
-          "machine"
+        "Scopes": [
+          "Machine"
         ],
-        "architectures": [
-          "x64"
+        "Architectures": [
+          "X64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     },
     {
-      "id": "allow.winget.vscode.version-range",
-      "priority": 100,
-      "decision": "allow",
-      "reason": "VS Code is allowed only within the tested version range.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.winget.vscode.version-range",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "VS Code is allowed only within the tested version range.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.VisualStudioCode"
         ],
-        "versionRange": {
-          "minVersion": "1.90.0",
-          "maxVersion": "2.0.0",
-          "includePrerelease": false
+        "VersionRange": {
+          "MinVersion": "1.90.0",
+          "MaxVersion": "2.0.0",
+          "IncludePrerelease": false
         },
-        "scopes": [
-          "machine"
+        "Scopes": [
+          "Machine"
         ],
-        "architectures": [
-          "x64"
+        "Architectures": [
+          "X64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     },
     {
-      "id": "allow.winget.git.customized",
-      "priority": 100,
-      "decision": "allow",
-      "reason": "Git is allowed with tightly constrained customization.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.winget.git.customized",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Git is allowed with tightly constrained customization.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Git.Git"
         ],
-        "scopes": [
-          "machine"
+        "Scopes": [
+          "Machine"
         ],
-        "architectures": [
-          "x64"
+        "Architectures": [
+          "X64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomInstallLocation": true,
-        "allowedInstallLocationPatterns": [
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomInstallLocation": true,
+        "AllowedInstallLocationPatterns": [
           "C:\\Tools\\Git*"
         ],
-        "allowCustomParameters": true,
-        "allowedCustomParameters": [
+        "AllowCustomParameters": true,
+        "AllowedCustomParameters": [
           "--accept-source-agreements"
         ],
-        "deniedCustomParameters": [
+        "DeniedCustomParameters": [
           "--override*"
         ],
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     },
     {
-      "id": "allow.winget.git.uninstall",
-      "priority": 100,
-      "decision": "allow",
-      "reason": "Git uninstall is allowed for the same corporate package source and machine scope.",
-      "match": {
-        "operations": [
-          "uninstall"
+      "Id": "allow.winget.git.uninstall",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Git uninstall is allowed for the same corporate package source and machine scope.",
+      "Match": {
+        "Operations": [
+          "Uninstall"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Git.Git"
         ],
-        "scopes": [
-          "machine"
+        "Scopes": [
+          "Machine"
         ],
-        "architectures": [
-          "x64"
+        "Architectures": [
+          "X64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     }
   ]

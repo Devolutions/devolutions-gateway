@@ -1,17 +1,17 @@
 {
   "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "responseVersion": "1.0.0",
-  "responseType": "packageOperationStatusResponse",
-  "broker": {
-    "name": "Devolutions Agent UniGetUI Broker",
-    "protocolVersion": "1.0",
-    "transport": "http-named-pipe",
-    "pipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
-    "elevatedSimulation": false
+  "ResponseVersion": "1.0.0",
+  "ResponseType": "PackageOperationStatusResponse",
+  "Broker": {
+    "Name": "Devolutions Agent UniGetUI Broker",
+    "ProtocolVersion": "1.0",
+    "Transport": "HttpNamedPipe",
+    "PipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
+    "ElevatedSimulation": false
   },
-  "requestId": "req-long-running-op",
-  "status": "failed",
-  "startedAt": "2026-05-05T11:00:00Z",
-  "completedAt": "2026-05-05T12:00:00Z",
-  "note": "Operation timed out after 1 hour."
+  "RequestId": "req-long-running-op",
+  "Status": "failed",
+  "StartedAt": "2026-05-05T11:00:00Z",
+  "CompletedAt": "2026-05-05T12:00:00Z",
+  "Note": "Operation timed out after 1 hour."
 }

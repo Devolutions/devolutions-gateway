@@ -1,37 +1,37 @@
 {
   "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "requestVersion": "1.0.0",
-  "requestType": "packageOperation",
-  "requestId": "req-winget-git-custom-location-allowed",
-  "createdAt": "2026-05-05T12:15:00Z",
-  "operation": "install",
-  "manager": {
-    "name": "Winget",
-    "displayName": "WinGet",
-    "executableFriendlyName": "winget.exe"
+  "RequestVersion": "1.0.0",
+  "RequestType": "PackageOperation",
+  "RequestId": "req-winget-git-custom-location-allowed",
+  "CreatedAt": "2026-05-05T12:15:00Z",
+  "Operation": "Install",
+  "Manager": {
+    "Name": "Winget",
+    "DisplayName": "WinGet",
+    "ExecutableFriendlyName": "winget.exe"
   },
-  "source": {
-    "name": "winget",
-    "url": "https://cdn.winget.microsoft.com/cache",
-    "isVirtualManager": false
+  "Source": {
+    "Name": "winget",
+    "Url": "https://cdn.winget.microsoft.com/cache",
+    "IsVirtualManager": false
   },
-  "package": {
-    "id": "Git.Git",
-    "name": "Git",
-    "architecture": "x64"
+  "Package": {
+    "Id": "Git.Git",
+    "Name": "Git",
+    "Architecture": "X64"
   },
-  "options": {
-    "scope": "machine",
-    "interactive": false,
-    "skipHashCheck": false,
-    "preRelease": false,
-    "customInstallLocation": "C:\\Tools\\Git",
-    "customParameters": [],
-    "killBeforeOperation": []
+  "Options": {
+    "Scope": "Machine",
+    "Interactive": false,
+    "SkipHashCheck": false,
+    "PreRelease": false,
+    "CustomInstallLocation": "C:\\Tools\\Git",
+    "CustomParameters": [],
+    "KillBeforeOperation": []
   },
-  "broker": {
-    "requestedElevation": "elevated",
-    "effectiveUser": "CONTOSO\\alice",
-    "clientVersion": "3.2.0"
+  "Broker": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0"
   }
 }

@@ -1,11 +1,11 @@
 {
   "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-  "requestVersion": "1.0.0",
-  "requestType": "packageOperationStatus",
-  "requestId": "req-winget-vscode-install",
-  "broker": {
-    "requestedElevation": "elevated",
-    "effectiveUser": "CONTOSO\\alice",
-    "clientVersion": "3.2.0"
+  "RequestVersion": "1.0.0",
+  "RequestType": "PackageOperationStatus",
+  "RequestId": "req-winget-vscode-install",
+  "Broker": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0"
   }
 }

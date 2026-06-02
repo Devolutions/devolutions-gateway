@@ -1,18 +1,18 @@
 {
   "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "responseVersion": "1.0.0",
-  "responseType": "packageOperationStatusResponse",
-  "broker": {
-    "name": "Devolutions Agent UniGetUI Broker",
-    "protocolVersion": "1.0",
-    "transport": "http-named-pipe",
-    "pipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
-    "elevatedSimulation": false
+  "ResponseVersion": "1.0.0",
+  "ResponseType": "PackageOperationStatusResponse",
+  "Broker": {
+    "Name": "Devolutions Agent UniGetUI Broker",
+    "ProtocolVersion": "1.0",
+    "Transport": "HttpNamedPipe",
+    "PipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
+    "ElevatedSimulation": false
   },
-  "requestId": "req-winget-git-uninstall",
-  "status": "failed",
-  "startedAt": "2026-05-05T12:01:00Z",
-  "completedAt": "2026-05-05T12:01:05Z",
-  "exitCode": 1,
-  "note": "Process exited with code 1."
+  "RequestId": "req-winget-git-uninstall",
+  "Status": "failed",
+  "StartedAt": "2026-05-05T12:01:00Z",
+  "CompletedAt": "2026-05-05T12:01:05Z",
+  "ExitCode": 1,
+  "Note": "Process exited with code 1."
 }

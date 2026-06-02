@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Package operation type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "operation")]
-#[serde(rename_all = "lowercase")]
+#[schemars(rename = "Operation")]
 pub enum Operation {
     Install,
     Update,
@@ -15,8 +14,7 @@ pub enum Operation {
 
 /// Package installation scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "scope")]
-#[serde(rename_all = "lowercase")]
+#[schemars(rename = "Scope")]
 pub enum Scope {
     User,
     Machine,
@@ -24,8 +22,7 @@ pub enum Scope {
 
 /// Target architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "architecture")]
-#[serde(rename_all = "lowercase")]
+#[schemars(rename = "Architecture")]
 pub enum Architecture {
     X86,
     X64,
@@ -35,7 +32,7 @@ pub enum Architecture {
 
 /// Supported package manager names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "managerName")]
+#[schemars(rename = "ManagerName")]
 pub enum ManagerName {
     Winget,
     PowerShell,
@@ -43,8 +40,7 @@ pub enum ManagerName {
 
 /// Policy decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "decision")]
-#[serde(rename_all = "lowercase")]
+#[schemars(rename = "Decision")]
 pub enum Decision {
     Allow,
     Deny,
@@ -52,8 +48,7 @@ pub enum Decision {
 
 /// Requested elevation level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "elevation")]
-#[serde(rename_all = "lowercase")]
+#[schemars(rename = "Elevation")]
 pub enum Elevation {
     Standard,
     Elevated,
@@ -61,8 +56,7 @@ pub enum Elevation {
 
 /// Broker transport type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "transport")]
-#[serde(rename_all = "kebab-case")]
+#[schemars(rename = "Transport")]
 pub enum Transport {
     HttpNamedPipe,
     HttpLoopbackSimulator,
@@ -70,8 +64,7 @@ pub enum Transport {
 
 /// Execution mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "executionMode")]
-#[serde(rename_all = "kebab-case")]
+#[schemars(rename = "ExecutionMode")]
 pub enum ExecutionMode {
     SimulatedElevated,
     Elevated,
@@ -79,8 +72,7 @@ pub enum ExecutionMode {
 
 /// Status of an asynchronous package operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "operationStatus")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "OperationStatus")]
 pub enum OperationStatus {
     /// Process is being prepared/started.
     Starting,
@@ -99,8 +91,8 @@ pub enum OperationStatus {
 impl std::fmt::Display for Decision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Allow => f.write_str("allow"),
-            Self::Deny => f.write_str("deny"),
+            Self::Allow => f.write_str("Allow"),
+            Self::Deny => f.write_str("Deny"),
         }
     }
 }
@@ -108,9 +100,9 @@ impl std::fmt::Display for Decision {
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Install => f.write_str("install"),
-            Self::Update => f.write_str("update"),
-            Self::Uninstall => f.write_str("uninstall"),
+            Self::Install => f.write_str("Install"),
+            Self::Update => f.write_str("Update"),
+            Self::Uninstall => f.write_str("Uninstall"),
         }
     }
 }
@@ -127,8 +119,8 @@ impl std::fmt::Display for ManagerName {
 impl std::fmt::Display for Scope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::User => f.write_str("user"),
-            Self::Machine => f.write_str("machine"),
+            Self::User => f.write_str("User"),
+            Self::Machine => f.write_str("Machine"),
         }
     }
 }
@@ -136,8 +128,8 @@ impl std::fmt::Display for Scope {
 impl std::fmt::Display for Elevation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Standard => f.write_str("standard"),
-            Self::Elevated => f.write_str("elevated"),
+            Self::Standard => f.write_str("Standard"),
+            Self::Elevated => f.write_str("Elevated"),
         }
     }
 }
@@ -145,10 +137,10 @@ impl std::fmt::Display for Elevation {
 impl std::fmt::Display for Architecture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::X86 => f.write_str("x86"),
-            Self::X64 => f.write_str("x64"),
-            Self::Arm64 => f.write_str("arm64"),
-            Self::Neutral => f.write_str("neutral"),
+            Self::X86 => f.write_str("X86"),
+            Self::X64 => f.write_str("X64"),
+            Self::Arm64 => f.write_str("Arm64"),
+            Self::Neutral => f.write_str("Neutral"),
         }
     }
 }
@@ -156,8 +148,8 @@ impl std::fmt::Display for Architecture {
 impl std::fmt::Display for ExecutionMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SimulatedElevated => f.write_str("simulated-elevated"),
-            Self::Elevated => f.write_str("elevated"),
+            Self::SimulatedElevated => f.write_str("SimulatedElevated"),
+            Self::Elevated => f.write_str("Elevated"),
         }
     }
 }

@@ -2,21 +2,21 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
-    "brokerInfo": {
+    "BrokerInfo": {
       "additionalProperties": false,
       "description": "Broker identity information in responses.",
       "properties": {
-        "elevatedSimulation": {
+        "ElevatedSimulation": {
           "description": "Whether the broker is running in simulated elevation mode.",
           "type": "boolean"
         },
-        "name": {
+        "Name": {
           "description": "Broker display name.",
           "maxLength": 128,
           "minLength": 1,
           "type": "string"
         },
-        "pipeName": {
+        "PipeName": {
           "description": "Named pipe path (when transport is http-named-pipe).",
           "maxLength": 256,
           "minLength": 1,
@@ -25,7 +25,7 @@
             "null"
           ]
         },
-        "protocolVersion": {
+        "ProtocolVersion": {
           "allOf": [
             {
               "$ref": "#/definitions/protocolVersion"
@@ -33,59 +33,67 @@
           ],
           "description": "Protocol version (e.g., \"1.0\")."
         },
-        "transport": {
+        "Transport": {
           "allOf": [
             {
-              "$ref": "#/definitions/transport"
+              "$ref": "#/definitions/Transport"
             }
           ],
           "description": "Transport mechanism."
         }
       },
       "required": [
-        "elevatedSimulation",
-        "name",
-        "protocolVersion",
-        "transport"
+        "ElevatedSimulation",
+        "Name",
+        "ProtocolVersion",
+        "Transport"
       ],
       "type": "object"
     },
-    "operationStatus": {
+    "OperationStatus": {
       "description": "Status of an asynchronous package operation.",
       "oneOf": [
         {
           "description": "Process is being prepared/started.",
           "enum": [
-            "starting"
+            "Starting"
           ],
           "type": "string"
         },
         {
           "description": "Process is running.",
           "enum": [
-            "running"
+            "Running"
           ],
           "type": "string"
         },
         {
           "description": "Process exited successfully (exit code 0).",
           "enum": [
-            "completed"
+            "Completed"
           ],
           "type": "string"
         },
         {
           "description": "Process failed (non-zero exit, timeout, or launch failure).",
           "enum": [
-            "failed"
+            "Failed"
           ],
           "type": "string"
         }
       ]
     },
-    "packageOperationStatusResponse": {
+    "PackageOperationStatusResponse": {
       "enum": [
-        "packageOperationStatusResponse"
+        "PackageOperationStatusResponse"
+      ],
+      "type": "string"
+    },
+    "Transport": {
+      "description": "Broker transport type.",
+      "enum": [
+        "HttpNamedPipe",
+        "HttpLoopbackSimulator"
       ],
       "type": "string"
     },
@@ -108,14 +116,6 @@
         "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json"
       ],
       "type": "string"
-    },
-    "transport": {
-      "description": "Broker transport type.",
-      "enum": [
-        "http-named-pipe",
-        "http-loopback-simulator"
-      ],
-      "type": "string"
     }
   },
   "description": "Response to a status query.",
@@ -128,15 +128,15 @@
       ],
       "description": "Status response schema URI constant."
     },
-    "broker": {
+    "Broker": {
       "allOf": [
         {
-          "$ref": "#/definitions/brokerInfo"
+          "$ref": "#/definitions/BrokerInfo"
         }
       ],
       "description": "Broker identity and capabilities."
     },
-    "completedAt": {
+    "CompletedAt": {
       "description": "UTC timestamp when the operation completed or failed (null if still running).",
       "format": "date-time",
       "type": [
@@ -144,7 +144,7 @@
         "null"
       ]
     },
-    "exitCode": {
+    "ExitCode": {
       "description": "Process exit code (present when status is `completed`, or `failed` due to non-zero exit).",
       "format": "int32",
       "type": [
@@ -152,7 +152,7 @@
         "null"
       ]
     },
-    "note": {
+    "Note": {
       "description": "Human-readable note about the status.",
       "maxLength": 2048,
       "type": [
@@ -160,7 +160,7 @@
         "null"
       ]
     },
-    "requestId": {
+    "RequestId": {
       "allOf": [
         {
           "$ref": "#/definitions/resourceId"
@@ -168,15 +168,15 @@
       ],
       "description": "The original request id being queried."
     },
-    "responseType": {
+    "ResponseType": {
       "allOf": [
         {
-          "$ref": "#/definitions/packageOperationStatusResponse"
+          "$ref": "#/definitions/PackageOperationStatusResponse"
         }
       ],
       "description": "Must be `\"packageOperationStatusResponse\"`."
     },
-    "responseVersion": {
+    "ResponseVersion": {
       "allOf": [
         {
           "$ref": "#/definitions/semanticVersion"
@@ -184,7 +184,7 @@
       ],
       "description": "Response syntax version (semver)."
     },
-    "startedAt": {
+    "StartedAt": {
       "description": "UTC timestamp when the process was actually launched (null if not yet started).",
       "format": "date-time",
       "type": [
@@ -192,10 +192,10 @@
         "null"
       ]
     },
-    "status": {
+    "Status": {
       "allOf": [
         {
-          "$ref": "#/definitions/operationStatus"
+          "$ref": "#/definitions/OperationStatus"
         }
       ],
       "description": "Current status of the operation."
@@ -203,12 +203,12 @@
   },
   "required": [
     "$schema",
-    "broker",
-    "requestId",
-    "responseType",
-    "responseVersion",
-    "status"
+    "Broker",
+    "RequestId",
+    "ResponseType",
+    "ResponseVersion",
+    "Status"
   ],
-  "title": "statusResponse",
+  "title": "StatusResponse",
   "type": "object"
 }

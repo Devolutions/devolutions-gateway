@@ -10,8 +10,8 @@ use super::newtypes::{CustomParameterString, PackageIdentifier, ProcessName, Res
 
 /// Canonical request sent by an unelevated UniGetUI process to the elevated broker.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "packageRequest")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PackageRequest")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PackageRequest {
     /// Request schema URI constant.
@@ -51,8 +51,8 @@ pub struct PackageRequest {
 
 /// Package manager metadata from the request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "requestManager")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "RequestManager")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestManager {
     /// Package manager name.
@@ -69,8 +69,8 @@ pub struct RequestManager {
 
 /// Package source/repository information.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "requestSource")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "RequestSource")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestSource {
     /// Source name.
@@ -89,8 +89,8 @@ pub struct RequestSource {
 
 /// Package information.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "requestPackage")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "RequestPackage")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestPackage {
     /// Package identifier (e.g., "Publisher.Package" for WinGet).
@@ -116,8 +116,8 @@ pub struct RequestPackage {
 
 /// Options controlling the package operation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "requestOptions")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "RequestOptions")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestOptions {
     /// Installation scope.
@@ -169,8 +169,8 @@ pub struct RequestOptions {
 
 /// Broker context provided by the client.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "brokerContext")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "BrokerContext")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct BrokerContext {
     /// Elevation level requested.

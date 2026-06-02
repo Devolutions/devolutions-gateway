@@ -15,18 +15,18 @@ pub struct PackageOperation;
 
 impl Serialize for PackageOperation {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("packageOperation")
+        serializer.serialize_str("PackageOperation")
     }
 }
 
 impl<'de> Deserialize<'de> for PackageOperation {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        if s == "packageOperation" {
+        if s == "PackageOperation" {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(format!(
-                "expected \"packageOperation\", got \"{s}\""
+                "expected \"PackageOperation\", got \"{s}\""
             )))
         }
     }
@@ -34,13 +34,13 @@ impl<'de> Deserialize<'de> for PackageOperation {
 
 impl JsonSchema for PackageOperation {
     fn schema_name() -> String {
-        "packageOperation".to_owned()
+        "PackageOperation".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String("packageOperation".to_owned())]),
+            enum_values: Some(vec![serde_json::Value::String("PackageOperation".to_owned())]),
             ..Default::default()
         }
         .into()
@@ -57,18 +57,18 @@ pub struct PackageBrokerPolicy;
 
 impl Serialize for PackageBrokerPolicy {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("packageBrokerPolicy")
+        serializer.serialize_str("PackageBrokerPolicy")
     }
 }
 
 impl<'de> Deserialize<'de> for PackageBrokerPolicy {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        if s == "packageBrokerPolicy" {
+        if s == "PackageBrokerPolicy" {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(format!(
-                "expected \"packageBrokerPolicy\", got \"{s}\""
+                "expected \"PackageBrokerPolicy\", got \"{s}\""
             )))
         }
     }
@@ -76,13 +76,13 @@ impl<'de> Deserialize<'de> for PackageBrokerPolicy {
 
 impl JsonSchema for PackageBrokerPolicy {
     fn schema_name() -> String {
-        "packageBrokerPolicy".to_owned()
+        "PackageBrokerPolicy".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String("packageBrokerPolicy".to_owned())]),
+            enum_values: Some(vec![serde_json::Value::String("PackageBrokerPolicy".to_owned())]),
             ..Default::default()
         }
         .into()
@@ -99,18 +99,18 @@ pub struct PackageBrokerResponse;
 
 impl Serialize for PackageBrokerResponse {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("packageBrokerResponse")
+        serializer.serialize_str("PackageBrokerResponse")
     }
 }
 
 impl<'de> Deserialize<'de> for PackageBrokerResponse {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        if s == "packageBrokerResponse" {
+        if s == "PackageBrokerResponse" {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(format!(
-                "expected \"packageBrokerResponse\", got \"{s}\""
+                "expected \"PackageBrokerResponse\", got \"{s}\""
             )))
         }
     }
@@ -118,13 +118,13 @@ impl<'de> Deserialize<'de> for PackageBrokerResponse {
 
 impl JsonSchema for PackageBrokerResponse {
     fn schema_name() -> String {
-        "packageBrokerResponse".to_owned()
+        "PackageBrokerResponse".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String("packageBrokerResponse".to_owned())]),
+            enum_values: Some(vec![serde_json::Value::String("PackageBrokerResponse".to_owned())]),
             ..Default::default()
         }
         .into()
@@ -271,18 +271,18 @@ pub struct PackageOperationStatusType;
 
 impl Serialize for PackageOperationStatusType {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("packageOperationStatus")
+        serializer.serialize_str("PackageOperationStatus")
     }
 }
 
 impl<'de> Deserialize<'de> for PackageOperationStatusType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        if s == "packageOperationStatus" {
+        if s == "PackageOperationStatus" {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(format!(
-                "expected \"packageOperationStatus\", got \"{s}\""
+                "expected \"PackageOperationStatus\", got \"{s}\""
             )))
         }
     }
@@ -290,13 +290,13 @@ impl<'de> Deserialize<'de> for PackageOperationStatusType {
 
 impl JsonSchema for PackageOperationStatusType {
     fn schema_name() -> String {
-        "packageOperationStatus".to_owned()
+        "PackageOperationStatus".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String("packageOperationStatus".to_owned())]),
+            enum_values: Some(vec![serde_json::Value::String("PackageOperationStatus".to_owned())]),
             ..Default::default()
         }
         .into()
@@ -313,18 +313,18 @@ pub struct PackageOperationStatusResponse;
 
 impl Serialize for PackageOperationStatusResponse {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("packageOperationStatusResponse")
+        serializer.serialize_str("PackageOperationStatusResponse")
     }
 }
 
 impl<'de> Deserialize<'de> for PackageOperationStatusResponse {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        if s == "packageOperationStatusResponse" {
+        if s == "PackageOperationStatusResponse" {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(format!(
-                "expected \"packageOperationStatusResponse\", got \"{s}\""
+                "expected \"PackageOperationStatusResponse\", got \"{s}\""
             )))
         }
     }
@@ -332,14 +332,14 @@ impl<'de> Deserialize<'de> for PackageOperationStatusResponse {
 
 impl JsonSchema for PackageOperationStatusResponse {
     fn schema_name() -> String {
-        "packageOperationStatusResponse".to_owned()
+        "PackageOperationStatusResponse".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
             enum_values: Some(vec![serde_json::Value::String(
-                "packageOperationStatusResponse".to_owned(),
+                "PackageOperationStatusResponse".to_owned(),
             )]),
             ..Default::default()
         }

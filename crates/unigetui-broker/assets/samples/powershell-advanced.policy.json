@@ -1,81 +1,81 @@
 {
   "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
-  "policyVersion": "1.0.0",
-  "policyType": "packageBrokerPolicy",
-  "metadata": {
-    "id": "contoso.powershell.advanced-scenarios",
-    "publisher": "Contoso IT",
-    "revision": 1,
-    "publishedAt": "2026-05-05T00:00:00Z",
-    "description": "PowerShell policy fixture for source, version range, and update operation coverage."
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.powershell.advanced-scenarios",
+    "Publisher": "Contoso IT",
+    "Revision": 1,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "PowerShell policy fixture for source, version range, and update operation coverage."
   },
-  "enforcement": {
-    "defaultDecision": "deny",
-    "rulePrecedence": "priorityThenDeny"
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
   },
-  "rules": [
+  "Rules": [
     {
-      "id": "deny.powershell.untrusted-source",
-      "priority": 5,
-      "decision": "deny",
-      "reason": "Only PSGallery is approved for brokered PowerShell module operations.",
-      "match": {
-        "managers": [
+      "Id": "deny.powershell.untrusted-source",
+      "Priority": 5,
+      "Decision": "Deny",
+      "Reason": "Only PSGallery is approved for brokered PowerShell module operations.",
+      "Match": {
+        "Managers": [
           "PowerShell"
         ],
-        "sources": [
+        "Sources": [
           "PoshTestGallery"
         ]
       }
     },
     {
-      "id": "deny.powershell.prerelease",
-      "priority": 10,
-      "decision": "deny",
-      "reason": "Prerelease PowerShell modules are not approved in advanced scenarios.",
-      "match": {
-        "managers": [
+      "Id": "deny.powershell.prerelease",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Prerelease PowerShell modules are not approved in advanced scenarios.",
+      "Match": {
+        "Managers": [
           "PowerShell"
         ],
-        "preRelease": [
+        "PreRelease": [
           true
         ]
       }
     },
     {
-      "id": "allow.powershell.pester.versioned",
-      "priority": 100,
-      "decision": "allow",
-      "reason": "Pester is approved from PSGallery for CurrentUser install and update operations within the supported version range.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.powershell.pester.versioned",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Pester is approved from PSGallery for CurrentUser install and update operations within the supported version range.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "PowerShell"
         ],
-        "sources": [
+        "Sources": [
           "PSGallery"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Pester"
         ],
-        "versionRange": {
-          "minVersion": "5.0.0",
-          "maxVersion": "6.0.0",
-          "includePrerelease": false
+        "VersionRange": {
+          "MinVersion": "5.0.0",
+          "MaxVersion": "6.0.0",
+          "IncludePrerelease": false
         },
-        "scopes": [
-          "user"
+        "Scopes": [
+          "User"
         ]
       },
-      "constraints": {
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     }
   ]

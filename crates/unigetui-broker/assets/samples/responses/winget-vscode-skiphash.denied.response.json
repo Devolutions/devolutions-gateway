@@ -1,34 +1,34 @@
 {
   "$schema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
-  "responseVersion": "1.0.0",
-  "responseType": "packageBrokerResponse",
-  "broker": {
-    "name": "UniGetUI Package Broker",
-    "protocolVersion": "1.0",
-    "transport": "http-named-pipe",
-    "pipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
-    "elevatedSimulation": false
+  "ResponseVersion": "1.0.0",
+  "ResponseType": "PackageBrokerResponse",
+  "Broker": {
+    "Name": "UniGetUI Package Broker",
+    "ProtocolVersion": "1.0",
+    "Transport": "HttpNamedPipe",
+    "PipeName": "\\\\.\\pipe\\UniGetUI.PackageBroker.v1",
+    "ElevatedSimulation": false
   },
-  "auditId": "audit-20260505-000002",
-  "requestId": "req-winget-vscode-skiphash",
-  "receivedAt": "2026-05-05T12:10:01Z",
-  "completedAt": "2026-05-05T12:10:01Z",
-  "manager": "Winget",
-  "source": "winget",
-  "packageId": "Microsoft.VisualStudioCode",
-  "operation": "install",
-  "decision": "deny",
-  "ruleId": "deny.integrity-bypass",
-  "reason": "Integrity and publisher checks cannot be bypassed by brokered requests.",
-  "wouldExecute": false,
-  "policy": {
-    "id": "contoso.desktop.standard-allowlist",
-    "revision": 4,
-    "policyVersion": "1.0.0"
+  "AuditId": "audit-20260505-000002",
+  "RequestId": "req-winget-vscode-skiphash",
+  "ReceivedAt": "2026-05-05T12:10:01Z",
+  "CompletedAt": "2026-05-05T12:10:01Z",
+  "Manager": "Winget",
+  "Source": "winget",
+  "PackageId": "Microsoft.VisualStudioCode",
+  "Operation": "Install",
+  "Decision": "Deny",
+  "RuleId": "deny.integrity-bypass",
+  "Reason": "Integrity and publisher checks cannot be bypassed by brokered requests.",
+  "WouldExecute": false,
+  "Policy": {
+    "Id": "contoso.desktop.standard-allowlist",
+    "Revision": 4,
+    "PolicyVersion": "1.0.0"
   },
-  "execution": {
-    "mode": "elevated",
-    "command": [],
-    "note": "Policy denied the request; the broker must not execute a package manager command."
+  "Execution": {
+    "Mode": "Elevated",
+    "Command": [],
+    "Note": "Policy denied the request; the broker must not execute a package manager command."
   }
 }

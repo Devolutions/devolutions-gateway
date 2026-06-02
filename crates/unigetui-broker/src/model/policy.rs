@@ -13,8 +13,8 @@ use super::request::PackageRequest;
 
 /// A policy document governing which package operations are allowed or denied.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyDocument")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyDocument")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyDocument {
     /// Policy schema URI constant.
@@ -40,8 +40,8 @@ pub struct PolicyDocument {
 
 /// Policy metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyMetadata")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyMetadata")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyMetadata {
     /// Unique policy identifier.
@@ -78,14 +78,14 @@ pub struct PolicyMetadata {
 
 /// Enforcement configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyEnforcement")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyEnforcement")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyEnforcement {
     /// Decision when no rule matches.
     pub default_decision: Decision,
 
-    /// Rule precedence strategy (must be "priorityThenDeny").
+    /// Rule precedence strategy (must be "PriorityThenDeny").
     pub rule_precedence: RulePrecedence,
 
     /// When true, broker logs decisions but does not enforce.
@@ -93,18 +93,17 @@ pub struct PolicyEnforcement {
     pub audit_mode: Option<bool>,
 }
 
-/// Rule precedence strategy — always priorityThenDeny.
+/// Rule precedence strategy — always PriorityThenDeny.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "rulePrecedence")]
+#[schemars(rename = "RulePrecedence")]
 pub enum RulePrecedence {
-    #[serde(rename = "priorityThenDeny")]
     PriorityThenDeny,
 }
 
 /// A single policy rule.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyRule")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyRule")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyRule {
     /// Unique rule identifier.
@@ -128,7 +127,7 @@ pub struct PolicyRule {
 
     /// Match criteria — request must satisfy all specified fields.
     /// At least one criterion must be present.
-    #[serde(rename = "match", deserialize_with = "deserialize_non_empty_match")]
+    #[serde(rename = "Match", deserialize_with = "deserialize_non_empty_match")]
     pub match_criteria: PolicyMatch,
 
     /// Additional constraints applied after matching.
@@ -153,8 +152,8 @@ fn deserialize_non_empty_match<'de, D: serde::Deserializer<'de>>(deserializer: D
 /// Match criteria for a policy rule. All specified fields must match.
 /// At least one field must be present.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyMatch")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyMatch")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyMatch {
     /// Allowed operations.
@@ -272,8 +271,8 @@ impl PolicyMatch {
 
 /// Semantic version range for matching.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "versionRange")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "VersionRange")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct VersionRange {
     /// Minimum version (inclusive).
@@ -293,8 +292,8 @@ pub struct VersionRange {
 
 /// Constraints applied after a rule matches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "policyConstraints")]
-#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PolicyConstraints")]
+#[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PolicyConstraints {
     /// Allow interactive mode.

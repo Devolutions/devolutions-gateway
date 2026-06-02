@@ -1,133 +1,133 @@
 {
   "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
-  "policyVersion": "1.0.0",
-  "policyType": "packageBrokerPolicy",
-  "metadata": {
-    "id": "contoso.desktop.standard-allowlist",
-    "publisher": "Contoso IT",
-    "revision": 4,
-    "publishedAt": "2026-05-05T00:00:00Z",
-    "description": "Fail-closed policy for standard workstation package installs."
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.desktop.standard-allowlist",
+    "Publisher": "Contoso IT",
+    "Revision": 4,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "Fail-closed policy for standard workstation package installs."
   },
-  "enforcement": {
-    "defaultDecision": "deny",
-    "rulePrecedence": "priorityThenDeny"
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
   },
-  "rules": [
+  "Rules": [
     {
-      "id": "deny.integrity-bypass",
-      "enabled": true,
-      "priority": 10,
-      "decision": "deny",
-      "reason": "Integrity and publisher checks cannot be bypassed by brokered requests.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "deny.integrity-bypass",
+      "Enabled": true,
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Integrity and publisher checks cannot be bypassed by brokered requests.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "skipHashCheck": [
+        "SkipHashCheck": [
           true
         ]
       }
     },
     {
-      "id": "deny.custom-parameters",
-      "enabled": true,
-      "priority": 20,
-      "decision": "deny",
-      "reason": "Custom package-manager parameters are not allowed in the workstation allow list.",
-      "match": {
-        "hasCustomParameters": [
+      "Id": "deny.custom-parameters",
+      "Enabled": true,
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "Custom package-manager parameters are not allowed in the workstation allow list.",
+      "Match": {
+        "HasCustomParameters": [
           true
         ]
       }
     },
     {
-      "id": "deny.prepost-commands",
-      "enabled": true,
-      "priority": 30,
-      "decision": "deny",
-      "reason": "Pre and post operation commands are not allowed in the workstation allow list.",
-      "match": {
-        "hasPrePostCommands": [
+      "Id": "deny.prepost-commands",
+      "Enabled": true,
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Pre and post operation commands are not allowed in the workstation allow list.",
+      "Match": {
+        "HasPrePostCommands": [
           true
         ]
       }
     },
     {
-      "id": "allow.winget.vscode",
-      "enabled": true,
-      "priority": 100,
-      "decision": "allow",
-      "reason": "Visual Studio Code is approved for managed workstations.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.winget.vscode",
+      "Enabled": true,
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Visual Studio Code is approved for managed workstations.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.VisualStudioCode"
         ],
-        "scopes": [
-          "user",
-          "machine"
+        "Scopes": [
+          "User",
+          "Machine"
         ],
-        "architectures": [
-          "x64",
-          "arm64"
+        "Architectures": [
+          "X64",
+          "Arm64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     },
     {
-      "id": "allow.winget.powertoys",
-      "enabled": true,
-      "priority": 100,
-      "decision": "allow",
-      "reason": "PowerToys is approved for developer workstations.",
-      "match": {
-        "operations": [
-          "install",
-          "update"
+      "Id": "allow.winget.powertoys",
+      "Enabled": true,
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "PowerToys is approved for developer workstations.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
         ],
-        "managers": [
+        "Managers": [
           "Winget"
         ],
-        "sources": [
+        "Sources": [
           "winget"
         ],
-        "packageIdentifiers": [
+        "PackageIdentifiers": [
           "Microsoft.PowerToys"
         ],
-        "scopes": [
-          "user",
-          "machine"
+        "Scopes": [
+          "User",
+          "Machine"
         ],
-        "architectures": [
-          "x64",
-          "arm64"
+        "Architectures": [
+          "X64",
+          "Arm64"
         ]
       },
-      "constraints": {
-        "allowInteractive": false,
-        "allowSkipHashCheck": false,
-        "allowPreRelease": false,
-        "allowCustomParameters": false,
-        "allowPrePostCommands": false,
-        "allowKillBeforeOperation": false
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
       }
     }
   ]

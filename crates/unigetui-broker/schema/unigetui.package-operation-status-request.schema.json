@@ -2,11 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
-    "brokerContext": {
+    "BrokerContext": {
       "additionalProperties": false,
       "description": "Broker context provided by the client.",
       "properties": {
-        "clientProcessPath": {
+        "ClientProcessPath": {
           "description": "File path of the client process.",
           "maxLength": 2048,
           "type": [
@@ -14,7 +14,7 @@
             "null"
           ]
         },
-        "clientVersion": {
+        "ClientVersion": {
           "description": "Version of the UniGetUI client.",
           "maxLength": 128,
           "type": [
@@ -22,38 +22,38 @@
             "null"
           ]
         },
-        "effectiveUser": {
+        "EffectiveUser": {
           "description": "Windows identity of the calling user.",
           "maxLength": 256,
           "minLength": 1,
           "type": "string"
         },
-        "requestedElevation": {
+        "RequestedElevation": {
           "allOf": [
             {
-              "$ref": "#/definitions/elevation"
+              "$ref": "#/definitions/Elevation"
             }
           ],
           "description": "Elevation level requested."
         }
       },
       "required": [
-        "effectiveUser",
-        "requestedElevation"
+        "EffectiveUser",
+        "RequestedElevation"
       ],
       "type": "object"
     },
-    "elevation": {
+    "Elevation": {
       "description": "Requested elevation level.",
       "enum": [
-        "standard",
-        "elevated"
+        "Standard",
+        "Elevated"
       ],
       "type": "string"
     },
-    "packageOperationStatus": {
+    "PackageOperationStatus": {
       "enum": [
-        "packageOperationStatus"
+        "PackageOperationStatus"
       ],
       "type": "string"
     },
@@ -84,15 +84,15 @@
       ],
       "description": "Status request schema URI constant."
     },
-    "broker": {
+    "Broker": {
       "allOf": [
         {
-          "$ref": "#/definitions/brokerContext"
+          "$ref": "#/definitions/BrokerContext"
         }
       ],
       "description": "Broker context from the client."
     },
-    "requestId": {
+    "RequestId": {
       "allOf": [
         {
           "$ref": "#/definitions/resourceId"
@@ -100,15 +100,15 @@
       ],
       "description": "The `requestId` of the original package operation to query."
     },
-    "requestType": {
+    "RequestType": {
       "allOf": [
         {
-          "$ref": "#/definitions/packageOperationStatus"
+          "$ref": "#/definitions/PackageOperationStatus"
         }
       ],
       "description": "Must be `\"packageOperationStatus\"`."
     },
-    "requestVersion": {
+    "RequestVersion": {
       "allOf": [
         {
           "$ref": "#/definitions/semanticVersion"
@@ -119,11 +119,11 @@
   },
   "required": [
     "$schema",
-    "broker",
-    "requestId",
-    "requestType",
-    "requestVersion"
+    "Broker",
+    "RequestId",
+    "RequestType",
+    "RequestVersion"
   ],
-  "title": "statusRequest",
+  "title": "StatusRequest",
   "type": "object"
 }
