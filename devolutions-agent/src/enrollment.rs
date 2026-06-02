@@ -22,7 +22,7 @@ use crate::config;
 pub struct EnrollmentJwtClaims {
     /// Gateway URL to connect to for enrollment.
     pub jet_gw_url: String,
-    /// Agent display name set by the provisioner.
+    /// Agent friendly name.
     pub jet_agent_name: String,
 }
 
@@ -100,13 +100,16 @@ pub async fn enroll_agent(
     enrollment_token: &str,
     advertise_subnets: Vec<String>,
 ) -> Result<PersistedEnrollment> {
-    let EnrollmentJwtClaims { jet_agent_name, .. } = parse_enrollment_jwt(enrollment_token)?;
+    let EnrollmentJwtClaims {
+        jet_agent_name: agent_name,
+        ..
+    } = parse_enrollment_jwt(enrollment_token)?;
 
     // Generate key pair and CSR locally — the private key never leaves this machine.
-    let (key_pem, csr_pem) = generate_key_and_csr(&jet_agent_name)?;
+    let (key_pem, csr_pem) = generate_key_and_csr(&agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, &csr_pem).await?;
-    persist_enrollment_response(&jet_agent_name, advertise_subnets, enroll_response, &key_pem)
+    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -155,7 +158,7 @@ async fn request_enrollment(gateway_url: &str, enrollment_token: &str, csr_pem: 
 }
 
 fn persist_enrollment_response(
-    agent_name: &str,
+    agent_name: String,
     advertise_subnets: Vec<String>,
     EnrollResponse {
         agent_id,
@@ -277,7 +280,7 @@ fn persist_enrollment_response(
 
     Ok(PersistedEnrollment {
         agent_id,
-        agent_name: agent_name.to_owned(),
+        agent_name,
         client_cert_path,
         client_key_path,
         gateway_ca_path,

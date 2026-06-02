@@ -499,8 +499,7 @@ pub struct ScopeTokenClaims {
 
 /// Claims carried by an agent-tunnel enrollment JWT.
 ///
-/// The agent reads `jet_gw_url` and `jet_agent_name` locally (without
-/// verifying the signature, since it is the intended recipient), then sends
+/// The agent reads `jet_gw_url` and `jet_agent_name` locally, then sends
 /// the JWT as the Bearer token to `/jet/tunnel/enroll`, where the Gateway
 /// verifies the signature, content type, expiry, and agent name against
 /// the configured provisioner key.
@@ -1433,7 +1432,7 @@ mod serde_impl {
 
     #[derive(Serialize, Deserialize)]
     struct AssociationClaimsHelper {
-        #[serde(default = "Uuid::new_v4")] // Older provisioners may not generate this claim.
+        #[serde(default = "Uuid::new_v4")] // DVLS up to 2021.2.10 do not generate this claim.
         jet_aid: Uuid,
         jet_ap: ApplicationProtocol,
         #[serde(flatten)]

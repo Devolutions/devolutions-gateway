@@ -6,12 +6,12 @@ namespace Devolutions.Gateway.Utils;
 /// Claims carried by an agent-tunnel enrollment JWT.
 ///
 /// The provisioner signs this with the gateway's private key and hands the
-/// resulting JWT to the agent. The agent uses it as the ****** on
+/// resulting JWT to the agent. The agent uses it as the Bearer token on
 /// <c>POST /jet/tunnel/enroll</c>, where the gateway verifies the signature,
 /// content type, and lifetime.
 ///
 /// The agent reads <see cref="JetGwUrl"/> and <see cref="JetAgentName"/>
-/// locally without verifying the signature (it is the intended recipient).
+/// locally without verifying the signature.
 /// </summary>
 public class EnrollmentClaims : IGatewayClaims
 {
@@ -20,7 +20,7 @@ public class EnrollmentClaims : IGatewayClaims
     public string JetGwUrl { get; set; }
 
     /// <summary>
-    /// Agent display name set by the provisioner at token generation time.
+    /// Agent friendly name set by the provisioner at token generation time.
     ///
     /// The gateway reads this signed claim on <c>POST /jet/tunnel/enroll</c>
     /// and stamps it into the signed client certificate's CN.
