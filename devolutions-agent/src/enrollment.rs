@@ -22,7 +22,7 @@ use crate::config;
 pub struct EnrollmentJwtClaims {
     /// Gateway URL to connect to for enrollment.
     pub jet_gw_url: String,
-    /// Authoritative agent display name.
+    /// Agent display name set by the provisioner.
     pub jet_agent_name: String,
 }
 
@@ -93,8 +93,7 @@ pub struct PersistedEnrollment {
 /// * `gateway_url` - Base Gateway URL (e.g., "https://gateway.example.com:7171")
 /// * `enrollment_token` - JWT token for enrollment. The signed `jet_gw_url`
 ///   claim is also used by `up --enrollment-string` when no explicit gateway
-///   URL is provided. The signed `jet_agent_name` claim is the authoritative
-///   enrollment name.
+///   URL is provided. The signed `jet_agent_name` claim is the enrollment name.
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
 pub async fn enroll_agent(
     gateway_url: &str,
@@ -319,7 +318,7 @@ pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<boo
 
 /// Extract the `CommonName` from an existing PEM certificate. The renewal CSR
 /// must reuse the agent's name across renewals — the gateway looks the agent
-/// up in its registry by that name, and the most authoritative source for it
+/// up in its registry by that name, and the source for it
 /// is the cert the gateway itself signed last time.
 pub fn read_agent_name_from_cert(cert_path: &Utf8Path) -> Result<String> {
     use std::io::BufReader;

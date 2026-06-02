@@ -44,7 +44,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 /// Enroll a new agent.
 ///
 /// Requires a Bearer token: an `ENROLLMENT` JWT signed by the configured provisioner key
-/// (e.g. DVLS, Hub, or any PEM service).
+/// (e.g. any compatible provisioner).
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
