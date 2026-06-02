@@ -473,7 +473,9 @@ where
     let conf = conf_handle.get_conf();
     let conf = extract_conf(&conf)?;
 
-    let path = path.map(|path| path.0).unwrap_or_else(|| "/".to_owned());
+    // The captured wildcard ({*path}) does not include the leading slash,
+    // but `path_and_query` requires the path to start with a slash.
+    let path = format!("/{}", path.map(|path| path.0).unwrap_or_default());
 
     debug!(path, "Requested client ressource");
 

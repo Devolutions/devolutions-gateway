@@ -165,6 +165,68 @@ async fn custom_authentication_flow() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn client_static_assets_are_served() -> anyhow::Result<()> {
+    // Regression test: sub-resources under `/jet/webapp/client/` must be served.
+    // Since the axum 0.8 migration, the catch-all capture (`{*path}`) no longer includes
+    // the leading slash, which caused `Uri::path_and_query` to reject the path and made every
+    // static asset (JS, CSS, fonts) return 500 ("invalid ressource path") while the index
+    // page kept loading fine.
+
+    let tmp = tempfile::tempdir()?;
+    let client_dir = tmp.path().join("client");
+    std::fs::create_dir_all(client_dir.join("assets"))?;
+    std::fs::write(client_dir.join("index.html"), b"<html>index</html>")?;
+    std::fs::write(client_dir.join("chunk-DV2Y2PNY.js"), b"console.log('chunk');")?;
+    std::fs::write(client_dir.join("assets").join("styles-6RKIPFC3.css"), b"body{margin:0}")?;
+
+    let static_root = tmp
+        .path()
+        .to_str()
+        .context("non UTF-8 temporary path")?
+        .replace('\\', "/");
+
+    // Reuse the provisioner keys from CONFIG, but disable authentication (irrelevant for
+    // serving the public client files) and point the static root at our temporary directory.
+    let config = CONFIG
+        .replace("\"Authentication\": \"Custom\",", "\"Authentication\": \"None\",")
+        .replace(
+            "\"AppTokenMaximumLifetime\": 28800",
+            &format!("\"AppTokenMaximumLifetime\": 28800,\n        \"StaticRootPath\": \"{static_root}\""),
+        );
+
+    let (state, _handle) = devolutions_gateway::DgwState::mock(&config)?;
+
+    let mut app =
+        devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
+
+    for (uri, expected_body) in [
+        ("/jet/webapp/client/chunk-DV2Y2PNY.js", "console.log('chunk');"),
+        ("/jet/webapp/client/assets/styles-6RKIPFC3.css", "body{margin:0}"),
+    ] {
+        let response = app
+            .call(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .uri(uri)
+                    .body(Body::empty())?,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "unexpected status for {uri}");
+
+        let body = response.into_body().collect().await?.to_bytes();
+        assert_eq!(
+            std::str::from_utf8(&body).context("from_utf8")?,
+            expected_body,
+            "unexpected body for {uri}"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sign_app_token_bad_password() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
     initialize_conf();
