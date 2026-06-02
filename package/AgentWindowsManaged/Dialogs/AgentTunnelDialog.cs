@@ -20,7 +20,6 @@ public partial class AgentTunnelDialog : AgentDialog
     public override bool ToProperties()
     {
         Runtime.Session[AgentProperties.AgentTunnelEnrollmentString] = enrollmentString.Text.Trim();
-        Runtime.Session[AgentProperties.AgentTunnelAgentName] = agentName.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseSubnets] = advertiseSubnets.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseDomains] = advertiseDomains.Text.Trim();
 
@@ -32,7 +31,6 @@ public partial class AgentTunnelDialog : AgentDialog
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
         enrollmentString.Text = Runtime.Session.Property(AgentProperties.AgentTunnelEnrollmentString);
-        agentName.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAgentName);
         advertiseSubnets.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseSubnets);
         advertiseDomains.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
 
@@ -43,10 +41,10 @@ public partial class AgentTunnelDialog : AgentDialog
     {
         // The dialog is only reached when the Agent Tunnel feature is selected
         // (see Wizard.ShouldSkip), so an enrollment string is required here.
-        // Structural validation of the string itself happens server-side at
-        // enrollment time — surface that gateway error verbatim rather than
-        // half-validating implementation details (signature, encoding, etc.)
-        // here.
+        // We only check for non-emptiness: `agent.exe up` parses the JWT locally
+        // (requiring jet_gw_url and jet_agent_name) and the gateway then verifies
+        // the signature, content type, and expiry — surface those errors verbatim
+        // rather than half-validating implementation details here.
         if (string.IsNullOrWhiteSpace(enrollmentString.Text))
         {
             ShowValidationErrorString("An enrollment string is required. Paste the enrollment string provided by your gateway operator, or go back and deselect the Agent Tunnel feature.");

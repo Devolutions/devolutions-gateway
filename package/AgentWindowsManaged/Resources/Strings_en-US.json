@@ -219,14 +219,6 @@
             "text": "Enrollment String (provided by your gateway operator):"
           },
           {
-            "id": "AgentTunnelDlgAgentNameLabel",
-            "text": "Agent Name (Optional):"
-          },
-          {
-            "id": "AgentTunnelDlgAgentNameHint",
-            "text": "Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name."
-          },
-          {
             "id": "AgentTunnelDlgSubnetsLabel",
             "text": "Advertise Subnets:"
           },

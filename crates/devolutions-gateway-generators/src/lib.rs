@@ -323,8 +323,7 @@ pub fn any_kdc_claims(now: i64, validity_duration: i64) -> impl Strategy<Value =
 #[derive(Debug, Clone, Serialize)]
 pub struct EnrollmentClaims {
     pub jet_gw_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jet_agent_name: Option<String>,
+    pub jet_agent_name: String,
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,
@@ -333,7 +332,7 @@ pub struct EnrollmentClaims {
 pub fn any_enrollment_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = EnrollmentClaims> {
     (
         "https://[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?",
-        option::of("[a-zA-Z0-9_-]{1,25}"),
+        "[a-zA-Z0-9_-]{1,25}",
         uuid_typed(),
     )
         .prop_map(move |(jet_gw_url, jet_agent_name, jti)| EnrollmentClaims {

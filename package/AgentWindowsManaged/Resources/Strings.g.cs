@@ -197,14 +197,6 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string AgentTunnelDlgEnrollmentStringLabel = "AgentTunnelDlgEnrollmentStringLabel";		
 		/// <summary>
-		/// Agent Name (Optional):
-		/// </summary>
-		public const string AgentTunnelDlgAgentNameLabel = "AgentTunnelDlgAgentNameLabel";		
-		/// <summary>
-		/// Identifies this agent in your gateway's management console. If left blank, the name embedded in the enrollment string is used, falling back to this computer's name.
-		/// </summary>
-		public const string AgentTunnelDlgAgentNameHint = "AgentTunnelDlgAgentNameHint";		
-		/// <summary>
 		/// Advertise Subnets:
 		/// </summary>
 		public const string AgentTunnelDlgSubnetsLabel = "AgentTunnelDlgSubnetsLabel";		

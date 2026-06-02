@@ -195,14 +195,6 @@
             "text": "Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :"
           },
           {
-            "id": "AgentTunnelDlgAgentNameLabel",
-            "text": "Nom de l'agent (facultatif) :"
-          },
-          {
-            "id": "AgentTunnelDlgAgentNameHint",
-            "text": "Identifie cet agent dans la console de gestion de votre passerelle. Si laissé vide, le nom contenu dans la chaîne d'enrôlement est utilisé, à défaut le nom de cet ordinateur."
-          },
-          {
             "id": "AgentTunnelDlgSubnetsLabel",
             "text": "Sous-réseaux annoncés :"
           },

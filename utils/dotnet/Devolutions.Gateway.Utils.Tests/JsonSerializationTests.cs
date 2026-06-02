@@ -197,16 +197,6 @@ public class JsonSerializationTests
     }
 
     [Fact]
-    public void EnrollmentClaimsOmitsNullOptionals()
-    {
-        const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777"}""";
-
-        var claims = new EnrollmentClaims("http://gw.example.com:7777");
-        string result = JsonSerializer.Serialize(claims);
-        Assert.Equal(EXPECTED, result);
-    }
-
-    [Fact]
     public void NetScanClaims()
     {
         const string EXPECTED = """{"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";

@@ -238,7 +238,7 @@ enum SignSubCommand {
         #[clap(long)]
         jet_gw_url: String,
         #[clap(long)]
-        jet_agent_name: Option<String>,
+        jet_agent_name: String,
     },
     Bridge {
         #[clap(long)]

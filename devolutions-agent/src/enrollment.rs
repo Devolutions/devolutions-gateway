@@ -22,9 +22,8 @@ use crate::config;
 pub struct EnrollmentJwtClaims {
     /// Gateway URL to connect to for enrollment.
     pub jet_gw_url: String,
-    /// Suggested agent display name (optional hint).
-    #[serde(default)]
-    pub jet_agent_name: Option<String>,
+    /// Agent friendly name.
+    pub jet_agent_name: String,
 }
 
 /// Decode an enrollment JWT to extract agent-side configuration claims.
@@ -61,8 +60,6 @@ pub fn parse_enrollment_jwt(jwt: &str) -> Result<EnrollmentJwtClaims> {
 struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity)
     agent_id: Uuid,
-    /// Friendly name for the agent
-    agent_name: String,
     /// PEM-encoded Certificate Signing Request
     csr_pem: String,
     /// Optional hostname of the agent machine (added as DNS SAN in the issued certificate)
@@ -94,19 +91,24 @@ pub struct PersistedEnrollment {
 ///
 /// # Arguments
 /// * `gateway_url` - Base Gateway URL (e.g., "https://gateway.example.com:7171")
-/// * `enrollment_token` - JWT token for enrollment
-/// * `agent_name` - Friendly name for this agent
+/// * `enrollment_token` - JWT token for enrollment. The signed `jet_gw_url`
+///   claim is also used by `up --enrollment-string` when no explicit gateway
+///   URL is provided. The signed `jet_agent_name` claim is the enrollment name.
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
-    agent_name: &str,
     advertise_subnets: Vec<String>,
 ) -> Result<PersistedEnrollment> {
-    // Generate key pair and CSR locally — the private key never leaves this machine.
-    let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
+    let EnrollmentJwtClaims {
+        jet_agent_name: agent_name,
+        ..
+    } = parse_enrollment_jwt(enrollment_token)?;
 
-    let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
+    // Generate key pair and CSR locally — the private key never leaves this machine.
+    let (key_pem, csr_pem) = generate_key_and_csr(&agent_name)?;
+
+    let enroll_response = request_enrollment(gateway_url, enrollment_token, &csr_pem).await?;
     persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
@@ -127,12 +129,7 @@ fn generate_key_and_csr(agent_name: &str) -> Result<(String, String)> {
     Ok((key_pem, csr_pem))
 }
 
-async fn request_enrollment(
-    gateway_url: &str,
-    enrollment_token: &str,
-    agent_name: &str,
-    csr_pem: &str,
-) -> Result<EnrollResponse> {
+async fn request_enrollment(gateway_url: &str, enrollment_token: &str, csr_pem: &str) -> Result<EnrollResponse> {
     let client = reqwest::Client::new();
     let enroll_url = format!("{}/jet/tunnel/enroll", gateway_url.trim_end_matches('/'));
 
@@ -141,7 +138,6 @@ async fn request_enrollment(
         .bearer_auth(enrollment_token)
         .json(&EnrollRequest {
             agent_id: Uuid::new_v4(),
-            agent_name: agent_name.to_owned(),
             csr_pem: csr_pem.to_owned(),
             agent_hostname: hostname::get()
                 .ok()
@@ -162,7 +158,7 @@ async fn request_enrollment(
 }
 
 fn persist_enrollment_response(
-    agent_name: &str,
+    agent_name: String,
     advertise_subnets: Vec<String>,
     EnrollResponse {
         agent_id,
@@ -284,7 +280,7 @@ fn persist_enrollment_response(
 
     Ok(PersistedEnrollment {
         agent_id,
-        agent_name: agent_name.to_owned(),
+        agent_name,
         client_cert_path,
         client_key_path,
         gateway_ca_path,
@@ -325,7 +321,7 @@ pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<boo
 
 /// Extract the `CommonName` from an existing PEM certificate. The renewal CSR
 /// must reuse the agent's name across renewals — the gateway looks the agent
-/// up in its registry by that name, and the most authoritative source for it
+/// up in its registry by that name, and the source for it
 /// is the cert the gateway itself signed last time.
 pub fn read_agent_name_from_cert(cert_path: &Utf8Path) -> Result<String> {
     use std::io::BufReader;
@@ -392,6 +388,14 @@ mod tests {
     fn parse_enrollment_jwt_requires_gw_url() {
         let jwt = make_jwt(serde_json::json!({
             "jet_agent_name": "agent-a",
+        }));
+        assert!(parse_enrollment_jwt(&jwt).is_err());
+    }
+
+    #[test]
+    fn parse_enrollment_jwt_requires_agent_name() {
+        let jwt = make_jwt(serde_json::json!({
+            "jet_gw_url": "https://gw.example.com",
         }));
         assert!(parse_enrollment_jwt(&jwt).is_err());
     }

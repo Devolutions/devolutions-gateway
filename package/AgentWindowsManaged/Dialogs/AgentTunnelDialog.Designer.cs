@@ -35,9 +35,6 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.labelEnrollmentString = new System.Windows.Forms.Label();
             this.enrollmentString = new System.Windows.Forms.TextBox();
-            this.labelAgentName = new System.Windows.Forms.Label();
-            this.agentName = new System.Windows.Forms.TextBox();
-            this.labelAgentNameHint = new System.Windows.Forms.Label();
             this.labelSubnets = new System.Windows.Forms.Label();
             this.advertiseSubnets = new System.Windows.Forms.TextBox();
             this.labelSubnetsHint = new System.Windows.Forms.Label();
@@ -81,24 +78,18 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.Controls.Add(this.labelEnrollmentString, 0, 0);
             this.tableLayoutPanel2.Controls.Add(this.enrollmentString, 0, 1);
-            this.tableLayoutPanel2.Controls.Add(this.labelAgentName, 0, 2);
-            this.tableLayoutPanel2.Controls.Add(this.agentName, 0, 3);
-            this.tableLayoutPanel2.Controls.Add(this.labelAgentNameHint, 0, 4);
-            this.tableLayoutPanel2.Controls.Add(this.labelSubnets, 0, 5);
-            this.tableLayoutPanel2.Controls.Add(this.advertiseSubnets, 0, 6);
-            this.tableLayoutPanel2.Controls.Add(this.labelSubnetsHint, 0, 7);
-            this.tableLayoutPanel2.Controls.Add(this.labelDomains, 0, 8);
-            this.tableLayoutPanel2.Controls.Add(this.advertiseDomains, 0, 9);
-            this.tableLayoutPanel2.Controls.Add(this.labelDomainsHint, 0, 10);
+            this.tableLayoutPanel2.Controls.Add(this.labelSubnets, 0, 2);
+            this.tableLayoutPanel2.Controls.Add(this.advertiseSubnets, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.labelSubnetsHint, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.labelDomains, 0, 5);
+            this.tableLayoutPanel2.Controls.Add(this.advertiseDomains, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.labelDomainsHint, 0, 7);
             this.tableLayoutPanel2.AutoSize = true;
             this.tableLayoutPanel2.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 11;
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowCount = 8;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -131,36 +122,6 @@ namespace WixSharpSetup.Dialogs
             this.enrollmentString.Name = "enrollmentString";
             this.enrollmentString.Size = new System.Drawing.Size(443, 60);
             this.enrollmentString.TabIndex = 1;
-            //
-            // labelAgentName
-            //
-            this.labelAgentName.AutoSize = true;
-            this.labelAgentName.BackColor = System.Drawing.Color.Transparent;
-            this.labelAgentName.Margin = new System.Windows.Forms.Padding(3, 8, 3, 3);
-            this.labelAgentName.Name = "labelAgentName";
-            this.labelAgentName.Size = new System.Drawing.Size(200, 13);
-            this.labelAgentName.TabIndex = 11;
-            this.labelAgentName.Text = "[AgentTunnelDlgAgentNameLabel]";
-            //
-            // agentName
-            //
-            this.agentName.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.agentName.Name = "agentName";
-            this.agentName.Size = new System.Drawing.Size(443, 20);
-            this.agentName.TabIndex = 12;
-            //
-            // labelAgentNameHint
-            //
-            this.labelAgentNameHint.AutoSize = true;
-            this.labelAgentNameHint.BackColor = System.Drawing.Color.Transparent;
-            this.labelAgentNameHint.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.labelAgentNameHint.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
-            this.labelAgentNameHint.Name = "labelAgentNameHint";
-            this.labelAgentNameHint.Size = new System.Drawing.Size(300, 13);
-            this.labelAgentNameHint.TabIndex = 13;
-            this.labelAgentNameHint.Text = "[AgentTunnelDlgAgentNameHint]";
-            //
             // labelSubnets
             //
             this.labelSubnets.AutoSize = true;
@@ -399,9 +360,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
         private System.Windows.Forms.Label labelEnrollmentString;
         private System.Windows.Forms.TextBox enrollmentString;
-        private System.Windows.Forms.Label labelAgentName;
-        private System.Windows.Forms.TextBox agentName;
-        private System.Windows.Forms.Label labelAgentNameHint;
         private System.Windows.Forms.Label labelSubnets;
         private System.Windows.Forms.TextBox advertiseSubnets;
         private System.Windows.Forms.Label labelSubnetsHint;

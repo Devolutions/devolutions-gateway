@@ -294,7 +294,6 @@ internal static class AgentActions
         UsesProperties = string.Join(";", new[]
         {
             AgentProperties.AgentTunnelEnrollmentString,
-            AgentProperties.AgentTunnelAgentName,
             AgentProperties.AgentTunnelAdvertiseSubnets,
             AgentProperties.AgentTunnelAdvertiseDomains,
             AgentProperties.InstallDir,
