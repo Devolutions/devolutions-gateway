@@ -166,11 +166,9 @@ async fn custom_authentication_flow() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn client_static_assets_are_served() -> anyhow::Result<()> {
-    // Regression test: sub-resources under `/jet/webapp/client/` must be served.
-    // Since the axum 0.8 migration, the catch-all capture (`{*path}`) no longer includes
-    // the leading slash, which caused `Uri::path_and_query` to reject the path and made every
-    // static asset (JS, CSS, fonts) return 500 ("invalid ressource path") while the index
-    // page kept loading fine.
+    // The standalone web application references its static assets (JS, CSS, fonts) as
+    // sub-resources under `/jet/webapp/client/`. This test ensures such nested asset paths,
+    // including ones in sub-directories, are served correctly rather than failing the request.
 
     let tmp = tempfile::tempdir()?;
     let client_dir = tmp.path().join("client");
