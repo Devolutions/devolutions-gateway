@@ -514,7 +514,7 @@ pub struct EnrollmentTokenClaims {
     /// Gateway URL the agent should connect to for enrollment.
     pub jet_gw_url: String,
 
-    /// Agent display name set by the provisioner.
+    /// Agent friendly name.
     pub jet_agent_name: String,
 }
 
