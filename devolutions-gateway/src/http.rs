@@ -149,7 +149,7 @@ where
     // but `path_and_query` requires the path to start with a slash.
     let path = format!("/{}", captured_path.map(|path| path.0).unwrap_or_default());
 
-    debug!(path, "Requested static ressource");
+    debug!(path, "Requested static resource");
 
     *request.uri_mut() = axum::http::Uri::builder()
         .path_and_query(path)
