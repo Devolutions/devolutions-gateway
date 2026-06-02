@@ -2,6 +2,34 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.2.0 (2026-06-02)
+
+Several newly introduced Gateway/Agent surfaces remain experimental and are
+controlled by `__debug__.enable_unstable` (notably `/jet/tunnel/*`, and KDC
+proxy credential-injection destination handling). Related infrastructure such
+as core forwarding, KDC real-destination proxying, and Agent Tunnel runtime
+activation is configured independently and may remain active outside this flag.
+
+### Features
+
+- _dgw_: refuse JREC push when recording storage is full ([9d5a6626b4](https://github.com/Devolutions/devolutions-gateway/commit/9d5a6626b491905efeb1bcac06406f98e85c94b7))
+
+- _agent,gateway_: transparent routing through agent tunnel (experimental) ([#1741](https://github.com/Devolutions/devolutions-gateway/issues/1741)) ([9340a82c7f](https://github.com/Devolutions/devolutions-gateway/commit/9340a82c7fcb75bc937f2cddb5b33db1a7a19df6)) ([#1773](https://github.com/Devolutions/devolutions-gateway/issues/1773)) ([87be5cda1b](https://github.com/Devolutions/devolutions-gateway/commit/87be5cda1b2d285caee556d7a6e5983d83029f82)) ([#1775](https://github.com/Devolutions/devolutions-gateway/issues/1775)) ([6f692e75a7](https://github.com/Devolutions/devolutions-gateway/commit/6f692e75a7ebc5a3550562c21638454e92a7157b)) ([06706d033e](https://github.com/Devolutions/devolutions-gateway/commit/06706d033e80f97dbe5bcaef61ce63a67d3b1cc1)) ([#1789](https://github.com/Devolutions/devolutions-gateway/issues/1789)) ([26f23c02a4](https://github.com/Devolutions/devolutions-gateway/commit/26f23c02a41e02634bacf9be2d625a00d0b80345))
+
+- _installer_: add install-time certificate checks ([b696ea1181](https://github.com/Devolutions/devolutions-gateway/commit/b696ea1181ab7025ece477288eb94e4cf5cb3cf9))
+
+- _dgw_: Kerberos-based credential injection (experimental) ([#1768](https://github.com/Devolutions/devolutions-gateway/issues/1768)) ([8ceb2ad913](https://github.com/Devolutions/devolutions-gateway/commit/8ceb2ad9131ae591cc6d25336e8ca541a9e8662a))
+
+- _dgw_: improved network scans ([#1776](https://github.com/Devolutions/devolutions-gateway/issues/1776)) ([a3aa448dac](https://github.com/Devolutions/devolutions-gateway/commit/a3aa448dac9af355cee1093f6ee762d93ff5ae61))
+
+### Improvements
+
+- _jetsocat_: embed Windows icon and version metadata ([#1793](https://github.com/Devolutions/devolutions-gateway/issues/1793)) ([c606a52fa7](https://github.com/Devolutions/devolutions-gateway/commit/c606a52fa71826067f6a969c0b416102243de14d))
+
+### Bug Fixes
+
+- _agent_: add OEM code page transcoding in Devolutions Agent ([#1780](https://github.com/Devolutions/devolutions-gateway/issues/1780)) ([b50e5d0fb3](https://github.com/Devolutions/devolutions-gateway/commit/b50e5d0fb3394878a5560328b92ef2c9d8659234)) ([DGW-370](https://devolutions.atlassian.net/browse/DGW-370))
+
 ## 2026.1.2 (2026-04-18)
 
 ### Features

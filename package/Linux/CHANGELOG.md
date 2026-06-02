@@ -1,5 +1,9 @@
 # Packaging changelog
 
+## 2026.2.0 (2026-06-02)
+
+- No changes.
+
 ## 2026.1.2 (2026-04-18)
 
 - RPM: bundles the systemd unit file directly in the package, eliminating the `service register` post-install call that caused a systemd startup failure on RHEL/Rocky Linux.
