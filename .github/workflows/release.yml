@@ -575,8 +575,7 @@ jobs:
 
       - name: Download artifacts
         run: |
-          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
-          Move-Item devolutions-agent-signed devolutions-agent
+          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed -D devolutions-agent --repo $Env:GITHUB_REPOSITORY
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
