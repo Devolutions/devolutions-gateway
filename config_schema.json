@@ -67,7 +67,8 @@
     },
     "TlsVerifyStrict": {
       "type": "boolean",
-      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the default is true."
+      "default": false,
+      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the runtime default is false."
     },
     "CredSspCertificateFile": {
       "type": "string",
@@ -98,6 +99,7 @@
     },
     "MinRecordingStorageFreeSpace": {
       "type": "integer",
+      "minimum": 0,
       "description": "Minimum free space (in bytes) on the recording storage volume below which the gateway returns HTTP 507 on recording push. Omit to skip this threshold check."
     },
     "Ngrok": {
@@ -727,6 +729,7 @@
         },
         "ws_keep_alive_interval": {
           "type": "integer",
+          "minimum": 0,
           "default": 45,
           "description": "WebSocket keep-alive interval in seconds (interval before a Ping is sent). Default is 45."
         },
@@ -756,6 +759,8 @@
         },
         "ListenPort": {
           "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
           "default": 4433,
           "description": "UDP port for the QUIC listener (default: 4433)."
         }
@@ -792,6 +797,7 @@
         },
         "max_time_skew": {
           "type": "integer",
+          "minimum": 0,
           "description": "Maximum allowed time difference (in seconds) between client and proxy clocks."
         },
         "krbtgt_key": {
