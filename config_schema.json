@@ -67,8 +67,7 @@
     },
     "TlsVerifyStrict": {
       "type": "boolean",
-      "default": false,
-      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the runtime default is false."
+      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the runtime default is false (compat mode); explicitly setting false is treated as an opt-out."
     },
     "CredSspCertificateFile": {
       "type": "string",
