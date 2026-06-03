@@ -36,6 +36,7 @@ pub enum Architecture {
 pub enum ManagerName {
     Winget,
     PowerShell,
+    PowerShell7,
 }
 
 /// Policy decision.
@@ -112,6 +113,7 @@ impl std::fmt::Display for ManagerName {
         match self {
             Self::Winget => f.write_str("Winget"),
             Self::PowerShell => f.write_str("PowerShell"),
+            Self::PowerShell7 => f.write_str("PowerShell7"),
         }
     }
 }

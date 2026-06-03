@@ -18,7 +18,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::command_builder::winget::build_winget_command;
+use crate::command_builder::build_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::model::{
@@ -120,8 +120,8 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
         "responseMediaTypes": [RESPONSE_MEDIA_TYPE],
         "requestSchema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
         "responseSchema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
-        "supportedManagers": ["Winget"],
-        "supportedOperations": ["install", "update", "uninstall"],
+        "supportedManagers": ["Winget", "PowerShell", "PowerShell7"],
+        "supportedOperations": ["Install", "Update", "Uninstall"],
         "maxRequestBodyBytes": 262144,
         "pipeName": &state.pipe_name
     });
@@ -241,20 +241,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
     let decision = evaluator::evaluate(&policy, &request);
 
     let (command, would_execute) = if decision.decision == Decision::Allow {
-        if request.manager.name != crate::model::ManagerName::Winget {
-            return make_error_response(
-                &policy,
-                &audit_id,
-                received_at,
-                &format!(
-                    "manager '{}' is not supported for command execution",
-                    request.manager.name
-                ),
-                StatusCode::UNPROCESSABLE_ENTITY,
-                &state.pipe_name,
-            );
-        }
-        let cmd = build_winget_command(&request);
+        let cmd = build_command(&request);
         (cmd, true)
     } else {
         (vec![], false)

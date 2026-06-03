@@ -4,6 +4,7 @@
 //! The broker never executes client-supplied commands directly.
 
 pub mod winget;
+pub mod powershell;
 
 use crate::model::PackageRequest;
 
@@ -14,7 +15,8 @@ use crate::model::PackageRequest;
 pub fn build_command(request: &PackageRequest) -> Vec<String> {
     match request.manager.name {
         crate::model::ManagerName::Winget => winget::build_winget_command(request),
-        crate::model::ManagerName::PowerShell => winget::build_winget_command(request), // TODO: PowerShell builder
+        crate::model::ManagerName::PowerShell => powershell::build_powershell5_command(request),
+        crate::model::ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
     }
 }
 

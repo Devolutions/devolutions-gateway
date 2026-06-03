@@ -65,7 +65,8 @@
       "description": "Supported package manager names.",
       "enum": [
         "Winget",
-        "PowerShell"
+        "PowerShell",
+        "PowerShell7"
       ],
       "type": "string"
     },
