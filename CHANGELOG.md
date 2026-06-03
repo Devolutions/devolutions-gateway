@@ -2,6 +2,20 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.2.1 (2026-06-03)
+
+### Bug Fixes
+
+- _dgw_: serve standalone web app and recording player static assets ([#1811](https://github.com/Devolutions/devolutions-gateway/issues/1811)) ([eb6c032627](https://github.com/Devolutions/devolutions-gateway/commit/eb6c0326273284cc9672f0b1005be30c6342e46b))
+
+  The standalone web application and the recording player loaded their
+  main page but failed to load any static assets (JS, CSS, fonts), which
+  returned HTTP 500. As a result both UIs were effectively broken.
+
+  Requests for sub-resources under /jet/webapp/client/ and /jet/jrec/play/
+  now resolve correctly, restoring the standalone web application and the
+  recording player.
+
 ## 2026.2.0 (2026-06-02)
 
 Several newly introduced Gateway/Agent surfaces remain experimental and are
