@@ -11,10 +11,9 @@ use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
 pub use date_version::{DateVersion, DateVersionError};
 pub use update_manifest::{
-    InstalledProductUpdateInfo, ProductUpdateInfoV1, ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION,
-    UpdateManifest, UpdateManifestV1,
-    UpdateManifestV2, UpdateProductKey, UpdateSchedule, VersionMajorV2, VersionSpecification,
-    default_schedule_window_start, detect_update_manifest_major_version,
+    InstalledProductUpdateInfo, ProductUpdateInfo, ProductUpdateInfoV1, UPDATE_MANIFEST_V2_MINOR_VERSION,
+    UpdateManifest, UpdateManifestV1, UpdateManifestV2, UpdateProductKey, UpdateSchedule, VersionMajorV2,
+    VersionSpecification, default_schedule_window_start, detect_update_manifest_major_version,
 };
 pub use update_status::{UpdateStatus, UpdateStatusV2};
 

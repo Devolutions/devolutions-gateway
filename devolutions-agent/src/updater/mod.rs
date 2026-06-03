@@ -503,10 +503,10 @@ async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateM
         UpdateManifest::Legacy(v1) => {
             let mut products = HashMap::new();
             if let Some(gw) = v1.gateway {
-                products.insert(UpdateProductKey::Gateway, gw);
+                products.insert(UpdateProductKey::Gateway, gw.into());
             }
             if let Some(hs) = v1.hub_service {
-                products.insert(UpdateProductKey::HubService, hs);
+                products.insert(UpdateProductKey::HubService, hs.into());
             }
             UpdateManifest::ManifestV2(UpdateManifestV2 {
                 products,

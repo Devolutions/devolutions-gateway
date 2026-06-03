@@ -56,10 +56,10 @@ async fn read_manifest() -> Result<(UpdateManifestV2, bool), HttpError> {
         UpdateManifest::Legacy(v1) => {
             let mut products = HashMap::new();
             if let Some(gw) = v1.gateway {
-                products.insert(UpdateProductKey::Gateway, gw);
+                products.insert(UpdateProductKey::Gateway, gw.into());
             }
             if let Some(hs) = v1.hub_service {
-                products.insert(UpdateProductKey::HubService, hs);
+                products.insert(UpdateProductKey::HubService, hs.into());
             }
             Ok((
                 UpdateManifestV2 {
