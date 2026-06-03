@@ -12,4 +12,4 @@ workspace = true
 anyhow = "1"
 async-trait = "0.1"
 ulid = "1"
-uuid = { version = "1.17", features = ["v4"] }
+uuid = { version = "1.23", features = ["v4"] }

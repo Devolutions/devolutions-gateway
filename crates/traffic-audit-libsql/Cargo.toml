@@ -15,7 +15,7 @@ libsql = { version = "0.9", default-features = false, features = ["core", "serde
 tracing = "0.1"
 traffic-audit.path = "../traffic-audit"
 ulid = "1"
-uuid = "1.17"
+uuid = "1.23"
 
 [dev-dependencies]
 tempfile = "3.24"
