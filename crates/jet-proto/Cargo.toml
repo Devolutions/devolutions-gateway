@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 log = "0.4"
 byteorder = "1.5"
-uuid = { version = "1.17", features = ["v4"] }
+uuid = { version = "1.23", features = ["v4"] }
 httparse = "1.10"
 http = "1.4"
 

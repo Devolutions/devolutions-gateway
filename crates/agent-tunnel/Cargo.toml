@@ -30,7 +30,7 @@ tracing = "0.1"
 
 # Data
 serde = { version = "1", features = ["derive"] }
-uuid = { version = "1.17", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
 camino = "1.1"
 ipnetwork = "0.20"
 
