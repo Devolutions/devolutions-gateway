@@ -11,17 +11,17 @@ use crate::DateVersion;
 ///
 /// ```json
 /// {
-///     "Gateway":    { "Version": "1.2.3.4" },
-///     "HubService": { "Version": "latest"  }
+///     "Gateway":    { "TargetVersion": "1.2.3.4" },
+///     "HubService": { "TargetVersion": "latest"  }
 /// }
 /// ```
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UpdateManifestV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gateway: Option<ProductUpdateInfo>,
+    pub gateway: Option<ProductUpdateInfoV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hub_service: Option<ProductUpdateInfo>,
+    pub hub_service: Option<ProductUpdateInfoV1>,
 }
 
 // ── Shared value types ────────────────────────────────────────────────────────
@@ -55,6 +55,28 @@ impl std::str::FromStr for VersionSpecification {
     }
 }
 
+/// Product update info payload used by legacy V1 manifests.
+///
+/// Canonical V1 field name is `TargetVersion`.
+/// `Version` is accepted as an alias because of already released
+/// gateway/agent with incorrect V1 manifest format, so we support both for
+/// parsing but only emit the correct `TargetVersion` in serialization.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProductUpdateInfoV1 {
+    /// The version of the product to update to.
+    #[serde(rename = "TargetVersion", alias = "Version")]
+    pub target_version: VersionSpecification,
+}
+
+impl From<ProductUpdateInfoV1> for ProductUpdateInfo {
+    fn from(value: ProductUpdateInfoV1) -> Self {
+        Self {
+            target_version: value.target_version,
+        }
+    }
+}
+
+/// Product update info payload used by V2 manifests (`Products` map).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProductUpdateInfo {
     /// The version of the product to update to.
@@ -235,19 +257,18 @@ impl UpdateManifest {
     /// Normalise the manifest into a flat product map for uniform processing.
     ///
     /// - V2 `products` is used directly.
-    /// - V1 named fields are mapped to their [`UpdateProductKey`] equivalents.
-    /// - V1 `other` entries are best-effort converted; entries that do not match
-    ///   [`ProductUpdateInfo`]'s schema are silently dropped.
+    /// - V1 named fields are mapped to their [`UpdateProductKey`] equivalents and
+    ///   converted from `TargetVersion` payloads into [`ProductUpdateInfo`].
     pub fn into_products(self) -> HashMap<UpdateProductKey, ProductUpdateInfo> {
         match self {
             Self::ManifestV2(v2) => v2.products,
             Self::Legacy(v1) => {
                 let mut map = HashMap::new();
                 if let Some(gw) = v1.gateway {
-                    map.insert(UpdateProductKey::Gateway, gw);
+                    map.insert(UpdateProductKey::Gateway, gw.into());
                 }
                 if let Some(hs) = v1.hub_service {
-                    map.insert(UpdateProductKey::HubService, hs);
+                    map.insert(UpdateProductKey::HubService, hs.into());
                 }
                 map
             }
@@ -393,7 +414,7 @@ mod tests {
 
     #[test]
     fn v1_with_products_into_products() {
-        let json = r#"{"Gateway":{"Version":"2026.1.0"},"HubService":{"Version":"latest"}}"#;
+        let json = r#"{"Gateway":{"TargetVersion":"2026.1.0"},"HubService":{"TargetVersion":"latest"}}"#;
         let manifest = UpdateManifest::parse(json.as_bytes()).unwrap();
         assert!(matches!(manifest, UpdateManifest::Legacy(_)));
         let products = manifest.into_products();
@@ -402,6 +423,29 @@ mod tests {
             products[&UpdateProductKey::Gateway].target_version,
             VersionSpecification::Specific(_)
         ));
+    }
+
+    #[test]
+    fn v1_accepted_with_version_alias() {
+        let json = r#"{"HubService":{"Version":"2026.2.1.7"}}"#;
+        let manifest = UpdateManifest::parse(json.as_bytes()).unwrap();
+        assert!(matches!(manifest, UpdateManifest::Legacy(_)));
+
+        // Re-serializing the parsed V1 manifest should emit the canonical `TargetVersion` field.
+        let UpdateManifest::Legacy(v1) = &manifest else {
+            unreachable!();
+        };
+        assert_eq!(
+            serde_json::to_string(v1).unwrap(),
+            r#"{"HubService":{"TargetVersion":"2026.2.1.7"}}"#
+        );
+
+        let products = manifest.into_products();
+        assert_eq!(products.len(), 1);
+        assert_eq!(
+            products[&UpdateProductKey::HubService].target_version,
+            VersionSpecification::Specific("2026.2.1.7".parse().unwrap())
+        );
     }
 
     #[test]
