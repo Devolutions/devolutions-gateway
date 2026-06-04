@@ -9,6 +9,7 @@ pub mod config;
 pub mod domain_detect;
 pub mod enrollment;
 pub mod log;
+pub mod psu_event_hub;
 pub mod remote_desktop;
 pub mod tunnel;
 mod tunnel_helpers;

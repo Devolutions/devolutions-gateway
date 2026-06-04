@@ -65,6 +65,14 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureAgentTunnelDescription = "FeatureAgentTunnelDescription";		
 		/// <summary>
+		/// PowerShell Universal Event Hub
+		/// </summary>
+		public const string FeaturePsuEventHubName = "FeaturePsuEventHubName";		
+		/// <summary>
+		/// Enables PowerShell Universal Event Hub remote agent compatibility.
+		/// </summary>
+		public const string FeaturePsuEventHubDescription = "FeaturePsuEventHubDescription";		
+		/// <summary>
 		/// There is a problem with the entered data. Please correct the issue and try again.
 		/// </summary>
 		public const string ThereIsAProblemWithTheEnteredData = "ThereIsAProblemWithTheEnteredData";		

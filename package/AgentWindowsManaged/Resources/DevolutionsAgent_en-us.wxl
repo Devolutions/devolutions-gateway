@@ -9,6 +9,8 @@
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
+                <String Id="FeaturePsuEventHubDescription">Enables PowerShell Universal Event Hub remote agent compatibility.</String>
+                <String Id="FeaturePsuEventHubName">PowerShell Universal Event Hub</String>
                 <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
                 <String Id="FeatureSessionName">RDP Extension</String>
                 <String Id="Language">1033</String>

@@ -266,22 +266,28 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                Dictionary<string, object> config = [];
+                JObject config = new JObject();
 
                 try
                 {
                     using StreamReader reader = new StreamReader(path);
-                    config = JsonConvert.DeserializeObject<Dictionary<string, object>>(reader.ReadToEnd());
+                    config = JObject.Parse(reader.ReadToEnd());
                 }
                 catch (Exception)
                 {
                     // ignored. Previous config is either invalid or non-existent.
                 }
 
-                config[feature] = new Dictionary<string, bool> {{"Enabled", enable}};
+                if (config[feature] is not JObject featureConfig)
+                {
+                    featureConfig = new JObject();
+                    config[feature] = featureConfig;
+                }
+
+                featureConfig["Enabled"] = enable;
 
                 using StreamWriter writer = new StreamWriter(path);
-                writer.Write(JsonConvert.SerializeObject(config));
+                writer.Write(config.ToString(Formatting.None));
 
                 return ActionResult.Success;
             }
@@ -302,6 +308,7 @@ namespace DevolutionsAgent.Actions
             [
                 (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.PSU_EVENT_HUB_FEATURE.Id, Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
             ];
 
@@ -752,6 +759,7 @@ namespace DevolutionsAgent.Actions
             [
                 Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
             ];
 

@@ -33,6 +33,14 @@
         {
           "id": "FeatureAgentTunnelDescription",
           "text": "Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle."
+        },
+        {
+          "id": "FeaturePsuEventHubName",
+          "text": "PowerShell Universal Event Hub"
+        },
+        {
+          "id": "FeaturePsuEventHubDescription",
+          "text": "Active la compatibilité d'agent distant pour PowerShell Universal Event Hub."
         }
       ],
       "messages": [

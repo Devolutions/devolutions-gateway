@@ -21,6 +21,7 @@ pub struct Conf {
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
     pub tunnel: TunnelConf,
+    pub psu_event_hub: dto::PsuEventHubConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -122,6 +123,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            psu_event_hub: conf_file.psu_event_hub.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -286,7 +288,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
-    let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
+    let mut conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
         Some(conf_file) => conf_file,
         None => {
             let defaults = dto::ConfFile::generate_new();
@@ -296,7 +298,241 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
         }
     };
 
+    merge_psu_event_hub_compat_config(&mut conf_file)
+        .context("failed to load PowerShell Universal agent configuration")?;
+
     Ok(conf_file)
+}
+
+fn merge_psu_event_hub_compat_config(conf_file: &mut dto::ConfFile) -> anyhow::Result<()> {
+    let Some(compat_conf) = load_psu_event_hub_compat_config()? else {
+        return Ok(());
+    };
+
+    match &mut conf_file.psu_event_hub {
+        None => conf_file.psu_event_hub = Some(compat_conf),
+        Some(current) if current.enabled && current.connections.is_empty() => {
+            current.connections = compat_conf.connections;
+        }
+        Some(_) => {}
+    }
+
+    Ok(())
+}
+
+fn load_psu_event_hub_compat_config() -> anyhow::Result<Option<dto::PsuEventHubConf>> {
+    let mut connections = Vec::new();
+
+    for path in psu_event_hub_compat_config_paths() {
+        let Some(file) = load_psu_event_hub_compat_file(&path)? else {
+            continue;
+        };
+
+        if !file.connections.is_empty() {
+            connections = file.connections;
+        }
+    }
+
+    apply_psu_event_hub_env_overrides(&mut connections)?;
+
+    if connections.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(dto::PsuEventHubConf {
+        enabled: true,
+        connections,
+        power_shell: dto::PsuPowerShellConf::default(),
+    }))
+}
+
+fn load_psu_event_hub_compat_file(path: &Utf8Path) -> anyhow::Result<Option<dto::PsuEventHubCompatFile>> {
+    match File::open(path) {
+        Ok(file) => BufReader::new(file)
+            .pipe(serde_json::from_reader)
+            .map(Some)
+            .with_context(|| format!("invalid PowerShell Universal agent config file at {path}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(anyhow::anyhow!(error).context(format!(
+            "couldn't open PowerShell Universal agent config file at {path}"
+        ))),
+    }
+}
+
+fn psu_event_hub_compat_config_paths() -> Vec<Utf8PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(program_data) = env_path("ProgramData") {
+        paths.push(program_data.join("PowerShellUniversal").join("eventHubClient.json"));
+        paths.push(program_data.join("PowerShellUniversal").join("agent.json"));
+    }
+
+    if let Some(app_data) = env_path("APPDATA") {
+        paths.push(app_data.join("PowerShellUniversal").join("agent.json"));
+    }
+
+    paths
+}
+
+fn env_path(name: &str) -> Option<Utf8PathBuf> {
+    std::env::var_os(name).and_then(|path| Utf8PathBuf::from_path_buf(path.into()).ok())
+}
+
+#[derive(Default)]
+struct PsuEventHubConnectionPatch {
+    hub: Option<String>,
+    url: Option<String>,
+    app_token: Option<Option<String>>,
+    use_default_credentials: Option<bool>,
+    script_path: Option<Option<Utf8PathBuf>>,
+    description: Option<Option<String>>,
+}
+
+impl PsuEventHubConnectionPatch {
+    fn apply_to(&self, connection: &mut dto::PsuEventHubConnectionConf) -> anyhow::Result<()> {
+        if let Some(hub) = &self.hub {
+            connection.hub = hub.clone();
+        }
+        if let Some(url) = &self.url {
+            connection.url =
+                Url::parse(url).with_context(|| format!("invalid PSU Event Hub URL from environment: {url}"))?;
+        }
+        if let Some(app_token) = &self.app_token {
+            connection.app_token = app_token.clone();
+        }
+        if let Some(use_default_credentials) = self.use_default_credentials {
+            connection.use_default_credentials = use_default_credentials;
+        }
+        if let Some(script_path) = &self.script_path {
+            connection.script_path = script_path.clone();
+        }
+        if let Some(description) = &self.description {
+            connection.description = description.clone();
+        }
+
+        Ok(())
+    }
+
+    fn try_build(&self) -> anyhow::Result<Option<dto::PsuEventHubConnectionConf>> {
+        let (Some(hub), Some(url)) = (&self.hub, &self.url) else {
+            return Ok(None);
+        };
+
+        Ok(Some(dto::PsuEventHubConnectionConf {
+            hub: hub.clone(),
+            url: Url::parse(url).with_context(|| format!("invalid PSU Event Hub URL from environment: {url}"))?,
+            app_token: self.app_token.clone().flatten(),
+            use_default_credentials: self.use_default_credentials.unwrap_or(false),
+            script_path: self.script_path.clone().flatten(),
+            description: self.description.clone().flatten(),
+        }))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.hub.is_none()
+            && self.url.is_none()
+            && self.app_token.is_none()
+            && self.use_default_credentials.is_none()
+            && self.script_path.is_none()
+            && self.description.is_none()
+    }
+}
+
+fn apply_psu_event_hub_env_overrides(connections: &mut Vec<dto::PsuEventHubConnectionConf>) -> anyhow::Result<()> {
+    let mut patches = std::collections::BTreeMap::<usize, PsuEventHubConnectionPatch>::new();
+
+    for (name, value) in std::env::vars() {
+        let Some(key) = name.strip_prefix("PSU_") else {
+            continue;
+        };
+
+        let key = key.replace("__", ":");
+        if let Some((index, field)) = parse_psu_connection_env_key(&key)? {
+            apply_psu_connection_patch_field(patches.entry(index).or_default(), field, value)?;
+        } else if let Some(field) = psu_connection_field_name(&key) {
+            apply_psu_connection_patch_field(patches.entry(0).or_default(), field, value)?;
+        }
+    }
+
+    for (index, patch) in patches {
+        if patch.is_empty() {
+            continue;
+        }
+
+        if let Some(connection) = connections.get_mut(index) {
+            patch.apply_to(connection)?;
+        } else if let Some(connection) = patch.try_build()? {
+            connections.push(connection);
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_psu_connection_env_key(key: &str) -> anyhow::Result<Option<(usize, &'static str)>> {
+    let parts = key.split(':').collect::<Vec<_>>();
+    if parts.len() != 3 || !parts[0].eq_ignore_ascii_case("Connections") {
+        return Ok(None);
+    }
+
+    let index = parts[1]
+        .parse::<usize>()
+        .with_context(|| format!("invalid PSU connection environment index: {}", parts[1]))?;
+    let Some(field) = psu_connection_field_name(parts[2]) else {
+        return Ok(None);
+    };
+
+    Ok(Some((index, field)))
+}
+
+fn psu_connection_field_name(key: &str) -> Option<&'static str> {
+    if key.eq_ignore_ascii_case("Hub") {
+        Some("Hub")
+    } else if key.eq_ignore_ascii_case("Url") {
+        Some("Url")
+    } else if key.eq_ignore_ascii_case("AppToken") {
+        Some("AppToken")
+    } else if key.eq_ignore_ascii_case("UseDefaultCredentials") {
+        Some("UseDefaultCredentials")
+    } else if key.eq_ignore_ascii_case("ScriptPath") {
+        Some("ScriptPath")
+    } else if key.eq_ignore_ascii_case("Description") {
+        Some("Description")
+    } else {
+        None
+    }
+}
+
+fn apply_psu_connection_patch_field(
+    patch: &mut PsuEventHubConnectionPatch,
+    field: &str,
+    value: String,
+) -> anyhow::Result<()> {
+    match field {
+        "Hub" => patch.hub = Some(value),
+        "Url" => patch.url = Some(value),
+        "AppToken" => patch.app_token = Some(non_empty_string(value)),
+        "UseDefaultCredentials" => patch.use_default_credentials = Some(parse_psu_bool(&value)?),
+        "ScriptPath" => patch.script_path = Some(non_empty_string(value).map(Utf8PathBuf::from)),
+        "Description" => patch.description = Some(non_empty_string(value)),
+        _ => unreachable!("unsupported PSU Event Hub connection field"),
+    }
+
+    Ok(())
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+fn parse_psu_bool(value: &str) -> anyhow::Result<bool> {
+    if value.eq_ignore_ascii_case("true") || value == "1" || value.eq_ignore_ascii_case("yes") {
+        Ok(true)
+    } else if value.eq_ignore_ascii_case("false") || value == "0" || value.eq_ignore_ascii_case("no") {
+        Ok(false)
+    } else {
+        bail!("invalid PSU boolean environment value: {value}");
+    }
 }
 
 pub mod dto {
@@ -499,6 +735,98 @@ pub mod dto {
         pub server_spki_sha256: Option<String>,
     }
 
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubConf {
+        /// Enable PowerShell Universal Event Hub compatibility.
+        pub enabled: bool,
+
+        /// Event Hub connections to maintain.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub connections: Vec<PsuEventHubConnectionConf>,
+
+        /// PowerShell worker process configuration.
+        #[serde(default, skip_serializing_if = "PsuPowerShellConf::is_default")]
+        pub power_shell: PsuPowerShellConf,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubCompatFile {
+        #[serde(default)]
+        pub connections: Vec<PsuEventHubConnectionConf>,
+    }
+
+    #[allow(clippy::derivable_impls)] // Just to be explicit about default disabled behavior.
+    impl Default for PsuEventHubConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                connections: Vec::new(),
+                power_shell: PsuPowerShellConf::default(),
+            }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuEventHubConnectionConf {
+        pub hub: String,
+        pub url: Url,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub app_token: Option<String>,
+        #[serde(default)]
+        pub use_default_credentials: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub script_path: Option<Utf8PathBuf>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub description: Option<String>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuPowerShellConf {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub executable_path: Option<Utf8PathBuf>,
+        #[serde(default)]
+        pub use_windows_power_shell: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub version_selector: Option<String>,
+        #[serde(default = "default_worker_pool_size")]
+        pub worker_pool_size: usize,
+        #[serde(default = "default_max_worker_pool_size")]
+        pub max_worker_pool_size: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub virtual_environment: Option<String>,
+    }
+
+    impl Default for PsuPowerShellConf {
+        fn default() -> Self {
+            Self {
+                executable_path: None,
+                use_windows_power_shell: false,
+                version_selector: None,
+                worker_pool_size: default_worker_pool_size(),
+                max_worker_pool_size: default_max_worker_pool_size(),
+                virtual_environment: None,
+            }
+        }
+    }
+
+    impl PsuPowerShellConf {
+        pub fn is_default(&self) -> bool {
+            Self::default().eq(self)
+        }
+    }
+
+    fn default_worker_pool_size() -> usize {
+        1
+    }
+
+    fn default_max_worker_pool_size() -> usize {
+        25
+    }
+
     fn default_true() -> bool {
         true
     }
@@ -556,6 +884,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
 
+        /// PowerShell Universal Event Hub compatibility.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub psu_event_hub: Option<PsuEventHubConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -586,6 +918,7 @@ pub mod dto {
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
                 tunnel: None,
+                psu_event_hub: None,
                 rest: serde_json::Map::new(),
             }
         }
@@ -765,4 +1098,262 @@ pub fn handle_cli(command: &str) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use parking_lot::{Mutex, MutexGuard};
+
+    use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        _guard: MutexGuard<'static, ()>,
+        saved: Vec<(OsString, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn new(vars: &[(&str, &str)]) -> Self {
+            let guard = ENV_LOCK.lock();
+            let mut saved = std::env::vars_os()
+                .filter(|(name, _)| {
+                    let name = name.to_string_lossy();
+                    name == "ProgramData" || name == "APPDATA" || name.starts_with("PSU_")
+                })
+                .map(|(name, value)| (name, Some(value)))
+                .collect::<Vec<_>>();
+
+            for (name, _) in &saved {
+                // SAFETY: These tests hold ENV_LOCK while mutating process environment.
+                unsafe {
+                    std::env::remove_var(name);
+                }
+            }
+
+            for (name, value) in vars {
+                let name = OsString::from(name);
+                if !saved.iter().any(|(saved_name, _)| saved_name == &name) {
+                    saved.push((name.clone(), None));
+                }
+                // SAFETY: These tests hold ENV_LOCK while mutating process environment.
+                unsafe {
+                    std::env::set_var(name, value);
+                }
+            }
+
+            Self { _guard: guard, saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                match value {
+                    Some(value) => {
+                        // SAFETY: These tests hold ENV_LOCK while mutating process environment.
+                        unsafe {
+                            std::env::set_var(name, value);
+                        }
+                    }
+                    None => {
+                        // SAFETY: These tests hold ENV_LOCK while mutating process environment.
+                        unsafe {
+                            std::env::remove_var(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn psu_event_hub_config_is_disabled_by_default() {
+        let conf = Conf::from_conf_file(&dto::ConfFile::generate_new()).expect("load generated config");
+        assert!(!conf.psu_event_hub.enabled);
+        assert!(conf.psu_event_hub.connections.is_empty());
+    }
+
+    #[test]
+    fn psu_event_hub_config_deserializes() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuEventHub": {
+                "Enabled": true,
+                "Connections": [
+                    {
+                        "Hub": "Hub",
+                        "Url": "http://localhost:5000",
+                        "AppToken": "token",
+                        "UseDefaultCredentials": false,
+                        "ScriptPath": "event.ps1",
+                        "Description": "test agent"
+                    }
+                ],
+                "PowerShell": {
+                    "VersionSelector": "7.4",
+                    "WorkerPoolSize": 1,
+                    "MaxWorkerPoolSize": 25
+                }
+            }
+        }))
+        .expect("deserialize config");
+
+        let conf = Conf::from_conf_file(&conf_file).expect("load config");
+        assert!(conf.psu_event_hub.enabled);
+        assert_eq!(conf.psu_event_hub.connections[0].hub, "Hub");
+        assert_eq!(conf.psu_event_hub.power_shell.version_selector.as_deref(), Some("7.4"));
+    }
+
+    #[test]
+    fn psu_event_hub_imports_compat_config_when_missing() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).expect("temp path is UTF-8");
+        let psu_dir = program_data.join("PowerShellUniversal");
+        std::fs::create_dir_all(&psu_dir).expect("create PSU dir");
+        std::fs::write(
+            psu_dir.join("eventHubClient.json"),
+            r#"{"Connections":[{"Hub":"Compat","Url":"http://localhost:5000"}]}"#,
+        )
+        .expect("write compat config");
+
+        let _env = EnvGuard::new(&[
+            ("ProgramData", program_data.as_str()),
+            ("APPDATA", program_data.as_str()),
+        ]);
+        let mut conf_file = dto::ConfFile::generate_new();
+
+        merge_psu_event_hub_compat_config(&mut conf_file).expect("merge compat config");
+
+        let psu_event_hub = conf_file.psu_event_hub.expect("compat config");
+        assert!(psu_event_hub.enabled);
+        assert_eq!(psu_event_hub.connections[0].hub, "Compat");
+    }
+
+    #[test]
+    fn psu_event_hub_imports_compat_connections_when_enabled_empty() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).expect("temp path is UTF-8");
+        let psu_dir = program_data.join("PowerShellUniversal");
+        std::fs::create_dir_all(&psu_dir).expect("create PSU dir");
+        std::fs::write(
+            psu_dir.join("eventHubClient.json"),
+            r#"{"Connections":[{"Hub":"Compat","Url":"http://localhost:5000"}]}"#,
+        )
+        .expect("write compat config");
+
+        let _env = EnvGuard::new(&[
+            ("ProgramData", program_data.as_str()),
+            ("APPDATA", program_data.as_str()),
+        ]);
+        let mut conf_file = dto::ConfFile::generate_new();
+        conf_file.psu_event_hub = Some(dto::PsuEventHubConf {
+            enabled: true,
+            connections: Vec::new(),
+            power_shell: dto::PsuPowerShellConf::default(),
+        });
+
+        merge_psu_event_hub_compat_config(&mut conf_file).expect("merge compat config");
+
+        let psu_event_hub = conf_file.psu_event_hub.expect("compat config");
+        assert!(psu_event_hub.enabled);
+        assert_eq!(psu_event_hub.connections[0].hub, "Compat");
+    }
+
+    #[test]
+    fn psu_event_hub_explicit_connections_win_over_compat_config() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).expect("temp path is UTF-8");
+        let psu_dir = program_data.join("PowerShellUniversal");
+        std::fs::create_dir_all(&psu_dir).expect("create PSU dir");
+        std::fs::write(
+            psu_dir.join("eventHubClient.json"),
+            r#"{"Connections":[{"Hub":"Compat","Url":"http://localhost:5000"}]}"#,
+        )
+        .expect("write compat config");
+
+        let _env = EnvGuard::new(&[
+            ("ProgramData", program_data.as_str()),
+            ("APPDATA", program_data.as_str()),
+        ]);
+        let mut conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuEventHub": {
+                "Enabled": true,
+                "Connections": [{"Hub":"Explicit","Url":"http://localhost:5001"}]
+            }
+        }))
+        .expect("deserialize config");
+
+        merge_psu_event_hub_compat_config(&mut conf_file).expect("merge compat config");
+
+        let psu_event_hub = conf_file.psu_event_hub.expect("compat config");
+        assert_eq!(psu_event_hub.connections[0].hub, "Explicit");
+    }
+
+    #[test]
+    fn psu_event_hub_explicit_disabled_config_stays_disabled() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).expect("temp path is UTF-8");
+        let psu_dir = program_data.join("PowerShellUniversal");
+        std::fs::create_dir_all(&psu_dir).expect("create PSU dir");
+        std::fs::write(
+            psu_dir.join("eventHubClient.json"),
+            r#"{"Connections":[{"Hub":"Compat","Url":"http://localhost:5000"}]}"#,
+        )
+        .expect("write compat config");
+
+        let _env = EnvGuard::new(&[
+            ("ProgramData", program_data.as_str()),
+            ("APPDATA", program_data.as_str()),
+        ]);
+        let mut conf_file = dto::ConfFile::generate_new();
+        conf_file.psu_event_hub = Some(dto::PsuEventHubConf::default());
+
+        merge_psu_event_hub_compat_config(&mut conf_file).expect("merge compat config");
+
+        let psu_event_hub = conf_file.psu_event_hub.expect("compat config");
+        assert!(!psu_event_hub.enabled);
+        assert!(psu_event_hub.connections.is_empty());
+    }
+
+    #[test]
+    fn psu_event_hub_reads_scalar_env_connection() {
+        let _env = EnvGuard::new(&[
+            ("PSU_Hub", "EnvHub"),
+            ("PSU_Url", "http://localhost:5000"),
+            ("PSU_AppToken", "token"),
+            ("PSU_UseDefaultCredentials", "true"),
+            ("PSU_ScriptPath", "event.ps1"),
+            ("PSU_Description", "env agent"),
+        ]);
+
+        let compat = load_psu_event_hub_compat_config()
+            .expect("load compat config")
+            .expect("env compat config");
+
+        assert!(compat.enabled);
+        assert_eq!(compat.connections[0].hub, "EnvHub");
+        assert_eq!(compat.connections[0].app_token.as_deref(), Some("token"));
+        assert!(compat.connections[0].use_default_credentials);
+        assert_eq!(
+            compat.connections[0].script_path.as_deref(),
+            Some(Utf8Path::new("event.ps1"))
+        );
+        assert_eq!(compat.connections[0].description.as_deref(), Some("env agent"));
+    }
+
+    #[test]
+    fn psu_event_hub_reads_indexed_env_connection() {
+        let _env = EnvGuard::new(&[
+            ("PSU_Connections__0__Hub", "IndexedHub"),
+            ("PSU_Connections__0__Url", "http://localhost:5000"),
+        ]);
+
+        let compat = load_psu_event_hub_compat_config()
+            .expect("load compat config")
+            .expect("env compat config");
+
+        assert_eq!(compat.connections[0].hub, "IndexedHub");
+    }
 }
