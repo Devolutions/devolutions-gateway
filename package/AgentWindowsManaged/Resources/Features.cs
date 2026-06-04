@@ -10,7 +10,7 @@ namespace DevolutionsAgent.Resources
     {
         internal const string FEATURE_ID_PREFIX = "F.";
 
-        internal static IEnumerable<Feature> ExperimentalFeatures => [ ];
+        internal static IEnumerable<Feature> ExperimentalFeatures => [ PSU_EVENT_HUB_FEATURE ];
 
         internal static Feature AGENT_UPDATER_FEATURE = new("!(loc.FeatureAgentUpdaterName)", "!(loc.FeatureAgentUpdaterDescription)", isEnabled: true, allowChange: true)
         {

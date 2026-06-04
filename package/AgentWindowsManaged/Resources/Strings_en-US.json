@@ -57,6 +57,14 @@
         {
           "id": "FeatureAgentTunnelDescription",
           "text": "Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator."
+        },
+        {
+          "id": "FeaturePsuEventHubName",
+          "text": "PowerShell Universal Event Hub"
+        },
+        {
+          "id": "FeaturePsuEventHubDescription",
+          "text": "Enables PowerShell Universal Event Hub remote agent compatibility."
         }
       ],
       "messages": [
