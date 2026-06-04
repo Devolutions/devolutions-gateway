@@ -14,3 +14,8 @@ devolutions-gateway/openapi/dotnet-client/docs/** linguist-generated merge=binar
 devolutions-gateway/openapi/dotnet-subscriber/src/** linguist-generated merge=binary
 devolutions-gateway/openapi/ts-angular-client/api/** linguist-generated merge=binary
 devolutions-gateway/openapi/ts-angular-client/model/** linguist-generated merge=binary
+
+# Sample assets and schema files produce huge LoC counts; exclude them from language statistics and
+# treat them as generated files.
+crates/unigetui-broker/assets/** linguist-generated
+crates/unigetui-broker/schema/** linguist-generated

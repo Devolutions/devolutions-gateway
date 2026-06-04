@@ -57,7 +57,7 @@ const STATUS_REFRESH_INITIAL_DELAY: Duration = Duration::from_secs(30);
 
 /// Interval between subsequent unconditional `update_status.json` refreshes.
 ///
-/// This catches manual re-installations or any other external change that the
+/// This catches manual re-installations or any other external change tt phat the
 /// update-triggered refresh would miss.
 const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperationStatus",
+  "requestId": "req-abc-123",
+  "broker": {
+    "requestedElevation": "standard",
+    "effectiveUser": "WORKSTATION\\bob"
+  }
+}

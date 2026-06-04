@@ -1,0 +1,38 @@
+POST /v1/package-operations/evaluate HTTP/1.1
+Host: unigetui-broker
+UniGetUI-Protocol-Version: 1.0
+UniGetUI-Request-Id: req-winget-vscode-skiphash
+Content-Type: application/vnd.unigetui.package-request+json; version=1.0
+Accept: application/vnd.unigetui.package-broker-response+json; version=1.0
+Content-Length: <computed-by-client>
+
+{
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-winget-vscode-skiphash",
+  "createdAt": "2026-05-05T12:10:00Z",
+  "operation": "install",
+  "manager": { "name": "Winget", "displayName": "WinGet", "executableFriendlyName": "winget.exe" },
+  "source": { "name": "winget", "url": "https://cdn.winget.microsoft.com/cache", "isVirtualManager": false },
+  "package": { "id": "Microsoft.VisualStudioCode", "name": "Microsoft Visual Studio Code" },
+  "options": {
+    "scope": "machine",
+    "architecture": "x64",
+    "interactive": false,
+    "skipHashCheck": true,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": { "requestedElevation": "elevated", "effectiveUser": "CONTOSO\\alice", "clientVersion": "3.2.0" }
+}
+
+HTTP/1.1 403 Forbidden
+UniGetUI-Protocol-Version: 1.0
+UniGetUI-Audit-Id: audit-20260505-000002
+UniGetUI-Policy-Id: contoso.desktop.standard-allowlist
+UniGetUI-Policy-Revision: 4
+Content-Type: application/vnd.unigetui.package-broker-response+json; version=1.0
+Content-Length: <computed-by-broker>
+
+<see policies/samples/responses/winget-vscode-skiphash.denied.response.json>

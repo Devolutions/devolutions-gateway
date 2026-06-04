@@ -1,0 +1,37 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-winget-vscode-version-out-of-range",
+  "createdAt": "2026-05-05T12:12:00Z",
+  "operation": "install",
+  "manager": {
+    "name": "Winget",
+    "displayName": "WinGet",
+    "executableFriendlyName": "winget.exe"
+  },
+  "source": {
+    "name": "winget",
+    "url": "https://cdn.winget.microsoft.com/cache",
+    "isVirtualManager": false
+  },
+  "package": {
+    "id": "Microsoft.VisualStudioCode",
+    "name": "Microsoft Visual Studio Code",
+    "architecture": "x64",
+    "version": "3.0.0"
+  },
+  "options": {
+    "scope": "machine",
+    "interactive": false,
+    "skipHashCheck": false,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": {
+    "requestedElevation": "elevated",
+    "effectiveUser": "CONTOSO\\alice",
+    "clientVersion": "3.2.0"
+  }
+}

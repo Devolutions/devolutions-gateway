@@ -1,0 +1,36 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
+  "requestVersion": "1.0.0",
+  "requestType": "packageOperation",
+  "requestId": "req-winget-unknown-install",
+  "createdAt": "2026-05-05T12:05:00Z",
+  "operation": "install",
+  "manager": {
+    "name": "Winget",
+    "displayName": "WinGet",
+    "executableFriendlyName": "winget.exe"
+  },
+  "source": {
+    "name": "winget",
+    "url": "https://cdn.winget.microsoft.com/cache",
+    "isVirtualManager": false
+  },
+  "package": {
+    "id": "Example.UnapprovedTool",
+    "name": "Unapproved Tool",
+    "architecture": "x64"
+  },
+  "options": {
+    "scope": "user",
+    "interactive": false,
+    "skipHashCheck": false,
+    "preRelease": false,
+    "customParameters": [],
+    "killBeforeOperation": []
+  },
+  "broker": {
+    "requestedElevation": "standard",
+    "effectiveUser": "CONTOSO\\alice",
+    "clientVersion": "3.2.0"
+  }
+}

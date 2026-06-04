@@ -1,0 +1,56 @@
+[package]
+name = "unigetui-broker"
+version = "0.1.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "UniGetUI package broker - policy evaluation and command execution over named pipe"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+schemars = { version = "0.8", features = ["chrono"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
+thiserror = "2"
+tokio = { version = "1.52", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1.17", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+
+[target.'cfg(windows)'.dependencies]
+win-api-wrappers = { path = "../win-api-wrappers" }
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Pipes",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Environment",
+] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[[bin]]
+name = "unigetui-broker-standalone"
+path = "src/bin/standalone.rs"
+
+[[bin]]
+name = "generate-broker-schema"
+path = "src/bin/generate_schema.rs"

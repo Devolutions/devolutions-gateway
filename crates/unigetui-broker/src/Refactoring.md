@@ -1,0 +1,11 @@
+### Refactoring
+- I updated model the way I like it - moved some fileds, some were removed etc. Please update code/fix errors after theese changes.
+- Add logic to watch and live reload policy (watch both json and yml).
+    -- If file failed to load or corrupted, pause stop the actual broker logic and wait while file becomes available again. If file was changed and successfully loaded - restart the broker logic with new policy.
+- command_builder.rs is generic name, bit it implementes only winget-related logic.
+    -- I added some changes to winget command building logic, please try to preserve it (extend if needed, if something missing)
+    -- Add new command_builder module folder, and add mod.rs with generic methods/structs and separate winget.rs. If asked non-winget managers - return "not supported" response with a proper description.
+- "const" fields like `schema` in json structures should be prefixed with "_" as they are unused members, and only relevant for serialization.
+- Split models.rs into separate files for better readability and maintainability. module folder should be named "model".
+- Please review README.md file under Unigetui repo/policies folder - there are still some missing pieces of feature implementation, most notably - YML support; rust should also search for *yml as alternative to *.json files, and accept both formats for policy file. (deserialize).
+- Update uniget client side after changes on server side.
