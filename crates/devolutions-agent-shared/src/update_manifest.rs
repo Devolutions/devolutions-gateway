@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn v1_accepted_with_version_alias() {
-        let json = r#"{\"HubService\":{\"Version\":\"2026.2.1.7\"}}"#;
+        let json = r#"{"HubService":{"Version":"2026.2.1.7"}}"#;
         let manifest = UpdateManifest::parse(json.as_bytes()).unwrap();
         assert!(matches!(manifest, UpdateManifest::Legacy(_)));
 
@@ -437,7 +437,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(v1).unwrap(),
-            r#"{\"HubService\":{\"TargetVersion\":\"2026.2.1.7\"}}"#
+            r#"{"HubService":{"TargetVersion":"2026.2.1.7"}}"#
         );
 
         let products = manifest.into_products();
