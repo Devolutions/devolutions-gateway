@@ -425,19 +425,28 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn v1_accepted_with_version_alias() {
-        let json = r#"{"HubService":{"Version":"2026.2.1.7"}}"#;
-        let manifest = UpdateManifest::parse(json.as_bytes()).unwrap();
-        assert!(matches!(manifest, UpdateManifest::Legacy(_)));
+#[test]
+fn v1_accepted_with_version_alias() {
+    let json = r#"{\"HubService\":{\"Version\":\"2026.2.1.7\"}}"#;
+    let manifest = UpdateManifest::parse(json.as_bytes()).unwrap();
+    assert!(matches!(manifest, UpdateManifest::Legacy(_)));
 
-        let products = manifest.into_products();
-        assert_eq!(products.len(), 1);
-        assert_eq!(
-            products[&UpdateProductKey::HubService].target_version,
-            VersionSpecification::Specific("2026.2.1.7".parse().unwrap())
-        );
-    }
+    // Re-serializing the parsed V1 manifest should emit the canonical `TargetVersion` field.
+    let UpdateManifest::Legacy(v1) = &manifest else {
+        unreachable!();
+    };
+    assert_eq!(
+        serde_json::to_string(v1).unwrap(),
+        r#"{\"HubService\":{\"TargetVersion\":\"2026.2.1.7\"}}"#
+    );
+
+    let products = manifest.into_products();
+    assert_eq!(products.len(), 1);
+    assert_eq!(
+        products[&UpdateProductKey::HubService].target_version,
+        VersionSpecification::Specific("2026.2.1.7".parse().unwrap())
+    );
+}
 
     #[test]
     fn bom_is_stripped() {
