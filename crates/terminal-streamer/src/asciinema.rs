@@ -24,9 +24,11 @@ pub(crate) enum AsciinemaEvent {
 
 impl AsciinemaHeader {
     pub(crate) fn to_json(&self) -> String {
+        // Emit the standard asciicast v2 header (width = columns, height = rows) so any cast
+        // client (asciinema-player, the Avalonia replayer, …) sizes the terminal correctly.
         format!(
-            r#"{{"version": {}, "row": {}, "col": {}}}"#,
-            self.version, self.row, self.col
+            r#"{{"version": {}, "width": {}, "height": {}}}"#,
+            self.version, self.col, self.row
         )
     }
 }
