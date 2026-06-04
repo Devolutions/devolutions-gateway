@@ -102,7 +102,7 @@ async fn run_single_connection(
     info!(hub = %connection.hub, url = %connection.url, "Connecting to PSU Event Hub");
     let (mut socket, _) = connect_async(ws_request)
         .await
-        .with_context(|| format!("failed to connect PSU Event Hub WebSocket at {ws_url}"))?;
+        .with_context(|| format!("failed to connect PSU Event Hub WebSocket at {}", redact_url(&ws_url)))?;
 
     socket
         .send(Message::Text(
@@ -235,6 +235,24 @@ fn websocket_url(endpoint: &Url, connection_token: &str, access_token: Option<&s
         url.query_pairs_mut().append_pair("access_token", access_token);
     }
     Ok(url)
+}
+
+/// Returns a printable form of `url` with the SignalR `access_token` query parameter removed,
+/// so we don't leak bearer tokens into logs/errors.
+fn redact_url(url: &Url) -> String {
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "access_token")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+
+    let mut redacted = url.clone();
+    if pairs.is_empty() {
+        redacted.set_query(None);
+    } else {
+        redacted.query_pairs_mut().clear().extend_pairs(&pairs);
+    }
+    redacted.to_string()
 }
 
 fn psu_headers(connection: &PsuEventHubConnectionConf) -> anyhow::Result<HeaderMap> {
