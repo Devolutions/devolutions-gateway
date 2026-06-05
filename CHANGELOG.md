@@ -2,6 +2,22 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.2.2 (2026-06-05)
+
+### Features
+
+- _agent_: add PSU Event Hub compatibility (experimental) ([#1803](https://github.com/Devolutions/devolutions-gateway/issues/1803)) ([273ee66fc9](https://github.com/Devolutions/devolutions-gateway/commit/273ee66fc90a39de9177006103be5c3634f599b8))
+
+  Adds PowerShell Universal Event Hub remote agent compatibility as an
+  optional Devolutions Agent feature. This lets Devolutions Agent connect
+  to PSU Event Hubs, receive command/script invocations, and return
+  PSU-compatible PowerShell results without installing a separate PSU
+  agent service.
+
+### Bug Fixes
+
+- _dgw,agent_: backwards-compatibility for update manifest V1 ([#1815](https://github.com/Devolutions/devolutions-gateway/issues/1815)) ([389ae7e2b9](https://github.com/Devolutions/devolutions-gateway/commit/389ae7e2b9e81a320ddbd42487870386a43a464d))
+
 ## 2026.2.1 (2026-06-03)
 
 ### Bug Fixes
