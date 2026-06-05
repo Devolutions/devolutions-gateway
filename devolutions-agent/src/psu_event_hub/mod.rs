@@ -1,3 +1,4 @@
+pub(crate) mod compat;
 mod executor;
 mod models;
 mod powershell_worker;
@@ -44,7 +45,7 @@ impl Task for PsuEventHubTask {
 
         let mut join_set = JoinSet::new();
 
-        let secret_resolver = PowerShellWorker::new(psu_conf.power_shell.clone());
+        let secret_resolver = PowerShellWorker::new(psu_conf.powershell.clone());
 
         for mut connection in psu_conf.connections {
             if connection.hub.trim().is_empty() {
@@ -66,7 +67,7 @@ impl Task for PsuEventHubTask {
                 }
             }
 
-            let executor = EventHubExecutor::new(&connection, psu_conf.power_shell.clone());
+            let executor = EventHubExecutor::new(&connection, psu_conf.powershell.clone());
             let connection_shutdown_signal = shutdown_signal.clone();
 
             join_set
