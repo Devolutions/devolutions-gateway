@@ -304,7 +304,7 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     // the user if the installer detects old PSU Event Hub configuration files.
     // The migration would update the agent.json file to be equivalent to the
     // previous configuration, at which point the old files are not necessary
-    // anymore, and we don’t need tho import & merge logic anymore.
+    // anymore, and we don’t need to import & merge logic anymore.
     let enable_unstable = conf_file.debug.as_ref().is_some_and(|debug| debug.enable_unstable);
     let psu_event_hub_enabled = conf_file.psu_event_hub.as_ref().is_some_and(|cfg| cfg.enabled);
     if enable_unstable && psu_event_hub_enabled {
