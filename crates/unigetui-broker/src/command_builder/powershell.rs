@@ -1,8 +1,21 @@
 //! PowerShell command-line builders for WinPS 5.x and PowerShell 7.x.
+//!
+//! These mirror UniGetUI's own PowerShell manager helpers so the broker runs the
+//! same command the unelevated client would have run:
+//! - PowerShell 5 uses PowerShellGet (`Install-Module`/`Update-Module`/`Uninstall-Module`)
+//!   invoked as `powershell.exe -NoProfile -Command <script>`.
+//! - PowerShell 7 uses PSResourceGet (`Install-PSResource`/`Update-PSResource`/
+//!   `Uninstall-PSResource`) invoked as `pwsh.exe -NoProfile -Command <script>`.
+//!
+//! Like UniGetUI, neither builder pins a `-Repository`/source: the package source is
+//! part of the policy-matched request identity, but the executed command lets the
+//! PowerShell module resolver pick the repository. Options that don't apply to
+//! PowerShell modules (interactive, custom install location, winget's no-upgrade /
+//! uninstall-previous) are intentionally omitted.
 
 use crate::model::{Operation, PackageRequest, Scope};
 
-/// Build a Windows PowerShell 5.x command from a validated request.
+/// Build a Windows PowerShell 5.x (PowerShellGet) command from a validated request.
 pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
     let mut script = String::new();
 
@@ -12,7 +25,8 @@ pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
         Operation::Uninstall => "Uninstall-Module",
     };
 
-    append_flag_value(&mut script, verb, &request.package.id.0);
+    append_raw(&mut script, verb);
+    append_flag_value(&mut script, "-Name", &request.package.id.0);
     append_raw(&mut script, "-Confirm:$false");
     append_raw(&mut script, "-Force");
 
@@ -51,7 +65,7 @@ pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
     ]
 }
 
-/// Build a PowerShell 7.x command from a validated request.
+/// Build a PowerShell 7.x (PSResourceGet) command from a validated request.
 pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
     let mut script = String::new();
 
@@ -61,7 +75,8 @@ pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
         Operation::Uninstall => "Uninstall-PSResource",
     };
 
-    append_flag_value(&mut script, verb, &request.package.id.0);
+    append_raw(&mut script, verb);
+    append_flag_value(&mut script, "-Name", &request.package.id.0);
     append_raw(&mut script, "-Confirm:$false");
 
     match request.operation {
@@ -177,23 +192,98 @@ mod tests {
         }
     }
 
-    #[test]
-    fn powershell5_builder_uses_install_module() {
-        let request = make_request(ManagerName::PowerShell);
-        let cmd = build_powershell5_command(&request);
-        assert_eq!(cmd[0], "powershell.exe");
-        assert!(cmd[3].contains("Install-Module"));
-        assert!(cmd[3].contains("-Scope CurrentUser"));
-        assert!(cmd[3].contains("-RequiredVersion"));
+    /// The full PowerShell command line is `exe -NoProfile -Command <script>`.
+    fn script_of(cmd: &[String]) -> &str {
+        assert_eq!(cmd[1], "-NoProfile");
+        assert_eq!(cmd[2], "-Command");
+        &cmd[3]
     }
 
     #[test]
-    fn powershell7_builder_uses_install_psresource() {
+    fn powershell5_install_matches_unigetui_semantics() {
+        let request = make_request(ManagerName::PowerShell);
+        let cmd = build_powershell5_command(&request);
+        let script = script_of(&cmd);
+        assert_eq!(cmd[0], "powershell.exe");
+        // verb, then -Name <id>, -Confirm:$false, -Force.
+        assert!(script.starts_with("Install-Module -Name \"Pester\" -Confirm:$false -Force"));
+        assert!(script.contains("-Scope CurrentUser"));
+        assert!(script.contains("-RequiredVersion \"5.6.0\""));
+        // UniGetUI does not pin a repository for PowerShell operations.
+        assert!(!script.contains("-Repository"));
+    }
+
+    #[test]
+    fn powershell5_machine_scope_is_allusers() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.options.scope = Some(Scope::Machine);
+        let script = build_powershell5_command(&request)[3].clone();
+        assert!(script.contains("-Scope AllUsers"));
+    }
+
+    #[test]
+    fn powershell5_prerelease_and_skiphash() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.options.pre_release = true;
+        request.options.skip_hash_check = true;
+        let script = build_powershell5_command(&request)[3].clone();
+        assert!(script.contains("-AllowPrerelease"));
+        assert!(script.contains("-SkipPublisherCheck"));
+    }
+
+    #[test]
+    fn powershell5_uninstall_omits_scope_and_version() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.operation = Operation::Uninstall;
+        let script = build_powershell5_command(&request)[3].clone();
+        assert!(script.starts_with("Uninstall-Module -Name \"Pester\""));
+        assert!(!script.contains("-Scope"));
+        assert!(!script.contains("-RequiredVersion"));
+        assert!(!script.contains("-SkipPublisherCheck"));
+    }
+
+    #[test]
+    fn powershell7_install_matches_unigetui_semantics() {
         let request = make_request(ManagerName::PowerShell7);
         let cmd = build_powershell7_command(&request);
+        let script = script_of(&cmd);
         assert_eq!(cmd[0], "pwsh.exe");
-        assert!(cmd[3].contains("Install-PSResource"));
-        assert!(cmd[3].contains("-TrustRepository"));
-        assert!(cmd[3].contains("-AcceptLicense"));
+        assert!(script.starts_with("Install-PSResource -Name \"Pester\" -Confirm:$false"));
+        assert!(script.contains("-Version \"5.6.0\""));
+        assert!(script.contains("-TrustRepository"));
+        assert!(script.contains("-AcceptLicense"));
+        assert!(script.contains("-Scope CurrentUser"));
+        assert!(!script.contains("-Repository"));
+    }
+
+    #[test]
+    fn powershell7_update_uses_force_not_version() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.operation = Operation::Update;
+        let script = build_powershell7_command(&request)[3].clone();
+        assert!(script.contains("Update-PSResource"));
+        assert!(script.contains("-Force"));
+        assert!(!script.contains("-Version"));
+        assert!(script.contains("-TrustRepository"));
+    }
+
+    #[test]
+    fn powershell7_uninstall_uses_version_and_no_trust_flags() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.operation = Operation::Uninstall;
+        let script = build_powershell7_command(&request)[3].clone();
+        assert!(script.starts_with("Uninstall-PSResource -Name \"Pester\" -Confirm:$false"));
+        assert!(script.contains("-Version \"5.6.0\""));
+        assert!(!script.contains("-TrustRepository"));
+        assert!(!script.contains("-AcceptLicense"));
+        assert!(!script.contains("-Scope"));
+    }
+
+    #[test]
+    fn powershell_custom_parameters_are_appended() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.options.custom_parameters = vec![CustomParameterString("-Reinstall".to_owned())];
+        let script = build_powershell7_command(&request)[3].clone();
+        assert!(script.contains("-Reinstall"));
     }
 }
