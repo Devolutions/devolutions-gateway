@@ -58,7 +58,7 @@ The workspace is organized into three main categories:
 ### Prerequisites
 
 - **Node.js** >= 18.0.0
-- **pnpm** >= 8.0.0
+- **pnpm** >= 10.16.0
 
 ### Installation
 
