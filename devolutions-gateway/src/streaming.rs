@@ -65,11 +65,14 @@ impl terminal_streamer::TerminalStreamSocket for TerminalStreamSocketImpl {
     }
 
     async fn close(&mut self) {
+        // 4001 = StreamerCloseCode::StreamingEnded (see api/jrec.rs). Signals the recording player
+        // that the live session has ended so it tears down the shadow view and falls back to the
+        // seekable static recording. A plain 1000 only stops the player, with no replay/seek.
         let _ = self
             .0
             .send(axum::extract::ws::Message::Close(Some(CloseFrame {
-                code: 1000,
-                reason: Utf8Bytes::from_static("EOF"),
+                code: 4001,
+                reason: Utf8Bytes::from_static("streaming ended"),
             })))
             .await;
         let _ = self.0.flush().await;

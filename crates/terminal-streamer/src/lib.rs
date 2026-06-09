@@ -59,6 +59,14 @@ pub async fn terminal_stream(
         }
     }
 
+    // Register the shutdown waiter once and keep it alive across iterations. The recording manager
+    // signals end-of-stream with `Notify::notify_waiters`, which only wakes already-registered
+    // waiters and stores no permit. A `notified()` future created fresh inside the `select!` would
+    // miss a notification that fires while we are draining lines, leaving the stream open forever
+    // (the client keeps "playing" after the source ended).
+    let shutdown = shutdown_signal.notified();
+    tokio::pin!(shutdown);
+
     loop {
         tokio::select! {
             _ = when_new_chunk_appended() => {
@@ -77,15 +85,14 @@ pub async fn terminal_stream(
                     }
                 }
             }
-            _ = shutdown_signal.notified() => {
+            _ = &mut shutdown => {
                 break;
             }
         }
     }
 
-    // Note: though sometimes we end the loop with error
-    // but we still needs to send 1000 code to the client
-    // as it is what is expected for the ascii-player to end the playback properly
+    // Note: though sometimes we end the loop with an error, we still send a close frame so the
+    // player ends playback properly (the close code is chosen by the TerminalStreamSocket impl).
     websocket.close().await;
     if let Some(task) = trp_task_handle {
         task.abort();
