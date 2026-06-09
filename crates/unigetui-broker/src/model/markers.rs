@@ -164,7 +164,7 @@ impl<'de> Deserialize<'de> for RequestSchemaUri {
 
 impl JsonSchema for RequestSchemaUri {
     fn schema_name() -> String {
-        "requestSchemaUri".to_owned()
+        "RequestSchemaUri".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -206,7 +206,7 @@ impl<'de> Deserialize<'de> for ResponseSchemaUri {
 
 impl JsonSchema for ResponseSchemaUri {
     fn schema_name() -> String {
-        "responseSchemaUri".to_owned()
+        "ResponseSchemaUri".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -248,7 +248,7 @@ impl<'de> Deserialize<'de> for PolicySchemaUri {
 
 impl JsonSchema for PolicySchemaUri {
     fn schema_name() -> String {
-        "policySchemaUri".to_owned()
+        "PolicySchemaUri".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -379,7 +379,7 @@ impl<'de> Deserialize<'de> for StatusRequestSchemaUri {
 
 impl JsonSchema for StatusRequestSchemaUri {
     fn schema_name() -> String {
-        "statusRequestSchemaUri".to_owned()
+        "StatusRequestSchemaUri".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -421,7 +421,7 @@ impl<'de> Deserialize<'de> for StatusResponseSchemaUri {
 
 impl JsonSchema for StatusResponseSchemaUri {
     fn schema_name() -> String {
-        "statusResponseSchemaUri".to_owned()
+        "StatusResponseSchemaUri".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {

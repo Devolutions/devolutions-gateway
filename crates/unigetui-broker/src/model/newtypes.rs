@@ -73,7 +73,7 @@ impl<'de> Deserialize<'de> for SemanticVersion {
 
 impl JsonSchema for SemanticVersion {
     fn schema_name() -> String {
-        "semanticVersion".to_owned()
+        "SemanticVersion".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -172,7 +172,7 @@ fn is_valid_resource_id(s: &str) -> bool {
 
 impl JsonSchema for ResourceId {
     fn schema_name() -> String {
-        "resourceId".to_owned()
+        "ResourceId".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -258,7 +258,7 @@ impl<'de> Deserialize<'de> for RuleId {
 
 impl JsonSchema for RuleId {
     fn schema_name() -> String {
-        "ruleId".to_owned()
+        "RuleId".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -347,7 +347,7 @@ impl<'de> Deserialize<'de> for HttpUrl {
 
 impl JsonSchema for HttpUrl {
     fn schema_name() -> String {
-        "httpUrl".to_owned()
+        "HttpUrl".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -443,7 +443,7 @@ impl<'de> Deserialize<'de> for PackageIdentifier {
 
 impl JsonSchema for PackageIdentifier {
     fn schema_name() -> String {
-        "packageIdentifier".to_owned()
+        "PackageIdentifier".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -508,7 +508,7 @@ impl<'de> Deserialize<'de> for StringPattern {
 
 impl JsonSchema for StringPattern {
     fn schema_name() -> String {
-        "stringPattern".to_owned()
+        "StringPattern".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -591,7 +591,7 @@ fn is_valid_protocol_version(s: &str) -> bool {
 
 impl JsonSchema for ProtocolVersion {
     fn schema_name() -> String {
-        "protocolVersion".to_owned()
+        "ProtocolVersion".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -654,7 +654,7 @@ impl<'de> Deserialize<'de> for VersionString {
 
 impl JsonSchema for VersionString {
     fn schema_name() -> String {
-        "versionString".to_owned()
+        "VersionString".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -711,7 +711,7 @@ impl<'de> Deserialize<'de> for CustomParameterString {
 
 impl JsonSchema for CustomParameterString {
     fn schema_name() -> String {
-        "customParameterString".to_owned()
+        "CustomParameterString".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -768,7 +768,7 @@ impl<'de> Deserialize<'de> for ProcessName {
 
 impl JsonSchema for ProcessName {
     fn schema_name() -> String {
-        "processName".to_owned()
+        "ProcessName".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
@@ -819,7 +819,7 @@ impl<'de> Deserialize<'de> for CommandString {
 
 impl JsonSchema for CommandString {
     fn schema_name() -> String {
-        "commandString".to_owned()
+        "CommandString".to_owned()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {

@@ -1,4 +1,5 @@
 {
+  "$id": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -10,6 +11,11 @@
         "Arm64",
         "Neutral"
       ],
+      "type": "string"
+    },
+    "CustomParameterString": {
+      "maxLength": 512,
+      "minLength": 1,
       "type": "string"
     },
     "Decision": {
@@ -26,6 +32,11 @@
         "Standard",
         "Elevated"
       ],
+      "type": "string"
+    },
+    "HttpUrl": {
+      "maxLength": 2048,
+      "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
       "type": "string"
     },
     "ManagerName": {
@@ -95,7 +106,7 @@
         "AllowedCustomParameterPatterns": {
           "description": "Glob patterns for allowed custom parameters.",
           "items": {
-            "$ref": "#/definitions/customParameterString"
+            "$ref": "#/definitions/CustomParameterString"
           },
           "maxItems": 128,
           "type": "array"
@@ -103,7 +114,7 @@
         "AllowedCustomParameters": {
           "description": "Exact allowed custom parameters.",
           "items": {
-            "$ref": "#/definitions/customParameterString"
+            "$ref": "#/definitions/CustomParameterString"
           },
           "maxItems": 128,
           "type": "array"
@@ -111,7 +122,7 @@
         "AllowedInstallLocationPatterns": {
           "description": "Glob patterns for allowed install locations.",
           "items": {
-            "$ref": "#/definitions/stringPattern"
+            "$ref": "#/definitions/StringPattern"
           },
           "maxItems": 64,
           "type": "array"
@@ -119,7 +130,7 @@
         "DeniedCustomParameters": {
           "description": "Denied custom parameters (deny takes precedence over allow).",
           "items": {
-            "$ref": "#/definitions/customParameterString"
+            "$ref": "#/definitions/CustomParameterString"
           },
           "maxItems": 128,
           "type": "array"
@@ -257,7 +268,7 @@
         "PackageIdentifiers": {
           "description": "Package identifier patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/stringPattern"
+            "$ref": "#/definitions/StringPattern"
           },
           "maxItems": 1024,
           "type": "array",
@@ -266,7 +277,7 @@
         "PackageNames": {
           "description": "Package name patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/stringPattern"
+            "$ref": "#/definitions/StringPattern"
           },
           "maxItems": 1024,
           "type": "array",
@@ -302,7 +313,7 @@
         "Sources": {
           "description": "Source patterns (wildcard).",
           "items": {
-            "$ref": "#/definitions/stringPattern"
+            "$ref": "#/definitions/StringPattern"
           },
           "maxItems": 128,
           "type": "array",
@@ -322,7 +333,7 @@
         "Versions": {
           "description": "Exact version list.",
           "items": {
-            "$ref": "#/definitions/versionString"
+            "$ref": "#/definitions/VersionString"
           },
           "maxItems": 256,
           "type": "array",
@@ -346,7 +357,7 @@
         "Id": {
           "allOf": [
             {
-              "$ref": "#/definitions/resourceId"
+              "$ref": "#/definitions/ResourceId"
             }
           ],
           "description": "Unique policy identifier."
@@ -372,7 +383,7 @@
         "SupportUrl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/httpUrl"
+              "$ref": "#/definitions/HttpUrl"
             },
             {
               "type": "null"
@@ -436,7 +447,7 @@
         "Id": {
           "allOf": [
             {
-              "$ref": "#/definitions/resourceId"
+              "$ref": "#/definitions/ResourceId"
             }
           ],
           "description": "Unique rule identifier."
@@ -473,6 +484,17 @@
       ],
       "type": "object"
     },
+    "PolicySchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-policy.schema.1.0.json"
+      ],
+      "type": "string"
+    },
+    "ResourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
     "RulePrecedence": {
       "description": "Rule precedence strategy — always PriorityThenDeny.",
       "enum": [
@@ -486,6 +508,16 @@
         "User",
         "Machine"
       ],
+      "type": "string"
+    },
+    "SemanticVersion": {
+      "maxLength": 128,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
+    "StringPattern": {
+      "maxLength": 256,
+      "minLength": 1,
       "type": "string"
     },
     "VersionRange": {
@@ -518,38 +550,7 @@
       },
       "type": "object"
     },
-    "customParameterString": {
-      "maxLength": 512,
-      "minLength": 1,
-      "type": "string"
-    },
-    "httpUrl": {
-      "maxLength": 2048,
-      "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
-      "type": "string"
-    },
-    "policySchemaUri": {
-      "enum": [
-        "https://aka.ms/unigetui/package-policy.schema.1.0.json"
-      ],
-      "type": "string"
-    },
-    "resourceId": {
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-      "type": "string"
-    },
-    "semanticVersion": {
-      "maxLength": 128,
-      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
-      "type": "string"
-    },
-    "stringPattern": {
-      "maxLength": 256,
-      "minLength": 1,
-      "type": "string"
-    },
-    "versionString": {
+    "VersionString": {
       "maxLength": 128,
       "minLength": 1,
       "type": "string"
@@ -560,7 +561,7 @@
     "$schema": {
       "allOf": [
         {
-          "$ref": "#/definitions/policySchemaUri"
+          "$ref": "#/definitions/PolicySchemaUri"
         }
       ],
       "description": "Policy schema URI constant."
@@ -592,7 +593,7 @@
     "PolicyVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/semanticVersion"
+          "$ref": "#/definitions/SemanticVersion"
         }
       ],
       "description": "Policy syntax version (semver)."

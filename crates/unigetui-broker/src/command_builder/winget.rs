@@ -154,7 +154,7 @@ mod tests {
     fn test_upgrade_command() {
         let mut request = make_request();
         request.operation = Operation::Update;
-        request.package.version = Some(SemanticVersion::from("120.0.0"));
+        request.package.version = Some(VersionString("120.0.0".to_owned()));
 
         let cmd = build_winget_command(&request);
         assert_eq!(cmd[1], "upgrade");

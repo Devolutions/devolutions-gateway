@@ -151,7 +151,7 @@ mod tests {
             package: RequestPackage {
                 id: PackageIdentifier::from("Pester".to_owned()),
                 name: "Pester".to_owned(),
-                version: Some(SemanticVersion::from("5.6.0")),
+                version: Some(VersionString("5.6.0".to_owned())),
                 architecture: None,
                 channel: None,
             },

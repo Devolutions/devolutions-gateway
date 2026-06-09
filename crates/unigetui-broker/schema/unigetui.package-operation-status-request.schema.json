@@ -1,4 +1,5 @@
 {
+  "$id": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -57,17 +58,17 @@
       ],
       "type": "string"
     },
-    "resourceId": {
+    "ResourceId": {
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
       "type": "string"
     },
-    "semanticVersion": {
+    "SemanticVersion": {
       "maxLength": 128,
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
       "type": "string"
     },
-    "statusRequestSchemaUri": {
+    "StatusRequestSchemaUri": {
       "enum": [
         "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json"
       ],
@@ -79,7 +80,7 @@
     "$schema": {
       "allOf": [
         {
-          "$ref": "#/definitions/statusRequestSchemaUri"
+          "$ref": "#/definitions/StatusRequestSchemaUri"
         }
       ],
       "description": "Status request schema URI constant."
@@ -95,7 +96,7 @@
     "RequestId": {
       "allOf": [
         {
-          "$ref": "#/definitions/resourceId"
+          "$ref": "#/definitions/ResourceId"
         }
       ],
       "description": "The `requestId` of the original package operation to query."
@@ -111,7 +112,7 @@
     "RequestVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/semanticVersion"
+          "$ref": "#/definitions/SemanticVersion"
         }
       ],
       "description": "Request syntax version (semver)."

@@ -1,4 +1,5 @@
 {
+  "$id": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -28,7 +29,7 @@
         "ProtocolVersion": {
           "allOf": [
             {
-              "$ref": "#/definitions/protocolVersion"
+              "$ref": "#/definitions/ProtocolVersion"
             }
           ],
           "description": "Protocol version (e.g., \"1.0\")."
@@ -89,31 +90,31 @@
       ],
       "type": "string"
     },
+    "ProtocolVersion": {
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
+    },
+    "ResourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
+    "SemanticVersion": {
+      "maxLength": 128,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
+    "StatusResponseSchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json"
+      ],
+      "type": "string"
+    },
     "Transport": {
       "description": "Broker transport type.",
       "enum": [
         "HttpNamedPipe",
         "HttpLoopbackSimulator"
-      ],
-      "type": "string"
-    },
-    "protocolVersion": {
-      "pattern": "^[0-9]+\\.[0-9]+$",
-      "type": "string"
-    },
-    "resourceId": {
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-      "type": "string"
-    },
-    "semanticVersion": {
-      "maxLength": 128,
-      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
-      "type": "string"
-    },
-    "statusResponseSchemaUri": {
-      "enum": [
-        "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json"
       ],
       "type": "string"
     }
@@ -123,7 +124,7 @@
     "$schema": {
       "allOf": [
         {
-          "$ref": "#/definitions/statusResponseSchemaUri"
+          "$ref": "#/definitions/StatusResponseSchemaUri"
         }
       ],
       "description": "Status response schema URI constant."
@@ -163,7 +164,7 @@
     "RequestId": {
       "allOf": [
         {
-          "$ref": "#/definitions/resourceId"
+          "$ref": "#/definitions/ResourceId"
         }
       ],
       "description": "The original request id being queried."
@@ -179,7 +180,7 @@
     "ResponseVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/semanticVersion"
+          "$ref": "#/definitions/SemanticVersion"
         }
       ],
       "description": "Response syntax version (semver)."

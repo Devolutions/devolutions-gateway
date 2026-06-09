@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{Architecture, Elevation, ManagerName, Operation, Scope};
 use super::markers::{PackageOperation, RequestSchemaUri};
-use super::newtypes::{CustomParameterString, PackageIdentifier, ProcessName, ResourceId, SemanticVersion};
+use super::newtypes::{CustomParameterString, PackageIdentifier, ProcessName, ResourceId, SemanticVersion, VersionString};
 
 /// Canonical request sent by an unelevated UniGetUI process to the elevated broker.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -101,8 +101,12 @@ pub struct RequestPackage {
     pub name: String,
 
     /// Target version (for update/install operations).
+    ///
+    /// A lenient version string rather than strict SemVer: real package versions
+    /// are frequently not SemVer (e.g. PowerShell modules use 4-part .NET versions
+    /// like `5.6.0.0`, and some winget packages use 2-part or date-based versions).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<SemanticVersion>,
+    pub version: Option<VersionString>,
 
     /// Target architecture.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,4 +1,5 @@
 {
+  "$id": "https://aka.ms/unigetui/package-request.schema.1.0.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -53,6 +54,11 @@
       ],
       "type": "object"
     },
+    "CustomParameterString": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
     "Elevation": {
       "description": "Requested elevation level.",
       "enum": [
@@ -79,10 +85,21 @@
       ],
       "type": "string"
     },
+    "PackageIdentifier": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
+      "type": "string"
+    },
     "PackageOperation": {
       "enum": [
         "PackageOperation"
       ],
+      "type": "string"
+    },
+    "ProcessName": {
+      "maxLength": 128,
+      "minLength": 1,
       "type": "string"
     },
     "RequestManager": {
@@ -132,7 +149,7 @@
         "CustomParameters": {
           "description": "Additional command-line parameters.",
           "items": {
-            "$ref": "#/definitions/customParameterString"
+            "$ref": "#/definitions/CustomParameterString"
           },
           "maxItems": 64,
           "type": "array"
@@ -144,7 +161,7 @@
         "KillBeforeOperation": {
           "description": "Processes to kill before running the operation.",
           "items": {
-            "$ref": "#/definitions/processName"
+            "$ref": "#/definitions/ProcessName"
           },
           "maxItems": 64,
           "type": "array"
@@ -229,7 +246,7 @@
         "Id": {
           "allOf": [
             {
-              "$ref": "#/definitions/packageIdentifier"
+              "$ref": "#/definitions/PackageIdentifier"
             }
           ],
           "description": "Package identifier (e.g., \"Publisher.Package\" for WinGet)."
@@ -243,13 +260,13 @@
         "Version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/semanticVersion"
+              "$ref": "#/definitions/VersionString"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Target version (for update/install operations)."
+          "description": "Target version (for update/install operations).\n\nA lenient version string rather than strict SemVer: real package versions are frequently not SemVer (e.g. PowerShell modules use 4-part .NET versions like `5.6.0.0`, and some winget packages use 2-part or date-based versions)."
         }
       },
       "required": [
@@ -257,6 +274,12 @@
         "Name"
       ],
       "type": "object"
+    },
+    "RequestSchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-request.schema.1.0.json"
+      ],
+      "type": "string"
     },
     "RequestSource": {
       "additionalProperties": false,
@@ -289,6 +312,11 @@
       ],
       "type": "object"
     },
+    "ResourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
     "Scope": {
       "description": "Package installation scope.",
       "enum": [
@@ -297,36 +325,14 @@
       ],
       "type": "string"
     },
-    "customParameterString": {
-      "maxLength": 512,
-      "minLength": 1,
-      "type": "string"
-    },
-    "packageIdentifier": {
-      "maxLength": 256,
-      "minLength": 1,
-      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
-      "type": "string"
-    },
-    "processName": {
-      "maxLength": 128,
-      "minLength": 1,
-      "type": "string"
-    },
-    "requestSchemaUri": {
-      "enum": [
-        "https://aka.ms/unigetui/package-request.schema.1.0.json"
-      ],
-      "type": "string"
-    },
-    "resourceId": {
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-      "type": "string"
-    },
-    "semanticVersion": {
+    "SemanticVersion": {
       "maxLength": 128,
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
+    "VersionString": {
+      "maxLength": 128,
+      "minLength": 1,
       "type": "string"
     }
   },
@@ -335,7 +341,7 @@
     "$schema": {
       "allOf": [
         {
-          "$ref": "#/definitions/requestSchemaUri"
+          "$ref": "#/definitions/RequestSchemaUri"
         }
       ],
       "description": "Request schema URI constant."
@@ -388,7 +394,7 @@
     "RequestId": {
       "allOf": [
         {
-          "$ref": "#/definitions/resourceId"
+          "$ref": "#/definitions/ResourceId"
         }
       ],
       "description": "Unique client-generated request id for audit correlation."
@@ -404,7 +410,7 @@
     "RequestVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/semanticVersion"
+          "$ref": "#/definitions/SemanticVersion"
         }
       ],
       "description": "The request syntax version (semver)."

@@ -1,4 +1,5 @@
 {
+  "$id": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -28,7 +29,7 @@
         "ProtocolVersion": {
           "allOf": [
             {
-              "$ref": "#/definitions/protocolVersion"
+              "$ref": "#/definitions/ProtocolVersion"
             }
           ],
           "description": "Protocol version (e.g., \"1.0\")."
@@ -50,6 +51,11 @@
       ],
       "type": "object"
     },
+    "CommandString": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "type": "string"
+    },
     "Decision": {
       "description": "Policy decision.",
       "enum": [
@@ -65,7 +71,7 @@
         "Command": {
           "description": "Command that was or would be executed.",
           "items": {
-            "$ref": "#/definitions/commandString"
+            "$ref": "#/definitions/CommandString"
           },
           "maxItems": 256,
           "type": "array"
@@ -115,6 +121,21 @@
       ],
       "type": "string"
     },
+    "PackageIdentifier": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
+      "type": "string"
+    },
+    "ProtocolVersion": {
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
+    },
+    "ResourceId": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+      "type": "string"
+    },
     "ResponsePolicyInfo": {
       "additionalProperties": false,
       "description": "Summary of policy used for the decision.",
@@ -122,7 +143,7 @@
         "Id": {
           "allOf": [
             {
-              "$ref": "#/definitions/resourceId"
+              "$ref": "#/definitions/ResourceId"
             }
           ],
           "description": "Policy document identifier."
@@ -130,7 +151,7 @@
         "PolicyVersion": {
           "allOf": [
             {
-              "$ref": "#/definitions/semanticVersion"
+              "$ref": "#/definitions/SemanticVersion"
             }
           ],
           "description": "Policy syntax version."
@@ -150,48 +171,28 @@
       ],
       "type": "object"
     },
+    "ResponseSchemaUri": {
+      "enum": [
+        "https://aka.ms/unigetui/package-broker-response.schema.1.0.json"
+      ],
+      "type": "string"
+    },
+    "RuleId": {
+      "maxLength": 128,
+      "pattern": "^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127})$",
+      "type": "string"
+    },
+    "SemanticVersion": {
+      "maxLength": 128,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string"
+    },
     "Transport": {
       "description": "Broker transport type.",
       "enum": [
         "HttpNamedPipe",
         "HttpLoopbackSimulator"
       ],
-      "type": "string"
-    },
-    "commandString": {
-      "maxLength": 2048,
-      "minLength": 1,
-      "type": "string"
-    },
-    "packageIdentifier": {
-      "maxLength": 256,
-      "minLength": 1,
-      "pattern": "^[^\\/:*?\"<>|\\x01-\\x1f]+$",
-      "type": "string"
-    },
-    "protocolVersion": {
-      "pattern": "^[0-9]+\\.[0-9]+$",
-      "type": "string"
-    },
-    "resourceId": {
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-      "type": "string"
-    },
-    "responseSchemaUri": {
-      "enum": [
-        "https://aka.ms/unigetui/package-broker-response.schema.1.0.json"
-      ],
-      "type": "string"
-    },
-    "ruleId": {
-      "maxLength": 128,
-      "pattern": "^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127})$",
-      "type": "string"
-    },
-    "semanticVersion": {
-      "maxLength": 128,
-      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
       "type": "string"
     }
   },
@@ -200,7 +201,7 @@
     "$schema": {
       "allOf": [
         {
-          "$ref": "#/definitions/responseSchemaUri"
+          "$ref": "#/definitions/ResponseSchemaUri"
         }
       ],
       "description": "Response schema URI constant."
@@ -208,7 +209,7 @@
     "AuditId": {
       "allOf": [
         {
-          "$ref": "#/definitions/resourceId"
+          "$ref": "#/definitions/ResourceId"
         }
       ],
       "description": "Server-generated audit identifier."
@@ -265,7 +266,7 @@
     "PackageId": {
       "anyOf": [
         {
-          "$ref": "#/definitions/packageIdentifier"
+          "$ref": "#/definitions/PackageIdentifier"
         },
         {
           "type": "null"
@@ -295,7 +296,7 @@
     "RequestId": {
       "allOf": [
         {
-          "$ref": "#/definitions/resourceId"
+          "$ref": "#/definitions/ResourceId"
         }
       ],
       "description": "Echoed request id."
@@ -311,7 +312,7 @@
     "ResponseVersion": {
       "allOf": [
         {
-          "$ref": "#/definitions/semanticVersion"
+          "$ref": "#/definitions/SemanticVersion"
         }
       ],
       "description": "Response syntax version (semver)."
@@ -319,7 +320,7 @@
     "RuleId": {
       "allOf": [
         {
-          "$ref": "#/definitions/ruleId"
+          "$ref": "#/definitions/RuleId"
         }
       ],
       "description": "The rule that produced the decision."
