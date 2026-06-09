@@ -60,8 +60,12 @@ mod windows_pipe {
         let security_attributes =
             build_pipe_security_attributes().context("failed to build pipe security attributes")?;
 
-        // SAFETY: security_attributes.as_ptr() points to a valid SECURITY_ATTRIBUTES
-        // structure that remains alive for the duration of this call.
+        // SAFETY: `create_with_security_attributes_raw` requires a pointer to a valid
+        // `SECURITY_ATTRIBUTES` that stays alive for the duration of the call. The pointer
+        // comes from `security_attributes` (a `win_api_wrappers::security::SecurityAttributes`),
+        // a local binding that owns the structure and its security descriptor and is dropped
+        // only at the end of this function, well after the call returns. `CreateNamedPipeW`
+        // copies the descriptor at creation, so the pointer is not retained afterwards.
         let server = unsafe {
             ServerOptions::new()
                 .first_pipe_instance(false)
