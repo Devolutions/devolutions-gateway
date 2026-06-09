@@ -194,15 +194,18 @@ async fn run_tcp_server(state: Arc<BrokerState>, addr: SocketAddr, shutdown: Arc
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "TCP server listening");
 
+    // Build the axum router once; it is cheaply cloned per connection.
+    let router = unigetui_broker::server::build_router(state);
+
     loop {
         tokio::select! {
             result = listener.accept() => {
                 match result {
                     Ok((stream, peer)) => {
                         tracing::debug!(%peer, "TCP connection accepted");
-                        let state = Arc::clone(&state);
+                        let router = router.clone();
                         tokio::spawn(async move {
-                            unigetui_broker::server::serve_connection(stream, state).await;
+                            unigetui_broker::server::serve_connection(stream, router).await;
                         });
                     }
                     Err(error) => {

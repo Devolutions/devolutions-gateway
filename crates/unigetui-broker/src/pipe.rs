@@ -18,28 +18,31 @@ mod windows_pipe {
     use windows::Win32::Security::Authorization::SET_ACCESS;
     use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
 
-    use crate::server::{BrokerState, serve_connection};
+    use crate::server::{BrokerState, build_router, serve_connection};
 
     /// Default pipe name for the UniGetUI package broker.
     pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\UniGetUI.PackageBroker.v1";
 
     /// Start the named pipe server and accept connections until shutdown.
     pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: Arc<Notify>) -> anyhow::Result<()> {
-        let pipe_name = &state.pipe_name;
+        let pipe_name = state.pipe_name.clone();
         tracing::info!(%pipe_name, "Starting named pipe server");
+
+        // Build the axum router once; it is cheaply cloned per connection.
+        let router = build_router(state);
 
         loop {
             // Create a new pipe instance for each connection.
-            let server = create_pipe_instance(pipe_name)?;
+            let server = create_pipe_instance(&pipe_name)?;
 
             tokio::select! {
                 result = server.connect() => {
                     match result {
                         Ok(()) => {
                             tracing::info!("Client connected to named pipe");
-                            let state = Arc::clone(&state);
+                            let router = router.clone();
                             tokio::spawn(async move {
-                                serve_connection(server, state).await;
+                                serve_connection(server, router).await;
                                 tracing::info!("Client disconnected from named pipe");
                             });
                         }

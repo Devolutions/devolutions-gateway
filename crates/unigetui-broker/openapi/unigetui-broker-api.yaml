@@ -1,0 +1,1050 @@
+openapi: 3.1.0
+info:
+  title: UniGetUI Package Broker API
+  description: HTTP API exposed by the Devolutions Agent UniGetUI package broker over a Windows named pipe.
+  version: '1.0'
+paths:
+  /v1/health:
+    get:
+      summary: Health check
+      description: Reports whether the broker is ready or paused (policy unavailable).
+  /v1/capabilities:
+    get:
+      summary: Broker capabilities
+      description: Lists supported transports, media types, managers, and operations.
+  /v1/package-operations/evaluate:
+    post:
+      summary: Evaluate a package operation (dry-run)
+      description: Evaluates a package request against the active policy without executing anything.
+      requestBody:
+        description: Canonical request sent by an unelevated UniGetUI process to the elevated broker.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PackageRequest'
+        required: true
+      responses:
+        '200':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '403':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+  /v1/package-operations:
+    post:
+      summary: Evaluate and execute a package operation
+      description: Evaluates a package request and, if allowed, submits it for elevated background execution. Poll the status endpoint for the result.
+      requestBody:
+        description: Canonical request sent by an unelevated UniGetUI process to the elevated broker.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PackageRequest'
+        required: true
+      responses:
+        '200':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '403':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+  /v1/package-operations/status:
+    post:
+      summary: Query operation status
+      description: Returns the current status of a previously submitted package operation.
+      requestBody:
+        description: Request to query the status of a previously submitted package operation.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusRequest'
+        required: true
+      responses:
+        '200':
+          description: Response to a status query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          description: Response to a status query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+components:
+  schemas:
+    Architecture:
+      description: Target architecture.
+      type: string
+      enum:
+      - X86
+      - X64
+      - Arm64
+      - Neutral
+    BrokerContext:
+      description: Broker context provided by the client.
+      type: object
+      required:
+      - EffectiveUser
+      - RequestedElevation
+      properties:
+        ClientProcessPath:
+          description: File path of the client process.
+          type: string
+          maxLength: 2048
+          nullable: true
+        ClientVersion:
+          description: Version of the UniGetUI client.
+          type: string
+          maxLength: 128
+          nullable: true
+        EffectiveUser:
+          description: Windows identity of the calling user.
+          type: string
+          maxLength: 256
+          minLength: 1
+        RequestedElevation:
+          description: Elevation level requested.
+          $ref: '#/components/schemas/Elevation'
+      additionalProperties: false
+    BrokerInfo:
+      description: Broker identity information in responses.
+      type: object
+      required:
+      - ElevatedSimulation
+      - Name
+      - ProtocolVersion
+      - Transport
+      properties:
+        ElevatedSimulation:
+          description: Whether the broker is running in simulated elevation mode.
+          type: boolean
+        Name:
+          description: Broker display name.
+          type: string
+          maxLength: 128
+          minLength: 1
+        PipeName:
+          description: Named pipe path (when transport is http-named-pipe).
+          type: string
+          maxLength: 256
+          minLength: 1
+          nullable: true
+        ProtocolVersion:
+          description: Protocol version (e.g., "1.0").
+          $ref: '#/components/schemas/ProtocolVersion'
+        Transport:
+          description: Transport mechanism.
+          $ref: '#/components/schemas/Transport'
+      additionalProperties: false
+    BrokerResponse:
+      description: Canonical response returned by the broker after evaluating a request.
+      type: object
+      required:
+      - $schema
+      - AuditId
+      - Broker
+      - CompletedAt
+      - Decision
+      - Execution
+      - Policy
+      - Reason
+      - ReceivedAt
+      - RequestId
+      - ResponseType
+      - ResponseVersion
+      - RuleId
+      - WouldExecute
+      properties:
+        $schema:
+          description: Response schema URI constant.
+          $ref: '#/components/schemas/ResponseSchemaUri'
+        AuditId:
+          description: Server-generated audit identifier.
+          $ref: '#/components/schemas/ResourceId'
+        Broker:
+          description: Broker identity and capabilities.
+          $ref: '#/components/schemas/BrokerInfo'
+        CompletedAt:
+          description: UTC timestamp when broker completed evaluation (RFC 3339).
+          type: string
+          format: date-time
+        Decision:
+          description: The evaluation decision.
+          $ref: '#/components/schemas/Decision'
+        Execution:
+          description: Execution details.
+          $ref: '#/components/schemas/ExecutionInfo'
+        Manager:
+          description: Manager name from the request (null if not parsed).
+          type: string
+          maxLength: 256
+          minLength: 1
+          nullable: true
+        Operation:
+          description: Operation from the request (null if not parsed).
+          $ref: '#/components/schemas/Operation'
+          nullable: true
+        PackageId:
+          description: Package identifier from the request (null if not parsed).
+          $ref: '#/components/schemas/PackageIdentifier'
+          nullable: true
+        Policy:
+          description: Summary of the policy used.
+          $ref: '#/components/schemas/ResponsePolicyInfo'
+        Reason:
+          description: Human-readable reason for the decision.
+          type: string
+          maxLength: 2048
+          minLength: 1
+        ReceivedAt:
+          description: UTC timestamp when broker received the request (RFC 3339).
+          type: string
+          format: date-time
+        RequestId:
+          description: Echoed request id.
+          $ref: '#/components/schemas/ResourceId'
+        ResponseType:
+          description: Must be `"packageBrokerResponse"`.
+          $ref: '#/components/schemas/PackageBrokerResponse'
+        ResponseVersion:
+          description: Response syntax version (semver).
+          $ref: '#/components/schemas/SemanticVersion'
+        RuleId:
+          description: The rule that produced the decision.
+          $ref: '#/components/schemas/RuleId'
+        Source:
+          description: Source name from the request (null if not parsed).
+          type: string
+          maxLength: 256
+          minLength: 1
+          nullable: true
+        WouldExecute:
+          description: Whether the broker would execute a command for this decision.
+          type: boolean
+      additionalProperties: false
+    CommandString:
+      type: string
+      maxLength: 2048
+      minLength: 1
+    CustomParameterString:
+      type: string
+      maxLength: 512
+      minLength: 1
+    Decision:
+      description: Policy decision.
+      type: string
+      enum:
+      - Allow
+      - Deny
+    Elevation:
+      description: Requested elevation level.
+      type: string
+      enum:
+      - Standard
+      - Elevated
+    ExecutionInfo:
+      description: Execution outcome details.
+      type: object
+      required:
+      - Command
+      - Mode
+      - Note
+      properties:
+        Command:
+          description: Command that was or would be executed.
+          type: array
+          items:
+            $ref: '#/components/schemas/CommandString'
+          maxItems: 256
+        Mode:
+          description: Execution mode.
+          $ref: '#/components/schemas/ExecutionMode'
+        Note:
+          description: Additional note about execution.
+          type: string
+          maxLength: 2048
+          minLength: 1
+      additionalProperties: false
+    ExecutionMode:
+      description: Execution mode.
+      type: string
+      enum:
+      - SimulatedElevated
+      - Elevated
+    ManagerName:
+      description: Supported package manager names.
+      type: string
+      enum:
+      - Winget
+      - PowerShell
+      - PowerShell7
+    Operation:
+      description: Package operation type.
+      type: string
+      enum:
+      - Install
+      - Update
+      - Uninstall
+    OperationStatus:
+      description: Status of an asynchronous package operation.
+      oneOf:
+      - description: Process is being prepared/started.
+        type: string
+        enum:
+        - Starting
+      - description: Process is running.
+        type: string
+        enum:
+        - Running
+      - description: Process exited successfully (exit code 0).
+        type: string
+        enum:
+        - Completed
+      - description: Process failed (non-zero exit, timeout, or launch failure).
+        type: string
+        enum:
+        - Failed
+    PackageBrokerResponse:
+      type: string
+      enum:
+      - PackageBrokerResponse
+    PackageIdentifier:
+      type: string
+      maxLength: 256
+      minLength: 1
+      pattern: ^[^\/:*?"<>|\x01-\x1f]+$
+    PackageOperation:
+      type: string
+      enum:
+      - PackageOperation
+    PackageOperationStatus:
+      type: string
+      enum:
+      - PackageOperationStatus
+    PackageOperationStatusResponse:
+      type: string
+      enum:
+      - PackageOperationStatusResponse
+    PackageRequest:
+      description: Canonical request sent by an unelevated UniGetUI process to the elevated broker.
+      type: object
+      required:
+      - $schema
+      - Broker
+      - CreatedAt
+      - Manager
+      - Operation
+      - Options
+      - Package
+      - RequestId
+      - RequestType
+      - RequestVersion
+      - Source
+      properties:
+        $schema:
+          description: Request schema URI constant.
+          $ref: '#/components/schemas/RequestSchemaUri'
+        Broker:
+          description: Broker context from the client.
+          $ref: '#/components/schemas/BrokerContext'
+        CreatedAt:
+          description: UTC timestamp when the client created the request (RFC 3339).
+          type: string
+          format: date-time
+        Manager:
+          description: Package manager information.
+          $ref: '#/components/schemas/RequestManager'
+        Operation:
+          description: The package operation to perform.
+          $ref: '#/components/schemas/Operation'
+        Options:
+          description: Operation options.
+          $ref: '#/components/schemas/RequestOptions'
+        Package:
+          description: Package information.
+          $ref: '#/components/schemas/RequestPackage'
+        RequestId:
+          description: Unique client-generated request id for audit correlation.
+          $ref: '#/components/schemas/ResourceId'
+        RequestType:
+          description: Must be `"packageOperation"`.
+          $ref: '#/components/schemas/PackageOperation'
+        RequestVersion:
+          description: The request syntax version (semver).
+          $ref: '#/components/schemas/SemanticVersion'
+        Source:
+          description: Source/repository information.
+          $ref: '#/components/schemas/RequestSource'
+      additionalProperties: false
+    ProcessName:
+      type: string
+      maxLength: 128
+      minLength: 1
+    ProtocolVersion:
+      type: string
+      pattern: ^[0-9]+\.[0-9]+$
+    RequestManager:
+      description: Package manager metadata from the request.
+      type: object
+      required:
+      - DisplayName
+      - ExecutableFriendlyName
+      - Name
+      properties:
+        DisplayName:
+          description: Human-readable display name.
+          type: string
+          maxLength: 128
+          minLength: 1
+        ExecutableFriendlyName:
+          description: Friendly name of the executable.
+          type: string
+          maxLength: 128
+          minLength: 1
+        Name:
+          description: Package manager name.
+          $ref: '#/components/schemas/ManagerName'
+      additionalProperties: false
+    RequestOptions:
+      description: Options controlling the package operation.
+      type: object
+      required:
+      - Interactive
+      - PreRelease
+      - SkipHashCheck
+      properties:
+        CustomInstallLocation:
+          description: Custom install directory path.
+          type: string
+          maxLength: 2048
+          nullable: true
+        CustomParameters:
+          description: Additional command-line parameters.
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomParameterString'
+          maxItems: 64
+        Interactive:
+          description: Run interactively (show installer UI).
+          type: boolean
+        KillBeforeOperation:
+          description: Processes to kill before running the operation.
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessName'
+          maxItems: 64
+        NoUpgrade:
+          description: Whether to skip upgrade if an existing version is detected (for install operations).
+          default: false
+          type: boolean
+        PostOperationCommand:
+          description: Command to execute after the package operation.
+          type: string
+          maxLength: 2048
+          nullable: true
+        PreOperationCommand:
+          description: Command to execute before the package operation.
+          type: string
+          maxLength: 2048
+          nullable: true
+        PreRelease:
+          description: Allow pre-release versions.
+          type: boolean
+        Scope:
+          description: Installation scope.
+          $ref: '#/components/schemas/Scope'
+          nullable: true
+        SkipHashCheck:
+          description: Skip package hash verification.
+          type: boolean
+        UninstallPrevious:
+          description: Whether to uninstall previous version before installing update.
+          default: false
+          type: boolean
+      additionalProperties: false
+    RequestPackage:
+      description: Package information.
+      type: object
+      required:
+      - Id
+      - Name
+      properties:
+        Architecture:
+          description: Target architecture.
+          $ref: '#/components/schemas/Architecture'
+          nullable: true
+        Channel:
+          description: Release channel.
+          type: string
+          maxLength: 16
+          minLength: 1
+          nullable: true
+        Id:
+          description: Package identifier (e.g., "Publisher.Package" for WinGet).
+          $ref: '#/components/schemas/PackageIdentifier'
+        Name:
+          description: Human-readable package name.
+          type: string
+          maxLength: 256
+          minLength: 1
+        Version:
+          description: |-
+            Target version (for update/install operations).
+
+            A lenient version string rather than strict SemVer: real package versions are frequently not SemVer (e.g. PowerShell modules use 4-part .NET versions like `5.6.0.0`, and some winget packages use 2-part or date-based versions).
+          $ref: '#/components/schemas/VersionString'
+          nullable: true
+      additionalProperties: false
+    RequestSchemaUri:
+      type: string
+      enum:
+      - https://aka.ms/unigetui/package-request.schema.1.0.json
+    RequestSource:
+      description: Package source/repository information.
+      type: object
+      required:
+      - Name
+      properties:
+        IsVirtualManager:
+          description: Whether this is a virtual manager (runs without a real CLI).
+          type: boolean
+          nullable: true
+        Name:
+          description: Source name.
+          type: string
+          maxLength: 128
+          minLength: 1
+        Url:
+          description: Optional source URL.
+          type: string
+          maxLength: 2048
+          nullable: true
+      additionalProperties: false
+    ResourceId:
+      type: string
+      maxLength: 128
+      pattern: ^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$
+    ResponsePolicyInfo:
+      description: Summary of policy used for the decision.
+      type: object
+      required:
+      - Id
+      - PolicyVersion
+      - Revision
+      properties:
+        Id:
+          description: Policy document identifier.
+          $ref: '#/components/schemas/ResourceId'
+        PolicyVersion:
+          description: Policy syntax version.
+          $ref: '#/components/schemas/SemanticVersion'
+        Revision:
+          description: Policy revision number.
+          type: integer
+          format: int32
+          maximum: 2147483647.0
+          minimum: 1.0
+      additionalProperties: false
+    ResponseSchemaUri:
+      type: string
+      enum:
+      - https://aka.ms/unigetui/package-broker-response.schema.1.0.json
+    RuleId:
+      type: string
+      maxLength: 128
+      pattern: ^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\-]{0,127})$
+    Scope:
+      description: Package installation scope.
+      type: string
+      enum:
+      - User
+      - Machine
+    SemanticVersion:
+      type: string
+      maxLength: 128
+      pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$
+    StatusRequest:
+      description: Request to query the status of a previously submitted package operation.
+      type: object
+      required:
+      - $schema
+      - Broker
+      - RequestId
+      - RequestType
+      - RequestVersion
+      properties:
+        $schema:
+          description: Status request schema URI constant.
+          $ref: '#/components/schemas/StatusRequestSchemaUri'
+        Broker:
+          description: Broker context from the client.
+          $ref: '#/components/schemas/BrokerContext'
+        RequestId:
+          description: The `requestId` of the original package operation to query.
+          $ref: '#/components/schemas/ResourceId'
+        RequestType:
+          description: Must be `"packageOperationStatus"`.
+          $ref: '#/components/schemas/PackageOperationStatus'
+        RequestVersion:
+          description: Request syntax version (semver).
+          $ref: '#/components/schemas/SemanticVersion'
+      additionalProperties: false
+    StatusRequestSchemaUri:
+      type: string
+      enum:
+      - https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json
+    StatusResponse:
+      description: Response to a status query.
+      type: object
+      required:
+      - $schema
+      - Broker
+      - RequestId
+      - ResponseType
+      - ResponseVersion
+      - Status
+      properties:
+        $schema:
+          description: Status response schema URI constant.
+          $ref: '#/components/schemas/StatusResponseSchemaUri'
+        Broker:
+          description: Broker identity and capabilities.
+          $ref: '#/components/schemas/BrokerInfo'
+        CompletedAt:
+          description: UTC timestamp when the operation completed or failed (null if still running).
+          type: string
+          format: date-time
+          nullable: true
+        ExitCode:
+          description: Process exit code (present when status is `completed`, or `failed` due to non-zero exit).
+          type: integer
+          format: int32
+          nullable: true
+        Note:
+          description: Human-readable note about the status.
+          type: string
+          maxLength: 2048
+          nullable: true
+        RequestId:
+          description: The original request id being queried.
+          $ref: '#/components/schemas/ResourceId'
+        ResponseType:
+          description: Must be `"packageOperationStatusResponse"`.
+          $ref: '#/components/schemas/PackageOperationStatusResponse'
+        ResponseVersion:
+          description: Response syntax version (semver).
+          $ref: '#/components/schemas/SemanticVersion'
+        StartedAt:
+          description: UTC timestamp when the process was actually launched (null if not yet started).
+          type: string
+          format: date-time
+          nullable: true
+        Status:
+          description: Current status of the operation.
+          $ref: '#/components/schemas/OperationStatus'
+      additionalProperties: false
+    StatusResponseSchemaUri:
+      type: string
+      enum:
+      - https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json
+    Transport:
+      description: Broker transport type.
+      type: string
+      enum:
+      - HttpNamedPipe
+      - HttpLoopbackSimulator
+    VersionString:
+      type: string
+      maxLength: 128
+      minLength: 1
+    PolicyDocument:
+      title: PolicyDocument
+      description: A policy document governing which package operations are allowed or denied.
+      type: object
+      required:
+      - $schema
+      - Enforcement
+      - Metadata
+      - PolicyType
+      - PolicyVersion
+      - Rules
+      properties:
+        $schema:
+          description: Policy schema URI constant.
+          allOf:
+          - $ref: '#/components/schemas/PolicySchemaUri'
+        Enforcement:
+          description: Enforcement configuration.
+          allOf:
+          - $ref: '#/components/schemas/PolicyEnforcement'
+        Metadata:
+          description: Policy metadata.
+          allOf:
+          - $ref: '#/components/schemas/PolicyMetadata'
+        PolicyType:
+          description: Must be `"packageBrokerPolicy"`.
+          allOf:
+          - $ref: '#/components/schemas/PackageBrokerPolicy'
+        PolicyVersion:
+          description: Policy syntax version (semver).
+          allOf:
+          - $ref: '#/components/schemas/SemanticVersion'
+        Rules:
+          description: Ordered list of policy rules (may be empty; enforcement defaults apply).
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyRule'
+          maxItems: 1024
+      additionalProperties: false
+    HttpUrl:
+      type: string
+      maxLength: 2048
+      pattern: ^([Hh][Tt][Tt][Pp][Ss]?)://.+$
+    PackageBrokerPolicy:
+      type: string
+      enum:
+      - PackageBrokerPolicy
+    PolicyConstraints:
+      description: Constraints applied after a rule matches.
+      type: object
+      properties:
+        AllowCustomInstallLocation:
+          description: Allow custom install location.
+          type: boolean
+        AllowCustomParameters:
+          description: Allow custom parameters.
+          type: boolean
+        AllowInteractive:
+          description: Allow interactive mode.
+          type: boolean
+        AllowKillBeforeOperation:
+          description: Allow killing processes before operation.
+          type: boolean
+        AllowPrePostCommands:
+          description: Allow pre/post operation commands.
+          type: boolean
+        AllowPreRelease:
+          description: Allow pre-release versions.
+          type: boolean
+        AllowSkipHashCheck:
+          description: Allow skipping hash verification.
+          type: boolean
+        AllowUninstallPrevious:
+          description: Allow uninstalling previous version before installing update.
+          type: boolean
+        AllowUpgrade:
+          description: Allow skipping upgrade on install operations if an existing version is detected (for install operations).
+          type: boolean
+        AllowedCustomParameterPatterns:
+          description: Glob patterns for allowed custom parameters.
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomParameterString'
+          maxItems: 128
+        AllowedCustomParameters:
+          description: Exact allowed custom parameters.
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomParameterString'
+          maxItems: 128
+        AllowedInstallLocationPatterns:
+          description: Glob patterns for allowed install locations.
+          type: array
+          items:
+            $ref: '#/components/schemas/StringPattern'
+          maxItems: 64
+        DeniedCustomParameters:
+          description: Denied custom parameters (deny takes precedence over allow).
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomParameterString'
+          maxItems: 128
+      additionalProperties: false
+    PolicyEnforcement:
+      description: Enforcement configuration.
+      type: object
+      required:
+      - DefaultDecision
+      - RulePrecedence
+      properties:
+        AuditMode:
+          description: When true, broker logs decisions but does not enforce.
+          type: boolean
+          nullable: true
+        DefaultDecision:
+          description: Decision when no rule matches.
+          allOf:
+          - $ref: '#/components/schemas/Decision'
+        RulePrecedence:
+          description: Rule precedence strategy (must be "PriorityThenDeny").
+          allOf:
+          - $ref: '#/components/schemas/RulePrecedence'
+      additionalProperties: false
+    PolicyMatch:
+      description: Match criteria for a policy rule. All specified fields must match. At least one field must be present.
+      type: object
+      properties:
+        Architectures:
+          description: Allowed architectures.
+          type: array
+          items:
+            $ref: '#/components/schemas/Architecture'
+          maxItems: 5
+          uniqueItems: true
+        Elevation:
+          description: Allowed elevation levels.
+          type: array
+          items:
+            $ref: '#/components/schemas/Elevation'
+          maxItems: 2
+          uniqueItems: true
+        HasCustomInstallLocation:
+          description: Whether request has custom install location.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        HasCustomParameters:
+          description: Whether request has custom parameters.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        HasKillBeforeOperation:
+          description: Whether request has kill-before-operation entries.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        HasPrePostCommands:
+          description: Whether request has pre/post operation commands.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        HasUninstallPrevious:
+          description: Whether request has uninstall-previous flag set.
+          type: array
+          items:
+            type: boolean
+          uniqueItems: true
+        Interactive:
+          description: Allowed interactive values.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        Managers:
+          description: Allowed managers.
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagerName'
+          maxItems: 16
+          uniqueItems: true
+        Operations:
+          description: Allowed operations.
+          type: array
+          items:
+            $ref: '#/components/schemas/Operation'
+          maxItems: 3
+          uniqueItems: true
+        PackageIdentifiers:
+          description: Package identifier patterns (wildcard).
+          type: array
+          items:
+            $ref: '#/components/schemas/StringPattern'
+          maxItems: 1024
+          uniqueItems: true
+        PackageNames:
+          description: Package name patterns (wildcard).
+          type: array
+          items:
+            $ref: '#/components/schemas/StringPattern'
+          maxItems: 1024
+          uniqueItems: true
+        PreRelease:
+          description: Allowed preRelease values.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        Scopes:
+          description: Allowed scopes.
+          type: array
+          items:
+            $ref: '#/components/schemas/Scope'
+          maxItems: 2
+          uniqueItems: true
+        SkipHashCheck:
+          description: Allowed skipHashCheck values.
+          type: array
+          items:
+            type: boolean
+          maxItems: 2
+          uniqueItems: true
+        Sources:
+          description: Source patterns (wildcard).
+          type: array
+          items:
+            $ref: '#/components/schemas/StringPattern'
+          maxItems: 128
+          uniqueItems: true
+        VersionRange:
+          description: Semantic version range.
+          allOf:
+          - $ref: '#/components/schemas/VersionRange'
+          nullable: true
+        Versions:
+          description: Exact version list.
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionString'
+          maxItems: 256
+          uniqueItems: true
+      additionalProperties: false
+    PolicyMetadata:
+      description: Policy metadata.
+      type: object
+      required:
+      - Id
+      - PublishedAt
+      - Publisher
+      - Revision
+      properties:
+        Description:
+          description: Human-readable description.
+          type: string
+          maxLength: 512
+          nullable: true
+        Id:
+          description: Unique policy identifier.
+          allOf:
+          - $ref: '#/components/schemas/ResourceId'
+        PublishedAt:
+          description: ISO 8601 publication timestamp (RFC 3339).
+          type: string
+          format: date-time
+        Publisher:
+          description: Organization that published the policy.
+          type: string
+          maxLength: 128
+          minLength: 1
+        Revision:
+          description: Monotonically increasing revision number.
+          type: integer
+          format: int32
+          maximum: 2147483647.0
+          minimum: 1.0
+        SupportUrl:
+          description: URL for support or documentation.
+          allOf:
+          - $ref: '#/components/schemas/HttpUrl'
+          nullable: true
+        ValidFrom:
+          description: Policy becomes active at this time.
+          type: string
+          format: date-time
+          nullable: true
+        ValidUntil:
+          description: Policy expires at this time.
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    PolicyRule:
+      description: A single policy rule.
+      type: object
+      required:
+      - Decision
+      - Id
+      - Match
+      - Priority
+      properties:
+        Constraints:
+          description: Additional constraints applied after matching. When absent, no constraints are enforced beyond the match criteria.
+          allOf:
+          - $ref: '#/components/schemas/PolicyConstraints'
+          nullable: true
+        Decision:
+          description: Decision if this rule matches.
+          allOf:
+          - $ref: '#/components/schemas/Decision'
+        Enabled:
+          description: Whether the rule is active.
+          default: true
+          type: boolean
+        Id:
+          description: Unique rule identifier.
+          allOf:
+          - $ref: '#/components/schemas/ResourceId'
+        Match:
+          description: Match criteria — request must satisfy all specified fields. At least one criterion must be present.
+          allOf:
+          - $ref: '#/components/schemas/PolicyMatch'
+        Priority:
+          description: Priority (lower = higher precedence).
+          type: integer
+          format: int32
+          maximum: 2147483647.0
+          minimum: 0.0
+        Reason:
+          description: Reason reported to the client.
+          type: string
+          maxLength: 512
+          nullable: true
+      additionalProperties: false
+    PolicySchemaUri:
+      type: string
+      enum:
+      - https://aka.ms/unigetui/package-policy.schema.1.0.json
+    RulePrecedence:
+      description: Rule precedence strategy — always PriorityThenDeny.
+      type: string
+      enum:
+      - PriorityThenDeny
+    StringPattern:
+      type: string
+      maxLength: 256
+      minLength: 1
+    VersionRange:
+      description: Semantic version range for matching.
+      type: object
+      properties:
+        IncludePrerelease:
+          description: Whether to include pre-release versions.
+          default: false
+          type: boolean
+        MaxVersion:
+          description: Maximum version (inclusive).
+          type: string
+          maxLength: 128
+          minLength: 1
+          nullable: true
+        MinVersion:
+          description: Minimum version (inclusive).
+          type: string
+          maxLength: 128
+          minLength: 1
+          nullable: true
+      additionalProperties: false
+

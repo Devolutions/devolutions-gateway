@@ -13,8 +13,13 @@ workspace = true
 anyhow = "1"
 async-trait = "0.1"
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "original-uri", "matched-path"] }
+aide = { version = "0.14", features = ["axum", "axum-json"] }
+tower = "0.5"
+tower-service = "0.3"
+tower-http = { version = "0.5", features = ["timeout"] }
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
 http-body-util = "0.1"
 bytes = "1"
 schemars = { version = "0.8", features = ["chrono"] }

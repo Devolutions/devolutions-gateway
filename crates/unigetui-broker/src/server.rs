@@ -1,21 +1,28 @@
 //! HTTP server for the UniGetUI package broker.
 //!
-//! Implements the HTTP-over-named-pipe protocol described in the spec.
+//! Built on `axum` + `aide`, served over a Windows named pipe (or TCP in dev).
+//! The same router drives both request handling and OpenAPI generation.
+//!
 //! Routes:
 //! - `GET /v1/health` — readiness check
 //! - `GET /v1/capabilities` — supported features
 //! - `POST /v1/package-operations/evaluate` — evaluate policy (dry-run)
 //! - `POST /v1/package-operations` — evaluate and execute
+//! - `POST /v1/package-operations/status` — query an operation's status
 
 use std::sync::{Arc, RwLock};
 
-use bytes::Bytes;
+use aide::axum::ApiRouter;
+use aide::axum::routing::{get_with, post_with};
+use aide::openapi::OpenApi;
+use aide::transform::TransformOperation;
+use axum::Json;
+use axum::body::{Body, Bytes};
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
 use chrono::{DateTime, Utc};
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::command_builder::build_command;
@@ -41,6 +48,8 @@ const ACCEPTED_CONTENT_TYPES: &[&str] = &[
     "application/json",
 ];
 
+const BROKER_NAME: &str = "Devolutions Agent UniGetUI Broker";
+
 /// Shared server state.
 pub struct BrokerState {
     /// Current policy. `None` means the broker is paused (policy file missing or corrupted).
@@ -50,42 +59,129 @@ pub struct BrokerState {
     pub tracker: OperationTracker,
 }
 
-/// Serve one HTTP connection over an arbitrary async stream.
-pub async fn serve_connection<S>(stream: S, state: Arc<BrokerState>)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Router and transport
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Build the broker's API router (state not yet applied).
+///
+/// Used both to serve requests (via [`build_router`]) and to generate the OpenAPI
+/// document (via [`openapi`]).
+pub fn api_router() -> ApiRouter<Arc<BrokerState>> {
+    ApiRouter::new()
+        .api_route("/v1/health", get_with(handle_health, health_docs))
+        .api_route("/v1/capabilities", get_with(handle_capabilities, capabilities_docs))
+        .api_route(
+            "/v1/package-operations/evaluate",
+            post_with(handle_evaluate_dryrun, evaluate_docs),
+        )
+        .api_route("/v1/package-operations", post_with(handle_execute, execute_docs))
+        .api_route("/v1/package-operations/status", post_with(handle_status, status_docs))
+}
+
+/// Build the axum router to serve, with state applied.
+pub fn build_router(state: Arc<BrokerState>) -> axum::Router {
+    axum::Router::from(api_router().with_state(state))
+}
+
+/// Serve one HTTP connection (a named-pipe instance or a TCP stream) using the router.
+pub async fn serve_connection<S>(stream: S, router: axum::Router)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let service = service_fn(move |req| {
-        let state = Arc::clone(&state);
-        async move { handle_request(req, state).await }
-    });
+    use tower_service::Service as _;
 
-    let io = hyper_util::rt::TokioIo::new(stream);
-    if let Err(error) = http1::Builder::new()
-        .max_buf_size(32 * 1024) // 32 KiB max header size per wire protocol spec.
-        .serve_connection(io, service)
+    let socket = TokioIo::new(stream);
+
+    // Obtain a per-connection service from the router.
+    let mut make_service = router.into_make_service();
+    let tower_service = match make_service.call(()).await {
+        Ok(service) => service,
+        Err(infallible) => match infallible {},
+    };
+    let hyper_service = hyper_util::service::TowerToHyperService::new(tower_service);
+
+    if let Err(error) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+        .http1()
+        .keep_alive(false)
+        .serve_connection_with_upgrades(socket, hyper_service)
         .await
     {
-        tracing::warn!(%error, "Connection error");
+        tracing::warn!(error = %error, "Connection error");
     }
 }
 
-async fn handle_request(
-    req: Request<Incoming>,
-    state: Arc<BrokerState>,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let response = match (req.method(), req.uri().path()) {
-        (&Method::GET, "/v1/health") => handle_health(&state),
-        (&Method::GET, "/v1/capabilities") => handle_capabilities(&state),
-        (&Method::POST, "/v1/package-operations/evaluate") => handle_evaluate(req, Arc::clone(&state), false).await,
-        (&Method::POST, "/v1/package-operations") => handle_evaluate(req, Arc::clone(&state), true).await,
-        (&Method::POST, "/v1/package-operations/status") => handle_status(req, &state).await,
-        _ => not_found(),
+// ═══════════════════════════════════════════════════════════════════════════════
+// OpenAPI document
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Build the OpenAPI 3 document for the broker API from the router and schemas.
+pub fn openapi() -> OpenApi {
+    use aide::openapi::Info;
+
+    let mut api = OpenApi {
+        info: Info {
+            title: "UniGetUI Package Broker API".to_owned(),
+            version: "1.0".to_owned(),
+            description: Some(
+                "HTTP API exposed by the Devolutions Agent UniGetUI package broker over a Windows named pipe."
+                    .to_owned(),
+            ),
+            ..Info::default()
+        },
+        ..OpenApi::default()
     };
-    Ok(response)
+
+    aide::generate::in_context(|ctx| {
+        ctx.schema = schemars::r#gen::SchemaGenerator::new(schemars::r#gen::SchemaSettings::openapi3());
+    });
+
+    let _ = api_router().finish_api(&mut api);
+
+    // The policy document is admin-authored config, not an API payload, so it is not
+    // referenced by any route. Register it (and its dependencies) as components anyway
+    // so the generated C# client also gets strongly-typed policy models.
+    register_policy_schema(&mut api);
+
+    api
 }
 
-fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
+/// Add `PolicyDocument` and its dependency schemas to the OpenAPI components.
+///
+/// Uses the same openapi3 schemars settings as the route schemas, so shared
+/// definitions (e.g. `ResourceId`, `Decision`) are byte-identical and de-duplicated.
+fn register_policy_schema(api: &mut OpenApi) {
+    use aide::openapi::{Components, SchemaObject};
+    use schemars::schema::Schema;
+
+    let generator = schemars::r#gen::SchemaGenerator::new(schemars::r#gen::SchemaSettings::openapi3());
+    let root = generator.into_root_schema_for::<PolicyDocument>();
+
+    let components = api.components.get_or_insert_with(Components::default);
+
+    components
+        .schemas
+        .entry("PolicyDocument".to_owned())
+        .or_insert_with(|| SchemaObject {
+            json_schema: Schema::Object(root.schema),
+            external_docs: None,
+            example: None,
+        });
+
+    for (name, schema) in root.definitions {
+        components.schemas.entry(name).or_insert_with(|| SchemaObject {
+            json_schema: schema,
+            external_docs: None,
+            example: None,
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Handlers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async fn handle_health(State(state): State<Arc<BrokerState>>) -> Response {
     let policy_guard = state.policy.read().expect("policy lock poisoned");
     let status = if policy_guard.is_some() { "ready" } else { "paused" };
     let policy_id = policy_guard
@@ -109,7 +205,7 @@ fn handle_health(state: &BrokerState) -> Response<Full<Bytes>> {
     json_response(StatusCode::OK, &body)
 }
 
-fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
+async fn handle_capabilities(State(state): State<Arc<BrokerState>>) -> Response {
     let body = serde_json::json!({
         "protocolVersion": PROTOCOL_VERSION_STR,
         "transports": ["http-named-pipe"],
@@ -122,17 +218,24 @@ fn handle_capabilities(state: &BrokerState) -> Response<Full<Bytes>> {
         "responseSchema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
         "supportedManagers": ["Winget", "PowerShell", "PowerShell7"],
         "supportedOperations": ["Install", "Update", "Uninstall"],
-        "maxRequestBodyBytes": 262144,
+        "maxRequestBodyBytes": MAX_REQUEST_BODY_BYTES,
         "pipeName": &state.pipe_name
     });
     json_response(StatusCode::OK, &body)
 }
 
-async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execute: bool) -> Response<Full<Bytes>> {
+async fn handle_evaluate_dryrun(State(state): State<Arc<BrokerState>>, headers: HeaderMap, body: Bytes) -> Response {
+    evaluate(state, &headers, &body, false)
+}
+
+async fn handle_execute(State(state): State<Arc<BrokerState>>, headers: HeaderMap, body: Bytes) -> Response {
+    evaluate(state, &headers, &body, true)
+}
+
+/// Shared evaluate/execute logic for both package-operation endpoints.
+fn evaluate(state: Arc<BrokerState>, headers: &HeaderMap, body_bytes: &Bytes, execute: bool) -> Response {
     let audit_id = generate_audit_id();
     let received_at = Utc::now();
-
-    tracing::trace!(%audit_id, method = %req.method(), path = %req.uri().path(), "Received request");
 
     // Acquire policy; return 503 if broker is paused.
     let policy = {
@@ -157,31 +260,15 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
     }
 
     // Validate required protocol headers per wire protocol spec.
-    if let Some(err_response) = validate_request_headers(&req, &policy, &audit_id, received_at, &state.pipe_name) {
+    if let Some(err_response) = validate_request_headers(headers, &policy, &audit_id, received_at, &state.pipe_name) {
         return err_response;
     }
 
-    // Extract header request-id before consuming the body.
-    let header_request_id = req
-        .headers()
+    // Extract header request-id for cross-check with the body.
+    let header_request_id = headers
         .get("UniGetUI-Request-Id")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-
-    // Read body.
-    let body_bytes = match req.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => {
-            return make_error_response(
-                &policy,
-                &audit_id,
-                received_at,
-                "failed to read request body",
-                StatusCode::BAD_REQUEST,
-                &state.pipe_name,
-            );
-        }
-    };
 
     if body_bytes.is_empty() {
         return make_error_response(
@@ -210,7 +297,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
     }
 
     // Deserialize and validate the request (validation happens in custom Deserialize impls).
-    let request: PackageRequest = match serde_json::from_slice(&body_bytes) {
+    let request: PackageRequest = match serde_json::from_slice(body_bytes) {
         Ok(req) => req,
         Err(error) => {
             return make_error_response(
@@ -359,7 +446,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         response_version: SemanticVersion::from("1.0.0"),
         response_type: PackageBrokerResponse,
         broker: BrokerInfo {
-            name: "Devolutions Agent UniGetUI Broker".to_owned(),
+            name: BROKER_NAME.to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
             transport: Transport::HttpNamedPipe,
             pipe_name: Some(state.pipe_name.clone()),
@@ -389,15 +476,6 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         },
     };
 
-    tracing::trace!(
-        %audit_id,
-        decision = %response.decision,
-        rule_id = %*response.rule_id,
-        reason = %response.reason,
-        would_execute = response.would_execute,
-        "Sending response",
-    );
-
     let status = if effective_decision == Decision::Allow {
         StatusCode::OK
     } else {
@@ -412,7 +490,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         .header("UniGetUI-Audit-Id", &audit_id)
         .header("UniGetUI-Policy-Id", &*policy.metadata.id)
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
-        .body(Full::new(Bytes::from(body)))
+        .body(Body::from(body))
         .expect("BUG: response builder with valid status and ASCII headers")
 }
 
@@ -420,21 +498,13 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
 // Status endpoint
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async fn handle_status(req: Request<Incoming>, state: &BrokerState) -> Response<Full<Bytes>> {
-    // Read body.
-    let body_bytes = match req.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => {
-            return json_error_response(StatusCode::BAD_REQUEST, "failed to read request body");
-        }
-    };
-
-    if body_bytes.is_empty() {
+async fn handle_status(State(state): State<Arc<BrokerState>>, body: Bytes) -> Response {
+    if body.is_empty() {
         return json_error_response(StatusCode::BAD_REQUEST, "request body is required");
     }
 
     // Deserialize the status request.
-    let status_req: StatusRequest = match serde_json::from_slice(&body_bytes) {
+    let status_req: StatusRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(error) => {
             return json_error_response(
@@ -447,89 +517,78 @@ async fn handle_status(req: Request<Incoming>, state: &BrokerState) -> Response<
     // Look up the tracked operation.
     let tracked = state.tracker.get(&status_req.request_id);
 
-    match tracked {
-        Some(op) => {
-            let response = StatusResponse {
+    let broker_info = || BrokerInfo {
+        name: BROKER_NAME.to_owned(),
+        protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
+        transport: Transport::HttpNamedPipe,
+        pipe_name: Some(state.pipe_name.clone()),
+        elevated_simulation: false,
+    };
+
+    let (status_code, response) = match tracked {
+        Some(op) => (
+            StatusCode::OK,
+            StatusResponse {
                 _schema: StatusResponseSchemaUri,
                 response_version: SemanticVersion::from("1.0.0"),
                 response_type: PackageOperationStatusResponse,
-                broker: BrokerInfo {
-                    name: "Devolutions Agent UniGetUI Broker".to_owned(),
-                    protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
-                    transport: Transport::HttpNamedPipe,
-                    pipe_name: Some(state.pipe_name.clone()),
-                    elevated_simulation: false,
-                },
+                broker: broker_info(),
                 request_id: status_req.request_id,
                 status: op.status,
                 started_at: op.started_at,
                 completed_at: op.completed_at,
                 exit_code: op.exit_code,
                 note: op.note,
-            };
-
-            let body = serde_json::to_vec_pretty(&response).expect("BUG: StatusResponse serialization");
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", STATUS_RESPONSE_MEDIA_TYPE)
-                .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
-                .body(Full::new(Bytes::from(body)))
-                .expect("BUG: response builder with valid status and ASCII headers")
-        }
-        None => {
+            },
+        ),
+        None => (
             // Operation not found — either it never existed or it was evicted.
-            let response = StatusResponse {
+            StatusCode::NOT_FOUND,
+            StatusResponse {
                 _schema: StatusResponseSchemaUri,
                 response_version: SemanticVersion::from("1.0.0"),
                 response_type: PackageOperationStatusResponse,
-                broker: BrokerInfo {
-                    name: "Devolutions Agent UniGetUI Broker".to_owned(),
-                    protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
-                    transport: Transport::HttpNamedPipe,
-                    pipe_name: Some(state.pipe_name.clone()),
-                    elevated_simulation: false,
-                },
+                broker: broker_info(),
                 request_id: status_req.request_id,
                 status: OperationStatus::Failed,
                 started_at: None,
                 completed_at: None,
                 exit_code: None,
                 note: Some("Operation not found (never submitted or already evicted).".to_owned()),
-            };
+            },
+        ),
+    };
 
-            let body = serde_json::to_vec_pretty(&response).expect("BUG: StatusResponse serialization");
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", STATUS_RESPONSE_MEDIA_TYPE)
-                .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
-                .body(Full::new(Bytes::from(body)))
-                .expect("BUG: response builder with valid status and ASCII headers")
-        }
-    }
+    let body = serde_json::to_vec_pretty(&response).expect("BUG: StatusResponse serialization");
+    Response::builder()
+        .status(status_code)
+        .header("Content-Type", STATUS_RESPONSE_MEDIA_TYPE)
+        .header("UniGetUI-Protocol-Version", PROTOCOL_VERSION_STR)
+        .body(Body::from(body))
+        .expect("BUG: response builder with valid status and ASCII headers")
 }
 
-fn json_error_response(status: StatusCode, message: &str) -> Response<Full<Bytes>> {
+// ═══════════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+fn json_error_response(status: StatusCode, message: &str) -> Response {
     let body = serde_json::json!({ "error": message });
-    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: JSON value serialization");
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "application/json")
-        .body(Full::new(Bytes::from(bytes)))
-        .expect("BUG: static response builder")
+    json_response(status, &body)
 }
 
 /// Validate required request headers per the wire protocol specification.
 ///
 /// Returns `Some(response)` if validation fails, `None` if all checks pass.
 fn validate_request_headers(
-    req: &Request<Incoming>,
+    headers: &HeaderMap,
     policy: &PolicyDocument,
     audit_id: &str,
     received_at: DateTime<Utc>,
     pipe_name: &str,
-) -> Option<Response<Full<Bytes>>> {
+) -> Option<Response> {
     // UniGetUI-Protocol-Version header is required.
-    let proto_version = req.headers().get("UniGetUI-Protocol-Version");
+    let proto_version = headers.get("UniGetUI-Protocol-Version");
     match proto_version.and_then(|v| v.to_str().ok()) {
         Some("1.0") => {}
         Some(other) => {
@@ -555,7 +614,7 @@ fn validate_request_headers(
     }
 
     // UniGetUI-Request-Id header is required.
-    if req.headers().get("UniGetUI-Request-Id").is_none() {
+    if headers.get("UniGetUI-Request-Id").is_none() {
         return Some(make_error_response(
             policy,
             audit_id,
@@ -567,7 +626,7 @@ fn validate_request_headers(
     }
 
     // Content-Type must be an accepted type.
-    let content_type = req.headers().get(hyper::header::CONTENT_TYPE);
+    let content_type = headers.get(axum::http::header::CONTENT_TYPE);
     match content_type.and_then(|v| v.to_str().ok()) {
         Some(ct) => {
             let ct_lower = ct.to_lowercase();
@@ -624,14 +683,14 @@ fn make_error_response(
     reason: &str,
     status: StatusCode,
     pipe_name: &str,
-) -> Response<Full<Bytes>> {
+) -> Response {
     let completed_at = Utc::now();
     let response = BrokerResponse {
         _schema: ResponseSchemaUri,
         response_version: SemanticVersion::from("1.0.0"),
         response_type: PackageBrokerResponse,
         broker: BrokerInfo {
-            name: "Devolutions Agent UniGetUI Broker".to_owned(),
+            name: BROKER_NAME.to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
             transport: Transport::HttpNamedPipe,
             pipe_name: Some(pipe_name.to_owned()),
@@ -669,11 +728,11 @@ fn make_error_response(
         .header("UniGetUI-Audit-Id", audit_id)
         .header("UniGetUI-Policy-Id", &*policy.metadata.id)
         .header("UniGetUI-Policy-Revision", policy.metadata.revision.to_string())
-        .body(Full::new(Bytes::from(body)))
+        .body(Body::from(body))
         .expect("BUG: response builder with valid status and ASCII headers")
 }
 
-fn service_unavailable(audit_id: &str) -> Response<Full<Bytes>> {
+fn service_unavailable(audit_id: &str) -> Response {
     let body = serde_json::json!({
         "error": "broker paused",
         "reason": "policy file is unavailable or corrupted; waiting for a valid policy",
@@ -684,27 +743,95 @@ fn service_unavailable(audit_id: &str) -> Response<Full<Bytes>> {
         .status(StatusCode::SERVICE_UNAVAILABLE)
         .header("Content-Type", "application/json")
         .header("Retry-After", "5")
-        .body(Full::new(Bytes::from(bytes)))
+        .body(Body::from(bytes))
         .expect("BUG: static response builder")
 }
 
-fn not_found() -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header("Content-Type", "application/json")
-        .body(Full::new(Bytes::from(r#"{"error":"not found"}"#.as_bytes().to_vec())))
-        .expect("BUG: static response builder")
-}
-
-fn json_response(status: StatusCode, body: &serde_json::Value) -> Response<Full<Bytes>> {
+fn json_response(status: StatusCode, body: &serde_json::Value) -> Response {
     let bytes = serde_json::to_vec_pretty(body).expect("BUG: JSON value serialization");
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
-        .body(Full::new(Bytes::from(bytes)))
+        .body(Body::from(bytes))
         .expect("BUG: response builder with valid status")
 }
 
 fn generate_audit_id() -> String {
     format!("audit-{}", uuid::Uuid::new_v4())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OpenAPI operation docs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+fn health_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
+    op.summary("Health check")
+        .description("Reports whether the broker is ready or paused (policy unavailable).")
+}
+
+fn capabilities_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
+    op.summary("Broker capabilities")
+        .description("Lists supported transports, media types, managers, and operations.")
+}
+
+fn evaluate_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
+    op.summary("Evaluate a package operation (dry-run)")
+        .description("Evaluates a package request against the active policy without executing anything.")
+        .input::<Json<PackageRequest>>()
+        .response::<200, Json<BrokerResponse>>()
+        .response::<403, Json<BrokerResponse>>()
+}
+
+fn execute_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
+    op.summary("Evaluate and execute a package operation")
+        .description(
+            "Evaluates a package request and, if allowed, submits it for elevated background execution. \
+             Poll the status endpoint for the result.",
+        )
+        .input::<Json<PackageRequest>>()
+        .response::<200, Json<BrokerResponse>>()
+        .response::<403, Json<BrokerResponse>>()
+}
+
+fn status_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
+    op.summary("Query operation status")
+        .description("Returns the current status of a previously submitted package operation.")
+        .input::<Json<StatusRequest>>()
+        .response::<200, Json<StatusResponse>>()
+        .response::<404, Json<StatusResponse>>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openapi_has_expected_paths_and_components() {
+        let api = openapi();
+
+        let paths = api.paths.expect("OpenAPI should have paths");
+        for expected in [
+            "/v1/health",
+            "/v1/capabilities",
+            "/v1/package-operations/evaluate",
+            "/v1/package-operations",
+            "/v1/package-operations/status",
+        ] {
+            assert!(paths.paths.contains_key(expected), "missing OpenAPI path: {expected}");
+        }
+
+        let components = api.components.expect("OpenAPI should have components");
+        for expected in [
+            "PackageRequest",
+            "BrokerResponse",
+            "StatusRequest",
+            "StatusResponse",
+            "PolicyDocument",
+        ] {
+            assert!(
+                components.schemas.contains_key(expected),
+                "missing OpenAPI component schema: {expected}"
+            );
+        }
+    }
 }

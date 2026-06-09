@@ -23,6 +23,7 @@ fn main() {
         }
         Some("gateway") | None => ApiDoc::openapi().to_yaml().unwrap(),
         Some("pedm") => pedm_yaml(),
+        Some("unigetui-broker") => serde_yaml::to_string(&unigetui_broker::server::openapi()).unwrap(),
         _ => panic!("unknown API doc"),
     };
     println!("{yaml}");
