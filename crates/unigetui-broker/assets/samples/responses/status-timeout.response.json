@@ -10,7 +10,7 @@
     "ElevatedSimulation": false
   },
   "RequestId": "req-long-running-op",
-  "Status": "failed",
+  "Status": "Failed",
   "StartedAt": "2026-05-05T11:00:00Z",
   "CompletedAt": "2026-05-05T12:00:00Z",
   "Note": "Operation timed out after 1 hour."

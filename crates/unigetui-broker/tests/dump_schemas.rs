@@ -230,10 +230,10 @@ fn status_response_roundtrip_timeout() {
 fn status_request_rejects_wrong_request_type() {
     let json = r#"{
         "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-        "requestVersion": "1.0.0",
-        "requestType": "packageOperation",
-        "requestId": "req-123",
-        "broker": { "requestedElevation": "elevated", "effectiveUser": "USER" }
+        "RequestVersion": "1.0.0",
+        "RequestType": "PackageOperation",
+        "RequestId": "req-123",
+        "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" }
     }"#;
     let result = serde_json::from_str::<StatusRequest>(json);
     assert!(result.is_err(), "should reject wrong requestType");
@@ -243,10 +243,10 @@ fn status_request_rejects_wrong_request_type() {
 fn status_request_rejects_wrong_schema_uri() {
     let json = r#"{
         "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-        "requestVersion": "1.0.0",
-        "requestType": "packageOperationStatus",
-        "requestId": "req-123",
-        "broker": { "requestedElevation": "elevated", "effectiveUser": "USER" }
+        "RequestVersion": "1.0.0",
+        "RequestType": "PackageOperationStatus",
+        "RequestId": "req-123",
+        "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" }
     }"#;
     let result = serde_json::from_str::<StatusRequest>(json);
     assert!(result.is_err(), "should reject wrong schema URI");
@@ -256,11 +256,11 @@ fn status_request_rejects_wrong_schema_uri() {
 fn status_request_rejects_unknown_fields() {
     let json = r#"{
         "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-        "requestVersion": "1.0.0",
-        "requestType": "packageOperationStatus",
-        "requestId": "req-123",
-        "broker": { "requestedElevation": "elevated", "effectiveUser": "USER" },
-        "extraField": true
+        "RequestVersion": "1.0.0",
+        "RequestType": "PackageOperationStatus",
+        "RequestId": "req-123",
+        "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" },
+        "ExtraField": true
     }"#;
     let result = serde_json::from_str::<StatusRequest>(json);
     assert!(result.is_err(), "should reject unknown fields");

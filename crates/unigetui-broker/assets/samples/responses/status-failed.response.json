@@ -10,7 +10,7 @@
     "ElevatedSimulation": false
   },
   "RequestId": "req-winget-git-uninstall",
-  "Status": "failed",
+  "Status": "Failed",
   "StartedAt": "2026-05-05T12:01:00Z",
   "CompletedAt": "2026-05-05T12:01:05Z",
   "ExitCode": 1,

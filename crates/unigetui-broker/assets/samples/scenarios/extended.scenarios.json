@@ -1,198 +1,198 @@
 {
-  "scenarioSet": "extended",
+  "ScenarioSet": "extended",
   "Description": "Extended scenarios for precedence, versioning, constraints, risky options, and validation failures.",
-  "scenarios": [
+  "Scenarios": [
     {
       "Id": "extended.precedence.deny-wins-tie",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-custom-param.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.tie.custom-parameters",
-      "tags": ["extended", "precedence", "winget"]
+      "Request": "requests/winget-vscode-custom-param.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.tie.custom-parameters",
+      "Tags": ["extended", "precedence", "winget"]
     },
     {
       "Id": "extended.precedence.disabled-rule-ignored",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-powertoys-install.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.powertoys",
-      "tags": ["extended", "precedence", "winget"]
+      "Request": "requests/winget-powertoys-install.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.powertoys",
+      "Tags": ["extended", "precedence", "winget"]
     },
     {
       "Id": "extended.version.range.allow",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-version-in-range.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.vscode.version-range",
-      "tags": ["extended", "version", "winget"]
+      "Request": "requests/winget-vscode-version-in-range.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode.version-range",
+      "Tags": ["extended", "version", "winget"]
     },
     {
       "Id": "extended.operation.update.allow",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-update-in-range.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.vscode.version-range",
-      "tags": ["extended", "operation", "Update", "winget"]
+      "Request": "requests/winget-vscode-update-in-range.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode.version-range",
+      "Tags": ["extended", "operation", "Update", "winget"]
     },
     {
       "Id": "extended.operation.uninstall.allow",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-git-uninstall.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.git.uninstall",
-      "tags": ["extended", "operation", "Uninstall", "winget"]
+      "Request": "requests/winget-git-uninstall.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.git.uninstall",
+      "Tags": ["extended", "operation", "Uninstall", "winget"]
     },
     {
       "Id": "extended.version.range.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-version-out-of-range.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "version", "winget", "default-deny"]
+      "Request": "requests/winget-vscode-version-out-of-range.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "version", "winget", "default-deny"]
     },
     {
       "Id": "extended.match.source.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-winget-fonts.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "source", "winget", "default-deny"]
+      "Request": "requests/winget-vscode-winget-fonts.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "source", "winget", "default-deny"]
     },
     {
       "Id": "extended.match.architecture.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-x86.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "architecture", "winget", "default-deny"]
+      "Request": "requests/winget-vscode-x86.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "architecture", "winget", "default-deny"]
     },
     {
       "Id": "extended.version.prerelease.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-prerelease.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "version", "winget", "prerelease"]
+      "Request": "requests/winget-vscode-prerelease.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "version", "winget", "prerelease"]
     },
     {
       "Id": "extended.risky.interactive.deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-interactive.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.interactive",
-      "tags": ["extended", "risky-options", "winget"]
+      "Request": "requests/winget-vscode-interactive.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.interactive",
+      "Tags": ["extended", "risky-options", "winget"]
     },
     {
       "Id": "extended.constraint.install-location.allow",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-git-custom-location-allowed.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.git.customized",
-      "tags": ["extended", "constraints", "winget"]
+      "Request": "requests/winget-git-custom-location-allowed.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.git.customized",
+      "Tags": ["extended", "constraints", "winget"]
     },
     {
       "Id": "extended.constraint.install-location.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-git-custom-location-denied.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "constraints", "winget", "default-deny"]
+      "Request": "requests/winget-git-custom-location-denied.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "constraints", "winget", "default-deny"]
     },
     {
       "Id": "extended.constraint.custom-parameter.allow",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-git-custom-param-allowed.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.git.customized",
-      "tags": ["extended", "constraints", "winget"]
+      "Request": "requests/winget-git-custom-param-allowed.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.git.customized",
+      "Tags": ["extended", "constraints", "winget"]
     },
     {
       "Id": "extended.constraint.custom-parameter.default-deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-git-custom-param-denied.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "constraints", "winget", "default-deny"]
+      "Request": "requests/winget-git-custom-param-denied.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "constraints", "winget", "default-deny"]
     },
     {
       "Id": "extended.risky.prepost.deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-prepost.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.prepost-commands",
-      "tags": ["extended", "risky-options", "winget"]
+      "Request": "requests/winget-vscode-prepost.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.prepost-commands",
+      "Tags": ["extended", "risky-options", "winget"]
     },
     {
       "Id": "extended.risky.kill-before-operation.deny",
       "Policy": "scenario-coverage.policy.json",
-      "request": "requests/winget-vscode-kill-before.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.kill-process-actions",
-      "tags": ["extended", "risky-options", "winget"]
+      "Request": "requests/winget-vscode-kill-before.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.kill-process-actions",
+      "Tags": ["extended", "risky-options", "winget"]
     },
     {
       "Id": "extended.powershell.prerelease.deny",
       "Policy": "powershell-current-user.policy.json",
-      "request": "requests/powershell-pester-prerelease.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.powershell.prerelease",
-      "tags": ["extended", "powershell", "prerelease"]
+      "Request": "requests/powershell-pester-prerelease.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.powershell.prerelease",
+      "Tags": ["extended", "powershell", "prerelease"]
     },
     {
       "Id": "extended.powershell.publisher-bypass.deny",
       "Policy": "deny-risky-options.policy.json",
-      "request": "requests/powershell-pester-skipcheck.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.integrity-bypass",
-      "tags": ["extended", "powershell", "risky-options"]
+      "Request": "requests/powershell-pester-skipcheck.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.integrity-bypass",
+      "Tags": ["extended", "powershell", "risky-options"]
     },
     {
       "Id": "extended.powershell.source.deny",
       "Policy": "powershell-advanced.policy.json",
-      "request": "requests/powershell-pester-poshtestgallery.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.powershell.untrusted-source",
-      "tags": ["extended", "powershell", "source"]
+      "Request": "requests/powershell-pester-poshtestgallery.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.powershell.untrusted-source",
+      "Tags": ["extended", "powershell", "source"]
     },
     {
       "Id": "extended.powershell.version.allow",
       "Policy": "powershell-advanced.policy.json",
-      "request": "requests/powershell-pester-version-allowed.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.powershell.pester.versioned",
-      "tags": ["extended", "powershell", "version"]
+      "Request": "requests/powershell-pester-version-allowed.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.powershell.pester.versioned",
+      "Tags": ["extended", "powershell", "version"]
     },
     {
       "Id": "extended.powershell.version.default-deny",
       "Policy": "powershell-advanced.policy.json",
-      "request": "requests/powershell-pester-version-out-of-range.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["extended", "powershell", "version", "default-deny"]
+      "Request": "requests/powershell-pester-version-out-of-range.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["extended", "powershell", "version", "default-deny"]
     },
     {
       "Id": "extended.powershell.update.allow",
       "Policy": "powershell-advanced.policy.json",
-      "request": "requests/powershell-pester-update-currentuser.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.powershell.pester.versioned",
-      "tags": ["extended", "powershell", "operation", "Update"]
+      "Request": "requests/powershell-pester-update-currentuser.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.powershell.pester.versioned",
+      "Tags": ["extended", "powershell", "operation", "Update"]
     },
     {
       "Id": "extended.validation.request-missing-package-id.deny",
       "Policy": "corporate-allowlist.policy.json",
-      "request": "invalid/requests/missing-package-id.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<validation-failure>",
-      "tags": ["extended", "validation", "fail-closed"]
+      "Request": "invalid/requests/missing-package-id.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<validation-failure>",
+      "Tags": ["extended", "validation", "fail-closed"]
     },
     {
       "Id": "extended.validation.policy-invalid-failure-decision.deny",
       "Policy": "invalid/policies/invalid-failure-decision.policy.json",
-      "request": "requests/winget-vscode-install.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<validation-failure>",
-      "tags": ["extended", "validation", "fail-closed"]
+      "Request": "requests/winget-vscode-install.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<validation-failure>",
+      "Tags": ["extended", "validation", "fail-closed"]
     }
   ]
 }

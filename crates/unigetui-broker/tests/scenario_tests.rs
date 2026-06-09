@@ -20,13 +20,13 @@ fn samples_dir() -> PathBuf {
 // ─── Scenario file structures ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 struct ScenarioSet {
     scenarios: Vec<Scenario>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 struct Scenario {
     id: String,
     policy: String,
@@ -119,20 +119,20 @@ fn invalid_policy_unknown_field_fails_deserialization() {
     // Policy with unknown field should fail due to deny_unknown_fields.
     let value = serde_json::json!({
         "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
-        "policyVersion": "1.0.0",
-        "policyType": "packageBrokerPolicy",
-        "metadata": {
-            "id": "test",
-            "publisher": "Test",
-            "revision": 1,
-            "publishedAt": "2026-01-01T00:00:00Z"
+        "PolicyVersion": "1.0.0",
+        "PolicyType": "PackageBrokerPolicy",
+        "Metadata": {
+            "Id": "test",
+            "Publisher": "Test",
+            "Revision": 1,
+            "PublishedAt": "2026-01-01T00:00:00Z"
         },
-        "enforcement": {
-            "defaultDecision": "deny",
-            "rulePrecedence": "priorityThenDeny",
-            "unknownField": true
+        "Enforcement": {
+            "DefaultDecision": "Deny",
+            "RulePrecedence": "PriorityThenDeny",
+            "UnknownField": true
         },
-        "rules": []
+        "Rules": []
     });
     let result: Result<PolicyDocument, _> = serde_json::from_value(value);
     assert!(result.is_err(), "policy with unknown field should fail deserialization");
@@ -189,8 +189,8 @@ fn run_scenarios(scenario_file: &str) {
         let decision = evaluator::evaluate(&policy, &request);
 
         let expected_decision = match scenario.expected_decision.as_str() {
-            "allow" => Decision::Allow,
-            "deny" => Decision::Deny,
+            "Allow" => Decision::Allow,
+            "Deny" => Decision::Deny,
             other => {
                 failures.push(format!("{}: unknown expectedDecision '{other}'", scenario.id));
                 continue;
@@ -281,11 +281,11 @@ fn sample_responses_deserialize() {
                 path.file_name().unwrap().to_string_lossy()
             )
         });
-        assert!(obj.contains_key("decision"), "response missing 'decision' field");
-        assert!(obj.contains_key("ruleId"), "response missing 'ruleId' field");
+        assert!(obj.contains_key("Decision"), "response missing 'Decision' field");
+        assert!(obj.contains_key("RuleId"), "response missing 'RuleId' field");
         assert!(
-            obj.contains_key("wouldExecute"),
-            "response missing 'wouldExecute' field"
+            obj.contains_key("WouldExecute"),
+            "response missing 'WouldExecute' field"
         );
     }
 }

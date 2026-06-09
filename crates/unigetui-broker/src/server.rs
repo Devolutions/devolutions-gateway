@@ -143,6 +143,19 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         }
     };
 
+    // Fail closed if the policy is outside its validity window (not yet active or expired).
+    if let Some(reason) = policy_validity_failure(&policy, received_at) {
+        tracing::warn!(%audit_id, %reason, "Rejecting request: policy outside validity window");
+        return make_error_response(
+            &policy,
+            &audit_id,
+            received_at,
+            &reason,
+            StatusCode::FORBIDDEN,
+            &state.pipe_name,
+        );
+    }
+
     // Validate required protocol headers per wire protocol spec.
     if let Some(err_response) = validate_request_headers(&req, &policy, &audit_id, received_at, &state.pipe_name) {
         return err_response;
@@ -240,7 +253,30 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
     // Evaluate policy.
     let decision = evaluator::evaluate(&policy, &request);
 
-    let (command, would_execute) = if decision.decision == Decision::Allow {
+    // Audit mode observes but does not enforce: the broker logs the real decision
+    // and reports `Allow` so the client proceeds.
+    let audit_mode = policy.enforcement.audit_mode == Some(true);
+    if audit_mode {
+        tracing::info!(
+            %audit_id,
+            real_decision = %decision.decision,
+            rule_id = %decision.rule_id,
+            "Audit mode enabled; decision is not enforced",
+        );
+    }
+
+    let effective_decision = if audit_mode { Decision::Allow } else { decision.decision };
+
+    let reason = if audit_mode && decision.decision != Decision::Allow {
+        format!(
+            "[Audit mode] Not enforced. Policy decision was {} (rule '{}'): {}",
+            decision.decision, decision.rule_id, decision.reason
+        )
+    } else {
+        decision.reason.clone()
+    };
+
+    let (command, would_execute) = if effective_decision == Decision::Allow {
         let cmd = build_command(&request);
         (cmd, true)
     } else {
@@ -250,7 +286,15 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
     // If execute mode and decision is allow, spawn background execution.
     let (execution_mode, note) = if execute && would_execute {
         let ctx = crate::executor::ExecutionContext {
+            kill_processes: request
+                .options
+                .kill_before_operation
+                .iter()
+                .map(|p| p.0.clone())
+                .collect(),
+            pre_command: request.options.pre_operation_command.clone(),
             command: command.clone(),
+            post_command: request.options.post_operation_command.clone(),
             effective_user: request.broker.effective_user.clone(),
             elevation: request.broker.requested_elevation,
             scope: request.options.scope,
@@ -265,8 +309,9 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         // The response is returned immediately; clients poll /status for result.
         let bg_state = Arc::clone(&state);
         tokio::spawn(async move {
-            match bg_state.executor.execute(&ctx).await {
-                Ok(exit_code) => {
+            let timeout = OperationTracker::operation_timeout();
+            match tokio::time::timeout(timeout, bg_state.executor.execute(&ctx)).await {
+                Ok(Ok(exit_code)) => {
                     bg_state.tracker.mark_completed(&request_id_str, exit_code);
                     tracing::info!(
                         request_id = %request_id_str,
@@ -274,11 +319,22 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
                         "Background execution completed"
                     );
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     tracing::error!(request_id = %request_id_str, %error, "Background execution failed");
                     bg_state
                         .tracker
                         .mark_failed(&request_id_str, format!("Execution failed: {error:#}"));
+                }
+                Err(_elapsed) => {
+                    tracing::error!(
+                        request_id = %request_id_str,
+                        timeout_secs = timeout.as_secs(),
+                        "Background execution timed out"
+                    );
+                    bg_state.tracker.mark_failed(
+                        &request_id_str,
+                        format!("Operation timed out after {} seconds.", timeout.as_secs()),
+                    );
                 }
             }
         });
@@ -317,9 +373,9 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         source: Some(request.source.name.clone()),
         package_id: Some(request.package.id.clone()),
         operation: Some(request.operation),
-        decision: decision.decision,
+        decision: effective_decision,
         rule_id: RuleId::from(decision.rule_id),
-        reason: decision.reason,
+        reason,
         would_execute,
         policy: ResponsePolicyInfo {
             id: policy.metadata.id.clone(),
@@ -342,7 +398,7 @@ async fn handle_evaluate(req: Request<Incoming>, state: Arc<BrokerState>, execut
         "Sending response",
     );
 
-    let status = if decision.decision == Decision::Allow {
+    let status = if effective_decision == Decision::Allow {
         StatusCode::OK
     } else {
         StatusCode::FORBIDDEN
@@ -541,6 +597,23 @@ fn validate_request_headers(
         }
     }
 
+    None
+}
+
+/// Return a deny reason if the policy is outside its validity window at `now`,
+/// or `None` if the policy is currently active. Brokers fail closed: a policy that
+/// is not yet active or has expired denies all requests.
+fn policy_validity_failure(policy: &PolicyDocument, now: DateTime<Utc>) -> Option<String> {
+    if let Some(valid_from) = policy.metadata.valid_from
+        && now < valid_from
+    {
+        return Some(format!("policy is not active until {valid_from} (current time {now})"));
+    }
+    if let Some(valid_until) = policy.metadata.valid_until
+        && now > valid_until
+    {
+        return Some(format!("policy expired at {valid_until} (current time {now})"));
+    }
     None
 }
 

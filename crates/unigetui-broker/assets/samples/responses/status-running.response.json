@@ -10,6 +10,6 @@
     "ElevatedSimulation": false
   },
   "RequestId": "req-winget-vscode-install",
-  "Status": "running",
+  "Status": "Running",
   "StartedAt": "2026-05-05T12:00:02Z"
 }

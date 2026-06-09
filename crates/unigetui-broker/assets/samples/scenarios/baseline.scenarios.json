@@ -1,102 +1,102 @@
 {
-  "scenarioSet": "baseline",
+  "ScenarioSet": "baseline",
   "Description": "Existing baseline scenarios for package broker policy simulation.",
-  "scenarios": [
+  "Scenarios": [
     {
       "Id": "baseline.winget.vscode.allow",
       "Policy": "corporate-allowlist.policy.json",
-      "request": "requests/winget-vscode-install.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.vscode",
-      "tags": ["baseline", "winget", "allowlist"]
+      "Request": "requests/winget-vscode-install.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode",
+      "Tags": ["baseline", "winget", "allowlist"]
     },
     {
       "Id": "baseline.winget.unknown.default-deny",
       "Policy": "corporate-allowlist.policy.json",
-      "request": "requests/winget-unknown-install.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "<default>",
-      "tags": ["baseline", "winget", "default-deny"]
+      "Request": "requests/winget-unknown-install.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["baseline", "winget", "default-deny"]
     },
     {
       "Id": "baseline.winget.skiphash.deny",
       "Policy": "corporate-allowlist.policy.json",
-      "request": "requests/winget-vscode-skiphash.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.integrity-bypass",
-      "tags": ["baseline", "winget", "risky-options"]
+      "Request": "requests/winget-vscode-skiphash.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.integrity-bypass",
+      "Tags": ["baseline", "winget", "risky-options"]
     },
     {
       "Id": "baseline.default-allow.normal-install",
       "Policy": "deny-risky-options.policy.json",
-      "request": "requests/winget-vscode-install.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "<default>",
-      "tags": ["baseline", "winget", "default-allow"]
+      "Request": "requests/winget-vscode-install.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["baseline", "winget", "default-allow"]
     },
     {
       "Id": "baseline.default-allow.skiphash.deny",
       "Policy": "deny-risky-options.policy.json",
-      "request": "requests/winget-vscode-skiphash.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.integrity-bypass",
-      "tags": ["baseline", "winget", "risky-options"]
+      "Request": "requests/winget-vscode-skiphash.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.integrity-bypass",
+      "Tags": ["baseline", "winget", "risky-options"]
     },
     {
       "Id": "baseline.default-allow.custom-parameters.deny",
       "Policy": "deny-risky-options.policy.json",
-      "request": "requests/winget-vscode-custom-param.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.manager-custom-parameters",
-      "tags": ["baseline", "winget", "risky-options"]
+      "Request": "requests/winget-vscode-custom-param.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.manager-custom-parameters",
+      "Tags": ["baseline", "winget", "risky-options"]
     },
     {
       "Id": "baseline.default-allow.msstore.deny",
       "Policy": "deny-risky-options.policy.json",
-      "request": "requests/winget-vscode-msstore.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.unapproved-winget-source",
-      "tags": ["baseline", "winget", "source"]
+      "Request": "requests/winget-vscode-msstore.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.unapproved-winget-source",
+      "Tags": ["baseline", "winget", "source"]
     },
     {
       "Id": "baseline.powershell.pester.currentuser.allow",
       "Policy": "powershell-current-user.policy.json",
-      "request": "requests/powershell-pester-currentuser.request.json",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.powershell.pester",
-      "tags": ["baseline", "powershell", "scope"]
+      "Request": "requests/powershell-pester-currentuser.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.powershell.pester",
+      "Tags": ["baseline", "powershell", "scope"]
     },
     {
       "Id": "baseline.powershell.pester.allusers.deny",
       "Policy": "powershell-current-user.policy.json",
-      "request": "requests/powershell-pester-allusers.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.powershell.machine-scope",
-      "tags": ["baseline", "powershell", "scope"]
+      "Request": "requests/powershell-pester-allusers.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.powershell.machine-scope",
+      "Tags": ["baseline", "powershell", "scope"]
     },
     {
       "Id": "baseline.yaml.policy-yaml.request-yaml.allow",
       "Policy": "corporate-allowlist.policy.yaml",
-      "request": "requests/winget-vscode-install.request.yaml",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.vscode",
-      "tags": ["baseline", "yaml", "winget"]
+      "Request": "requests/winget-vscode-install.request.yaml",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode",
+      "Tags": ["baseline", "yaml", "winget"]
     },
     {
       "Id": "baseline.yaml.policy-yaml.request-json.deny",
       "Policy": "corporate-allowlist.policy.yaml",
-      "request": "requests/winget-vscode-skiphash.request.json",
-      "expectedDecision": "Deny",
-      "expectedRuleId": "deny.integrity-bypass",
-      "tags": ["baseline", "yaml", "winget", "risky-options"]
+      "Request": "requests/winget-vscode-skiphash.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.integrity-bypass",
+      "Tags": ["baseline", "yaml", "winget", "risky-options"]
     },
     {
       "Id": "baseline.yaml.policy-json.request-yaml.allow",
       "Policy": "corporate-allowlist.policy.json",
-      "request": "requests/winget-vscode-install.request.yaml",
-      "expectedDecision": "Allow",
-      "expectedRuleId": "allow.winget.vscode",
-      "tags": ["baseline", "yaml", "winget"]
+      "Request": "requests/winget-vscode-install.request.yaml",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode",
+      "Tags": ["baseline", "yaml", "winget"]
     }
   ]
 }

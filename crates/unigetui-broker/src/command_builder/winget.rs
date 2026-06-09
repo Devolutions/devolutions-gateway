@@ -60,6 +60,16 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         request.options.custom_install_location.as_deref(),
     );
 
+    // `--no-upgrade` only applies to install (skip if a version is already present).
+    if matches!(request.operation, Operation::Install) {
+        set_if_true(&mut command, "--no-upgrade", request.options.no_upgrade);
+    }
+
+    // `--uninstall-previous` applies to upgrade (remove the previous version).
+    if matches!(request.operation, Operation::Update) {
+        set_if_true(&mut command, "--uninstall-previous", request.options.uninstall_previous);
+    }
+
     // Append any custom parameters.
     for param in &request.options.custom_parameters {
         if !param.is_empty() {
@@ -150,5 +160,35 @@ mod tests {
         assert_eq!(cmd[1], "upgrade");
         assert!(cmd.contains(&"--version".to_owned()));
         assert!(cmd.contains(&"120.0.0".to_owned()));
+    }
+
+    #[test]
+    fn test_no_upgrade_flag_on_install_only() {
+        let mut request = make_request();
+        request.options.no_upgrade = true;
+
+        // Install: flag is emitted.
+        let cmd = build_winget_command(&request);
+        assert!(cmd.contains(&"--no-upgrade".to_owned()));
+
+        // Update: `--no-upgrade` is not an upgrade flag, so it must not appear.
+        request.operation = Operation::Update;
+        let cmd = build_winget_command(&request);
+        assert!(!cmd.contains(&"--no-upgrade".to_owned()));
+    }
+
+    #[test]
+    fn test_uninstall_previous_flag_on_update_only() {
+        let mut request = make_request();
+        request.options.uninstall_previous = true;
+
+        // Install: `--uninstall-previous` is an upgrade flag, so it must not appear.
+        let cmd = build_winget_command(&request);
+        assert!(!cmd.contains(&"--uninstall-previous".to_owned()));
+
+        // Update: flag is emitted.
+        request.operation = Operation::Update;
+        let cmd = build_winget_command(&request);
+        assert!(cmd.contains(&"--uninstall-previous".to_owned()));
     }
 }

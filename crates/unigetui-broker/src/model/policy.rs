@@ -395,6 +395,8 @@ pub struct RequestFlags {
     pub has_custom_install_location: bool,
     pub has_pre_post_commands: bool,
     pub has_kill_before_operation: bool,
+    pub has_uninstall_previous: bool,
+    pub no_upgrade: bool,
     pub custom_parameters: Vec<CustomParameterString>,
     pub custom_install_location: String,
 }
@@ -412,6 +414,8 @@ impl RequestFlags {
             has_custom_install_location: !custom_location.is_empty(),
             has_pre_post_commands: has_pre_post,
             has_kill_before_operation: !kill_before.is_empty(),
+            has_uninstall_previous: request.options.uninstall_previous,
+            no_upgrade: request.options.no_upgrade,
             custom_parameters: custom_params,
             custom_install_location: custom_location,
         }

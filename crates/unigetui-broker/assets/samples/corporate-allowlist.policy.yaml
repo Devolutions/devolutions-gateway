@@ -2,7 +2,7 @@
 PolicyVersion: 1.0.0
 PolicyType: PackageBrokerPolicy
 Metadata:
-  id: contoso.desktop.standard-allowlist-yaml
+  Id: contoso.desktop.standard-allowlist-yaml
   Publisher: Contoso IT
   Revision: 1
   PublishedAt: "2026-05-05T00:00:00Z"
@@ -11,42 +11,42 @@ Enforcement:
   DefaultDecision: Deny
   RulePrecedence: PriorityThenDeny
 Rules:
-  - id: Deny.integrity-bypass
-    enabled: true
-    priority: 10
-    decision: Deny
-    reason: Integrity and publisher checks cannot be bypassed by brokered requests.
-    match:
-      operations:
-        - install
-        - update
-      skipHashCheck:
+  - Id: deny.integrity-bypass
+    Enabled: true
+    Priority: 10
+    Decision: Deny
+    Reason: Integrity and publisher checks cannot be bypassed by brokered requests.
+    Match:
+      Operations:
+        - Install
+        - Update
+      SkipHashCheck:
         - true
-  - id: Allow.winget.vscode
-    enabled: true
-    priority: 100
-    decision: Allow
-    reason: Visual Studio Code is approved for managed workstations.
-    match:
-      operations:
-        - install
-        - update
-      managers:
+  - Id: allow.winget.vscode
+    Enabled: true
+    Priority: 100
+    Decision: Allow
+    Reason: Visual Studio Code is approved for managed workstations.
+    Match:
+      Operations:
+        - Install
+        - Update
+      Managers:
         - Winget
-      sources:
+      Sources:
         - winget
-      packageIdentifiers:
+      PackageIdentifiers:
         - Microsoft.VisualStudioCode
-      scopes:
-        - user
-        - machine
-      architectures:
-        - x64
-        - arm64
-    constraints:
-      allowInteractive: false
-      allowSkipHashCheck: false
-      allowPreRelease: false
-      allowCustomParameters: false
-      allowPrePostCommands: false
-      allowKillBeforeOperation: false
+      Scopes:
+        - User
+        - Machine
+      Architectures:
+        - X64
+        - Arm64
+    Constraints:
+      AllowInteractive: false
+      AllowSkipHashCheck: false
+      AllowPreRelease: false
+      AllowCustomParameters: false
+      AllowPrePostCommands: false
+      AllowKillBeforeOperation: false

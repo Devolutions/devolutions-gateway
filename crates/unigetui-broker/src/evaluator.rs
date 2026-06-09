@@ -97,6 +97,7 @@ fn rule_matches(rule: &PolicyRule, request: &PackageRequest, flags: &RequestFlag
         && bool_in_set(flags.has_custom_install_location, &m.has_custom_install_location)
         && bool_in_set(flags.has_pre_post_commands, &m.has_pre_post_commands)
         && bool_in_set(flags.has_kill_before_operation, &m.has_kill_before_operation)
+        && bool_in_set(flags.has_uninstall_previous, &m.has_uninstall_previous)
         && constraints_pass(&rule.constraints, request, flags)
 }
 
@@ -190,6 +191,13 @@ fn constraints_pass(constraints: &Option<PolicyConstraints>, request: &PackageRe
         return false;
     }
     if !c.allow_kill_before_operation && flags.has_kill_before_operation {
+        return false;
+    }
+    if !c.allow_uninstall_previous && flags.has_uninstall_previous {
+        return false;
+    }
+    // `allow_upgrade` gates the request's `no_upgrade` flag (skip-upgrade-if-present).
+    if !c.allow_upgrade && flags.no_upgrade {
         return false;
     }
 
@@ -461,5 +469,95 @@ mod tests {
     fn malformed_policy_fails_deserialization() {
         let bad = r#"{ "policyVersion": "1.0.0" }"#;
         assert!(serde_json::from_str::<PolicyDocument>(bad).is_err());
+    }
+
+    /// Build an allow rule matching all installs, with the given constraints.
+    fn allow_install_with_constraints(constraints: PolicyConstraints) -> PolicyDocument {
+        make_policy(
+            Decision::Deny,
+            vec![PolicyRule {
+                id: ResourceId::from("allow-install"),
+                enabled: true,
+                priority: 100,
+                decision: Decision::Allow,
+                reason: None,
+                match_criteria: PolicyMatch {
+                    operations: BTreeSet::from([Operation::Install]),
+                    ..Default::default()
+                },
+                constraints: Some(constraints),
+            }],
+        )
+    }
+
+    #[test]
+    fn deny_uninstall_previous_when_constraint_forbids() {
+        let policy = allow_install_with_constraints(PolicyConstraints {
+            allow_uninstall_previous: false,
+            ..Default::default()
+        });
+
+        let mut request = make_request(Operation::Install, "Some.Package");
+        request.options.uninstall_previous = true;
+
+        // Constraint fails => rule no longer matches => falls through to default Deny.
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Deny);
+        assert_eq!(result.rule_id, "<default>");
+    }
+
+    #[test]
+    fn deny_no_upgrade_when_allow_upgrade_false() {
+        let policy = allow_install_with_constraints(PolicyConstraints {
+            allow_upgrade: false,
+            ..Default::default()
+        });
+
+        let mut request = make_request(Operation::Install, "Some.Package");
+        request.options.no_upgrade = true;
+
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Deny);
+        assert_eq!(result.rule_id, "<default>");
+    }
+
+    #[test]
+    fn allow_when_uninstall_previous_permitted() {
+        let policy = allow_install_with_constraints(PolicyConstraints::default());
+
+        let mut request = make_request(Operation::Install, "Some.Package");
+        request.options.uninstall_previous = true;
+        request.options.no_upgrade = true;
+
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Allow);
+        assert_eq!(result.rule_id, "allow-install");
+    }
+
+    #[test]
+    fn has_uninstall_previous_match_criterion() {
+        let policy = make_policy(
+            Decision::Allow,
+            vec![PolicyRule {
+                id: ResourceId::from("deny-reinstall"),
+                enabled: true,
+                priority: 10,
+                decision: Decision::Deny,
+                reason: Some("Reinstall-with-uninstall is not allowed.".to_owned()),
+                match_criteria: PolicyMatch {
+                    has_uninstall_previous: BTreeSet::from([true]),
+                    ..Default::default()
+                },
+                constraints: None,
+            }],
+        );
+
+        let mut request = make_request(Operation::Install, "Some.Package");
+        request.options.uninstall_previous = true;
+        assert_eq!(evaluate(&policy, &request).rule_id, "deny-reinstall");
+
+        // Without the flag, the rule does not match; default Allow applies.
+        request.options.uninstall_previous = false;
+        assert_eq!(evaluate(&policy, &request).rule_id, "<default>");
     }
 }

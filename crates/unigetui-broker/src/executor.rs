@@ -24,10 +24,20 @@ use async_trait::async_trait;
 use crate::model::{Elevation, Scope};
 
 /// Execution context passed from the server to the executor.
+///
+/// Describes the full ordered plan the broker runs on the user's behalf:
+/// process kills, an optional pre-operation shell command, the main
+/// package-manager command, and an optional post-operation shell command.
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
-    /// The command line as separate arguments (exe + args).
+    /// Process image names to terminate before the operation (best-effort).
+    pub kill_processes: Vec<String>,
+    /// Optional shell command to run before the main command (`cmd.exe /S /C`).
+    pub pre_command: Option<String>,
+    /// The main package-manager command line as separate arguments (exe + args).
     pub command: Vec<String>,
+    /// Optional shell command to run after the main command (`cmd.exe /S /C`).
+    pub post_command: Option<String>,
     /// Windows identity of the target user (e.g., `DOMAIN\username`).
     pub effective_user: String,
     /// Requested elevation level.
@@ -54,9 +64,12 @@ impl CommandExecutor for DryRunExecutor {
     async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
         tracing::info!(
             effective_user = %ctx.effective_user,
+            kill_processes = ?ctx.kill_processes,
+            pre_command = ?ctx.pre_command,
             command = %ctx.command.join(" "),
+            post_command = ?ctx.post_command,
             elevation = %ctx.elevation,
-            "Dry-run: would execute command"
+            "Dry-run: would execute plan"
         );
         Ok(0)
     }
@@ -254,16 +267,16 @@ mod win {
         tracing::info!(
             command = %ctx.command.join(" "),
             session_id,
-            "Calling create_process_and_wait"
+            "Running execution plan"
         );
 
-        let exit_code = create_process_and_wait(&execution_token, &ctx.command, session_id)?;
+        let exit_code = run_plan(&execution_token, ctx, session_id)?;
 
         tracing::info!(
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
             exit_code,
-            "Process completed under user token"
+            "Plan completed under user token"
         );
 
         Ok(exit_code)
@@ -286,15 +299,71 @@ mod win {
 
         let session_id = token.session_id().context("failed to query token session ID")?;
 
-        let exit_code = create_process_and_wait(&token, &ctx.command, session_id)?;
+        let exit_code = run_plan(&token, ctx, session_id)?;
 
         tracing::info!(
             command = %ctx.command.join(" "),
             exit_code,
-            "Process completed under current user token"
+            "Plan completed under current user token"
         );
 
         Ok(exit_code)
+    }
+
+    /// Run the full execution plan under `token`: best-effort process kills, an
+    /// optional pre-operation command (must succeed), the main package-manager
+    /// command, then an optional post-operation command (failures are logged).
+    ///
+    /// Returns the exit code of the main command.
+    fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::Result<i32> {
+        // 1. Kill requested processes (best-effort; a missing process is not an error).
+        for process_name in &ctx.kill_processes {
+            let kill_cmd = vec![
+                "taskkill.exe".to_owned(),
+                "/F".to_owned(),
+                "/IM".to_owned(),
+                process_name.clone(),
+            ];
+            match create_process_and_wait(token, &kill_cmd, session_id) {
+                Ok(code) => tracing::info!(%process_name, exit_code = code, "Kill-before-operation completed"),
+                Err(error) => tracing::warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
+            }
+        }
+
+        // 2. Pre-operation command — must succeed before the main operation runs.
+        if let Some(pre) = &ctx.pre_command {
+            tracing::info!(command = %pre, "Running pre-operation command");
+            let code = create_process_and_wait(token, &shell_command(pre), session_id)
+                .context("failed to run pre-operation command")?;
+            if code != 0 {
+                bail!("pre-operation command exited with code {code}");
+            }
+        }
+
+        // 3. Main package-manager command.
+        let exit_code = create_process_and_wait(token, &ctx.command, session_id)?;
+
+        // 4. Post-operation command — runs after the main command; failures are logged only.
+        if let Some(post) = &ctx.post_command {
+            tracing::info!(command = %post, "Running post-operation command");
+            match create_process_and_wait(token, &shell_command(post), session_id) {
+                Ok(0) => {}
+                Ok(code) => tracing::warn!(exit_code = code, "Post-operation command exited non-zero"),
+                Err(error) => tracing::warn!(%error, "Post-operation command failed"),
+            }
+        }
+
+        Ok(exit_code)
+    }
+
+    /// Build a `cmd.exe` invocation for a client-supplied shell payload.
+    ///
+    /// Mirrors UniGetUI's pre/post command semantics: newlines are collapsed into
+    /// `&` separators, and `/S /C` makes `cmd.exe` strip the outermost quotes and
+    /// run the remainder verbatim, so the quoting added by `CommandLine` round-trips.
+    fn shell_command(payload: &str) -> Vec<String> {
+        let normalized = payload.replace('\r', "\n").replace("\n\n", "\n").replace('\n', "&");
+        vec!["cmd.exe".to_owned(), "/S".to_owned(), "/C".to_owned(), normalized]
     }
 
     /// Enumerate WTS sessions to find one belonging to `effective_user`.
