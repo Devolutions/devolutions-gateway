@@ -231,6 +231,45 @@ struct ConnectedRdpServer {
     x224_rsp: Vec<u8>,
 }
 
+/// Classification of a TLS handshake failure against the target RDP server.
+///
+/// Derived from the error we already have (the `rustls::Error` is tucked inside the `io::Error`,
+/// same as in [`io_to_rdcleanpath_err`]), so triage can tell apart a crypto/cert negotiation
+/// failure from a connection that never produced a valid TLS response — without a packet capture.
+#[derive(Debug)]
+enum TlsHandshakeFailure {
+    /// The server engaged in TLS and then sent a fatal alert (e.g. handshake_failure,
+    /// protocol_version): points at a cipher / certificate / TLS-version mismatch.
+    AlertFromServer(u8),
+    /// The peer sent bytes that are not a valid TLS record: points at a wrong protocol on that
+    /// port or an in-path device injecting data, rather than a crypto mismatch.
+    NonTlsResponse,
+    /// The connection was reset or closed before any TLS response: the handshake never got a
+    /// reply (a pre-ServerHello drop by the target or an in-path device).
+    ResetBeforeResponse,
+    /// Anything else.
+    Other,
+}
+
+fn classify_tls_failure(err: &io::Error) -> TlsHandshakeFailure {
+    use tokio_rustls::rustls::Error as RustlsError;
+
+    if let Some(rustls_err) = err.get_ref().and_then(|e| e.downcast_ref::<RustlsError>()) {
+        match rustls_err {
+            RustlsError::AlertReceived(alert) => TlsHandshakeFailure::AlertFromServer(u8::from(*alert)),
+            RustlsError::InvalidMessage(_) | RustlsError::PeerMisbehaved(_) => TlsHandshakeFailure::NonTlsResponse,
+            _ => TlsHandshakeFailure::Other,
+        }
+    } else {
+        match err.kind() {
+            ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof | ErrorKind::ConnectionAborted => {
+                TlsHandshakeFailure::ResetBeforeResponse
+            }
+            _ => TlsHandshakeFailure::Other,
+        }
+    }
+}
+
 /// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
@@ -290,12 +329,16 @@ async fn connect_rdp_server(
     let tls_stream = match crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream).await {
         Ok(tls_stream) => tls_stream,
         Err(source) => {
-            // Log the resolved peer address explicitly: the error that bubbles up only carries the
-            // target hostname, but the actual IP we connected to is what's needed to tell apart a
-            // wrong-DNS/split-horizon resolution from a target-side reset during the TLS handshake.
+            // Two facts are logged that the bubbled error does not carry, so the failure can be
+            // triaged from logs alone: the resolved peer address (the error only has the target
+            // hostname, but the actual IP tells a wrong/split-horizon DNS resolution apart from a
+            // target-side issue), and a classification of the handshake failure (alert vs non-TLS
+            // response vs reset-before-any-response).
+            let failure = classify_tls_failure(&source);
             warn!(
                 %selected_target,
                 server_addr = %server_addr,
+                ?failure,
                 error = %source,
                 "TLS handshake with target RDP server failed"
             );
