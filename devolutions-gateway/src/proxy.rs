@@ -30,6 +30,20 @@ pub struct Proxy<A, B> {
     buffer_size: Option<usize>,
 }
 
+/// Why the bidirectional forwarding loop stopped.
+///
+/// Distinguishes a Gateway-initiated termination from a natural/peer-driven end so the
+/// closing log line is not mistaken for a target-side reset during triage.
+#[derive(Debug)]
+enum ForwardingOutcome {
+    /// The bidirectional forwarding finished on its own (a peer closed the connection or
+    /// reached EOF).
+    Completed,
+    /// The Gateway terminated the session through the kill signal, e.g. because the
+    /// recording policy was violated or the max session duration was reached.
+    KilledByGateway,
+}
+
 impl<A, B> Proxy<A, B>
 where
     A: AsyncWrite + AsyncRead + Unpin + Send,
@@ -107,23 +121,20 @@ where
 
         let kill_notified = notify_kill.notified();
 
-        // `killed` distinguishes a Gateway-initiated termination (e.g. recording policy
-        // violated, max session duration reached) from a natural/peer-driven end, so the
-        // closing log line below is not mistaken for a target-side reset during triage.
-        let (res, killed) = if let Some(buffer_size) = self.buffer_size {
+        let (res, outcome) = if let Some(buffer_size) = self.buffer_size {
             // Use our for of copy_bidirectional because tokio doesn't have an API to set the buffer size.
             // See https://github.com/tokio-rs/tokio/issues/6454.
             let forward_fut =
                 transport::copy_bidirectional(&mut transport_a, &mut transport_b, buffer_size, buffer_size);
             match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
-                Either::Left((res, _)) => (res.map(|_| ()), false),
-                Either::Right(_) => (Ok(()), true),
+                Either::Left((res, _)) => (res.map(|_| ()), ForwardingOutcome::Completed),
+                Either::Right(_) => (Ok(()), ForwardingOutcome::KilledByGateway),
             }
         } else {
             let forward_fut = tokio::io::copy_bidirectional(&mut transport_a, &mut transport_b);
             match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
-                Either::Left((res, _)) => (res.map(|_| ()), false),
-                Either::Right(_) => (Ok(()), true),
+                Either::Left((res, _)) => (res.map(|_| ()), ForwardingOutcome::Completed),
+                Either::Right(_) => (Ok(()), ForwardingOutcome::KilledByGateway),
             }
         };
 
@@ -134,11 +145,7 @@ where
 
         match res {
             Ok(()) => {
-                if killed {
-                    info!("Forwarding ended because the session was killed by the Gateway");
-                } else {
-                    info!("Forwarding ended");
-                }
+                info!(?outcome, "Forwarding ended");
                 Ok(())
             }
             Err(error) => {
