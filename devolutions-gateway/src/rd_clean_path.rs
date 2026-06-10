@@ -236,11 +236,10 @@ struct ConnectedRdpServer {
 /// Derived from the error we already have (the `rustls::Error` is tucked inside the `io::Error`,
 /// same as in [`io_to_rdcleanpath_err`]), so triage can tell apart a crypto/cert negotiation
 /// failure from a connection that never produced a valid TLS response — without a packet capture.
-#[derive(Debug)]
 enum TlsHandshakeFailure {
     /// The server engaged in TLS and then sent a fatal alert (e.g. handshake_failure,
     /// protocol_version): points at a cipher / certificate / TLS-version mismatch.
-    AlertFromServer(u8),
+    AlertFromServer(tokio_rustls::rustls::AlertDescription),
     /// The peer sent bytes that are not a valid TLS record: points at a wrong protocol on that
     /// port or an in-path device injecting data, rather than a crypto mismatch.
     NonTlsResponse,
@@ -251,12 +250,23 @@ enum TlsHandshakeFailure {
     Other,
 }
 
+impl core::fmt::Display for TlsHandshakeFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::AlertFromServer(alert) => write!(f, "server sent TLS alert ({alert:?})"),
+            Self::NonTlsResponse => f.write_str("peer response was not valid TLS"),
+            Self::ResetBeforeResponse => f.write_str("connection reset before any TLS response"),
+            Self::Other => f.write_str("other"),
+        }
+    }
+}
+
 fn classify_tls_failure(err: &io::Error) -> TlsHandshakeFailure {
     use tokio_rustls::rustls::Error as RustlsError;
 
     if let Some(rustls_err) = err.get_ref().and_then(|e| e.downcast_ref::<RustlsError>()) {
         match rustls_err {
-            RustlsError::AlertReceived(alert) => TlsHandshakeFailure::AlertFromServer(u8::from(*alert)),
+            RustlsError::AlertReceived(alert) => TlsHandshakeFailure::AlertFromServer(*alert),
             RustlsError::InvalidMessage(_) | RustlsError::PeerMisbehaved(_) => TlsHandshakeFailure::NonTlsResponse,
             _ => TlsHandshakeFailure::Other,
         }
@@ -338,7 +348,7 @@ async fn connect_rdp_server(
             warn!(
                 %selected_target,
                 server_addr = %server_addr,
-                ?failure,
+                %failure,
                 error = %source,
                 "TLS handshake with target RDP server failed"
             );
