@@ -287,12 +287,24 @@ async fn connect_rdp_server(
 
     trace!("Establishing TLS connection with server");
 
-    let tls_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
-        .await
-        .map_err(|source| CleanPathError::TlsHandshake {
-            source,
-            target_server: selected_target.clone(),
-        })?;
+    let tls_stream = match crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream).await {
+        Ok(tls_stream) => tls_stream,
+        Err(source) => {
+            // Log the resolved peer address explicitly: the error that bubbles up only carries the
+            // target hostname, but the actual IP we connected to is what's needed to tell apart a
+            // wrong-DNS/split-horizon resolution from a target-side reset during the TLS handshake.
+            warn!(
+                %selected_target,
+                server_addr = %server_addr,
+                error = %source,
+                "TLS handshake with target RDP server failed"
+            );
+            return Err(CleanPathError::TlsHandshake {
+                source,
+                target_server: selected_target.clone(),
+            });
+        }
+    };
 
     Ok(ConnectedRdpServer {
         tls_stream,

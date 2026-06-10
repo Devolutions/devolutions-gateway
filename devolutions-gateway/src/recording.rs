@@ -99,6 +99,8 @@ where
             anyhow::bail!("inconsistent session ID (ID in token: {})", claims.jet_aid);
         }
 
+        info!(%session_id, ?file_type, "Recording push stream started");
+
         let disconnected_ttl = match claims.jet_reuse {
             crate::token::ReconnectionPolicy::Disallowed => Duration::ZERO,
             crate::token::ReconnectionPolicy::Allowed { window_in_seconds } => {

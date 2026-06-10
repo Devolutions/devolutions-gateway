@@ -107,20 +107,23 @@ where
 
         let kill_notified = notify_kill.notified();
 
-        let res = if let Some(buffer_size) = self.buffer_size {
+        // `killed` distinguishes a Gateway-initiated termination (e.g. recording policy
+        // violated, max session duration reached) from a natural/peer-driven end, so the
+        // closing log line below is not mistaken for a target-side reset during triage.
+        let (res, killed) = if let Some(buffer_size) = self.buffer_size {
             // Use our for of copy_bidirectional because tokio doesn't have an API to set the buffer size.
             // See https://github.com/tokio-rs/tokio/issues/6454.
             let forward_fut =
                 transport::copy_bidirectional(&mut transport_a, &mut transport_b, buffer_size, buffer_size);
             match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
-                Either::Left((res, _)) => res.map(|_| ()),
-                Either::Right(_) => Ok(()),
+                Either::Left((res, _)) => (res.map(|_| ()), false),
+                Either::Right(_) => (Ok(()), true),
             }
         } else {
             let forward_fut = tokio::io::copy_bidirectional(&mut transport_a, &mut transport_b);
             match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
-                Either::Left((res, _)) => res.map(|_| ()),
-                Either::Right(_) => Ok(()),
+                Either::Left((res, _)) => (res.map(|_| ()), false),
+                Either::Right(_) => (Ok(()), true),
             }
         };
 
@@ -131,7 +134,11 @@ where
 
         match res {
             Ok(()) => {
-                info!("Forwarding ended");
+                if killed {
+                    info!("Forwarding ended because the session was killed by the Gateway");
+                } else {
+                    info!("Forwarding ended");
+                }
                 Ok(())
             }
             Err(error) => {

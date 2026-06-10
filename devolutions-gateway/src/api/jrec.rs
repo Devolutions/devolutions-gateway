@@ -148,7 +148,7 @@ async fn handle_jrec_push(
         .shutdown_signal(shutdown_signal)
         .build()
         .run()
-        .instrument(info_span!("jrec", client = %source_addr))
+        .instrument(info_span!("jrec", client = %source_addr, session_id = %session_id))
         .await;
 
     match result {
