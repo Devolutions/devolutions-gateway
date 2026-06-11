@@ -145,14 +145,7 @@ where
 
         match res {
             Ok(()) => {
-                match outcome {
-                    ForwardingOutcome::KilledByGateway => {
-                        info!(?outcome, "Forwarding ended: session was killed by the Gateway");
-                    }
-                    ForwardingOutcome::Completed => {
-                        info!(?outcome, "Forwarding ended");
-                    }
-                }
+                info!(?outcome, "Forwarding ended");
                 Ok(())
             }
             Err(error) => {
