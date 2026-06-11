@@ -66,7 +66,7 @@ async fn handle_socket(
 
     let session_id = claims.jet_aid;
     let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx, traffic_audit_handle)
-        .instrument(info_span!("jmux", client = %source_addr, session_id = %session_id))
+        .instrument(info_span!("jmux", client = %source_addr, %session_id))
         .await;
 
     if let Err(error) = result {
