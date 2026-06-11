@@ -85,27 +85,27 @@ impl DestinationUrl {
         let scheme = &s[..scheme_end_idx];
         let rest = &s[scheme_end_idx + "://".len()..];
 
-        let host_end_idx = rest.rfind(':').ok_or_else(|| Error::InvalidDestinationUrl {
-            value: s.to_owned(),
+        Self::with_scheme(scheme, rest)
+    }
+
+    /// Builds a destination URL from a `<host>:<port>` authority and an explicit scheme.
+    ///
+    /// Useful when the scheme is known from context (e.g.: a TCP listener) and only the
+    /// `<host>:<port>` part comes from user input.
+    pub fn with_scheme(scheme: &str, host_port: &str) -> Result<Self, Error> {
+        let host_end_idx = host_port.rfind(':').ok_or_else(|| Error::InvalidDestinationUrl {
+            value: host_port.to_owned(),
             reason: "port is missing",
         })?;
-        let host = &rest[..host_end_idx];
-        let port = &rest[host_end_idx + 1..];
+        let host = &host_port[..host_end_idx];
+        let port = &host_port[host_end_idx + 1..];
 
         let port = port.parse().map_err(|_| Error::InvalidDestinationUrl {
-            value: s.to_owned(),
+            value: host_port.to_owned(),
             reason: "bad port",
         })?;
-        let scheme = SmolStr::new(scheme);
-        let host = SmolStr::new(host);
-        let inner = SmolStr::new(s);
 
-        Ok(Self {
-            inner,
-            scheme,
-            host,
-            port,
-        })
+        Ok(Self::new(scheme, host, port))
     }
 
     pub fn as_str(&self) -> &str {

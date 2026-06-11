@@ -906,6 +906,32 @@ fn forward_negative_repeat_count() {
     );
 }
 
+/// A TCP listener destination without a port is a client-side argument error and must be
+/// reported clearly during CLI parsing, before any listener is bound.
+#[test]
+fn jmux_proxy_listener_missing_destination_port() {
+    let output = jetsocat_assert_cmd()
+        .args([
+            "jmux-proxy",
+            "stdio",
+            "tcp-listen://127.0.0.1:60605/vdownsrv-test1.downhill.loc",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+
+    assert_stderr_eq(
+        &output,
+        expect![[r#"
+            Bad <LISTENER>: `tcp-listen://127.0.0.1:60605/vdownsrv-test1.downhill.loc`
+
+            Caused by:
+                0: parse destination URL
+                1: invalid destination URL `vdownsrv-test1.downhill.loc`: port is missing
+        "#]],
+    );
+}
+
 #[rstest]
 #[tokio::test]
 async fn mcp_proxy_smoke_test(#[values(true, false)] http_transport: bool) {
