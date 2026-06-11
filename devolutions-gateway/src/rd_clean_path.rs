@@ -146,10 +146,11 @@ enum CleanPathError {
     BadRequest(#[source] anyhow::Error),
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
-    #[error("TLS handshake with server {target_server} failed")]
+    #[error("TLS handshake with server {target_server} ({server_addr}) failed")]
     TlsHandshake {
         source: io::Error,
         target_server: TargetAddr,
+        server_addr: SocketAddr,
     },
     #[error("authorization error")]
     Authorization(#[from] AuthorizationError),
@@ -231,55 +232,6 @@ struct ConnectedRdpServer {
     x224_rsp: Vec<u8>,
 }
 
-/// Classification of a TLS handshake failure against the target RDP server.
-///
-/// Derived from the error we already have (the `rustls::Error` is tucked inside the `io::Error`,
-/// same as in [`io_to_rdcleanpath_err`]), so triage can tell apart a crypto/cert negotiation
-/// failure from a connection that never produced a valid TLS response — without a packet capture.
-enum TlsHandshakeFailure {
-    /// The server engaged in TLS and then sent a fatal alert (e.g. handshake_failure,
-    /// protocol_version): points at a cipher / certificate / TLS-version mismatch.
-    AlertFromServer(tokio_rustls::rustls::AlertDescription),
-    /// The peer sent bytes that are not a valid TLS record: points at a wrong protocol on that
-    /// port or an in-path device injecting data, rather than a crypto mismatch.
-    NonTlsResponse,
-    /// The connection was reset or closed before any TLS response: the handshake never got a
-    /// reply (a pre-ServerHello drop by the target or an in-path device).
-    ResetBeforeResponse,
-    /// Anything else.
-    Other,
-}
-
-impl core::fmt::Display for TlsHandshakeFailure {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::AlertFromServer(alert) => write!(f, "server sent TLS alert ({alert:?})"),
-            Self::NonTlsResponse => f.write_str("peer response was not valid TLS"),
-            Self::ResetBeforeResponse => f.write_str("connection reset before any TLS response"),
-            Self::Other => f.write_str("other"),
-        }
-    }
-}
-
-fn classify_tls_failure(err: &io::Error) -> TlsHandshakeFailure {
-    use tokio_rustls::rustls::Error as RustlsError;
-
-    if let Some(rustls_err) = err.get_ref().and_then(|e| e.downcast_ref::<RustlsError>()) {
-        match rustls_err {
-            RustlsError::AlertReceived(alert) => TlsHandshakeFailure::AlertFromServer(*alert),
-            RustlsError::InvalidMessage(_) | RustlsError::PeerMisbehaved(_) => TlsHandshakeFailure::NonTlsResponse,
-            _ => TlsHandshakeFailure::Other,
-        }
-    } else {
-        match err.kind() {
-            ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof | ErrorKind::ConnectionAborted => {
-                TlsHandshakeFailure::ResetBeforeResponse
-            }
-            _ => TlsHandshakeFailure::Other,
-        }
-    }
-}
-
 /// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
@@ -336,28 +288,16 @@ async fn connect_rdp_server(
 
     trace!("Establishing TLS connection with server");
 
-    let tls_stream = match crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream).await {
-        Ok(tls_stream) => tls_stream,
-        Err(source) => {
-            // Two facts are logged that the bubbled error does not carry, so the failure can be
-            // triaged from logs alone: the resolved peer address (the error only has the target
-            // hostname, but the actual IP tells a wrong/split-horizon DNS resolution apart from a
-            // target-side issue), and a classification of the handshake failure (alert vs non-TLS
-            // response vs reset-before-any-response).
-            let failure = classify_tls_failure(&source);
-            warn!(
-                %selected_target,
-                server_addr = %server_addr,
-                %failure,
-                error = %source,
-                "TLS handshake with target RDP server failed"
-            );
-            return Err(CleanPathError::TlsHandshake {
-                source,
-                target_server: selected_target.clone(),
-            });
-        }
-    };
+    // Carry the resolved peer address in the error (and thus the top-level error log): the error
+    // otherwise only has the target hostname, but the actual IP tells a wrong/split-horizon DNS
+    // resolution apart from a target-side issue during the TLS handshake.
+    let tls_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
+        .await
+        .map_err(|source| CleanPathError::TlsHandshake {
+            source,
+            target_server: selected_target.clone(),
+            server_addr,
+        })?;
 
     Ok(ConnectedRdpServer {
         tls_stream,
@@ -728,10 +668,7 @@ impl From<&CleanPathError> for RDCleanPathPdu {
         match value {
             CleanPathError::BadRequest(_) => Self::new_http_error(400),
             CleanPathError::Internal(_) => Self::new_http_error(500),
-            CleanPathError::TlsHandshake {
-                source,
-                target_server: _,
-            } => io_to_rdcleanpath_err(source),
+            CleanPathError::TlsHandshake { source, .. } => io_to_rdcleanpath_err(source),
             CleanPathError::Io(e) => io_to_rdcleanpath_err(e),
             CleanPathError::Authorization(AuthorizationError::Forbidden) => Self::new_http_error(403),
             CleanPathError::Authorization(AuthorizationError::Unauthorized) => Self::new_http_error(401),
