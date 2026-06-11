@@ -11,15 +11,20 @@ use tracing::Instrument as _;
 
 #[derive(Debug, Clone)]
 pub enum ListenerMode {
-    Tcp { bind_addr: String, destination_url: String },
-    Http { bind_addr: String },
-    Socks5 { bind_addr: String },
+    Tcp {
+        bind_addr: String,
+        destination_url: DestinationUrl,
+    },
+    Http {
+        bind_addr: String,
+    },
+    Socks5 {
+        bind_addr: String,
+    },
 }
 
 #[instrument(skip(api_request_tx))]
-pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: String, destination_url: String) {
-    let destination_url = format!("tcp://{destination_url}");
-
+pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: String, destination_url: DestinationUrl) {
     let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
         let destination_url = destination_url.clone();
@@ -27,14 +32,6 @@ pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: Stri
         tokio::spawn(
             async move {
                 debug!("Got request");
-
-                let destination_url = match DestinationUrl::parse_str(&destination_url) {
-                    Ok(url) => url,
-                    Err(error) => {
-                        debug!(%error, "Bad request");
-                        return;
-                    }
-                };
 
                 let (sender, receiver) = oneshot::channel();
 
@@ -63,10 +60,10 @@ pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: Stri
                             .await;
                     }
                     Ok(JmuxApiResponse::Failure { id, reason_code }) => {
-                        debug!(%id, %reason_code, "Channel failure");
+                        warn!(%id, %reason_code, "Couldn’t open JMUX channel for incoming connection");
                     }
                     Err(error) => {
-                        debug!(%error, "Couldn't receive API response");
+                        warn!(%error, "Couldn’t receive JMUX API response");
                     }
                 }
             }

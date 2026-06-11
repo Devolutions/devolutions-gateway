@@ -39,7 +39,7 @@ use jetsocat::DoctorOutputFormat;
 use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
-use jmux_proxy::JmuxConfig;
+use jmux_proxy::{DestinationUrl, JmuxConfig};
 use seahorse::{App, Command, Context, Flag, FlagType};
 use tokio::runtime;
 
@@ -894,9 +894,12 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
             let bind_addr = it.next().context("binding address is missing")?;
             let destination_url = it.next().context("destination URL is missing")?;
 
+            let destination_url =
+                DestinationUrl::with_scheme("tcp", destination_url).context("parse destination URL")?;
+
             Ok(ListenerMode::Tcp {
                 bind_addr: bind_addr.to_owned(),
-                destination_url: destination_url.to_owned(),
+                destination_url,
             })
         }
         "socks5-listen" => Ok(ListenerMode::Socks5 {
