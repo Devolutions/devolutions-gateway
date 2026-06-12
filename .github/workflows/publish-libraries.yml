@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client ]
+        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client, unigetui-broker-client ]
         include:
           - library: dotnet-client
             libpath: ./devolutions-gateway/openapi/dotnet-client
@@ -50,6 +50,8 @@ jobs:
             libpath: ./utils/dotnet
           - library: pedm-dotnet-client
             libpath: ./crates/devolutions-pedm/openapi/dotnet-client
+          - library: unigetui-broker-client
+            libpath: ./crates/unigetui-broker/dotnet
 
     steps:
       - name: Check out ${{ github.repository }}
