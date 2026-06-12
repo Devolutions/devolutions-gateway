@@ -146,10 +146,11 @@ enum CleanPathError {
     BadRequest(#[source] anyhow::Error),
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
-    #[error("TLS handshake with server {target_server} failed")]
+    #[error("TLS handshake with server {target_server} ({server_addr}) failed")]
     TlsHandshake {
         source: io::Error,
         target_server: TargetAddr,
+        server_addr: SocketAddr,
     },
     #[error("authorization error")]
     Authorization(#[from] AuthorizationError),
@@ -287,11 +288,15 @@ async fn connect_rdp_server(
 
     trace!("Establishing TLS connection with server");
 
+    // Carry the resolved peer address in the error (and thus the top-level error log): the error
+    // otherwise only has the target hostname, but the actual IP tells a wrong/split-horizon DNS
+    // resolution apart from a target-side issue during the TLS handshake.
     let tls_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
             source,
             target_server: selected_target.clone(),
+            server_addr,
         })?;
 
     Ok(ConnectedRdpServer {
@@ -663,10 +668,7 @@ impl From<&CleanPathError> for RDCleanPathPdu {
         match value {
             CleanPathError::BadRequest(_) => Self::new_http_error(400),
             CleanPathError::Internal(_) => Self::new_http_error(500),
-            CleanPathError::TlsHandshake {
-                source,
-                target_server: _,
-            } => io_to_rdcleanpath_err(source),
+            CleanPathError::TlsHandshake { source, .. } => io_to_rdcleanpath_err(source),
             CleanPathError::Io(e) => io_to_rdcleanpath_err(e),
             CleanPathError::Authorization(AuthorizationError::Forbidden) => Self::new_http_error(403),
             CleanPathError::Authorization(AuthorizationError::Unauthorized) => Self::new_http_error(401),
