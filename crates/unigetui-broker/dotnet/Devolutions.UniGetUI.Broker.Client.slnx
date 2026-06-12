@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Devolutions.UniGetUI.Broker.Client.Tests/Devolutions.UniGetUI.Broker.Client.Tests.csproj" />
+  <Project Path="Devolutions.UniGetUI.Broker.Client/Devolutions.UniGetUI.Broker.Client.csproj" />
+</Solution>

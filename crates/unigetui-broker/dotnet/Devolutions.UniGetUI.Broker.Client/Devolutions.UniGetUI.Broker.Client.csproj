@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Devolutions.UniGetUI.Broker.Client</RootNamespace>
+    <AssemblyName>Devolutions.UniGetUI.Broker.Client</AssemblyName>
+    <Description>Hand-written client and DTOs for the Devolutions Agent UniGetUI package broker API.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>
