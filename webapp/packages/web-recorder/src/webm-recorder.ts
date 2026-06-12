@@ -18,7 +18,7 @@ export class WebMRecorder {
   private _isRecording = false;
   private stream: MediaStream | null = null;
   private canvas: HTMLCanvasElement | null = null;
-  private frameTimer: ReturnType<typeof setInterval> | null = null;
+  private keepaliveRaf: number | null = null;
   private keepaliveTick = false;
   private isCleaningUp = false;
 
@@ -151,17 +151,24 @@ export class WebMRecorder {
     this.stop(); // Safe to call - stop() guards against circular calls
   }
 
-  // captureStream only emits a frame when the canvas is *modified*. Remote desktops are often static,
-  // so without this nudge the stream stalls (gaps / black screens). setInterval is not ideal for frame
-  // timing but is a practical keepalive.
+  // captureStream only captures a frame when the canvas is *composited*, and compositing is driven by
+  // the requestAnimationFrame / vsync loop — NOT by setInterval. With static content (no app animation)
+  // a setInterval keepalive marks the canvas dirty but it is never presented, so zero frames are
+  // captured (verified empirically: setInterval -> 0 frames, rAF -> frames). Drive the keepalive from
+  // rAF so the compositor ticks, and make a real change each frame so a fresh frame is always ready.
   private handleMediaRecorderStart(): void {
-    this.frameTimer = setInterval(() => this.keepCanvasLive(), 1000 / CanvasStreamFPS);
+    const tick = (): void => {
+      this.nudgeCanvas();
+      this.keepaliveRaf = requestAnimationFrame(tick);
+    };
+    this.keepaliveRaf = requestAnimationFrame(tick);
   }
 
-  // Nudge a single corner pixel with a *real* value change every tick. A zero-alpha / no-op draw is
-  // elided by some engines' dirty-tracking (Edge 149 → empty WebM), so we alternate the pixel value.
-  // save()/restore() keeps this from leaking state onto the canvas's shared 2D context.
-  private keepCanvasLive(): void {
+  // Nudge a single corner pixel with a *real* value change. A zero-alpha / no-op draw is elided by
+  // some engines' dirty-tracking (Edge 149 → empty WebM), so we alternate the pixel value. captureStream
+  // throttles the actual capture to CanvasStreamFPS regardless of the rAF rate. save()/restore() keeps
+  // this from leaking state onto the canvas's shared 2D context.
+  private nudgeCanvas(): void {
     const ctx = this.canvas?.getContext('2d');
     if (!ctx) {
       return;
@@ -211,9 +218,9 @@ export class WebMRecorder {
   private cleanupResources(): void {
     this._isRecording = false;
 
-    if (this.frameTimer !== null) {
-      clearInterval(this.frameTimer);
-      this.frameTimer = null;
+    if (this.keepaliveRaf !== null) {
+      cancelAnimationFrame(this.keepaliveRaf);
+      this.keepaliveRaf = null;
     }
 
     if (this.stream) {
