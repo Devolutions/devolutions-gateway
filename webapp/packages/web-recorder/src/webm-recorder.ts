@@ -17,8 +17,8 @@ export class WebMRecorder {
   private subject = new Subject<void>();
   private _isRecording = false;
   private stream: MediaStream | null = null;
-  private canvas: HTMLCanvasElement | null = null;
-  private animationLoopHandle: ReturnType<typeof setInterval> | null = null;
+  private frameTrack: CanvasCaptureMediaStreamTrack | null = null;
+  private frameTimer: ReturnType<typeof setInterval> | null = null;
   private isCleaningUp = false;
 
   private blobQueue: Blob[] = [];
@@ -29,6 +29,7 @@ export class WebMRecorder {
     return this._isRecording;
   }
 
+  // Combined method for backward compatibility
   start(canvas: HTMLCanvasElement, recordingUrl: string): Observable<void> {
     // Prevent starting multiple recordings simultaneously
     if (this._isRecording || this.isCleaningUp) {
@@ -38,7 +39,6 @@ export class WebMRecorder {
 
     // Create new Subject for each start cycle since completed Subjects cannot emit
     this.subject = new Subject<void>();
-    this.canvas = canvas;
     if (!this.initializeCapture(canvas)) {
       console.error('Failed to initialize capture. Aborting recording.');
       throw new Error('UnableToStartRecording');
@@ -78,7 +78,12 @@ export class WebMRecorder {
 
     this.options.onTelemetry?.('recording-initialized');
     try {
-      this.stream = canvas.captureStream(CanvasStreamFPS);
+      // Manual-frame mode (frameRate 0): the browser does NOT auto-capture. We drive frames explicitly
+      // with requestFrame(), so the cadence is deterministic and independent of the canvas "dirty"
+      // heuristic — which stopped emitting frames on Edge 149 and produced empty/near-empty WebM.
+      this.stream = canvas.captureStream(0);
+      const tracks = this.stream.getVideoTracks();
+      this.frameTrack = tracks.length > 0 ? (tracks[0] as CanvasCaptureMediaStreamTrack) : null;
       return true;
     } catch (error) {
       console.error('Failed to initialize canvas capture:', error);
@@ -146,29 +151,17 @@ export class WebMRecorder {
     this.stop(); // Safe to call - stop() guards against circular calls
   }
 
-  // Maintain continuous frame capture by drawing transparent pixels
-  // This is necessary because:
-  // 1. Remote connections often have static content with no visual updates
-  // 2. Without regular frame updates, the MediaRecorder may not capture enough frames
-  // 3. Insufficient frame capture can lead to:
-  //    - Gaps in the recording
-  //    - Black screens during streaming
-  // Note: While setInterval is not ideal for frame timing, it provides
-  // a practical solution for maintaining the stream
+  // Drive frames explicitly at a fixed cadence. requestFrame() captures the canvas's current pixels
+  // whether or not they changed, so even a static remote desktop yields a continuous, well-formed
+  // stream — and the frame count is controlled here rather than via canvas-mutation side effects.
   private handleMediaRecorderStart(): void {
-    const animationLoop = () => {
-      const drawEmpty = () => {
-        const ctx = this.canvas?.getContext('2d');
-        if (!ctx) {
-          return;
-        }
-        ctx.globalAlpha = 0;
-        ctx.fillRect(0, 0, 1, 1);
-      };
+    // Seed one frame immediately so the WebM header + first keyframe flush without waiting a tick.
+    this.pushFrame();
+    this.frameTimer = setInterval(() => this.pushFrame(), 1000 / CanvasStreamFPS);
+  }
 
-      return setInterval(drawEmpty, 1000 / CanvasStreamFPS);
-    };
-    this.animationLoopHandle = animationLoop();
+  private pushFrame(): void {
+    this.frameTrack?.requestFrame();
   }
 
   private handleMediaRecorderDataAvailable(event: BlobEvent): void {
@@ -208,9 +201,9 @@ export class WebMRecorder {
   private cleanupResources(): void {
     this._isRecording = false;
 
-    if (this.animationLoopHandle !== null) {
-      clearInterval(this.animationLoopHandle);
-      this.animationLoopHandle = null;
+    if (this.frameTimer !== null) {
+      clearInterval(this.frameTimer);
+      this.frameTimer = null;
     }
 
     if (this.stream) {
@@ -218,6 +211,7 @@ export class WebMRecorder {
       this.stream = null;
     }
 
+    this.frameTrack = null;
     this.mediaRecorder = null;
     this.ws = null;
     this.blobQueue.length = 0;
