@@ -17,8 +17,9 @@ export class WebMRecorder {
   private subject = new Subject<void>();
   private _isRecording = false;
   private stream: MediaStream | null = null;
-  private frameTrack: CanvasCaptureMediaStreamTrack | null = null;
+  private canvas: HTMLCanvasElement | null = null;
   private frameTimer: ReturnType<typeof setInterval> | null = null;
+  private keepaliveTick = false;
   private isCleaningUp = false;
 
   private blobQueue: Blob[] = [];
@@ -39,6 +40,7 @@ export class WebMRecorder {
 
     // Create new Subject for each start cycle since completed Subjects cannot emit
     this.subject = new Subject<void>();
+    this.canvas = canvas;
     if (!this.initializeCapture(canvas)) {
       console.error('Failed to initialize capture. Aborting recording.');
       throw new Error('UnableToStartRecording');
@@ -78,12 +80,10 @@ export class WebMRecorder {
 
     this.options.onTelemetry?.('recording-initialized');
     try {
-      // Manual-frame mode (frameRate 0): the browser does NOT auto-capture. We drive frames explicitly
-      // with requestFrame(), so the cadence is deterministic and independent of the canvas "dirty"
-      // heuristic — which stopped emitting frames on Edge 149 and produced empty/near-empty WebM.
-      this.stream = canvas.captureStream(0);
-      const tracks = this.stream.getVideoTracks();
-      this.frameTrack = tracks.length > 0 ? (tracks[0] as CanvasCaptureMediaStreamTrack) : null;
+      // Automatic capture, throttled to CanvasStreamFPS: the browser emits a frame whenever the canvas
+      // is modified. (Manual mode — captureStream(0) + requestFrame() — does NOT feed MediaRecorder
+      // reliably; it produces zero frames in Chromium, so we keep the canvas "dirty" instead.)
+      this.stream = canvas.captureStream(CanvasStreamFPS);
       return true;
     } catch (error) {
       console.error('Failed to initialize canvas capture:', error);
@@ -151,17 +151,27 @@ export class WebMRecorder {
     this.stop(); // Safe to call - stop() guards against circular calls
   }
 
-  // Drive frames explicitly at a fixed cadence. requestFrame() captures the canvas's current pixels
-  // whether or not they changed, so even a static remote desktop yields a continuous, well-formed
-  // stream — and the frame count is controlled here rather than via canvas-mutation side effects.
+  // captureStream only emits a frame when the canvas is *modified*. Remote desktops are often static,
+  // so without this nudge the stream stalls (gaps / black screens). setInterval is not ideal for frame
+  // timing but is a practical keepalive.
   private handleMediaRecorderStart(): void {
-    // Seed one frame immediately so the WebM header + first keyframe flush without waiting a tick.
-    this.pushFrame();
-    this.frameTimer = setInterval(() => this.pushFrame(), 1000 / CanvasStreamFPS);
+    this.frameTimer = setInterval(() => this.keepCanvasLive(), 1000 / CanvasStreamFPS);
   }
 
-  private pushFrame(): void {
-    this.frameTrack?.requestFrame();
+  // Nudge a single corner pixel with a *real* value change every tick. A zero-alpha / no-op draw is
+  // elided by some engines' dirty-tracking (Edge 149 → empty WebM), so we alternate the pixel value.
+  // save()/restore() keeps this from leaking state onto the canvas's shared 2D context.
+  private keepCanvasLive(): void {
+    const ctx = this.canvas?.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = this.keepaliveTick ? '#000000' : '#000001';
+    ctx.fillRect(0, 0, 1, 1);
+    ctx.restore();
+    this.keepaliveTick = !this.keepaliveTick;
   }
 
   private handleMediaRecorderDataAvailable(event: BlobEvent): void {
@@ -211,7 +221,7 @@ export class WebMRecorder {
       this.stream = null;
     }
 
-    this.frameTrack = null;
+    this.canvas = null;
     this.mediaRecorder = null;
     this.ws = null;
     this.blobQueue.length = 0;
