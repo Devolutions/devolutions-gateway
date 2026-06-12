@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ ts-angular-client, multi-video-player, shadow-player ]
+        library: [ ts-angular-client, multi-video-player, shadow-player, web-recorder ]
         include:
           - library: ts-angular-client
             libpath: ./devolutions-gateway/openapi/ts-angular-client
@@ -103,6 +103,8 @@ jobs:
             libpath: ./webapp/packages/multi-video-player
           - library: shadow-player
             libpath: ./webapp/packages/shadow-player
+          - library: web-recorder
+            libpath: ./webapp/packages/web-recorder
 
     steps:
       - name: Check out ${{ github.repository }}
