@@ -379,3 +379,129 @@ async fn client_disconnect_exits_cleanly() {
 
     let _ = h.writer_task.await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+/// Regression (#0): a client that goes away just as the first bytes (the WebM headers)
+/// start flowing must exit cleanly (`Ok`), not surface a spurious error.
+///
+/// The first Chunk a client receives is the header bytes, so disconnecting right after
+/// the first Chunk lands the teardown in the header-writing phase. The previous code
+/// propagated the closed-channel error from the header path as a hard failure (the main
+/// encode loop already treated it as a clean shutdown, but the header path did not).
+///
+/// Why a loop: whether the disconnect lands during the header writes is a scheduling
+/// race. Repeating it makes hitting the header phase overwhelmingly likely.
+async fn early_disconnect_during_headers_exits_ok() {
+    let _permit = global_stream_test_semaphore()
+        .acquire()
+        .await
+        .expect("failed to acquire global test semaphore");
+    init_tracing();
+    if !maybe_init_xmf() {
+        return;
+    }
+
+    for iter in 0..10u32 {
+        let mut h = spawn_stream_harness(asset_path("uncued-recording.webm"), LiveWriteConfig::default(), 1).await;
+        assert!(h.client_tx.send(vec![0]).is_ok(), "iter {iter}: failed to send Start");
+
+        // Pull until the first Chunk (the header bytes) arrives, then disconnect so the
+        // teardown races the header-writing phase.
+        let mut got_chunk = false;
+        let started_at = tokio::time::Instant::now();
+        while started_at.elapsed() < Duration::from_secs(30) {
+            assert!(h.client_tx.send(vec![1]).is_ok(), "iter {iter}: failed to send Pull");
+            if let Some(msg) = recv_server_message(&mut h.server_rx, Duration::from_secs(2)).await {
+                let (ty, _payload) = parse_server_message(&msg);
+                if ty == 0 {
+                    got_chunk = true;
+                    break;
+                }
+            }
+        }
+        assert!(got_chunk, "iter {iter}: never received a chunk");
+
+        drop(h.client_tx);
+        h.shutdown.notify_waiters();
+
+        let joined = tokio::time::timeout(Duration::from_secs(20), h.stream_task)
+            .await
+            .unwrap_or_else(|_| panic!("iter {iter}: timeout waiting for webm_stream to exit"))
+            .expect("webm_stream task panicked");
+
+        assert!(
+            joined.is_ok(),
+            "iter {iter}: webm_stream returned error on disconnect during headers: {:?}",
+            joined.err()
+        );
+
+        let _ = h.writer_task.await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+/// Regression (#5): on shutdown the server must emit at most one terminal frame
+/// (`End` or `Error`).
+///
+/// Previously both the message-handler task and the control task independently sent a
+/// terminal frame on every non-EOF termination path, so an external shutdown produced
+/// two `End` frames. We reach steady state (at least one chunk) and then trigger an
+/// external shutdown, draining the remaining frames and counting terminal ones.
+async fn external_shutdown_emits_single_terminal_frame() {
+    let _permit = global_stream_test_semaphore()
+        .acquire()
+        .await
+        .expect("failed to acquire global test semaphore");
+    init_tracing();
+    if !maybe_init_xmf() {
+        return;
+    }
+
+    let mut h = spawn_stream_harness(asset_path("uncued-recording.webm"), LiveWriteConfig::default(), 1).await;
+    assert!(h.client_tx.send(vec![0]).is_ok(), "failed to send Start");
+
+    // Drive to steady state: pull until we observe at least one Chunk.
+    let mut got_chunk = false;
+    let started_at = tokio::time::Instant::now();
+    while started_at.elapsed() < Duration::from_secs(30) {
+        assert!(h.client_tx.send(vec![1]).is_ok(), "failed to send Pull");
+        if let Some(msg) = recv_server_message(&mut h.server_rx, Duration::from_secs(2)).await {
+            let (ty, payload) = parse_server_message(&msg);
+            if ty == 2 {
+                panic!("received ServerMessage::Error before shutdown: {}", String::from_utf8_lossy(payload));
+            }
+            if ty == 0 {
+                got_chunk = true;
+                break;
+            }
+        }
+    }
+    assert!(got_chunk, "never received a chunk before shutdown");
+
+    // Trigger external shutdown and drain remaining frames.
+    h.shutdown.notify_waiters();
+
+    let mut terminal_frames = 0u32;
+    for _ in 0..50 {
+        let _ = h.client_tx.send(vec![1]);
+        match recv_server_message(&mut h.server_rx, Duration::from_secs(1)).await {
+            Some(msg) => {
+                let (ty, _payload) = parse_server_message(&msg);
+                if ty == 2 || ty == 3 {
+                    terminal_frames += 1;
+                }
+            }
+            None => break,
+        }
+    }
+
+    assert!(
+        terminal_frames <= 1,
+        "expected at most one terminal frame on shutdown, got {terminal_frames}"
+    );
+
+    let _ = tokio::time::timeout(Duration::from_secs(10), h.stream_task).await;
+    let _ = h.writer_task.await;
+}
