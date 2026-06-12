@@ -618,20 +618,15 @@ where
         let block: MatroskaSpec = block.into();
         if let Err(e) = self.writer.write(&block) {
             // When the client disconnects or we are shutting down, the destination channel is closed.
-            // This is normal control flow and is handled at a higher level.
-            if let TagWriterError::WriteError { source } = &e
-                && source.kind() == std::io::ErrorKind::Other
-                && source
-                    .get_ref()
-                    .and_then(|inner| inner.downcast_ref::<ChannelWriterError>())
-                    .is_some_and(|inner| matches!(inner, &ChannelWriterError::ChannelClosed))
-            {
+            // This is normal control flow and is handled at a higher level, so only the genuine
+            // failures are logged as errors.
+            let e = anyhow::Error::from(e);
+            if ChannelWriterError::is_in_chain(&e) {
                 perf_trace!("write_block aborted - destination channel closed");
-                return Err(e.into());
+            } else {
+                error!(error = %e, "write_block failed");
             }
-
-            error!(error = %e, "write_block failed");
-            return Err(e.into());
+            return Err(e);
         }
         perf_trace!("write_block completed successfully");
         Ok(())

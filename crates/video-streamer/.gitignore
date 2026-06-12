@@ -1,0 +1,3 @@
+# Local-only test fixtures for the (ignored, XMF-gated) integration tests.
+# These are real WebM recordings provided out-of-band, not committed to the repo.
+testing-assets/
