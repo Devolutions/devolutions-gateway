@@ -86,11 +86,8 @@ pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
             }
         }
         Operation::Update => append_raw(&mut script, "-Force"),
-        Operation::Uninstall => {
-            if let Some(version) = request.package.version.as_deref() {
-                append_flag_value(&mut script, "-Version", version);
-            }
-        }
+        // Uninstall removes the installed resource without pinning a version.
+        Operation::Uninstall => {}
     }
 
     if !matches!(request.operation, Operation::Uninstall) {
@@ -268,12 +265,14 @@ mod tests {
     }
 
     #[test]
-    fn powershell7_uninstall_uses_version_and_no_trust_flags() {
+    fn powershell7_uninstall_omits_version_and_trust_flags() {
         let mut request = make_request(ManagerName::PowerShell7);
         request.operation = Operation::Uninstall;
         let script = build_powershell7_command(&request)[3].clone();
         assert!(script.starts_with("Uninstall-PSResource -Name \"Pester\" -Confirm:$false"));
-        assert!(script.contains("-Version \"5.6.0\""));
+        // Uninstall must not pin a version (it would remove only the matching version,
+        // or fail if it does not match what is installed).
+        assert!(!script.contains("-Version"));
         assert!(!script.contains("-TrustRepository"));
         assert!(!script.contains("-AcceptLicense"));
         assert!(!script.contains("-Scope"));

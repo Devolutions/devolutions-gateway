@@ -24,7 +24,11 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         "--accept-source-agreements".to_owned(),
     ];
 
-    set_if_specified(&mut command, "--version", request.package.version.as_deref());
+    // Version pinning applies to install/update; uninstall removes whatever version is
+    // installed (pinning a possibly-mismatched version would fail the uninstall).
+    if !matches!(request.operation, Operation::Uninstall) {
+        set_if_specified(&mut command, "--version", request.package.version.as_deref());
+    }
 
     set_if_specified(
         &mut command,
@@ -190,5 +194,18 @@ mod tests {
         request.operation = Operation::Update;
         let cmd = build_winget_command(&request);
         assert!(cmd.contains(&"--uninstall-previous".to_owned()));
+    }
+
+    #[test]
+    fn test_uninstall_omits_version() {
+        let mut request = make_request();
+        request.operation = Operation::Uninstall;
+        request.package.version = Some(VersionString("120.0.0".to_owned()));
+
+        // Even when the request carries a version, uninstall must not pin it.
+        let cmd = build_winget_command(&request);
+        assert_eq!(cmd[1], "uninstall");
+        assert!(!cmd.contains(&"--version".to_owned()));
+        assert!(!cmd.contains(&"120.0.0".to_owned()));
     }
 }
