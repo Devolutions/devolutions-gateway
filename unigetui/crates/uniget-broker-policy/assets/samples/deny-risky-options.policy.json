@@ -1,0 +1,81 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.desktop.deny-risky-options",
+    "Publisher": "Contoso IT",
+    "Revision": 2,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "Default-allow policy that blocks risky broker request options."
+  },
+  "Enforcement": {
+    "DefaultDecision": "Allow",
+    "RulePrecedence": "PriorityThenDeny"
+  },
+  "Rules": [
+    {
+      "Id": "deny.integrity-bypass",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Do not broker installs that skip WinGet hash checks or PowerShell publisher checks.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "SkipHashCheck": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.manager-custom-parameters",
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "Custom package-manager parameters require a dedicated exception policy.",
+      "Match": {
+        "HasCustomParameters": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.prepost-commands",
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Pre and post operation commands are outside the package manager trust boundary.",
+      "Match": {
+        "HasPrePostCommands": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.kill-process-actions",
+      "Priority": 40,
+      "Decision": "Deny",
+      "Reason": "Killing processes before a brokered package operation is not allowed by this policy.",
+      "Match": {
+        "HasKillBeforeOperation": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.unapproved-winget-source",
+      "Priority": 50,
+      "Decision": "Deny",
+      "Reason": "Only the default WinGet source is accepted by this deny-list sample.",
+      "Match": {
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "msstore",
+          "winget-fonts"
+        ]
+      }
+    }
+  ]
+}

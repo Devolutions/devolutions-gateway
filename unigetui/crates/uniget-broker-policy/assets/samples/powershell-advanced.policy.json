@@ -1,0 +1,82 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.powershell.advanced-scenarios",
+    "Publisher": "Contoso IT",
+    "Revision": 1,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "PowerShell policy fixture for source, version range, and update operation coverage."
+  },
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
+  },
+  "Rules": [
+    {
+      "Id": "deny.powershell.untrusted-source",
+      "Priority": 5,
+      "Decision": "Deny",
+      "Reason": "Only PSGallery is approved for brokered PowerShell module operations.",
+      "Match": {
+        "Managers": [
+          "PowerShell"
+        ],
+        "Sources": [
+          "PoshTestGallery"
+        ]
+      }
+    },
+    {
+      "Id": "deny.powershell.prerelease",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Prerelease PowerShell modules are not approved in advanced scenarios.",
+      "Match": {
+        "Managers": [
+          "PowerShell"
+        ],
+        "PreRelease": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "allow.powershell.pester.versioned",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Pester is approved from PSGallery for CurrentUser install and update operations within the supported version range.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "PowerShell"
+        ],
+        "Sources": [
+          "PSGallery"
+        ],
+        "PackageIdentifiers": [
+          "Pester"
+        ],
+        "VersionRange": {
+          "MinVersion": "5.0.0",
+          "MaxVersion": "6.0.0",
+          "IncludePrerelease": false
+        },
+        "Scopes": [
+          "User"
+        ]
+      },
+      "Constraints": {
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    }
+  ]
+}

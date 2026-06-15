@@ -9,6 +9,7 @@ members = [
     "jetsocat",
     "testsuite",
     "tools/generate-openapi",
+    "unigetui/crates/*",
 ]
 default-members = [
     "devolutions-agent",

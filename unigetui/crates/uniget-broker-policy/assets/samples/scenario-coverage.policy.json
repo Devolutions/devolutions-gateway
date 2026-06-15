@@ -1,0 +1,257 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.desktop.scenario-coverage",
+    "Publisher": "Contoso IT",
+    "Revision": 1,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "Focused policy used to exercise simulator precedence, version, and constraint behavior."
+  },
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
+  },
+  "Rules": [
+    {
+      "Id": "deny.disabled-powertoys",
+      "Enabled": false,
+      "Priority": 1,
+      "Decision": "Deny",
+      "Reason": "Disabled rules must not participate in policy decisions.",
+      "Match": {
+        "Managers": [
+          "Winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.PowerToys"
+        ]
+      }
+    },
+    {
+      "Id": "deny.interactive",
+      "Priority": 5,
+      "Decision": "Deny",
+      "Reason": "Interactive brokered installs are not allowed in the scenario coverage policy.",
+      "Match": {
+        "Interactive": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.tie.custom-parameters",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Deny must win when allow and deny rules match at the same priority.",
+      "Match": {
+        "Managers": [
+          "Winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.VisualStudioCode"
+        ],
+        "HasCustomParameters": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "allow.tie.vscode-custom-parameters",
+      "Priority": 10,
+      "Decision": "Allow",
+      "Reason": "This intentionally ties the deny rule to prove deny wins ties.",
+      "Match": {
+        "Managers": [
+          "Winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.VisualStudioCode"
+        ],
+        "HasCustomParameters": [
+          true
+        ]
+      },
+      "Constraints": {
+        "AllowCustomParameters": true
+      }
+    },
+    {
+      "Id": "deny.prepost-commands",
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "Pre and post commands are outside the package manager trust boundary.",
+      "Match": {
+        "HasPrePostCommands": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.kill-process-actions",
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Killing processes before a brokered operation is not allowed.",
+      "Match": {
+        "HasKillBeforeOperation": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "allow.winget.powertoys",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "PowerToys is allowed and proves disabled deny rules are ignored.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.PowerToys"
+        ],
+        "Scopes": [
+          "Machine"
+        ],
+        "Architectures": [
+          "X64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    },
+    {
+      "Id": "allow.winget.vscode.version-range",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "VS Code is allowed only within the tested version range.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.VisualStudioCode"
+        ],
+        "VersionRange": {
+          "MinVersion": "1.90.0",
+          "MaxVersion": "2.0.0",
+          "IncludePrerelease": false
+        },
+        "Scopes": [
+          "Machine"
+        ],
+        "Architectures": [
+          "X64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    },
+    {
+      "Id": "allow.winget.git.customized",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Git is allowed with tightly constrained customization.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Git.Git"
+        ],
+        "Scopes": [
+          "Machine"
+        ],
+        "Architectures": [
+          "X64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomInstallLocation": true,
+        "AllowedInstallLocationPatterns": [
+          "C:\\Tools\\Git*"
+        ],
+        "AllowCustomParameters": true,
+        "AllowedCustomParameters": [
+          "--accept-source-agreements"
+        ],
+        "DeniedCustomParameters": [
+          "--override*"
+        ],
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    },
+    {
+      "Id": "allow.winget.git.uninstall",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Git uninstall is allowed for the same corporate package source and machine scope.",
+      "Match": {
+        "Operations": [
+          "Uninstall"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Git.Git"
+        ],
+        "Scopes": [
+          "Machine"
+        ],
+        "Architectures": [
+          "X64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    }
+  ]
+}

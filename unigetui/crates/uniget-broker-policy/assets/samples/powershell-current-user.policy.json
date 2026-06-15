@@ -1,0 +1,91 @@
+{
+  "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.powershell.current-user-modules",
+    "Publisher": "Contoso IT",
+    "Revision": 3,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "PowerShell Gallery module policy for non-admin CurrentUser installs."
+  },
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
+  },
+  "Rules": [
+    {
+      "Id": "deny.powershell.machine-scope",
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "PowerShell module installs through the broker must use CurrentUser scope.",
+      "Match": {
+        "Managers": [
+          "PowerShell"
+        ],
+        "Scopes": [
+          "Machine"
+        ]
+      }
+    },
+    {
+      "Id": "deny.powershell.elevated",
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "PowerShell module installs must not request an elevated broker context.",
+      "Match": {
+        "Managers": [
+          "PowerShell"
+        ],
+        "Elevation": [
+          "Elevated"
+        ]
+      }
+    },
+    {
+      "Id": "deny.powershell.prerelease",
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Prerelease PowerShell modules are not approved.",
+      "Match": {
+        "Managers": [
+          "PowerShell"
+        ],
+        "PreRelease": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "allow.powershell.pester",
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Pester is approved from PSGallery for CurrentUser installs.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "PowerShell"
+        ],
+        "Sources": [
+          "PSGallery"
+        ],
+        "PackageIdentifiers": [
+          "Pester"
+        ],
+        "Scopes": [
+          "User"
+        ]
+      },
+      "Constraints": {
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Devolutions.UniGetUI.Broker.Policy</RootNamespace>
+    <AssemblyName>Devolutions.UniGetUI.Broker.Policy</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Devolutions.UniGetUI.Broker.Policy</PackageId>
+    <Version>0.0.0.0</Version>
+    <AssemblyTitle>Devolutions Agent UniGetUI package broker policy model</AssemblyTitle>
+    <Description>Policy creation and parsing APIs for the Devolutions Agent UniGetUI package broker.</Description>
+    <Authors>Devolutions Inc.</Authors>
+    <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="16.2.0" />
+  </ItemGroup>
+
+</Project>
