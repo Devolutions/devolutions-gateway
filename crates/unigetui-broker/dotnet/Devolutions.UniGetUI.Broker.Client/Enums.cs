@@ -83,6 +83,14 @@ public enum OperationStatus
     Failed,
 }
 
+/// <summary>Broker readiness state reported by the health endpoint.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<HealthStatus>))]
+public enum HealthStatus
+{
+    Ready,
+    Paused,
+}
+
 /// <summary>Rule precedence strategy.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<RulePrecedence>))]
 public enum RulePrecedence

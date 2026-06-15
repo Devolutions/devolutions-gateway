@@ -43,6 +43,48 @@ public sealed class BrokerClient : IDisposable
         }
     }
 
+    /// <summary>Query the broker's health endpoint, returning the parsed status (or null if unreachable).</summary>
+    public async Task<HealthResponse?> GetHealthAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await SendHttpRequestAsync("GET", "/v1/health", null, null, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(response.Body))
+            {
+                Trace?.Invoke($"Empty health response body (status {response.StatusCode}).");
+                return null;
+            }
+
+            return JsonSerializer.Deserialize<HealthResponse>(response.Body, BrokerJson.Options);
+        }
+        catch (Exception ex)
+        {
+            Trace?.Invoke($"Error querying broker health: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Query the broker's advertised capabilities (or null if unreachable).</summary>
+    public async Task<CapabilitiesResponse?> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await SendHttpRequestAsync("GET", "/v1/capabilities", null, null, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(response.Body))
+            {
+                Trace?.Invoke($"Empty capabilities response body (status {response.StatusCode}).");
+                return null;
+            }
+
+            return JsonSerializer.Deserialize<CapabilitiesResponse>(response.Body, BrokerJson.Options);
+        }
+        catch (Exception ex)
+        {
+            Trace?.Invoke($"Error querying broker capabilities: {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>Evaluate a package operation against policy without executing it (dry-run).</summary>
     public Task<BrokerResponse?> EvaluateAsync(PackageRequest request, CancellationToken cancellationToken = default)
         => SendPackageOperationAsync(request, "/v1/package-operations/evaluate", cancellationToken);
