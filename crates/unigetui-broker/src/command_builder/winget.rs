@@ -97,9 +97,6 @@ mod tests {
 
     fn make_request() -> PackageRequest {
         PackageRequest {
-            _schema: RequestSchemaUri,
-            request_version: SemanticVersion::from("1.0.0"),
-            request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
             created_at: Utc::now(),
             operation: Operation::Install,
@@ -139,6 +136,7 @@ mod tests {
                 client_version: None,
                 client_process_path: None,
             },
+            capture_output: false,
         }
     }
 

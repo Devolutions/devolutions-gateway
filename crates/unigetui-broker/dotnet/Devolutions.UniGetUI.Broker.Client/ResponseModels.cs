@@ -5,15 +5,6 @@ namespace Devolutions.UniGetUI.Broker.Client;
 /// <summary>Canonical response returned by the broker after evaluating a request.</summary>
 public sealed class BrokerResponse
 {
-    [JsonPropertyName("$schema")]
-    public string Schema { get; set; } = SchemaUris.Response;
-
-    [JsonPropertyName("ResponseVersion")]
-    public string ResponseVersion { get; set; } = "1.0.0";
-
-    [JsonPropertyName("ResponseType")]
-    public string ResponseType { get; set; } = "PackageBrokerResponse";
-
     [JsonPropertyName("Broker")]
     public BrokerInfo Broker { get; set; } = new();
 

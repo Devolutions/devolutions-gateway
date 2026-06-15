@@ -5,8 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::enums::{Decision, ExecutionMode, Operation, Transport};
-use super::markers::{PackageBrokerResponse, ResponseSchemaUri};
-use super::newtypes::{CommandString, PackageIdentifier, ProtocolVersion, ResourceId, RuleId, SemanticVersion};
+use super::{CommandString, PackageIdentifier, ProtocolVersion, ResourceId, RuleId, SemanticVersion};
 
 /// Canonical response returned by the broker after evaluating a request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -14,16 +13,6 @@ use super::newtypes::{CommandString, PackageIdentifier, ProtocolVersion, Resourc
 #[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct BrokerResponse {
-    /// Response schema URI constant.
-    #[serde(rename = "$schema")]
-    pub _schema: ResponseSchemaUri,
-
-    /// Response syntax version (semver).
-    pub response_version: SemanticVersion,
-
-    /// Must be `"packageBrokerResponse"`.
-    pub response_type: PackageBrokerResponse,
-
     /// Broker identity and capabilities.
     pub broker: BrokerInfo,
 

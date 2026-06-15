@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "ResponseVersion": "1.0.0",
-  "ResponseType": "PackageOperationStatusResponse",
   "Broker": {
     "Name": "Devolutions Agent UniGetUI Broker",
     "ProtocolVersion": "1.0",

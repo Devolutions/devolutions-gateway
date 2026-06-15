@@ -3,8 +3,8 @@
 //! Constructs the commands the broker would execute from validated request fields.
 //! The broker never executes client-supplied commands directly.
 
-pub mod winget;
 pub mod powershell;
+pub mod winget;
 
 use crate::model::PackageRequest;
 

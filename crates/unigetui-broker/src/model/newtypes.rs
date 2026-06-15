@@ -1,8 +1,6 @@
 //! Schema-validated string newtypes.
 
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec, StringValidation};
 use serde::{Deserialize, Serialize};
 
 use super::ModelValidationError;
@@ -39,12 +37,16 @@ fn validate_bounded_string(
 ///
 /// Validated at deserialization time using the `semver` crate.
 /// Max length: 128
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct SemanticVersion(pub String);
-
-/// Regex pattern for SemVer 2.0.0 (used in JSON Schema generation only).
-pub const SEMVER_PATTERN: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SemanticVersion(
+    #[schemars(
+        length(max = 128),
+        regex(
+            pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+        )
+    )]
+    pub String,
+);
 
 impl SemanticVersion {
     /// Parse and validate a semantic version string.
@@ -68,25 +70,6 @@ impl<'de> Deserialize<'de> for SemanticVersion {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for SemanticVersion {
-    fn schema_name() -> String {
-        "SemanticVersion".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(128),
-                min_length: None,
-                pattern: Some(SEMVER_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
@@ -124,11 +107,10 @@ impl From<&str> for SemanticVersion {
 ///
 /// Pattern: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 /// Max length: 128
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct ResourceId(pub String);
-
-pub const RESOURCE_ID_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$";
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct ResourceId(
+    #[schemars(length(max = 128), regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$"))] pub String,
+);
 
 impl ResourceId {
     /// Parse and validate a resource identifier.
@@ -142,7 +124,9 @@ impl ResourceId {
         if !is_valid_resource_id(s) {
             return Err(ModelValidationError::Invalid {
                 type_name: "ResourceId",
-                reason: format!("does not match pattern {RESOURCE_ID_PATTERN}"),
+                reason:
+                    "must start with an alphanumeric character and contain only letters, digits, '.', '_', ':' or '-'"
+                        .to_owned(),
             });
         }
         Ok(Self(s.to_owned()))
@@ -168,25 +152,6 @@ fn is_valid_resource_id(s: &str) -> bool {
     bytes[1..]
         .iter()
         .all(|&b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b':' || b == b'-')
-}
-
-impl JsonSchema for ResourceId {
-    fn schema_name() -> String {
-        "ResourceId".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(128),
-                min_length: None,
-                pattern: Some(RESOURCE_ID_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
 }
 
 impl std::ops::Deref for ResourceId {
@@ -223,11 +188,14 @@ impl From<&str> for ResourceId {
 ///
 /// Pattern: `^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$`
 /// Max length: 128
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct RuleId(pub String);
-
-pub const RULE_ID_PATTERN: &str = r"^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\-]{0,127})$";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RuleId(
+    #[schemars(
+        length(max = 128),
+        regex(pattern = r"^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\-]{0,127})$")
+    )]
+    pub String,
+);
 
 impl RuleId {
     /// Parse and validate a rule ID.
@@ -243,7 +211,9 @@ impl RuleId {
         } else {
             Err(ModelValidationError::Invalid {
                 type_name: "RuleId",
-                reason: format!("does not match pattern {RULE_ID_PATTERN}"),
+                reason: "must be '<default>', '<validation-failure>', or start with an alphanumeric character \
+                         and contain only letters, digits, '.', '_', ':' or '-'"
+                    .to_owned(),
             })
         }
     }
@@ -253,25 +223,6 @@ impl<'de> Deserialize<'de> for RuleId {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for RuleId {
-    fn schema_name() -> String {
-        "RuleId".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(128),
-                min_length: None,
-                pattern: Some(RULE_ID_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
@@ -309,11 +260,11 @@ impl From<&str> for RuleId {
 ///
 /// Validated at deserialization time using the `url` crate.
 /// Max length: 2048
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct HttpUrl(pub String);
-
-pub const HTTP_URL_PATTERN: &str = r"^([Hh][Tt][Tt][Pp][Ss]?)://.+$";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct HttpUrl(
+    #[schemars(length(max = 2048), regex(pattern = r"^([Hh][Tt][Tt][Pp][Ss]?)://.+$"))]
+    pub String,
+);
 
 impl HttpUrl {
     /// Parse and validate an HTTP(S) URL.
@@ -345,25 +296,6 @@ impl<'de> Deserialize<'de> for HttpUrl {
     }
 }
 
-impl JsonSchema for HttpUrl {
-    fn schema_name() -> String {
-        "HttpUrl".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(2048),
-                min_length: None,
-                pattern: Some(HTTP_URL_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 impl std::ops::Deref for HttpUrl {
     type Target = str;
 
@@ -392,11 +324,10 @@ impl From<String> for HttpUrl {
 ///
 /// Must not contain `\/:*?"<>|` or control characters.
 /// Min length: 1, Max length: 256
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct PackageIdentifier(pub String);
-
-pub const PACKAGE_ID_PATTERN: &str = r#"^[^\/:*?"<>|\x01-\x1f]+$"#;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct PackageIdentifier(
+    #[schemars(length(min = 1, max = 256), regex(pattern = r#"^[^\/:*?"<>|\x01-\x1f]+$"#))] pub String,
+);
 
 impl PackageIdentifier {
     /// Parse and validate a package identifier.
@@ -441,25 +372,6 @@ impl<'de> Deserialize<'de> for PackageIdentifier {
     }
 }
 
-impl JsonSchema for PackageIdentifier {
-    fn schema_name() -> String {
-        "PackageIdentifier".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(256),
-                min_length: Some(1),
-                pattern: Some(PACKAGE_ID_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 impl std::ops::Deref for PackageIdentifier {
     type Target = str;
 
@@ -487,9 +399,8 @@ impl From<String> for PackageIdentifier {
 /// Case-insensitive exact value or wildcard pattern.
 ///
 /// Min length: 1, Max length: 256
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct StringPattern(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct StringPattern(#[schemars(length(min = 1, max = 256))] pub String);
 
 impl StringPattern {
     /// Parse and validate a string pattern.
@@ -503,25 +414,6 @@ impl<'de> Deserialize<'de> for StringPattern {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for StringPattern {
-    fn schema_name() -> String {
-        "StringPattern".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(256),
-                min_length: Some(1),
-                pattern: None,
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
@@ -552,11 +444,8 @@ impl std::fmt::Display for StringPattern {
 /// Protocol version string (e.g. "1.0").
 ///
 /// Pattern: `^[0-9]+\.[0-9]+$`
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct ProtocolVersion(pub String);
-
-pub const PROTOCOL_VERSION_PATTERN: &str = r"^[0-9]+\.[0-9]+$";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ProtocolVersion(#[schemars(regex(pattern = r"^[0-9]+\.[0-9]+$"))] pub String);
 
 impl ProtocolVersion {
     /// Parse and validate a protocol version string.
@@ -564,7 +453,7 @@ impl ProtocolVersion {
         if !is_valid_protocol_version(s) {
             return Err(ModelValidationError::Invalid {
                 type_name: "ProtocolVersion",
-                reason: format!("does not match pattern {PROTOCOL_VERSION_PATTERN}"),
+                reason: "must be in the form '<major>.<minor>' with digits only (e.g. '1.0')".to_owned(),
             });
         }
         Ok(Self(s.to_owned()))
@@ -587,25 +476,6 @@ fn is_valid_protocol_version(s: &str) -> bool {
         && !minor.is_empty()
         && major.bytes().all(|b| b.is_ascii_digit())
         && minor.bytes().all(|b| b.is_ascii_digit())
-}
-
-impl JsonSchema for ProtocolVersion {
-    fn schema_name() -> String {
-        "ProtocolVersion".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: None,
-                min_length: None,
-                pattern: Some(PROTOCOL_VERSION_PATTERN.to_owned()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
 }
 
 impl std::ops::Deref for ProtocolVersion {
@@ -633,9 +503,8 @@ impl From<&str> for ProtocolVersion {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// A short constrained string for version values (max 128 chars).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct VersionString(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct VersionString(#[schemars(length(min = 1, max = 128))] pub String);
 
 impl VersionString {
     /// Parse and validate a version string.
@@ -649,25 +518,6 @@ impl<'de> Deserialize<'de> for VersionString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for VersionString {
-    fn schema_name() -> String {
-        "VersionString".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(128),
-                min_length: Some(1),
-                pattern: None,
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
@@ -690,9 +540,8 @@ impl AsRef<str> for VersionString {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// A custom parameter string (max 512 chars).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct CustomParameterString(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct CustomParameterString(#[schemars(length(min = 1, max = 512))] pub String);
 
 impl CustomParameterString {
     /// Parse and validate a custom parameter string.
@@ -706,25 +555,6 @@ impl<'de> Deserialize<'de> for CustomParameterString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for CustomParameterString {
-    fn schema_name() -> String {
-        "CustomParameterString".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(512),
-                min_length: Some(1),
-                pattern: None,
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
@@ -747,9 +577,8 @@ impl AsRef<str> for CustomParameterString {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// A process name string (max 128 chars).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
-pub struct ProcessName(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub struct ProcessName(#[schemars(length(min = 1, max = 128))] pub String);
 
 impl ProcessName {
     /// Parse and validate a process name.
@@ -766,25 +595,6 @@ impl<'de> Deserialize<'de> for ProcessName {
     }
 }
 
-impl JsonSchema for ProcessName {
-    fn schema_name() -> String {
-        "ProcessName".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(128),
-                min_length: Some(1),
-                pattern: None,
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 impl std::ops::Deref for ProcessName {
     type Target = str;
 
@@ -798,9 +608,8 @@ impl std::ops::Deref for ProcessName {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// A command string (max 2048 chars).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct CommandString(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CommandString(#[schemars(length(min = 1, max = 2048))] pub String);
 
 impl CommandString {
     /// Parse and validate a command string.
@@ -814,25 +623,6 @@ impl<'de> Deserialize<'de> for CommandString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::parse(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for CommandString {
-    fn schema_name() -> String {
-        "CommandString".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            string: Some(Box::new(StringValidation {
-                max_length: Some(2048),
-                min_length: Some(1),
-                pattern: None,
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 

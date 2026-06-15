@@ -49,7 +49,7 @@ public sealed class BrokerClient : IDisposable
 
     /// <summary>Submit a package operation for evaluation and (if allowed) elevated execution.</summary>
     public Task<BrokerResponse?> ExecuteAsync(PackageRequest request, CancellationToken cancellationToken = default)
-        => SendPackageOperationAsync(request, "/v1/package-operations", cancellationToken);
+        => SendPackageOperationAsync(request, "/v1/package-operations/execute", cancellationToken);
 
     /// <summary>
     /// Submit a package operation and poll until it reaches a terminal status
@@ -60,7 +60,7 @@ public sealed class BrokerClient : IDisposable
         CancellationToken cancellationToken = default,
         int pollIntervalMs = 500)
     {
-        var executeResponse = await SendPackageOperationAsync(request, "/v1/package-operations", cancellationToken).ConfigureAwait(false);
+        var executeResponse = await SendPackageOperationAsync(request, "/v1/package-operations/execute", cancellationToken).ConfigureAwait(false);
         if (executeResponse is null)
         {
             Trace?.Invoke("Execute request failed, cannot poll for status.");

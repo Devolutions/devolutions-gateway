@@ -44,6 +44,101 @@ pub struct ExecutionContext {
     pub elevation: Elevation,
     /// Installation scope (machine scope requires elevation).
     pub scope: Option<Scope>,
+    /// When true, capture the main command's combined stdout+stderr.
+    pub capture_output: bool,
+}
+
+/// Maximum amount of captured process output retained (the tail is kept).
+pub const MAX_CAPTURED_OUTPUT_BYTES: usize = 10 * 1024;
+
+/// Outcome of executing a command plan: the main command's exit code and a
+/// tail-truncated, UTF-8 capture of its combined stdout+stderr.
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionOutput {
+    pub exit_code: i32,
+    pub stdout: String,
+}
+
+/// Keep the last [`MAX_CAPTURED_OUTPUT_BYTES`] of `bytes`, decoded lossily as UTF-8.
+///
+/// When truncated, a marker line is prepended so consumers can tell output was dropped.
+pub fn tail_utf8(bytes: &[u8]) -> String {
+    if bytes.len() <= MAX_CAPTURED_OUTPUT_BYTES {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let tail = &bytes[bytes.len() - MAX_CAPTURED_OUTPUT_BYTES..];
+    format!(
+        "[... output truncated to last {} KiB ...]\n{}",
+        MAX_CAPTURED_OUTPUT_BYTES / 1024,
+        String::from_utf8_lossy(tail)
+    )
+}
+
+/// Map a known WinGet or Windows Installer exit code to a short, human-readable
+/// description, if recognized.
+///
+/// WinGet returns documented `HRESULT`-style codes in the `0x8A15_xxxx` range
+/// (`APPINSTALLER_CLI_ERROR_*`); common MSI / Windows Installer codes are also
+/// recognized. Returns `None` for codes that are not in the known set, so callers
+/// can fall back to reporting the raw numeric code.
+#[allow(clippy::cast_sign_loss)]
+pub fn describe_exit_code(exit_code: i32) -> Option<&'static str> {
+    let description = match exit_code as u32 {
+        // WinGet CLI (APPINSTALLER_CLI_ERROR_*).
+        0x8A15_0001 => "internal error",
+        0x8A15_0002 => "invalid command line arguments",
+        0x8A15_0003 => "executing command failed",
+        0x8A15_0004 => "opening manifest failed",
+        0x8A15_0005 => "operation cancelled by signal",
+        0x8A15_0006 => "running command failed",
+        0x8A15_0007 => "command requires running as administrator",
+        0x8A15_0010 => "no installed package matched the query",
+        0x8A15_0011 => "no sources are configured",
+        0x8A15_0012 => "multiple packages matched the query",
+        0x8A15_0013 => "no manifest found for the package",
+        0x8A15_0014 => "loading a winget extension failed",
+        0x8A15_0015 => "this command requires administrator privileges",
+        0x8A15_0016 => "the source is not secure",
+        0x8A15_0017 => "Microsoft Store access is blocked by policy",
+        0x8A15_0018 => "this Microsoft Store app is blocked by policy",
+        0x8A15_0019 => "the package is currently in use",
+        0x8A15_0042 => "no applicable installer found for this system",
+        0x8A15_0043 => "the installer hash does not match",
+        0x8A15_0044 => "no applicable installer found",
+        // WinGet install (APPINSTALLER_CLI_ERROR_INSTALL_*).
+        0x8A15_0101 => "application is currently running; close it and retry",
+        0x8A15_0102 => "another installation is already in progress",
+        0x8A15_0103 => "a file required by the installer is in use",
+        0x8A15_0104 => "a required dependency is missing",
+        0x8A15_0105 => "not enough disk space to install",
+        0x8A15_0106 => "not enough memory to install",
+        0x8A15_0107 => "no network connection available",
+        0x8A15_0108 => "contact support to complete the installation",
+        0x8A15_0109 => "a reboot is required to finish the installation",
+        0x8A15_010A => "a reboot is required before installing",
+        0x8A15_010B => "a reboot was initiated to continue the installation",
+        0x8A15_010C => "installation cancelled by the user",
+        0x8A15_010D => "the package is already installed",
+        0x8A15_010E => "installation would downgrade the package",
+        0x8A15_010F => "installation is blocked by policy",
+        0x8A15_0110 => "failed to install package dependencies",
+        0x8A15_0111 => "the package is in use by another application",
+        0x8A15_0112 => "an invalid installer parameter was provided",
+        0x8A15_0113 => "this system is not supported by the installer",
+        0x8A15_0114 => "the installer is upgrading to an unsupported version",
+        // MSI / Windows Installer.
+        1602 => "the user cancelled the installation",
+        1603 => "a fatal error occurred during installation",
+        1605 => "the action is only valid for an installed product",
+        1618 => "another installation is already in progress",
+        1619 => "the installation package could not be opened",
+        1620 => "the installation package is invalid",
+        1638 => "another version of this product is already installed",
+        1641 => "a reboot was initiated to complete the installation",
+        3010 => "a reboot is required to complete the operation",
+        _ => return None,
+    };
+    Some(description)
 }
 
 /// Trait for command execution strategies.
@@ -51,9 +146,9 @@ pub struct ExecutionContext {
 pub trait CommandExecutor: Send + Sync {
     /// Execute a command under the given context.
     ///
-    /// Returns the process exit code on success. The method blocks (async) until
-    /// the spawned process exits or a fatal error occurs during launch.
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32>;
+    /// Returns the main command's exit code and captured output on success. The method
+    /// blocks (async) until the spawned process exits or a fatal error occurs during launch.
+    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput>;
 }
 
 /// Dry-run executor that only logs commands without running them.
@@ -61,7 +156,7 @@ pub struct DryRunExecutor;
 
 #[async_trait]
 impl CommandExecutor for DryRunExecutor {
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
+    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
         tracing::info!(
             effective_user = %ctx.effective_user,
             kill_processes = ?ctx.kill_processes,
@@ -71,7 +166,7 @@ impl CommandExecutor for DryRunExecutor {
             elevation = %ctx.elevation,
             "Dry-run: would execute plan"
         );
-        Ok(0)
+        Ok(ExecutionOutput::default())
     }
 }
 
@@ -97,19 +192,24 @@ pub fn create_platform_executor() -> Box<dyn CommandExecutor> {
 
 #[cfg(windows)]
 mod win {
+    use std::io::Read as _;
     use std::path::{Path, PathBuf};
 
     use anyhow::{Context as _, bail};
     use win_api_wrappers::identity::sid::Sid;
     use win_api_wrappers::process::{self, Process, StartupInfo};
+    use win_api_wrappers::security::attributes::SecurityAttributesInit;
     use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
     use win_api_wrappers::token::{Token, TokenElevationType};
-    use win_api_wrappers::utils::{self, CommandLine, WideString};
+    use win_api_wrappers::utils::{self, CommandLine, Pipe, WideString};
     use win_api_wrappers::wts;
     use windows::Win32::Security::{
         SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TokenPrimary,
     };
-    use windows::Win32::System::Threading::{CREATE_NEW_CONSOLE, NORMAL_PRIORITY_CLASS};
+    use windows::Win32::System::Threading::{
+        CREATE_NEW_CONSOLE, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
     use super::*;
 
@@ -141,7 +241,7 @@ mod win {
 
     #[async_trait]
     impl CommandExecutor for WindowsExecutor {
-        async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<i32> {
+        async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
             let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
             if !self.is_system && requires_elevation {
@@ -194,7 +294,7 @@ mod win {
     /// 3. If elevated execution is requested, obtain the linked elevated token.
     /// 4. Set the token session ID and create the process.
     /// 5. Wait for the process to exit and return the exit code.
-    fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<i32> {
+    fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
         let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
         tracing::info!(
@@ -270,23 +370,23 @@ mod win {
             "Running execution plan"
         );
 
-        let exit_code = run_plan(&execution_token, ctx, session_id)?;
+        let output = run_plan(&execution_token, ctx, session_id)?;
 
         tracing::info!(
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
-            exit_code,
+            exit_code = output.exit_code,
             "Plan completed under user token"
         );
 
-        Ok(exit_code)
+        Ok(output)
     }
 
     /// Execute a command as the current user (development mode).
     ///
     /// Opens the current process token and uses the same `create_process_as_user`
     /// code path as SYSTEM mode, ensuring consistent behavior (environment, desktop, flags).
-    fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<i32> {
+    fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
         tracing::info!(
             effective_user = %ctx.effective_user,
             command = %ctx.command.join(" "),
@@ -299,23 +399,23 @@ mod win {
 
         let session_id = token.session_id().context("failed to query token session ID")?;
 
-        let exit_code = run_plan(&token, ctx, session_id)?;
+        let output = run_plan(&token, ctx, session_id)?;
 
         tracing::info!(
             command = %ctx.command.join(" "),
-            exit_code,
+            exit_code = output.exit_code,
             "Plan completed under current user token"
         );
 
-        Ok(exit_code)
+        Ok(output)
     }
 
     /// Run the full execution plan under `token`: best-effort process kills, an
     /// optional pre-operation command (must succeed), the main package-manager
     /// command, then an optional post-operation command (failures are logged).
     ///
-    /// Returns the exit code of the main command.
-    fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::Result<i32> {
+    /// Returns the exit code and captured output of the main command.
+    fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::Result<ExecutionOutput> {
         // 1. Kill requested processes (best-effort; a missing process is not an error).
         for process_name in &ctx.kill_processes {
             let kill_cmd = vec![
@@ -324,8 +424,8 @@ mod win {
                 "/IM".to_owned(),
                 process_name.clone(),
             ];
-            match create_process_and_wait(token, &kill_cmd, session_id) {
-                Ok(code) => tracing::info!(%process_name, exit_code = code, "Kill-before-operation completed"),
+            match create_process(token, &kill_cmd, session_id, false) {
+                Ok(out) => tracing::info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
                 Err(error) => tracing::warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
             }
         }
@@ -333,27 +433,31 @@ mod win {
         // 2. Pre-operation command — must succeed before the main operation runs.
         if let Some(pre) = &ctx.pre_command {
             tracing::info!(command = %pre, "Running pre-operation command");
-            let code = create_process_and_wait(token, &shell_command(pre), session_id)
+            let out = create_process(token, &shell_command(pre), session_id, ctx.capture_output)
                 .context("failed to run pre-operation command")?;
-            if code != 0 {
-                bail!("pre-operation command exited with code {code}");
+            if out.exit_code != 0 {
+                bail!(
+                    "pre-operation command exited with code {}: {}",
+                    out.exit_code,
+                    out.stdout.trim()
+                );
             }
         }
 
         // 3. Main package-manager command.
-        let exit_code = create_process_and_wait(token, &ctx.command, session_id)?;
+        let output = create_process(token, &ctx.command, session_id, ctx.capture_output)?;
 
         // 4. Post-operation command — runs after the main command; failures are logged only.
         if let Some(post) = &ctx.post_command {
             tracing::info!(command = %post, "Running post-operation command");
-            match create_process_and_wait(token, &shell_command(post), session_id) {
-                Ok(0) => {}
-                Ok(code) => tracing::warn!(exit_code = code, "Post-operation command exited non-zero"),
+            match create_process(token, &shell_command(post), session_id, false) {
+                Ok(out) if out.exit_code == 0 => {}
+                Ok(out) => tracing::warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
                 Err(error) => tracing::warn!(%error, "Post-operation command failed"),
             }
         }
 
-        Ok(exit_code)
+        Ok(output)
     }
 
     /// Build a `cmd.exe` invocation for a client-supplied shell payload.
@@ -420,24 +524,28 @@ mod win {
         }
     }
 
-    /// Create a process under the given token and wait for it to exit.
+    /// Create a process under the given token and wait for exit.
     ///
     /// This is the unified process-creation path used by both SYSTEM and current-user modes.
-    /// It:
-    /// - Sets `lpDesktop` to `WinSta0\Default` so the process can interact with the user desktop.
-    /// - Passes `None` for environment so `create_process_as_user` loads the user's environment
-    ///   block via `CreateEnvironmentBlock` automatically.
-    /// - Uses `CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS` (plus `CREATE_UNICODE_ENVIRONMENT`
-    ///   which is always added by the wrapper).
+    /// The process always runs with no visible window (`STARTF_USESHOWWINDOW` + `SW_HIDE`, the
+    /// same approach `devolutions-session` uses). When `capture` is true, the child's
+    /// stdout+stderr are redirected into a single pipe and returned (tail-truncated to
+    /// [`MAX_CAPTURED_OUTPUT_BYTES`]); otherwise no output is captured.
     ///
-    /// Returns the process exit code.
+    /// Returns the process exit code and (when captured) its output.
     #[allow(clippy::cast_possible_wrap)]
-    fn create_process_and_wait(token: &Token, command: &[String], session_id: u32) -> anyhow::Result<i32> {
+    fn create_process(
+        token: &Token,
+        command: &[String],
+        session_id: u32,
+        capture: bool,
+    ) -> anyhow::Result<ExecutionOutput> {
         let cmd_line = CommandLine::new(command.to_vec());
 
         tracing::debug!(
             command_line = %command.join(" "),
             session_id,
+            capture,
             "Building process creation parameters"
         );
 
@@ -462,11 +570,38 @@ mod win {
             "Resolved executable path from user environment"
         );
 
-        // Desktop string: enables the process to interact with the interactive desktop.
-        // Required for GUI installers and many silent installers that create windows.
+        // The window is always hidden. `WinSta0\Default` keeps the process on the interactive
+        // desktop; `SW_HIDE` keeps any console it allocates invisible.
         let mut startup_info = StartupInfo {
             desktop: WideString::from("WinSta0\\Default"),
+            flags: STARTF_USESHOWWINDOW,
+            show_window: u16::try_from(SW_HIDE.0).expect("SW_HIDE fits into u16"),
             ..Default::default()
+        };
+
+        // Capture pipes are only set up when requested. They must be kept alive through
+        // process creation, and the child's ends closed afterwards so the reader sees EOF.
+        let inheritable = SecurityAttributesInit {
+            inherit_handle: true,
+            ..Default::default()
+        }
+        .init();
+        let (output_read, held_output_write, held_stdin_read) = if capture {
+            let (out_read, out_write) =
+                Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create output capture pipe")?;
+            // Empty stdin (write end closed immediately so the child reads EOF).
+            let (in_read, in_write) =
+                Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stdin pipe")?;
+            drop(in_write);
+
+            startup_info.flags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+            startup_info.std_input = in_read.handle.raw();
+            startup_info.std_output = out_write.handle.raw();
+            startup_info.std_error = out_write.handle.raw();
+
+            (Some(out_read), Some(out_write), Some(in_read))
+        } else {
+            (None, None, None)
         };
 
         let creation_flags = CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS;
@@ -479,7 +614,8 @@ mod win {
             Some(&cmd_line),
             None,
             None,
-            false,
+            // Inherit handles only when capturing (so the child receives the pipe ends).
+            capture,
             creation_flags,
             Some(&user_env),
             None,
@@ -504,13 +640,28 @@ mod win {
             }
         };
 
+        // Close our copies of the child's handles so the read end observes EOF on exit.
+        drop(held_output_write);
+        drop(held_stdin_read);
+
         tracing::info!(
             session_id,
             pid = process_info.process_id,
+            capture,
             "Process spawned, waiting for exit"
         );
 
-        // Wait for the process to exit (no timeout).
+        // Drain the pipe on a separate thread so a child producing more output than the pipe
+        // buffer can hold does not deadlock against our wait-for-exit.
+        let reader = output_read.map(|mut pipe| {
+            std::thread::spawn(move || {
+                let mut buffer = Vec::new();
+                let _ = pipe.read_to_end(&mut buffer);
+                buffer
+            })
+        });
+
+        // Wait for the process to exit (no timeout; the server enforces an overall timeout).
         process_info.process.wait(None).context("failed to wait for process")?;
 
         let exit_code = process_info
@@ -518,7 +669,15 @@ mod win {
             .exit_code()
             .context("failed to get process exit code")?;
 
-        Ok(exit_code as i32)
+        let stdout = match reader {
+            Some(handle) => tail_utf8(&handle.join().unwrap_or_default()),
+            None => String::new(),
+        };
+
+        Ok(ExecutionOutput {
+            exit_code: exit_code as i32,
+            stdout,
+        })
     }
 
     /// Resolve an executable name to its full path using the given environment's PATH.
@@ -570,3 +729,54 @@ mod win {
 
 #[cfg(windows)]
 pub use win::WindowsExecutor;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tail_utf8_keeps_short_output_verbatim() {
+        let s = "hello world";
+        assert_eq!(tail_utf8(s.as_bytes()), s);
+    }
+
+    #[test]
+    fn tail_utf8_truncates_to_tail_with_marker() {
+        let big = vec![b'a'; MAX_CAPTURED_OUTPUT_BYTES + 5000];
+        let out = tail_utf8(&big);
+        assert!(out.starts_with("[... output truncated"));
+        // The retained tail is exactly MAX_CAPTURED_OUTPUT_BYTES of 'a's.
+        assert!(out.ends_with(&"a".repeat(MAX_CAPTURED_OUTPUT_BYTES)));
+        assert!(!out.ends_with(&"a".repeat(MAX_CAPTURED_OUTPUT_BYTES + 1)));
+    }
+
+    #[test]
+    fn tail_utf8_handles_invalid_utf8_lossily() {
+        let bytes = [0xff, 0xfe, b'h', b'i'];
+        let out = tail_utf8(&bytes);
+        assert!(out.ends_with("hi"));
+    }
+
+    #[test]
+    fn describe_exit_code_recognizes_winget_no_package_found() {
+        // 0x8A150010 = APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND (-1978335216 as i32).
+        assert_eq!(
+            describe_exit_code(-1_978_335_216),
+            Some("no installed package matched the query")
+        );
+    }
+
+    #[test]
+    fn describe_exit_code_recognizes_msi_reboot_required() {
+        assert_eq!(
+            describe_exit_code(3010),
+            Some("a reboot is required to complete the operation")
+        );
+    }
+
+    #[test]
+    fn describe_exit_code_returns_none_for_unknown() {
+        assert_eq!(describe_exit_code(1), None);
+        assert_eq!(describe_exit_code(0), None);
+    }
+}

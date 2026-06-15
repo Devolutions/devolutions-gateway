@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "RequestVersion": "1.0.0",
-  "RequestType": "PackageOperation",
   "RequestId": "req-winget-vscode-version-in-range",
   "CreatedAt": "2026-05-05T12:11:00Z",
   "Operation": "Install",

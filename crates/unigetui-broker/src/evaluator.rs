@@ -324,9 +324,6 @@ mod tests {
 
     fn make_request(operation: Operation, package_id: &str) -> PackageRequest {
         PackageRequest {
-            _schema: RequestSchemaUri,
-            request_version: SemanticVersion::from("1.0.0"),
-            request_type: PackageOperation,
             request_id: ResourceId::from("req-1"),
             created_at: Utc::now(),
             operation,
@@ -366,6 +363,7 @@ mod tests {
                 client_version: None,
                 client_process_path: None,
             },
+            capture_output: false,
         }
     }
 

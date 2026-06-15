@@ -1,4 +1,4 @@
-//! Schema export and sample validation tests.
+//! Sample validation tests.
 //!
 //! Validates that the local sample documents successfully
 //! deserialize into our typed structs (which perform full validation).
@@ -7,33 +7,11 @@
 
 use std::path::PathBuf;
 
-use schemars::schema_for;
 use unigetui_broker::model::{BrokerResponse, PackageRequest, PolicyDocument, StatusRequest, StatusResponse};
 
 /// Local samples directory bundled inside the crate.
 fn samples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/samples")
-}
-
-#[test]
-fn dump_request_schema() {
-    let schema = schema_for!(PackageRequest);
-    let json = serde_json::to_string_pretty(&schema).unwrap();
-    std::fs::write("../../output/generated-request-schema.json", &json).unwrap();
-}
-
-#[test]
-fn dump_policy_schema() {
-    let schema = schema_for!(PolicyDocument);
-    let json = serde_json::to_string_pretty(&schema).unwrap();
-    std::fs::write("../../output/generated-policy-schema.json", &json).unwrap();
-}
-
-#[test]
-fn dump_response_schema() {
-    let schema = schema_for!(BrokerResponse);
-    let json = serde_json::to_string_pretty(&schema).unwrap();
-    std::fs::write("../../output/generated-response-schema.json", &json).unwrap();
 }
 
 #[test]
@@ -180,7 +158,6 @@ fn status_request_roundtrip() {
     let request: StatusRequest = serde_json::from_str(&content).unwrap();
 
     assert_eq!(&*request.request_id, "req-winget-vscode-install");
-    assert_eq!(&*request.request_version, "1.0.0");
     assert_eq!(&request.broker.effective_user, "CONTOSO\\alice");
 
     // Roundtrip: serialize and re-parse.
@@ -227,37 +204,8 @@ fn status_response_roundtrip_timeout() {
 }
 
 #[test]
-fn status_request_rejects_wrong_request_type() {
-    let json = r#"{
-        "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-        "RequestVersion": "1.0.0",
-        "RequestType": "PackageOperation",
-        "RequestId": "req-123",
-        "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" }
-    }"#;
-    let result = serde_json::from_str::<StatusRequest>(json);
-    assert!(result.is_err(), "should reject wrong requestType");
-}
-
-#[test]
-fn status_request_rejects_wrong_schema_uri() {
-    let json = r#"{
-        "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-        "RequestVersion": "1.0.0",
-        "RequestType": "PackageOperationStatus",
-        "RequestId": "req-123",
-        "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" }
-    }"#;
-    let result = serde_json::from_str::<StatusRequest>(json);
-    assert!(result.is_err(), "should reject wrong schema URI");
-}
-
-#[test]
 fn status_request_rejects_unknown_fields() {
     let json = r#"{
-        "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-        "RequestVersion": "1.0.0",
-        "RequestType": "PackageOperationStatus",
         "RequestId": "req-123",
         "Broker": { "RequestedElevation": "Elevated", "EffectiveUser": "USER" },
         "ExtraField": true

@@ -1,39 +1,18 @@
-//! Schema generation using `schemars`.
+//! Schema generation and parsing helpers.
 //!
-//! Generates JSON schemas from the Rust type definitions for export and diagnostics.
-//! Runtime validation is performed by the type system itself during deserialization.
+//! Generates the JSON schema for the policy document (consumed by the
+//! `generate-broker-schema` binary for export and IDE validation of
+//! admin-authored policy files). Runtime validation is performed by the type
+//! system itself during deserialization; the parse helpers wrap that into
+//! convenient fallible functions.
 
 use schemars::schema_for;
 
-use crate::model::{BrokerResponse, PackageRequest, PolicyDocument, StatusRequest, StatusResponse};
+use crate::model::{PackageRequest, PolicyDocument};
 
 /// Get the generated policy schema as a JSON value (for diagnostics/export).
 pub fn policy_schema_json() -> serde_json::Value {
     let schema = schema_for!(PolicyDocument);
-    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-}
-
-/// Get the generated request schema as a JSON value (for diagnostics/export).
-pub fn request_schema_json() -> serde_json::Value {
-    let schema = schema_for!(PackageRequest);
-    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-}
-
-/// Get the generated response schema as a JSON value (for diagnostics/export).
-pub fn response_schema_json() -> serde_json::Value {
-    let schema = schema_for!(BrokerResponse);
-    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-}
-
-/// Get the generated status request schema as a JSON value (for diagnostics/export).
-pub fn status_request_schema_json() -> serde_json::Value {
-    let schema = schema_for!(StatusRequest);
-    serde_json::to_value(&schema).expect("BUG: schema serialization failed")
-}
-
-/// Get the generated status response schema as a JSON value (for diagnostics/export).
-pub fn status_response_schema_json() -> serde_json::Value {
-    let schema = schema_for!(StatusResponse);
     serde_json::to_value(&schema).expect("BUG: schema serialization failed")
 }
 
@@ -65,12 +44,6 @@ mod tests {
             obj.contains_key("definitions") || obj.contains_key("$defs"),
             "schema should have type definitions"
         );
-    }
-
-    #[test]
-    fn request_schema_generates_valid_json() {
-        let schema = request_schema_json();
-        assert!(schema.is_object());
     }
 
     #[test]
@@ -118,9 +91,6 @@ mod tests {
     #[test]
     fn valid_request_deserializes_successfully() {
         let request_json = serde_json::json!({
-            "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-            "RequestVersion": "1.0.0",
-            "RequestType": "PackageOperation",
             "RequestId": "req-001",
             "CreatedAt": "2025-01-01T00:00:00Z",
             "Operation": "Install",
@@ -153,8 +123,6 @@ mod tests {
     #[test]
     fn invalid_request_missing_package_id_fails() {
         let bad_request = serde_json::json!({
-            "RequestVersion": "1.0.0",
-            "RequestType": "PackageOperation",
             "RequestId": "req-001",
             "CreatedAt": "2025-01-01T00:00:00Z",
             "Operation": "Install",
@@ -181,40 +149,8 @@ mod tests {
     }
 
     #[test]
-    fn invalid_semver_fails_deserialization() {
-        let bad_request = serde_json::json!({
-            "RequestVersion": "not-a-version",
-            "RequestType": "PackageOperation",
-            "RequestId": "req-001",
-            "CreatedAt": "2025-01-01T00:00:00Z",
-            "Operation": "Install",
-            "Manager": {
-                "Name": "Winget",
-                "DisplayName": "WinGet",
-                "ExecutableFriendlyName": "winget"
-            },
-            "Source": { "Name": "winget" },
-            "Package": { "Id": "X.Y", "Name": "X" },
-            "Options": {
-                "Interactive": false,
-                "SkipHashCheck": false,
-                "PreRelease": false
-            },
-            "Broker": {
-                "RequestedElevation": "Elevated",
-                "EffectiveUser": "user"
-            }
-        });
-
-        let result = parse_request(bad_request);
-        assert!(result.is_err(), "invalid semver should fail");
-    }
-
-    #[test]
     fn invalid_operation_enum_fails_deserialization() {
         let bad_request = serde_json::json!({
-            "RequestVersion": "1.0.0",
-            "RequestType": "PackageOperation",
             "RequestId": "req-001",
             "CreatedAt": "2025-01-01T00:00:00Z",
             "Operation": "Destroy",

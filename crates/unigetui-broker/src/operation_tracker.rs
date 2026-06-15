@@ -32,6 +32,8 @@ pub struct TrackedOperation {
     pub exit_code: Option<i32>,
     /// Human-readable note.
     pub note: Option<String>,
+    /// Captured combined stdout+stderr (tail-truncated), when the request opted in.
+    pub stdout: Option<String>,
     /// When this entry should be evicted (set upon completion/failure).
     pub expires_at: Option<DateTime<Utc>>,
 }
@@ -66,6 +68,7 @@ impl OperationTracker {
                 completed_at: None,
                 exit_code: None,
                 note: None,
+                stdout: None,
                 expires_at: None,
             },
         );
@@ -80,31 +83,33 @@ impl OperationTracker {
         }
     }
 
-    /// Mark an operation as Completed with an exit code.
-    pub fn mark_completed(&self, request_id: &str, exit_code: i32) {
+    /// Mark an operation as finished with an exit code, a status note (success message or
+    /// short error summary), and optionally captured output.
+    pub fn mark_completed(&self, request_id: &str, exit_code: i32, note: String, stdout: Option<String>) {
         let mut ops = self.operations.lock().expect("tracker lock poisoned");
         if let Some(op) = ops.get_mut(request_id) {
             let now = Utc::now();
-            if exit_code == 0 {
-                op.status = OperationStatus::Completed;
-                op.note = Some("Process exited successfully.".to_owned());
+            op.status = if exit_code == 0 {
+                OperationStatus::Completed
             } else {
-                op.status = OperationStatus::Failed;
-                op.note = Some(format!("Process exited with code {exit_code}."));
-            }
+                OperationStatus::Failed
+            };
             op.exit_code = Some(exit_code);
+            op.note = Some(note);
+            op.stdout = stdout;
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
         }
     }
 
-    /// Mark an operation as Failed with a reason.
-    pub fn mark_failed(&self, request_id: &str, reason: String) {
+    /// Mark an operation as Failed without a process exit code (launch failure or timeout).
+    pub fn mark_failed(&self, request_id: &str, note: String, stdout: Option<String>) {
         let mut ops = self.operations.lock().expect("tracker lock poisoned");
         if let Some(op) = ops.get_mut(request_id) {
             let now = Utc::now();
             op.status = OperationStatus::Failed;
-            op.note = Some(reason);
+            op.note = Some(note);
+            op.stdout = stdout;
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
         }

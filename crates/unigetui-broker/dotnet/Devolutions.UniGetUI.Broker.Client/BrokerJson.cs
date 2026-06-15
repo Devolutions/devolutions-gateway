@@ -3,14 +3,10 @@ using System.Text.Json.Serialization;
 
 namespace Devolutions.UniGetUI.Broker.Client;
 
-/// <summary>Canonical schema URIs used in the <c>$schema</c> field of each document.</summary>
+/// <summary>Canonical schema URI used in the <c>$schema</c> field of policy documents.</summary>
 public static class SchemaUris
 {
-    public const string Request = "https://aka.ms/unigetui/package-request.schema.1.0.json";
-    public const string Response = "https://aka.ms/unigetui/package-broker-response.schema.1.0.json";
     public const string Policy = "https://aka.ms/unigetui/package-policy.schema.1.0.json";
-    public const string StatusRequest = "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json";
-    public const string StatusResponse = "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json";
 }
 
 /// <summary>Shared <see cref="JsonSerializerOptions"/> for broker documents.</summary>

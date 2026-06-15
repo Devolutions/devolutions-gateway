@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
-  "ResponseVersion": "1.0.0",
-  "ResponseType": "PackageBrokerResponse",
   "Broker": {
     "Name": "UniGetUI Package Broker",
     "ProtocolVersion": "1.0",

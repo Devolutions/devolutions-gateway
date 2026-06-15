@@ -5,15 +5,6 @@ namespace Devolutions.UniGetUI.Broker.Client;
 /// <summary>Request to query the status of a previously submitted package operation.</summary>
 public sealed class StatusRequest
 {
-    [JsonPropertyName("$schema")]
-    public string Schema { get; set; } = SchemaUris.StatusRequest;
-
-    [JsonPropertyName("RequestVersion")]
-    public string RequestVersion { get; set; } = "1.0.0";
-
-    [JsonPropertyName("RequestType")]
-    public string RequestType { get; set; } = "PackageOperationStatus";
-
     [JsonPropertyName("RequestId")]
     public string RequestId { get; set; } = "";
 
@@ -24,15 +15,6 @@ public sealed class StatusRequest
 /// <summary>Response to a status query.</summary>
 public sealed class StatusResponse
 {
-    [JsonPropertyName("$schema")]
-    public string Schema { get; set; } = SchemaUris.StatusResponse;
-
-    [JsonPropertyName("ResponseVersion")]
-    public string ResponseVersion { get; set; } = "1.0.0";
-
-    [JsonPropertyName("ResponseType")]
-    public string ResponseType { get; set; } = "PackageOperationStatusResponse";
-
     [JsonPropertyName("Broker")]
     public BrokerInfo Broker { get; set; } = new();
 
@@ -53,4 +35,11 @@ public sealed class StatusResponse
 
     [JsonPropertyName("Note")]
     public string? Note { get; set; }
+
+    /// <summary>
+    /// Captured combined stdout+stderr of the operation (UTF-8, tail-truncated to ~10 KiB).
+    /// Only present when the request opted in via <see cref="PackageRequest.CaptureOutput"/>.
+    /// </summary>
+    [JsonPropertyName("Stdout")]
+    public string? Stdout { get; set; }
 }

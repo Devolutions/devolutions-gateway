@@ -8,10 +8,24 @@ paths:
     get:
       summary: Health check
       description: Reports whether the broker is ready or paused (policy unavailable).
+      responses:
+        '200':
+          description: Response body for `GET /v1/health`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
   /v1/capabilities:
     get:
       summary: Broker capabilities
       description: Lists supported transports, media types, managers, and operations.
+      responses:
+        '200':
+          description: Response body for `GET /v1/capabilities`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
   /v1/package-operations/evaluate:
     post:
       summary: Evaluate a package operation (dry-run)
@@ -30,13 +44,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrokerResponse'
+        '400':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
         '403':
           description: Canonical response returned by the broker after evaluating a request.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrokerResponse'
-  /v1/package-operations:
+        '415':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '422':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '503':
+          description: Generic error body returned for failures not described by a `BrokerResponse`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/package-operations/execute:
     post:
       summary: Evaluate and execute a package operation
       description: Evaluates a package request and, if allowed, submits it for elevated background execution. Poll the status endpoint for the result.
@@ -54,12 +92,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrokerResponse'
+        '400':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
         '403':
           description: Canonical response returned by the broker after evaluating a request.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrokerResponse'
+        '415':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '422':
+          description: Canonical response returned by the broker after evaluating a request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerResponse'
+        '503':
+          description: Generic error body returned for failures not described by a `BrokerResponse`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/package-operations/status:
     post:
       summary: Query operation status
@@ -78,12 +140,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
+        '400':
+          description: Generic error body returned for failures not described by a `BrokerResponse`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Response to a status query.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
+        '422':
+          description: Generic error body returned for failures not described by a `BrokerResponse`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     Architecture:
@@ -154,7 +228,6 @@ components:
       description: Canonical response returned by the broker after evaluating a request.
       type: object
       required:
-      - $schema
       - AuditId
       - Broker
       - CompletedAt
@@ -164,14 +237,9 @@ components:
       - Reason
       - ReceivedAt
       - RequestId
-      - ResponseType
-      - ResponseVersion
       - RuleId
       - WouldExecute
       properties:
-        $schema:
-          description: Response schema URI constant.
-          $ref: '#/components/schemas/ResponseSchemaUri'
         AuditId:
           description: Server-generated audit identifier.
           $ref: '#/components/schemas/ResourceId'
@@ -217,12 +285,6 @@ components:
         RequestId:
           description: Echoed request id.
           $ref: '#/components/schemas/ResourceId'
-        ResponseType:
-          description: Must be `"packageBrokerResponse"`.
-          $ref: '#/components/schemas/PackageBrokerResponse'
-        ResponseVersion:
-          description: Response syntax version (semver).
-          $ref: '#/components/schemas/SemanticVersion'
         RuleId:
           description: The rule that produced the decision.
           $ref: '#/components/schemas/RuleId'
@@ -236,11 +298,62 @@ components:
           description: Whether the broker would execute a command for this decision.
           type: boolean
       additionalProperties: false
+    CapabilitiesResponse:
+      description: Response body for `GET /v1/capabilities`.
+      type: object
+      required:
+      - MaxRequestBodyBytes
+      - PipeName
+      - ProtocolVersion
+      - RequestMediaTypes
+      - ResponseMediaTypes
+      - SupportedManagers
+      - SupportedOperations
+      - Transports
+      properties:
+        MaxRequestBodyBytes:
+          description: Maximum accepted request body size, in bytes.
+          type: integer
+          format: uint64
+          minimum: 0.0
+        PipeName:
+          description: Name of the named pipe the broker listens on.
+          type: string
+        ProtocolVersion:
+          description: Wire protocol version implemented by the broker.
+          $ref: '#/components/schemas/ProtocolVersion'
+        RequestMediaTypes:
+          description: Accepted request media types.
+          type: array
+          items:
+            type: string
+        ResponseMediaTypes:
+          description: Produced response media types.
+          type: array
+          items:
+            type: string
+        SupportedManagers:
+          description: Package managers the broker can operate.
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagerName'
+        SupportedOperations:
+          description: Operations the broker can perform.
+          type: array
+          items:
+            $ref: '#/components/schemas/Operation'
+        Transports:
+          description: Supported transports.
+          type: array
+          items:
+            $ref: '#/components/schemas/Transport'
     CommandString:
+      description: A command string.
       type: string
       maxLength: 2048
       minLength: 1
     CustomParameterString:
+      description: A custom parameter string.
       type: string
       maxLength: 512
       minLength: 1
@@ -256,6 +369,23 @@ components:
       enum:
       - Standard
       - Elevated
+    ErrorResponse:
+      description: Generic error body returned for failures not described by a `BrokerResponse`.
+      type: object
+      required:
+      - Error
+      properties:
+        AuditId:
+          description: Optional audit identifier correlating server logs.
+          type: string
+          nullable: true
+        Error:
+          description: Short, machine-stable error label.
+          type: string
+        Reason:
+          description: Optional human-readable elaboration.
+          type: string
+          nullable: true
     ExecutionInfo:
       description: Execution outcome details.
       type: object
@@ -285,6 +415,44 @@ components:
       enum:
       - SimulatedElevated
       - Elevated
+    HealthResponse:
+      description: Response body for `GET /v1/health`.
+      type: object
+      required:
+      - ElevatedSimulation
+      - Endpoints
+      - PolicyId
+      - ProtocolVersion
+      - Status
+      properties:
+        ElevatedSimulation:
+          description: Whether the broker runs in elevated-simulation (development) mode.
+          type: boolean
+        Endpoints:
+          description: The set of routes exposed by the broker.
+          type: array
+          items:
+            type: string
+        PolicyId:
+          description: Identifier of the active policy (empty when paused).
+          type: string
+        ProtocolVersion:
+          description: Wire protocol version implemented by the broker.
+          $ref: '#/components/schemas/ProtocolVersion'
+        Status:
+          description: Whether the broker is ready or paused.
+          $ref: '#/components/schemas/HealthStatus'
+    HealthStatus:
+      description: Broker readiness state.
+      oneOf:
+      - description: Broker has a valid policy and is serving requests.
+        type: string
+        enum:
+        - Ready
+      - description: Broker is paused (policy file missing or corrupted).
+        type: string
+        enum:
+        - Paused
     ManagerName:
       description: Supported package manager names.
       type: string
@@ -318,32 +486,19 @@ components:
         type: string
         enum:
         - Failed
-    PackageBrokerResponse:
-      type: string
-      enum:
-      - PackageBrokerResponse
     PackageIdentifier:
+      description: |-
+        Package identifier string.
+
+        Must not contain `\/:*?"<>|` or control characters.
       type: string
       maxLength: 256
       minLength: 1
       pattern: ^[^\/:*?"<>|\x01-\x1f]+$
-    PackageOperation:
-      type: string
-      enum:
-      - PackageOperation
-    PackageOperationStatus:
-      type: string
-      enum:
-      - PackageOperationStatus
-    PackageOperationStatusResponse:
-      type: string
-      enum:
-      - PackageOperationStatusResponse
     PackageRequest:
       description: Canonical request sent by an unelevated UniGetUI process to the elevated broker.
       type: object
       required:
-      - $schema
       - Broker
       - CreatedAt
       - Manager
@@ -351,16 +506,15 @@ components:
       - Options
       - Package
       - RequestId
-      - RequestType
-      - RequestVersion
       - Source
       properties:
-        $schema:
-          description: Request schema URI constant.
-          $ref: '#/components/schemas/RequestSchemaUri'
         Broker:
           description: Broker context from the client.
           $ref: '#/components/schemas/BrokerContext'
+        CaptureOutput:
+          description: When true, the broker captures the operation's combined stdout+stderr and returns it (tail-truncated) in the status response. Off by default to avoid the overhead when the client does not need the output.
+          default: false
+          type: boolean
         CreatedAt:
           description: UTC timestamp when the client created the request (RFC 3339).
           type: string
@@ -380,21 +534,17 @@ components:
         RequestId:
           description: Unique client-generated request id for audit correlation.
           $ref: '#/components/schemas/ResourceId'
-        RequestType:
-          description: Must be `"packageOperation"`.
-          $ref: '#/components/schemas/PackageOperation'
-        RequestVersion:
-          description: The request syntax version (semver).
-          $ref: '#/components/schemas/SemanticVersion'
         Source:
           description: Source/repository information.
           $ref: '#/components/schemas/RequestSource'
       additionalProperties: false
     ProcessName:
+      description: A process name string.
       type: string
       maxLength: 128
       minLength: 1
     ProtocolVersion:
+      description: Protocol version string (e.g. "1.0").
       type: string
       pattern: ^[0-9]+\.[0-9]+$
     RequestManager:
@@ -509,10 +659,6 @@ components:
           $ref: '#/components/schemas/VersionString'
           nullable: true
       additionalProperties: false
-    RequestSchemaUri:
-      type: string
-      enum:
-      - https://aka.ms/unigetui/package-request.schema.1.0.json
     RequestSource:
       description: Package source/repository information.
       type: object
@@ -535,6 +681,7 @@ components:
           nullable: true
       additionalProperties: false
     ResourceId:
+      description: Resource identifier (policy IDs, rule IDs, request IDs, audit IDs).
       type: string
       maxLength: 128
       pattern: ^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$
@@ -555,15 +702,12 @@ components:
         Revision:
           description: Policy revision number.
           type: integer
-          format: int32
+          format: uint32
           maximum: 2147483647.0
           minimum: 1.0
       additionalProperties: false
-    ResponseSchemaUri:
-      type: string
-      enum:
-      - https://aka.ms/unigetui/package-broker-response.schema.1.0.json
     RuleId:
+      description: Rule ID in responses — includes special sentinel values.
       type: string
       maxLength: 128
       pattern: ^(<default>|<validation-failure>|[A-Za-z0-9][A-Za-z0-9._:\-]{0,127})$
@@ -574,6 +718,10 @@ components:
       - User
       - Machine
     SemanticVersion:
+      description: |-
+        Semantic version string (SemVer 2.0.0).
+
+        Validated at deserialization time using the `semver` crate.
       type: string
       maxLength: 128
       pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$
@@ -581,46 +729,24 @@ components:
       description: Request to query the status of a previously submitted package operation.
       type: object
       required:
-      - $schema
       - Broker
       - RequestId
-      - RequestType
-      - RequestVersion
       properties:
-        $schema:
-          description: Status request schema URI constant.
-          $ref: '#/components/schemas/StatusRequestSchemaUri'
         Broker:
           description: Broker context from the client.
           $ref: '#/components/schemas/BrokerContext'
         RequestId:
           description: The `requestId` of the original package operation to query.
           $ref: '#/components/schemas/ResourceId'
-        RequestType:
-          description: Must be `"packageOperationStatus"`.
-          $ref: '#/components/schemas/PackageOperationStatus'
-        RequestVersion:
-          description: Request syntax version (semver).
-          $ref: '#/components/schemas/SemanticVersion'
       additionalProperties: false
-    StatusRequestSchemaUri:
-      type: string
-      enum:
-      - https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json
     StatusResponse:
       description: Response to a status query.
       type: object
       required:
-      - $schema
       - Broker
       - RequestId
-      - ResponseType
-      - ResponseVersion
       - Status
       properties:
-        $schema:
-          description: Status response schema URI constant.
-          $ref: '#/components/schemas/StatusResponseSchemaUri'
         Broker:
           description: Broker identity and capabilities.
           $ref: '#/components/schemas/BrokerInfo'
@@ -635,19 +761,13 @@ components:
           format: int32
           nullable: true
         Note:
-          description: Human-readable note about the status.
+          description: Human-readable note about the status. For failures this carries the short error summary (e.g. "winget.exe exited with code 0x8A150011", or a process-launch error).
           type: string
           maxLength: 2048
           nullable: true
         RequestId:
           description: The original request id being queried.
           $ref: '#/components/schemas/ResourceId'
-        ResponseType:
-          description: Must be `"packageOperationStatusResponse"`.
-          $ref: '#/components/schemas/PackageOperationStatusResponse'
-        ResponseVersion:
-          description: Response syntax version (semver).
-          $ref: '#/components/schemas/SemanticVersion'
         StartedAt:
           description: UTC timestamp when the process was actually launched (null if not yet started).
           type: string
@@ -656,11 +776,12 @@ components:
         Status:
           description: Current status of the operation.
           $ref: '#/components/schemas/OperationStatus'
+        Stdout:
+          description: Captured combined stdout+stderr of the operation (UTF-8, tail-truncated to ~10 KiB). Only present when the original request opted in via `CaptureOutput`.
+          type: string
+          maxLength: 16384
+          nullable: true
       additionalProperties: false
-    StatusResponseSchemaUri:
-      type: string
-      enum:
-      - https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json
     Transport:
       description: Broker transport type.
       type: string
@@ -668,6 +789,7 @@ components:
       - HttpNamedPipe
       - HttpLoopbackSimulator
     VersionString:
+      description: A short constrained string for version values.
       type: string
       maxLength: 128
       minLength: 1
@@ -711,6 +833,10 @@ components:
           maxItems: 1024
       additionalProperties: false
     HttpUrl:
+      description: |-
+        HTTP(S) URL string.
+
+        Validated at deserialization time using the `url` crate.
       type: string
       maxLength: 2048
       pattern: ^([Hh][Tt][Tt][Pp][Ss]?)://.+$
@@ -952,7 +1078,7 @@ components:
         Revision:
           description: Monotonically increasing revision number.
           type: integer
-          format: int32
+          format: uint32
           maximum: 2147483647.0
           minimum: 1.0
         SupportUrl:
@@ -1004,7 +1130,7 @@ components:
         Priority:
           description: Priority (lower = higher precedence).
           type: integer
-          format: int32
+          format: uint32
           maximum: 2147483647.0
           minimum: 0.0
         Reason:
@@ -1023,6 +1149,7 @@ components:
       enum:
       - PriorityThenDeny
     StringPattern:
+      description: Case-insensitive exact value or wildcard pattern.
       type: string
       maxLength: 256
       minLength: 1
@@ -1047,4 +1174,3 @@ components:
           minLength: 1
           nullable: true
       additionalProperties: false
-

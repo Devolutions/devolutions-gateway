@@ -4,7 +4,13 @@
 (served over a Windows named pipe). It is generated from the Rust types via
 `aide` + `schemars` and also carries the `PolicyDocument` schema as a component.
 
-Regenerate it with the workspace OpenAPI tool:
+Regenerate it with the crate-local binary (writes this file directly):
+
+```powershell
+cargo run -p unigetui-broker --bin generate-broker-openapi
+```
+
+Alternatively, use the workspace OpenAPI tool:
 
 ```powershell
 ../../../tools/generate-openapi/generate.ps1

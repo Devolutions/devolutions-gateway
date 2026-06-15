@@ -5,15 +5,6 @@ namespace Devolutions.UniGetUI.Broker.Client;
 /// <summary>Canonical request sent by an unelevated UniGetUI process to the elevated broker.</summary>
 public sealed class PackageRequest
 {
-    [JsonPropertyName("$schema")]
-    public string Schema { get; set; } = SchemaUris.Request;
-
-    [JsonPropertyName("RequestVersion")]
-    public string RequestVersion { get; set; } = "1.0.0";
-
-    [JsonPropertyName("RequestType")]
-    public string RequestType { get; set; } = "PackageOperation";
-
     [JsonPropertyName("RequestId")]
     public string RequestId { get; set; } = "";
 
@@ -37,6 +28,13 @@ public sealed class PackageRequest
 
     [JsonPropertyName("Broker")]
     public BrokerContext Broker { get; set; } = new();
+
+    /// <summary>
+    /// When true, the broker captures the operation's combined stdout+stderr and returns it
+    /// (tail-truncated) in the status response. Off by default to avoid the overhead when not needed.
+    /// </summary>
+    [JsonPropertyName("CaptureOutput")]
+    public bool CaptureOutput { get; set; }
 }
 
 public sealed class RequestManager

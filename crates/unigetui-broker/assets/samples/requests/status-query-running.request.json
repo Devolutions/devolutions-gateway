@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-operation-status-request.schema.1.0.json",
-  "RequestVersion": "1.0.0",
-  "RequestType": "PackageOperationStatus",
   "RequestId": "req-winget-vscode-install",
   "Broker": {
     "RequestedElevation": "Elevated",

@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "ResponseVersion": "1.0.0",
-  "ResponseType": "PackageOperationStatusResponse",
   "Broker": {
     "Name": "Devolutions Agent UniGetUI Broker",
     "ProtocolVersion": "1.0",
@@ -14,5 +11,6 @@
   "StartedAt": "2026-05-05T12:01:00Z",
   "CompletedAt": "2026-05-05T12:01:05Z",
   "ExitCode": 1,
-  "Note": "Process exited with code 1."
+  "Note": "winget.exe exited with code 1 (0x00000001)",
+  "Stdout": "Found Git [Git.Git]\nThis package's installer relies on the following dependencies...\nUninstall failed with exit code: 1"
 }

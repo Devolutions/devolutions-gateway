@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-operation-status-response.schema.1.0.json",
-  "ResponseVersion": "1.0.0",
-  "ResponseType": "PackageOperationStatusResponse",
   "Broker": {
     "Name": "Devolutions Agent UniGetUI Broker",
     "ProtocolVersion": "1.0",
@@ -13,5 +10,5 @@
   "Status": "Failed",
   "StartedAt": "2026-05-05T11:00:00Z",
   "CompletedAt": "2026-05-05T12:00:00Z",
-  "Note": "Operation timed out after 1 hour."
+  "Note": "Operation timed out after 3600 seconds."
 }

@@ -5,8 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::enums::{Architecture, Elevation, ManagerName, Operation, Scope};
-use super::markers::{PackageOperation, RequestSchemaUri};
-use super::newtypes::{CustomParameterString, PackageIdentifier, ProcessName, ResourceId, SemanticVersion, VersionString};
+use super::{CustomParameterString, PackageIdentifier, ProcessName, ResourceId, VersionString};
 
 /// Canonical request sent by an unelevated UniGetUI process to the elevated broker.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -14,16 +13,6 @@ use super::newtypes::{CustomParameterString, PackageIdentifier, ProcessName, Res
 #[serde(rename_all = "PascalCase")]
 #[serde(deny_unknown_fields)]
 pub struct PackageRequest {
-    /// Request schema URI constant.
-    #[serde(rename = "$schema")]
-    pub _schema: RequestSchemaUri,
-
-    /// The request syntax version (semver).
-    pub request_version: SemanticVersion,
-
-    /// Must be `"packageOperation"`.
-    pub request_type: PackageOperation,
-
     /// Unique client-generated request id for audit correlation.
     pub request_id: ResourceId,
 
@@ -47,6 +36,12 @@ pub struct PackageRequest {
 
     /// Broker context from the client.
     pub broker: BrokerContext,
+
+    /// When true, the broker captures the operation's combined stdout+stderr and returns
+    /// it (tail-truncated) in the status response. Off by default to avoid the overhead
+    /// when the client does not need the output.
+    #[serde(default)]
+    pub capture_output: bool,
 }
 
 /// Package manager metadata from the request.

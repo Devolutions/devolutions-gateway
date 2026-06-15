@@ -7,7 +7,7 @@
 //! - `GET /v1/health` — readiness check
 //! - `GET /v1/capabilities` — supported features
 //! - `POST /v1/package-operations/evaluate` — evaluate policy (dry-run)
-//! - `POST /v1/package-operations` — evaluate and execute
+//! - `POST /v1/package-operations/execute` — evaluate and execute
 //! - `POST /v1/package-operations/status` — query an operation's status
 
 use std::sync::{Arc, RwLock};
@@ -29,9 +29,9 @@ use crate::command_builder::build_command;
 use crate::evaluator;
 use crate::executor::CommandExecutor;
 use crate::model::{
-    BrokerInfo, BrokerResponse, Decision, ExecutionInfo, ExecutionMode, OperationStatus, PackageBrokerResponse,
-    PackageOperationStatusResponse, PackageRequest, PolicyDocument, ProtocolVersion, ResourceId, ResponsePolicyInfo,
-    ResponseSchemaUri, RuleId, SemanticVersion, StatusRequest, StatusResponse, StatusResponseSchemaUri, Transport,
+    BrokerInfo, BrokerResponse, CapabilitiesResponse, Decision, ErrorResponse, ExecutionInfo, ExecutionMode,
+    HealthResponse, HealthStatus, ManagerName, Operation, OperationStatus, PackageRequest, PolicyDocument,
+    ProtocolVersion, ResourceId, ResponsePolicyInfo, RuleId, StatusRequest, StatusResponse, Transport,
 };
 use crate::operation_tracker::OperationTracker;
 
@@ -75,7 +75,10 @@ pub fn api_router() -> ApiRouter<Arc<BrokerState>> {
             "/v1/package-operations/evaluate",
             post_with(handle_evaluate_dryrun, evaluate_docs),
         )
-        .api_route("/v1/package-operations", post_with(handle_execute, execute_docs))
+        .api_route(
+            "/v1/package-operations/execute",
+            post_with(handle_execute, execute_docs),
+        )
         .api_route("/v1/package-operations/status", post_with(handle_status, status_docs))
 }
 
@@ -181,47 +184,44 @@ fn register_policy_schema(api: &mut OpenApi) {
 // Handlers
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async fn handle_health(State(state): State<Arc<BrokerState>>) -> Response {
+async fn handle_health(State(state): State<Arc<BrokerState>>) -> Json<HealthResponse> {
     let policy_guard = state.policy.read().expect("policy lock poisoned");
-    let status = if policy_guard.is_some() { "ready" } else { "paused" };
+    let status = if policy_guard.is_some() {
+        HealthStatus::Ready
+    } else {
+        HealthStatus::Paused
+    };
     let policy_id = policy_guard
         .as_ref()
         .map(|p| p.metadata.id.to_string())
         .unwrap_or_default();
 
-    let body = serde_json::json!({
-        "status": status,
-        "protocolVersion": PROTOCOL_VERSION_STR,
-        "elevatedSimulation": false,
-        "policyId": policy_id,
-        "endpoints": [
-            "GET /v1/health",
-            "GET /v1/capabilities",
-            "POST /v1/package-operations/evaluate",
-            "POST /v1/package-operations",
-            "POST /v1/package-operations/status"
-        ]
-    });
-    json_response(StatusCode::OK, &body)
+    Json(HealthResponse {
+        status,
+        protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
+        elevated_simulation: false,
+        policy_id,
+        endpoints: vec![
+            "GET /v1/health".to_owned(),
+            "GET /v1/capabilities".to_owned(),
+            "POST /v1/package-operations/evaluate".to_owned(),
+            "POST /v1/package-operations/execute".to_owned(),
+            "POST /v1/package-operations/status".to_owned(),
+        ],
+    })
 }
 
-async fn handle_capabilities(State(state): State<Arc<BrokerState>>) -> Response {
-    let body = serde_json::json!({
-        "protocolVersion": PROTOCOL_VERSION_STR,
-        "transports": ["http-named-pipe"],
-        "requestMediaTypes": [
-            "application/vnd.unigetui.package-request+json; version=1.0",
-            "application/json"
-        ],
-        "responseMediaTypes": [RESPONSE_MEDIA_TYPE],
-        "requestSchema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-        "responseSchema": "https://aka.ms/unigetui/package-broker-response.schema.1.0.json",
-        "supportedManagers": ["Winget", "PowerShell", "PowerShell7"],
-        "supportedOperations": ["Install", "Update", "Uninstall"],
-        "maxRequestBodyBytes": MAX_REQUEST_BODY_BYTES,
-        "pipeName": &state.pipe_name
-    });
-    json_response(StatusCode::OK, &body)
+async fn handle_capabilities(State(state): State<Arc<BrokerState>>) -> Json<CapabilitiesResponse> {
+    Json(CapabilitiesResponse {
+        protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
+        transports: vec![Transport::HttpNamedPipe],
+        request_media_types: ACCEPTED_CONTENT_TYPES.iter().map(|&s| s.to_owned()).collect(),
+        response_media_types: vec![RESPONSE_MEDIA_TYPE.to_owned()],
+        supported_managers: vec![ManagerName::Winget, ManagerName::PowerShell, ManagerName::PowerShell7],
+        supported_operations: vec![Operation::Install, Operation::Update, Operation::Uninstall],
+        max_request_body_bytes: MAX_REQUEST_BODY_BYTES as u64,
+        pipe_name: state.pipe_name.clone(),
+    })
 }
 
 async fn handle_evaluate_dryrun(State(state): State<Arc<BrokerState>>, headers: HeaderMap, body: Bytes) -> Response {
@@ -385,6 +385,7 @@ fn evaluate(state: Arc<BrokerState>, headers: &HeaderMap, body_bytes: &Bytes, ex
             effective_user: request.broker.effective_user.clone(),
             elevation: request.broker.requested_elevation,
             scope: request.options.scope,
+            capture_output: request.capture_output,
         };
 
         // Register the operation and spawn execution in background.
@@ -395,33 +396,50 @@ fn evaluate(state: Arc<BrokerState>, headers: &HeaderMap, body_bytes: &Bytes, ex
         // Spawn background task to wait for process completion.
         // The response is returned immediately; clients poll /status for result.
         let bg_state = Arc::clone(&state);
+        let exe_name = ctx.command.first().cloned().unwrap_or_else(|| "process".to_owned());
         tokio::spawn(async move {
             let timeout = OperationTracker::operation_timeout();
             match tokio::time::timeout(timeout, bg_state.executor.execute(&ctx)).await {
-                Ok(Ok(exit_code)) => {
-                    bg_state.tracker.mark_completed(&request_id_str, exit_code);
+                Ok(Ok(output)) => {
+                    let stdout = (!output.stdout.is_empty()).then(|| output.stdout.clone());
+                    // For non-zero exits, the note is a short error summary (e.g. winget HRESULT
+                    // codes); for success it is a plain confirmation.
+                    let note = if output.exit_code == 0 {
+                        "Process exited successfully.".to_owned()
+                    } else {
+                        #[allow(clippy::cast_sign_loss)]
+                        let unsigned = output.exit_code as u32;
+                        match crate::executor::describe_exit_code(output.exit_code) {
+                            Some(description) => format!(
+                                "{exe_name} exited with code {} (0x{unsigned:08X}): {description}",
+                                output.exit_code
+                            ),
+                            None => format!("{exe_name} exited with code {} (0x{unsigned:08X})", output.exit_code),
+                        }
+                    };
                     tracing::info!(
                         request_id = %request_id_str,
-                        exit_code,
+                        exit_code = output.exit_code,
                         "Background execution completed"
                     );
-                }
-                Ok(Err(error)) => {
-                    tracing::error!(request_id = %request_id_str, %error, "Background execution failed");
                     bg_state
                         .tracker
-                        .mark_failed(&request_id_str, format!("Execution failed: {error:#}"));
+                        .mark_completed(&request_id_str, output.exit_code, note, stdout);
+                }
+                Ok(Err(error)) => {
+                    // Launch failures carry the underlying WinAPI error description.
+                    let note = format!("{error:#}");
+                    tracing::error!(request_id = %request_id_str, %error, "Background execution failed");
+                    bg_state.tracker.mark_failed(&request_id_str, note, None);
                 }
                 Err(_elapsed) => {
+                    let note = format!("Operation timed out after {} seconds.", timeout.as_secs());
                     tracing::error!(
                         request_id = %request_id_str,
                         timeout_secs = timeout.as_secs(),
                         "Background execution timed out"
                     );
-                    bg_state.tracker.mark_failed(
-                        &request_id_str,
-                        format!("Operation timed out after {} seconds.", timeout.as_secs()),
-                    );
+                    bg_state.tracker.mark_failed(&request_id_str, note, None);
                 }
             }
         });
@@ -442,9 +460,6 @@ fn evaluate(state: Arc<BrokerState>, headers: &HeaderMap, body_bytes: &Bytes, ex
     let completed_at = Utc::now();
 
     let response = BrokerResponse {
-        _schema: ResponseSchemaUri,
-        response_version: SemanticVersion::from("1.0.0"),
-        response_type: PackageBrokerResponse,
         broker: BrokerInfo {
             name: BROKER_NAME.to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
@@ -529,9 +544,6 @@ async fn handle_status(State(state): State<Arc<BrokerState>>, body: Bytes) -> Re
         Some(op) => (
             StatusCode::OK,
             StatusResponse {
-                _schema: StatusResponseSchemaUri,
-                response_version: SemanticVersion::from("1.0.0"),
-                response_type: PackageOperationStatusResponse,
                 broker: broker_info(),
                 request_id: status_req.request_id,
                 status: op.status,
@@ -539,15 +551,13 @@ async fn handle_status(State(state): State<Arc<BrokerState>>, body: Bytes) -> Re
                 completed_at: op.completed_at,
                 exit_code: op.exit_code,
                 note: op.note,
+                stdout: op.stdout,
             },
         ),
         None => (
             // Operation not found — either it never existed or it was evicted.
             StatusCode::NOT_FOUND,
             StatusResponse {
-                _schema: StatusResponseSchemaUri,
-                response_version: SemanticVersion::from("1.0.0"),
-                response_type: PackageOperationStatusResponse,
                 broker: broker_info(),
                 request_id: status_req.request_id,
                 status: OperationStatus::Failed,
@@ -555,6 +565,7 @@ async fn handle_status(State(state): State<Arc<BrokerState>>, body: Bytes) -> Re
                 completed_at: None,
                 exit_code: None,
                 note: Some("Operation not found (never submitted or already evicted).".to_owned()),
+                stdout: None,
             },
         ),
     };
@@ -573,8 +584,17 @@ async fn handle_status(State(state): State<Arc<BrokerState>>, body: Bytes) -> Re
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn json_error_response(status: StatusCode, message: &str) -> Response {
-    let body = serde_json::json!({ "error": message });
-    json_response(status, &body)
+    let body = ErrorResponse {
+        error: message.to_owned(),
+        reason: None,
+        audit_id: None,
+    };
+    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: ErrorResponse serialization");
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Body::from(bytes))
+        .expect("BUG: response builder with valid status")
 }
 
 /// Validate required request headers per the wire protocol specification.
@@ -686,9 +706,6 @@ fn make_error_response(
 ) -> Response {
     let completed_at = Utc::now();
     let response = BrokerResponse {
-        _schema: ResponseSchemaUri,
-        response_version: SemanticVersion::from("1.0.0"),
-        response_type: PackageBrokerResponse,
         broker: BrokerInfo {
             name: BROKER_NAME.to_owned(),
             protocol_version: ProtocolVersion::from(PROTOCOL_VERSION_STR),
@@ -733,27 +750,18 @@ fn make_error_response(
 }
 
 fn service_unavailable(audit_id: &str) -> Response {
-    let body = serde_json::json!({
-        "error": "broker paused",
-        "reason": "policy file is unavailable or corrupted; waiting for a valid policy",
-        "auditId": audit_id,
-    });
-    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: JSON value serialization");
+    let body = ErrorResponse {
+        error: "broker paused".to_owned(),
+        reason: Some("policy file is unavailable or corrupted; waiting for a valid policy".to_owned()),
+        audit_id: Some(audit_id.to_owned()),
+    };
+    let bytes = serde_json::to_vec_pretty(&body).expect("BUG: ErrorResponse serialization");
     Response::builder()
         .status(StatusCode::SERVICE_UNAVAILABLE)
         .header("Content-Type", "application/json")
         .header("Retry-After", "5")
         .body(Body::from(bytes))
         .expect("BUG: static response builder")
-}
-
-fn json_response(status: StatusCode, body: &serde_json::Value) -> Response {
-    let bytes = serde_json::to_vec_pretty(body).expect("BUG: JSON value serialization");
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "application/json")
-        .body(Body::from(bytes))
-        .expect("BUG: response builder with valid status")
 }
 
 fn generate_audit_id() -> String {
@@ -767,11 +775,13 @@ fn generate_audit_id() -> String {
 fn health_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
     op.summary("Health check")
         .description("Reports whether the broker is ready or paused (policy unavailable).")
+        .response::<200, Json<HealthResponse>>()
 }
 
 fn capabilities_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
     op.summary("Broker capabilities")
         .description("Lists supported transports, media types, managers, and operations.")
+        .response::<200, Json<CapabilitiesResponse>>()
 }
 
 fn evaluate_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
@@ -779,7 +789,11 @@ fn evaluate_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
         .description("Evaluates a package request against the active policy without executing anything.")
         .input::<Json<PackageRequest>>()
         .response::<200, Json<BrokerResponse>>()
+        .response::<400, Json<BrokerResponse>>()
         .response::<403, Json<BrokerResponse>>()
+        .response::<415, Json<BrokerResponse>>()
+        .response::<422, Json<BrokerResponse>>()
+        .response::<503, Json<ErrorResponse>>()
 }
 
 fn execute_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
@@ -790,7 +804,11 @@ fn execute_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
         )
         .input::<Json<PackageRequest>>()
         .response::<200, Json<BrokerResponse>>()
+        .response::<400, Json<BrokerResponse>>()
         .response::<403, Json<BrokerResponse>>()
+        .response::<415, Json<BrokerResponse>>()
+        .response::<422, Json<BrokerResponse>>()
+        .response::<503, Json<ErrorResponse>>()
 }
 
 fn status_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
@@ -798,7 +816,9 @@ fn status_docs(op: TransformOperation<'_>) -> TransformOperation<'_> {
         .description("Returns the current status of a previously submitted package operation.")
         .input::<Json<StatusRequest>>()
         .response::<200, Json<StatusResponse>>()
+        .response::<400, Json<ErrorResponse>>()
         .response::<404, Json<StatusResponse>>()
+        .response::<422, Json<ErrorResponse>>()
 }
 
 #[cfg(test)]
@@ -814,7 +834,7 @@ mod tests {
             "/v1/health",
             "/v1/capabilities",
             "/v1/package-operations/evaluate",
-            "/v1/package-operations",
+            "/v1/package-operations/execute",
             "/v1/package-operations/status",
         ] {
             assert!(paths.paths.contains_key(expected), "missing OpenAPI path: {expected}");
@@ -827,6 +847,9 @@ mod tests {
             "StatusRequest",
             "StatusResponse",
             "PolicyDocument",
+            "HealthResponse",
+            "CapabilitiesResponse",
+            "ErrorResponse",
         ] {
             assert!(
                 components.schemas.contains_key(expected),

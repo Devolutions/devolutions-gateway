@@ -14,6 +14,7 @@
       "type": "string"
     },
     "CustomParameterString": {
+      "description": "A custom parameter string.",
       "maxLength": 512,
       "minLength": 1,
       "type": "string"
@@ -35,6 +36,7 @@
       "type": "string"
     },
     "HttpUrl": {
+      "description": "HTTP(S) URL string.\n\nValidated at deserialization time using the `url` crate.",
       "maxLength": 2048,
       "pattern": "^([Hh][Tt][Tt][Pp][Ss]?)://.+$",
       "type": "string"
@@ -491,6 +493,7 @@
       "type": "string"
     },
     "ResourceId": {
+      "description": "Resource identifier (policy IDs, rule IDs, request IDs, audit IDs).",
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
       "type": "string"
@@ -511,11 +514,13 @@
       "type": "string"
     },
     "SemanticVersion": {
+      "description": "Semantic version string (SemVer 2.0.0).\n\nValidated at deserialization time using the `semver` crate.",
       "maxLength": 128,
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
       "type": "string"
     },
     "StringPattern": {
+      "description": "Case-insensitive exact value or wildcard pattern.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -551,6 +556,7 @@
       "type": "object"
     },
     "VersionString": {
+      "description": "A short constrained string for version values.",
       "maxLength": 128,
       "minLength": 1,
       "type": "string"

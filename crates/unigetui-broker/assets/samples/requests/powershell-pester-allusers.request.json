@@ -1,7 +1,4 @@
 {
-  "$schema": "https://aka.ms/unigetui/package-request.schema.1.0.json",
-  "RequestVersion": "1.0.0",
-  "RequestType": "PackageOperation",
   "RequestId": "req-powershell-pester-allusers",
   "CreatedAt": "2026-05-05T12:25:00Z",
   "Operation": "Install",
