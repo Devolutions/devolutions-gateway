@@ -276,8 +276,11 @@ export class WebMRecorder {
     if (this.isCleaningUp) return;
     this.isCleaningUp = true;
     this.stopKeepalive();
-    // Defer rejection until handleMediaRecorderStop so cleanup completes first.
     this.pendingError = 'UnableToStartRecording';
+    // Explicitly stop so onstop always fires — browsers don't guarantee it after onerror.
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
   }
 
   private fireTelemetry(event: WebMRecorderTelemetryEvent): void {

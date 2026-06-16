@@ -28,6 +28,7 @@ export class AsciiCastV2Recorder {
   private websocket: QueuedWebSocket | null = null;
   private outputGeneration = 0;
   private unsubscribeOutput: (() => void) | null = null;
+  private settleStart: ((error?: string) => void) | null = null;
 
   constructor(private initConfig: AsciiCastV2RecorderOptions) {}
 
@@ -51,6 +52,7 @@ export class AsciiCastV2Recorder {
       settle = (error?: string) => {
         if (settled) return;
         settled = true;
+        this.settleStart = null;
         if (error !== undefined) {
           reject(error);
         } else {
@@ -58,6 +60,7 @@ export class AsciiCastV2Recorder {
         }
       };
     });
+    this.settleStart = settle;
 
     let connected = false;
     let websocket: QueuedWebSocket | null = null;
@@ -130,7 +133,10 @@ export class AsciiCastV2Recorder {
       this.unsubscribeOutput();
       this.unsubscribeOutput = null;
     }
-    // Null websocket before close() so the onClose callback ignores the event
+    // Settle any pending start promise before closing — stop() is intentional so resolve, not reject.
+    this.settleStart?.();
+    this.settleStart = null;
+    // Null websocket before close() so the onClose callback ignores the event.
     const ws = this.websocket;
     this.websocket = null;
     ws?.close();
