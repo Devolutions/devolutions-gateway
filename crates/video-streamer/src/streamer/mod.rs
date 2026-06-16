@@ -101,7 +101,7 @@ pub fn webm_stream(
             // destination channel. Treat this exactly like the main encode loop does below:
             // it is normal shutdown, not a streaming failure.
             if ChannelWriterError::is_in_chain(&e) {
-                debug!("client went away during header write; ending stream");
+                debug!("Client went away during header write; ending stream");
                 return Ok(());
             }
             return Err(e);
@@ -335,8 +335,12 @@ fn spawn_sending_task<W>(
             let reason = shutdown_rx.borrow().clone();
             match reason {
                 StreamShutdown::Error(err) => {
-                    ws_send_terminal_once(&terminal_sent_control, &ws_frame_clone, protocol::ServerMessage::Error(err))
-                        .await;
+                    ws_send_terminal_once(
+                        &terminal_sent_control,
+                        &ws_frame_clone,
+                        protocol::ServerMessage::Error(err),
+                    )
+                    .await;
                 }
                 StreamShutdown::ExternalShutdown => {
                     info!("Received shutdown signal");
