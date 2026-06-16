@@ -5,82 +5,62 @@ use schemars::r#gen::SchemaGenerator;
 use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec};
 use serde::{Deserialize, Serialize};
 
-/// Marker type for policy type: serializes to `"PackageBrokerPolicy"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PackageBrokerPolicy;
+macro_rules! fixed_string_marker {
+    (
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident => $value:expr;
+    ) => {
+        $(#[$attr])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        $vis struct $name;
 
-impl Serialize for PackageBrokerPolicy {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("PackageBrokerPolicy")
-    }
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str($value)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(deserializer)?;
+                if value == $value {
+                    Ok(Self)
+                } else {
+                    Err(serde::de::Error::custom(format_args!(
+                        "expected {:?}, got {:?}",
+                        $value, value
+                    )))
+                }
+            }
+        }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> String {
+                stringify!($name).to_owned()
+            }
+
+            fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+                SchemaObject {
+                    instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+                    enum_values: Some(vec![serde_json::Value::String($value.to_owned())]),
+                    ..Default::default()
+                }
+                .into()
+            }
+        }
+    };
 }
 
-impl<'de> Deserialize<'de> for PackageBrokerPolicy {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        if s == "PackageBrokerPolicy" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected \"PackageBrokerPolicy\", got \"{s}\""
-            )))
-        }
-    }
-}
-
-impl JsonSchema for PackageBrokerPolicy {
-    fn schema_name() -> String {
-        "PackageBrokerPolicy".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String("PackageBrokerPolicy".to_owned())]),
-            ..Default::default()
-        }
-        .into()
-    }
+fixed_string_marker! {
+    /// Marker type for policy type: serializes to `"PackageBrokerPolicy"`.
+    pub struct PackageBrokerPolicy => "PackageBrokerPolicy";
 }
 
 /// Schema URI for package policy documents.
 pub const POLICY_SCHEMA_URI: &str = "https://aka.ms/unigetui/package-policy.schema.1.0.json";
 
-/// Marker type for the policy `$schema` field.
-/// Serializes to the canonical policy schema URI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PolicySchemaUri;
-
-impl Serialize for PolicySchemaUri {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(POLICY_SCHEMA_URI)
-    }
-}
-
-impl<'de> Deserialize<'de> for PolicySchemaUri {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        if s == POLICY_SCHEMA_URI {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected \"{POLICY_SCHEMA_URI}\", got \"{s}\""
-            )))
-        }
-    }
-}
-
-impl JsonSchema for PolicySchemaUri {
-    fn schema_name() -> String {
-        "PolicySchemaUri".to_owned()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::Value::String(POLICY_SCHEMA_URI.to_owned())]),
-            ..Default::default()
-        }
-        .into()
-    }
+fixed_string_marker! {
+    /// Marker type for the policy `$schema` field.
+    /// Serializes to the canonical policy schema URI.
+    pub struct PolicySchemaUri => POLICY_SCHEMA_URI;
 }
