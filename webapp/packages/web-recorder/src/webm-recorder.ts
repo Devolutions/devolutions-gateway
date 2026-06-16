@@ -101,7 +101,7 @@ export class WebMRecorder {
     if (!this.stream) {
       console.error('No capture stream initialized');
       this.isStarting = false;
-      this.rejectStart?.('lblCantViewRecording');
+      this.rejectStart?.('UnableToStartRecording');
       this.resolveStart = null;
       this.rejectStart = null;
       return;
