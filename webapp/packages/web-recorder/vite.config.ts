@@ -22,12 +22,10 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      // rxjs is a peer dependency provided by the consuming app; do not bundle it.
-      external: ['rxjs'],
       output: {
         globals: {},
       },
-    },
+    }
   },
   plugins: [dts({tsconfigPath: './tsconfig.declaration.json'}), staticCopyPlugin],
 });
