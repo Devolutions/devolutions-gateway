@@ -18,8 +18,8 @@ export interface AsciiCastV2RecorderOptions {
   rows: number;
   env?: { [key: string]: string };
   terminal: {
-    /** Register a callback for server output. May return an unsubscribe function. */
-    onServerOutput: (callback: (data: string) => void) => (() => void) | undefined;
+    /** Register a callback for server output. Must return an unsubscribe function. */
+    onServerOutput: (callback: (data: string) => void) => () => void;
   };
 }
 
@@ -100,7 +100,7 @@ export class AsciiCastV2Recorder {
     });
 
     try {
-      const unsub = terminal.onServerOutput((data) => {
+      this.unsubscribeOutput = terminal.onServerOutput((data) => {
         if (this.outputGeneration !== outputGeneration || !this.websocket) {
           return;
         }
@@ -108,7 +108,6 @@ export class AsciiCastV2Recorder {
         const normalizedData = data.replace(/\r?\n/g, '\r\n');
         this.onEvent('o', normalizedData);
       });
-      this.unsubscribeOutput = typeof unsub === 'function' ? unsub : null;
     } catch (error) {
       console.error('[AsciiCastV2Recorder] Failed to subscribe to terminal output:', error);
       const ws = this.websocket;
