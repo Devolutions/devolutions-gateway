@@ -130,7 +130,7 @@ export class WebMRecorder {
   private handleWebSocketOpen(): void {
     if (!this.stream) {
       this.isStarting = false;
-      this.rejectStart?.('lblCantViewRecording');
+      this.rejectStart?.('UnableToStartRecording');
       this.resolveStart = null;
       this.rejectStart = null;
       this.closeWebSocket();
