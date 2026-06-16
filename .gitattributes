@@ -18,3 +18,4 @@ devolutions-gateway/openapi/ts-angular-client/model/** linguist-generated merge=
 # Sample assets and schema files produce huge LoC counts; exclude them from language statistics and
 # treat them as generated files.
 unigetui/crates/uniget-broker-policy/assets/** linguist-generated
+unigetui/crates/uniget-broker-policy/schema/*.json linguist-generated

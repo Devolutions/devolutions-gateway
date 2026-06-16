@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
+use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -24,7 +26,7 @@ pub struct PolicyDocument {
     /// Policy syntax version (semver).
     pub policy_version: SemanticVersion,
 
-    /// Must be `"packageBrokerPolicy"`.
+    /// Must be `"PackageBrokerPolicy"`.
     pub policy_type: PackageBrokerPolicy,
 
     /// Policy metadata.
@@ -128,6 +130,7 @@ pub struct PolicyRule {
     /// Match criteria — request must satisfy all specified fields.
     /// At least one criterion must be present.
     #[serde(rename = "Match", deserialize_with = "deserialize_non_empty_match")]
+    #[schemars(with = "NonEmptyPolicyMatchSchema")]
     pub match_criteria: PolicyMatch,
 
     /// Additional constraints applied after matching.
@@ -146,6 +149,32 @@ fn deserialize_non_empty_match<'de, D: serde::Deserializer<'de>>(deserializer: D
         return Err(serde::de::Error::custom("match must contain at least one criterion"));
     }
     Ok(m)
+}
+
+struct NonEmptyPolicyMatchSchema;
+
+impl JsonSchema for NonEmptyPolicyMatchSchema {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "NonEmptyPolicyMatch".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        Schema::Object(SchemaObject {
+            object: Some(Box::new(ObjectValidation {
+                min_properties: Some(1),
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(SubschemaValidation {
+                all_of: Some(vec![generator.subschema_for::<PolicyMatch>()]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
 }
 
 /// Match criteria for a policy rule. All specified fields must match.

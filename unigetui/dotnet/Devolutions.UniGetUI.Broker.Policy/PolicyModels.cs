@@ -63,6 +63,11 @@ public sealed class PolicyDocument
     {
         var stream = new YamlStream();
         stream.Load(new StringReader(yaml));
+        if (stream.Documents.Count == 0)
+        {
+            throw new JsonException("policy YAML document was empty");
+        }
+
         var json = YamlToJson(stream.Documents[0].RootNode)?.ToJsonString()
             ?? throw new JsonException("policy YAML document was empty");
         return ParseJson(json);
@@ -78,7 +83,12 @@ public sealed class PolicyDocument
                 var obj = new JsonObject();
                 foreach (var (key, value) in map.Children)
                 {
-                    obj[((YamlScalarNode)key).Value!] = YamlToJson(value);
+                    if (key is not YamlScalarNode scalarKey || scalarKey.Value is null)
+                    {
+                        throw new JsonException("policy YAML mapping keys must be scalar strings");
+                    }
+
+                    obj[scalarKey.Value] = YamlToJson(value);
                 }
 
                 return obj;
@@ -134,7 +144,7 @@ public sealed class PolicyMetadata
     public string Publisher { get; set; } = "";
 
     [JsonPropertyName("Revision")]
-    public int Revision { get; set; }
+    public uint Revision { get; set; }
 
     [JsonPropertyName("PublishedAt")]
     public DateTimeOffset PublishedAt { get; set; }
@@ -173,7 +183,7 @@ public sealed class PolicyRule
     public bool Enabled { get; set; } = true;
 
     [JsonPropertyName("Priority")]
-    public int Priority { get; set; }
+    public uint Priority { get; set; }
 
     [JsonPropertyName("Decision")]
     public Decision Decision { get; set; }

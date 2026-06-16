@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 using NJsonSchema;
 
@@ -63,6 +64,59 @@ public class PolicyTests
         Assert.ThrowsAny<Exception>(() => PolicyDocument.ParseJson(content));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Empty_yaml_is_rejected_with_json_exception(string yaml)
+    {
+        Assert.Throws<JsonException>(() => PolicyDocument.ParseYaml(yaml));
+    }
+
+    [Fact]
+    public void Yaml_with_non_scalar_mapping_key_is_rejected_with_json_exception()
+    {
+        const string yaml = """
+        ? [PolicyVersion]
+        : 1.0.0
+        """;
+
+        Assert.Throws<JsonException>(() => PolicyDocument.ParseYaml(yaml));
+    }
+
+    [Fact]
+    public void Negative_revision_is_rejected_by_parser()
+    {
+        var json = MinimalPolicyJson("""
+                "Revision": -1,
+        """, """
+                "Rules": []
+        """);
+
+        Assert.Throws<JsonException>(() => PolicyDocument.ParseJson(json));
+    }
+
+    [Fact]
+    public void Negative_priority_is_rejected_by_parser()
+    {
+        var json = MinimalPolicyJson("""
+                "Revision": 1,
+        """, """
+                "Rules": [
+                    {
+                        "Id": "deny.test",
+                        "Enabled": true,
+                        "Priority": -1,
+                        "Decision": "Deny",
+                        "Match": {
+                            "Operations": ["Install"]
+                        }
+                    }
+                ]
+        """);
+
+        Assert.Throws<JsonException>(() => PolicyDocument.ParseJson(json));
+    }
+
     private static PolicyDocument ParsePolicy(string path)
     {
         var content = File.ReadAllText(path);
@@ -77,5 +131,27 @@ public class PolicyTests
     {
         var testsDir = Path.GetDirectoryName(thisFile)!;
         return Path.GetFullPath(Path.Combine(testsDir, "..", "..", "crates", "uniget-broker-policy"));
+    }
+
+    private static string MinimalPolicyJson(string revision, string rules)
+    {
+        return $$"""
+        {
+            "$schema": "https://aka.ms/unigetui/package-policy.schema.1.0.json",
+            "PolicyVersion": "1.0.0",
+            "PolicyType": "PackageBrokerPolicy",
+            "Metadata": {
+                "Id": "test.policy",
+                "Publisher": "Test",
+        {{revision}}
+                "PublishedAt": "2026-01-01T00:00:00Z"
+            },
+            "Enforcement": {
+                "DefaultDecision": "Deny",
+                "RulePrecedence": "PriorityThenDeny"
+            },
+        {{rules}}
+        }
+        """;
     }
 }

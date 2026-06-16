@@ -82,3 +82,13 @@ fn policy_schema_generates_valid_json() {
         "schema should have type definitions"
     );
 }
+
+#[test]
+fn policy_match_schema_requires_at_least_one_property() {
+    let schema = unigetui_broker_policy::schema::policy_schema_json();
+    let min_properties = schema
+        .pointer("/definitions/PolicyRule/properties/Match/minProperties")
+        .and_then(serde_json::Value::as_u64);
+
+    assert_eq!(min_properties, Some(1));
+}

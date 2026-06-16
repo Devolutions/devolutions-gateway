@@ -5,7 +5,7 @@ use schemars::r#gen::SchemaGenerator;
 use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec};
 use serde::{Deserialize, Serialize};
 
-/// Marker type for policy type: serializes to `"packageBrokerPolicy"`.
+/// Marker type for policy type: serializes to `"PackageBrokerPolicy"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackageBrokerPolicy;
 

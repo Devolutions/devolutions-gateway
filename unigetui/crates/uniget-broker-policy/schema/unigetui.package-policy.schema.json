@@ -460,7 +460,8 @@
               "$ref": "#/definitions/PolicyMatch"
             }
           ],
-          "description": "Match criteria — request must satisfy all specified fields. At least one criterion must be present."
+          "description": "Match criteria — request must satisfy all specified fields. At least one criterion must be present.",
+          "minProperties": 1
         },
         "Priority": {
           "description": "Priority (lower = higher precedence).",
@@ -594,7 +595,7 @@
           "$ref": "#/definitions/PackageBrokerPolicy"
         }
       ],
-      "description": "Must be `\"packageBrokerPolicy\"`."
+      "description": "Must be `\"PackageBrokerPolicy\"`."
     },
     "PolicyVersion": {
       "allOf": [
