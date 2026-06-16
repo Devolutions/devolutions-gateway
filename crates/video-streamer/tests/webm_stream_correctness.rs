@@ -442,7 +442,7 @@ async fn early_disconnect_during_headers_exits_ok() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-/// Regression (#5): on shutdown the server must emit at most one terminal frame
+/// Regression (#5): on shutdown the server must emit exactly one terminal frame
 /// (`End` or `Error`).
 ///
 /// Previously both the message-handler task and the control task independently sent a
@@ -470,7 +470,10 @@ async fn external_shutdown_emits_single_terminal_frame() {
         if let Some(msg) = recv_server_message(&mut h.server_rx, Duration::from_secs(2)).await {
             let (ty, payload) = parse_server_message(&msg);
             if ty == 2 {
-                panic!("received ServerMessage::Error before shutdown: {}", String::from_utf8_lossy(payload));
+                panic!(
+                    "received ServerMessage::Error before shutdown: {}",
+                    String::from_utf8_lossy(payload)
+                );
             }
             if ty == 0 {
                 got_chunk = true;
@@ -497,9 +500,9 @@ async fn external_shutdown_emits_single_terminal_frame() {
         }
     }
 
-    assert!(
-        terminal_frames <= 1,
-        "expected at most one terminal frame on shutdown, got {terminal_frames}"
+    assert_eq!(
+        terminal_frames, 1,
+        "expected exactly one terminal frame on shutdown, got {terminal_frames}"
     );
 
     let _ = tokio::time::timeout(Duration::from_secs(10), h.stream_task).await;
