@@ -1,0 +1,3 @@
+[serve-demo] static C:\DevDrive\dgw-vnc-demo\webapp\dist\gateway-ui
+[serve-demo] app:   http://localhost:4300/jet/webapp/client/
+[serve-demo] proxy: /jet/* -> http://localhost:7171 (incl. ws upgrade)

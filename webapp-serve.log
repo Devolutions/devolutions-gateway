@@ -1,0 +1,259 @@
+
+> gateway-ui@0.0.0 start
+> ng serve --proxy-config proxy.conf.json
+
+[33m❯[39m Building...
+[32m✔[39m Building...
+[1mLazy chunk files[22m             [2m | [22m[1mNames[22m[2m | [22m [1mRaw size[22m
+[32mweb-client.module-FYMEYDXS.js[39m[2m | [22m[2m-[22m    [2m | [22m[36m666.68 kB[39m[2m | [22m
+[32mmain.js[39m                      [2m | [22m[2m-[22m    [2m | [22m[36m310.04 kB[39m[2m | [22m
+[32mstyles.css[39m                   [2m | [22m[2m-[22m    [2m | [22m[36m207.45 kB[39m[2m | [22m
+[32mchunk-6FVSOY6G.js[39m            [2m | [22m[2m-[22m    [2m | [22m [36m61.86 kB[39m[2m | [22m
+[32mpolyfills.js[39m                 [2m | [22m[2m-[22m    [2m | [22m [36m95 bytes[39m[2m | [22m
+
+Application bundle generation complete. [12.746 seconds] - 2026-06-09T15:36:20.807Z
+
+[1m[33m[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:37:2:
+[37m      37 │   [32m[37mwidth: var(--checkbox-size);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:38:2:
+[37m      38 │   [32m[37mheight: var(--checkbox-size);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:40:2:
+[37m      40 │   [32m[37mborder: 2px solid var(--checkbox-border-color);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:41:2:
+[37m      41 │   [32m[37mbackground-color: var(--checkbox-background-color);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:42:2:
+[37m      42 │   [32m[37mborder-radius: $borderRadius;
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1m5 repetitive deprecation warnings omitted.
+Run in verbose mode to see all warnings.[0m [1m[35m[plugin angular-sass][0m
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+  null
+
+[39m[22m
+Watch mode enabled. Watching for file changes...
+NOTE: Raw file sizes do not reflect development server per-request transformations.
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m4200[22m/jet/webapp/client[39m
+[33m❯[39m Changes detected. Rebuilding...
+[32m✔[39m Changes detected. Rebuilding...
+[1mLazy chunk files[22m             [2m | [22m[1mNames[22m[2m | [22m [1mRaw size[22m
+[32mweb-client.module-FYMEYDXS.js[39m[2m | [22m[2m-[22m    [2m | [22m[36m666.68 kB[39m[2m | [22m
+[32mmain.js[39m                      [2m | [22m[2m-[22m    [2m | [22m[36m310.04 kB[39m[2m | [22m
+[32mstyles.css[39m                   [2m | [22m[2m-[22m    [2m | [22m[36m207.45 kB[39m[2m | [22m
+[32mchunk-6FVSOY6G.js[39m            [2m | [22m[2m-[22m    [2m | [22m [36m61.86 kB[39m[2m | [22m
+[32mpolyfills.js[39m                 [2m | [22m[2m-[22m    [2m | [22m [36m95 bytes[39m[2m | [22m
+
+Application bundle generation complete. [6.420 seconds] - 2026-06-09T15:36:28.942Z
+
+[1m[33m[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:37:2:
+[37m      37 │   [32m[37mwidth: var(--checkbox-size);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:38:2:
+[37m      38 │   [32m[37mheight: var(--checkbox-size);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:40:2:
+[37m      40 │   [32m[37mborder: 2px solid var(--checkbox-border-color);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:41:2:
+[37m      41 │   [32m[37mbackground-color: var(--checkbox-background-color);
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mDeprecation[0m [1m[35m[plugin angular-sass][0m
+
+    C:/DevDrive/dgw-vnc-demo/webapp/apps/gateway-ui/src/assets/css/override/_p-checkbox.scss:42:2:
+[37m      42 │   [32m[37mborder-radius: $borderRadius;
+         ╵   [32m^[0m
+
+
+  Sass's behavior for declarations that appear after nested
+  rules will be changing to match the behavior specified by CSS in an upcoming
+  version. To keep the existing behavior, move the declaration above the nested
+  rule. To opt into the new behavior, wrap the declaration in `& {}`.
+  
+  More info: [4mhttps://sass-lang.com/d/mixed-decls[0m
+
+  The plugin "angular-sass" was triggered by this import
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1m5 repetitive deprecation warnings omitted.
+Run in verbose mode to see all warnings.[0m [1m[35m[plugin angular-sass][0m
+
+    angular:styles/global:styles:2:8:
+[37m      2 │ @import [32m'src/assets/css/main.scss'[37m;
+        ╵         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+  null
+
+[39m[22m
