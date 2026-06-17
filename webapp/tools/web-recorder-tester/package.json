@@ -1,0 +1,19 @@
+{
+  "name": "web-recorder-tester",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@devolutions/web-recorder": "workspace:*",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vite": "^6.2.1"
+  }
+}

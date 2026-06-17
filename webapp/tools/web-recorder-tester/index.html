@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>web-recorder tester — Milky Way</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #05050a;
+        color: #cdd6f4;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: 0.02em;
+      }
+      #controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      label {
+        font-size: 13px;
+        color: #a6adc8;
+      }
+      input {
+        background: #11111b;
+        border: 1px solid #313244;
+        color: #cdd6f4;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: ui-monospace, monospace;
+      }
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #start {
+        background: #89b4fa;
+        color: #05050a;
+      }
+      #stop {
+        background: #f38ba8;
+        color: #05050a;
+      }
+      #animate {
+        background: #94e2d5;
+        color: #05050a;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      #status {
+        font-size: 13px;
+        min-height: 18px;
+      }
+      #status[data-kind='ok'] {
+        color: #a6e3a1;
+      }
+      #status[data-kind='err'] {
+        color: #f38ba8;
+      }
+      #recording-id {
+        font-size: 12px;
+        color: #a6adc8;
+        font-family: ui-monospace, monospace;
+        min-height: 16px;
+      }
+      canvas {
+        border-radius: 10px;
+        border: 1px solid #1e1e2e;
+        box-shadow: 0 0 60px rgba(60, 80, 180, 0.25);
+        max-width: 100%;
+        height: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>@devolutions/web-recorder · live capture tester</h1>
+    <div id="controls">
+      <label for="gateway">Gateway host</label>
+      <input id="gateway" value="localhost:7171" size="20" />
+      <button id="animate">Start animation</button>
+      <button id="start">Start recording</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <div id="status" data-kind="info">Idle — start the Gateway (:7171) and tokengen server (:8080), then hit Start.</div>
+    <div id="recording-id"></div>
+    <div id="hint" style="font-size: 12px; color: #6c7086;">
+      Animation is OFF by default — a static frame is the empty-WebM repro case. <b>Start animation</b> to animate;
+      <b>Start recording</b> records whatever is on the canvas. Scroll = zoom · drag = pan · double-click = reset.
+    </div>
+    <canvas id="stage" width="1280" height="720"></canvas>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

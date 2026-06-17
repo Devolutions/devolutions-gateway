@@ -147,6 +147,21 @@ export async function getRecordingUrl(uid: string): Promise<URL> {
   return url;
 }
 
+// Fetches a recording's start time (unix seconds) from its manifest. Powers the player tester's
+// recency sort, since /jet/jrec/list only returns ids. Costs one pull token + one GET per recording.
+export async function getRecordingStartTime(uid: string): Promise<number> {
+  const token = await requestPullToken({ jet_rop: 'pull', jet_aid: uid });
+  const url = new_gateway_url();
+  url.pathname = `/jet/jrec/pull/${uid}/recording.json`;
+  url.searchParams.set('token', token.token);
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`manifest ${response.status} for ${uid}`);
+  }
+  const data: { startTime?: number } = await response.json();
+  return typeof data.startTime === 'number' ? data.startTime : 0;
+}
+
 const new_gateway_url = () => {
   return new URL(`http://${GATEWAY_HOST}`);
 };
