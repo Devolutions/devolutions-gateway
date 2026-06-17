@@ -23,20 +23,48 @@ pub fn decode_stream(
 
 struct AsyncReadChannel {
     receiver: tokio::sync::mpsc::Receiver<anyhow::Result<String>>,
+    // A single decoded message can be larger than the caller's read buffer (e.g. a full-screen
+    // redraw becomes one big cast line). Hold the unread remainder across poll_read calls.
+    leftover: Vec<u8>,
+    leftover_pos: usize,
 }
 
 impl AsyncReadChannel {
     fn new(receiver: tokio::sync::mpsc::Receiver<anyhow::Result<String>>) -> Self {
-        Self { receiver }
+        Self {
+            receiver,
+            leftover: Vec::new(),
+            leftover_pos: 0,
+        }
     }
 }
 
 impl AsyncRead for AsyncReadChannel {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        let res = Pin::new(&mut self.receiver).poll_recv(cx);
-        match res {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+
+        // Drain any leftover from a previous oversized message before pulling a new one.
+        if this.leftover_pos < this.leftover.len() {
+            let n = std::cmp::min(buf.remaining(), this.leftover.len() - this.leftover_pos);
+            buf.put_slice(&this.leftover[this.leftover_pos..this.leftover_pos + n]);
+            this.leftover_pos += n;
+            if this.leftover_pos >= this.leftover.len() {
+                this.leftover.clear();
+                this.leftover_pos = 0;
+            }
+            return Poll::Ready(Ok(()));
+        }
+
+        match Pin::new(&mut this.receiver).poll_recv(cx) {
             Poll::Ready(Some(Ok(data))) => {
-                buf.put_slice(data.as_bytes());
+                // Only copy what fits; buffer the rest so we never overflow the read buffer.
+                let bytes = data.as_bytes();
+                let n = std::cmp::min(buf.remaining(), bytes.len());
+                buf.put_slice(&bytes[..n]);
+                if n < bytes.len() {
+                    this.leftover = bytes[n..].to_vec();
+                    this.leftover_pos = 0;
+                }
                 Poll::Ready(Ok(()))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::other(e))),
@@ -118,11 +146,16 @@ async fn parse_trp_stream(
                 }
             }
             2 => {
-                // Terminal size change
-                if before_setup_cache.is_some() {
-                    header.row = u16::from_le_bytes(event_payload[0..2].try_into()?);
-                    header.col = u16::from_le_bytes(event_payload[2..4].try_into()?);
-                } else {
+                // Terminal size change. Payload is little-endian [columns, rows].
+                if event_payload.len() < 4 {
+                    anyhow::bail!(
+                        "invalid terminal size change payload length (len={})",
+                        event_payload.len()
+                    );
+                }
+                header.col = u16::from_le_bytes(event_payload[0..2].try_into()?);
+                header.row = u16::from_le_bytes(event_payload[2..4].try_into()?);
+                if before_setup_cache.is_none() {
                     let event = AsciinemaEvent::Resize {
                         width: header.col,
                         height: header.row,
