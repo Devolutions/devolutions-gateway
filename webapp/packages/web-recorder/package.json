@@ -1,0 +1,18 @@
+{
+  "name": "@devolutions/web-recorder",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && vite build",
+    "check:write": "biome check --write ./src"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2",
+    "vite": "^5.4.9",
+    "vite-plugin-dts": "^4.3.0",
+    "vite-plugin-static-copy": "^2.3.0"
+  }
+}
