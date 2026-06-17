@@ -146,12 +146,12 @@ async fn parse_trp_stream(
                 }
             }
             2 => {
-// Terminal size change. Payload is little-endian [columns, rows].
-if event_payload.len() < 4 {
-    anyhow::bail!("invalid terminal size change payload length (len={})", event_payload.len());
-}
-header.col = u16::from_le_bytes(event_payload[0..2].try_into()?);
-header.row = u16::from_le_bytes(event_payload[2..4].try_into()?);
+                // Terminal size change. Payload is little-endian [columns, rows].
+                if event_payload.len() < 4 {
+                    anyhow::bail!("invalid terminal size change payload length (len={})", event_payload.len());
+                }
+                header.col = u16::from_le_bytes(event_payload[0..2].try_into()?);
+                header.row = u16::from_le_bytes(event_payload[2..4].try_into()?);
                 if before_setup_cache.is_none() {
                     let event = AsciinemaEvent::Resize {
                         width: header.col,
