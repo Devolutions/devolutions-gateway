@@ -5,11 +5,14 @@ mod powershell_worker;
 mod result_store;
 mod signalr;
 
+use std::sync::Arc;
+
+use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::task::JoinSet;
 
-use crate::config::ConfHandle;
+use crate::config::{ConfHandle, dto};
 use crate::psu_event_hub::executor::EventHubExecutor;
 use crate::psu_event_hub::powershell_worker::PowerShellWorker;
 
@@ -45,7 +48,9 @@ impl Task for PsuEventHubTask {
 
         let mut join_set = JoinSet::new();
 
-        let secret_resolver = PowerShellWorker::new(psu_conf.powershell.clone());
+        let worker = Arc::new(
+            PowerShellWorker::new(psu_conf.powershell.clone()).context("failed to initialize PSU PowerShell worker")?,
+        );
 
         for mut connection in psu_conf.connections {
             if connection.hub.trim().is_empty() {
@@ -53,8 +58,17 @@ impl Task for PsuEventHubTask {
                 continue;
             }
 
+            if let Err(error) = validate_connection(&connection) {
+                error!(
+                    hub = %connection.hub,
+                    error = format!("{error:#}"),
+                    "Skipping PSU Event Hub connection because configuration is invalid"
+                );
+                continue;
+            }
+
             if let Some(app_token) = connection.app_token.as_deref() {
-                match secret_resolver.resolve_app_token(app_token).await {
+                match worker.resolve_app_token(app_token).await {
                     Ok(resolved) => connection.app_token = Some(resolved),
                     Err(error) => {
                         error!(
@@ -67,7 +81,7 @@ impl Task for PsuEventHubTask {
                 }
             }
 
-            let executor = EventHubExecutor::new(&connection, psu_conf.powershell.clone());
+            let executor = EventHubExecutor::new(&connection, Arc::clone(&worker));
             let connection_shutdown_signal = shutdown_signal.clone();
 
             join_set
@@ -83,5 +97,37 @@ impl Task for PsuEventHubTask {
         }
 
         Ok(())
+    }
+}
+
+fn validate_connection(connection: &dto::PsuEventHubConnectionConf) -> anyhow::Result<()> {
+    if connection.use_default_credentials && connection.app_token.is_none() {
+        anyhow::bail!(
+            "PSU Event Hub UseDefaultCredentials is configured for hub {}, but Windows default credentials are not implemented",
+            connection.hub
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use url::Url;
+
+    use super::*;
+
+    #[test]
+    fn default_credentials_without_app_token_are_rejected() {
+        let connection = dto::PsuEventHubConnectionConf {
+            hub: "Hub".to_owned(),
+            url: Url::parse("http://localhost:5000").expect("parse URL"),
+            app_token: None,
+            use_default_credentials: true,
+            script_path: None,
+            description: None,
+        };
+
+        assert!(validate_connection(&connection).is_err());
     }
 }

@@ -41,6 +41,7 @@ sha2 = "0.10"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tap = "1.0"
+tempfile = "3"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"
@@ -97,9 +98,6 @@ features = [
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"
-
-[dev-dependencies]
-tempfile = "3"
 
 [target.'cfg(windows)'.dev-dependencies]
 expect-test = "1.5"

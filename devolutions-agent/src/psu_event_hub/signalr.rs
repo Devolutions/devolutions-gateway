@@ -1,8 +1,11 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{Context as _, bail};
 use futures::{SinkExt as _, StreamExt as _};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::task::{JoinError, JoinSet};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -29,10 +32,28 @@ pub(super) async fn run_connection(
     executor: EventHubExecutor,
     mut shutdown_signal: devolutions_gateway_task::ShutdownSignal,
 ) -> anyhow::Result<()> {
+    use backoff::backoff::Backoff as _;
+
+    const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
+    const RETRY_MAX_INTERVAL: Duration = Duration::from_secs(60);
+    const RETRY_MULTIPLIER: f64 = 2.0;
+    const CONNECTED_THRESHOLD: Duration = Duration::from_secs(30);
+
+    let mut backoff = backoff::ExponentialBackoffBuilder::default()
+        .with_initial_interval(RETRY_INITIAL_INTERVAL)
+        .with_max_interval(RETRY_MAX_INTERVAL)
+        .with_multiplier(RETRY_MULTIPLIER)
+        .with_max_elapsed_time(None)
+        .build();
+    let mut execution_tasks = JoinSet::new();
+
     loop {
-        match run_single_connection(&connection, &executor, &mut shutdown_signal).await {
+        let start = Instant::now();
+
+        match run_single_connection(&connection, &executor, &mut shutdown_signal, &mut execution_tasks).await {
             Ok(()) => {
                 info!(hub = %connection.hub, "Stopping PSU Event Hub connection");
+                execution_tasks.shutdown().await;
                 return Ok(());
             }
             Err(error) => {
@@ -45,9 +66,24 @@ pub(super) async fn run_connection(
             }
         }
 
-        tokio::select! {
-            _ = shutdown_signal.wait() => return Ok(()),
-            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+        if start.elapsed() > CONNECTED_THRESHOLD {
+            backoff.reset();
+        }
+
+        let wait = match backoff.next_backoff() {
+            Some(wait) => wait,
+            None => {
+                warn!("PSU Event Hub reconnect backoff exhausted, resetting");
+                backoff.reset();
+                RETRY_INITIAL_INTERVAL
+            }
+        };
+
+        info!(hub = %connection.hub, ?wait, "Reconnecting PSU Event Hub after backoff");
+
+        if !wait_before_reconnect(&mut shutdown_signal, wait, &mut execution_tasks).await {
+            execution_tasks.shutdown().await;
+            return Ok(());
         }
     }
 }
@@ -56,14 +92,8 @@ async fn run_single_connection(
     connection: &PsuEventHubConnectionConf,
     executor: &EventHubExecutor,
     shutdown_signal: &mut devolutions_gateway_task::ShutdownSignal,
+    execution_tasks: &mut JoinSet<()>,
 ) -> anyhow::Result<()> {
-    if connection.use_default_credentials && connection.app_token.is_none() {
-        warn!(
-            hub = %connection.hub,
-            "PSU Event Hub UseDefaultCredentials is configured, but Windows default credentials are not implemented yet"
-        );
-    }
-
     let endpoint = endpoint_url(connection)?;
     let negotiate = negotiate_url(&endpoint)?;
     let headers = psu_headers(connection)?;
@@ -117,30 +147,71 @@ async fn run_single_connection(
         tokio::select! {
             _ = shutdown_signal.wait() => {
                 let _ = socket.close(None).await;
-                return Ok(());
+                break Ok(());
             }
             message = socket.next() => {
                 let Some(message) = message else {
-                    bail!("SignalR WebSocket closed");
+                    break Err(anyhow::anyhow!("SignalR WebSocket closed"));
                 };
 
-                match message.context("failed to read SignalR WebSocket message")? {
-                    Message::Text(text) => handle_text_message(&mut socket, executor, &text).await?,
+                let message = match message.context("failed to read SignalR WebSocket message") {
+                    Ok(message) => message,
+                    Err(error) => break Err(error),
+                };
+
+                let message_result = match message {
+                    Message::Text(text) => handle_text_message(&mut socket, executor, &text, execution_tasks).await,
                     Message::Binary(bytes) => {
-                        let text = String::from_utf8(bytes.to_vec()).context("SignalR binary message was not UTF-8")?;
-                        handle_text_message(&mut socket, executor, &text).await?;
+                        let text = match std::str::from_utf8(&bytes).context("SignalR binary message was not UTF-8") {
+                            Ok(text) => text,
+                            Err(error) => break Err(error),
+                        };
+                        handle_text_message(&mut socket, executor, text, execution_tasks).await
                     }
-                    Message::Close(frame) => bail!("SignalR WebSocket closed: {frame:?}"),
-                    Message::Ping(payload) => socket.send(Message::Pong(payload)).await?,
-                    Message::Pong(_) => {}
-                    Message::Frame(_) => {}
+                    Message::Close(frame) => break Err(anyhow::anyhow!("SignalR WebSocket closed: {frame:?}")),
+                    Message::Ping(payload) => socket
+                        .send(Message::Pong(payload))
+                        .await
+                        .context("failed to send SignalR pong"),
+                    Message::Pong(_) | Message::Frame(_) => Ok(()),
+                };
+
+                if let Err(error) = message_result {
+                    break Err(error);
                 }
+            }
+            Some(result) = execution_tasks.join_next(), if !execution_tasks.is_empty() => {
+                log_execution_task_result(result);
             }
         }
     }
 }
 
-async fn handle_text_message<S>(socket: &mut S, executor: &EventHubExecutor, text: &str) -> anyhow::Result<()>
+async fn wait_before_reconnect(
+    shutdown_signal: &mut devolutions_gateway_task::ShutdownSignal,
+    wait: Duration,
+    execution_tasks: &mut JoinSet<()>,
+) -> bool {
+    let sleep = tokio::time::sleep(wait);
+    tokio::pin!(sleep);
+
+    loop {
+        tokio::select! {
+            _ = shutdown_signal.wait() => return false,
+            _ = &mut sleep => return true,
+            Some(result) = execution_tasks.join_next(), if !execution_tasks.is_empty() => {
+                log_execution_task_result(result);
+            }
+        }
+    }
+}
+
+async fn handle_text_message<S>(
+    socket: &mut S,
+    executor: &EventHubExecutor,
+    text: &str,
+    execution_tasks: &mut JoinSet<()>,
+) -> anyhow::Result<()>
 where
     S: futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
@@ -151,7 +222,7 @@ where
 
         match message_type {
             None => {}
-            Some(1) => handle_invocation(socket, executor, value).await?,
+            Some(1) => handle_invocation(socket, executor, value, execution_tasks).await?,
             Some(6) => {}
             Some(7) => bail!("SignalR server sent close message"),
             Some(message_type) => trace!(message_type, "Ignoring unsupported SignalR message"),
@@ -161,7 +232,12 @@ where
     Ok(())
 }
 
-async fn handle_invocation<S>(socket: &mut S, executor: &EventHubExecutor, value: Value) -> anyhow::Result<()>
+async fn handle_invocation<S>(
+    socket: &mut S,
+    executor: &EventHubExecutor,
+    value: Value,
+    execution_tasks: &mut JoinSet<()>,
+) -> anyhow::Result<()>
 where
     S: futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
@@ -176,7 +252,7 @@ where
         .unwrap_or(&[]);
     let invocation_id = value.get("invocationId").and_then(Value::as_str);
 
-    let result = executor.handle_invocation(target, arguments)?;
+    let result = executor.handle_invocation(target, arguments, execution_tasks)?;
     if let Some(invocation_id) = invocation_id {
         let completion = if let Some(result) = result {
             json!({
@@ -198,6 +274,12 @@ where
     }
 
     Ok(())
+}
+
+fn log_execution_task_result(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        error!(%error, "PSU Event Hub execution task panicked");
+    }
 }
 
 fn endpoint_url(connection: &PsuEventHubConnectionConf) -> anyhow::Result<Url> {
@@ -257,18 +339,28 @@ fn redact_url(url: &Url) -> String {
 
 fn psu_headers(connection: &PsuEventHubConnectionConf) -> anyhow::Result<HeaderMap> {
     let mut headers = HeaderMap::new();
-    headers.insert("PSUComputerName", HeaderValue::from_str(&computer_name())?);
-    headers.insert("PSUUserName", HeaderValue::from_str(&user_name())?);
-    headers.insert("PSUDomainName", HeaderValue::from_str(&domain_name())?);
-    headers.insert("PSUVersion", HeaderValue::from_static(env!("CARGO_PKG_VERSION")));
+    let identity = psu_identity();
     headers.insert(
-        "PSUDescription",
-        HeaderValue::from_str(connection.description.as_deref().unwrap_or_default())?,
+        "PSUComputerName",
+        psu_header_value("PSUComputerName", &computer_name())?,
     );
+    headers.insert("PSUUserName", psu_header_value("PSUUserName", &identity.user_name)?);
+    headers.insert(
+        "PSUDomainName",
+        psu_header_value("PSUDomainName", &identity.domain_name)?,
+    );
+    headers.insert("PSUVersion", HeaderValue::from_static(env!("CARGO_PKG_VERSION")));
+    let description = sanitize_header_value(connection.description.as_deref().unwrap_or_default());
+    headers.insert("PSUDescription", psu_header_value("PSUDescription", &description)?);
     if let Some(token) = &connection.app_token {
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token}"))?);
+        let authorization = format!("Bearer {token}");
+        headers.insert(AUTHORIZATION, psu_header_value("Authorization", &authorization)?);
     }
     Ok(headers)
+}
+
+fn psu_header_value(name: &str, value: &str) -> anyhow::Result<HeaderValue> {
+    HeaderValue::from_str(value).with_context(|| format!("invalid PSU header value for {name}"))
 }
 
 fn apply_ws_headers(target: &mut WsHeaderMap, source: &HeaderMap) -> anyhow::Result<()> {
@@ -287,12 +379,102 @@ fn computer_name() -> String {
         .unwrap_or_else(|| "localhost".to_owned())
 }
 
-fn user_name() -> String {
-    std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_default()
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PsuIdentity {
+    user_name: String,
+    domain_name: String,
 }
 
-fn domain_name() -> String {
+fn psu_identity() -> PsuIdentity {
+    platform_psu_identity().unwrap_or_else(env_psu_identity)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_psu_identity() -> Option<PsuIdentity> {
+    use win_api_wrappers::identity::account::get_username;
+    use win_api_wrappers::raw::Win32::Security::Authentication::Identity::NameSamCompatible;
+
+    let name = get_username(NameSamCompatible).ok()?.to_string_lossy();
+    let identity = split_sam_compatible_name(&name);
+    if identity.user_name.is_empty() {
+        None
+    } else {
+        Some(identity)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn platform_psu_identity() -> Option<PsuIdentity> {
+    None
+}
+
+fn split_sam_compatible_name(name: &str) -> PsuIdentity {
+    if let Some((domain_name, user_name)) = name.split_once('\\') {
+        PsuIdentity {
+            user_name: user_name.to_owned(),
+            domain_name: domain_name.to_owned(),
+        }
+    } else {
+        PsuIdentity {
+            user_name: name.to_owned(),
+            domain_name: env_domain_name(),
+        }
+    }
+}
+
+fn env_psu_identity() -> PsuIdentity {
+    PsuIdentity {
+        user_name: std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_default(),
+        domain_name: env_domain_name(),
+    }
+}
+
+fn env_domain_name() -> String {
     std::env::var("USERDOMAIN").unwrap_or_default()
+}
+
+fn sanitize_header_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_control() && ch != '\t' { ' ' } else { ch })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_connection(description: Option<String>) -> PsuEventHubConnectionConf {
+        PsuEventHubConnectionConf {
+            hub: "Hub".to_owned(),
+            url: Url::parse("http://localhost:5000").expect("parse URL"),
+            app_token: None,
+            use_default_credentials: false,
+            script_path: None,
+            description,
+        }
+    }
+
+    #[test]
+    fn psu_headers_sanitize_description_control_characters() {
+        let headers = psu_headers(&test_connection(Some("line 1\r\nline 2".to_owned()))).expect("build headers");
+
+        assert_eq!(
+            headers["PSUDescription"].to_str().expect("description header"),
+            "line 1  line 2"
+        );
+    }
+
+    #[test]
+    fn sam_compatible_identity_splits_domain_and_user() {
+        assert_eq!(
+            split_sam_compatible_name("DOMAIN\\user"),
+            PsuIdentity {
+                user_name: "user".to_owned(),
+                domain_name: "DOMAIN".to_owned(),
+            }
+        );
+    }
 }

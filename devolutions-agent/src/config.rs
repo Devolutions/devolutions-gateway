@@ -525,7 +525,10 @@ pub mod dto {
         pub server_spki_sha256: Option<String>,
     }
 
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    /// PowerShell Universal Event Hub compatibility configuration.
+    ///
+    /// Defaults to disabled.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuEventHubConf {
         /// Enable PowerShell Universal Event Hub compatibility.
@@ -542,17 +545,6 @@ pub mod dto {
             skip_serializing_if = "PsuPowerShellConf::is_default"
         )]
         pub powershell: PsuPowerShellConf,
-    }
-
-    #[allow(clippy::derivable_impls)] // Just to be explicit about default disabled behavior.
-    impl Default for PsuEventHubConf {
-        fn default() -> Self {
-            Self {
-                enabled: false,
-                connections: Vec::new(),
-                powershell: PsuPowerShellConf::default(),
-            }
-        }
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]

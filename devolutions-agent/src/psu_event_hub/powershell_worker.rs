@@ -1,13 +1,13 @@
 use std::ffi::OsString;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::Serialize;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
-use uuid::Uuid;
 
 use crate::config::dto::PsuPowerShellConf;
 use crate::psu_event_hub::models::WebsocketEventResponse;
@@ -166,19 +166,29 @@ try {
 $response | ConvertTo-Json -Compress -Depth 16
 "#;
 
+const POWERSHELL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 #[derive(Debug, Clone)]
 pub(super) struct PowerShellWorker {
     conf: PsuPowerShellConf,
     permits: Arc<Semaphore>,
+    worker_script: Arc<WorkerScriptFile>,
+    execution_timeout: Duration,
 }
 
 impl PowerShellWorker {
-    pub(super) fn new(conf: PsuPowerShellConf) -> Self {
+    pub(super) fn new(conf: PsuPowerShellConf) -> anyhow::Result<Self> {
+        Self::with_execution_timeout(conf, POWERSHELL_EXECUTION_TIMEOUT)
+    }
+
+    fn with_execution_timeout(conf: PsuPowerShellConf, execution_timeout: Duration) -> anyhow::Result<Self> {
         let worker_limit = effective_worker_limit(&conf);
-        Self {
+        Ok(Self {
             conf,
             permits: Arc::new(Semaphore::new(worker_limit)),
-        }
+            worker_script: Arc::new(WorkerScriptFile::new()?),
+            execution_timeout,
+        })
     }
 
     pub(super) async fn resolve_app_token(&self, app_token: &str) -> anyhow::Result<String> {
@@ -223,25 +233,9 @@ impl PowerShellWorker {
             .acquire()
             .await
             .context("PSU PowerShell worker pool is closed")?;
-        let temp_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .map_err(|path| anyhow::anyhow!("non-UTF-8 temp path: {path:?}"))?;
-        let request_path = temp_dir.join(format!("devolutions-agent-psu-{}.json", Uuid::new_v4()));
-        let script_path = temp_dir.join(format!("devolutions-agent-psu-{}.ps1", Uuid::new_v4()));
+        let request_file = TempRequestFile::write(&request).await?;
 
-        let request_json = serde_json::to_vec(&request).context("failed to serialize PSU worker request")?;
-        tokio::fs::write(&request_path, request_json)
-            .await
-            .with_context(|| format!("failed to write PSU worker request at {request_path}"))?;
-        tokio::fs::write(&script_path, WORKER_SCRIPT)
-            .await
-            .with_context(|| format!("failed to write PSU worker script at {script_path}"))?;
-
-        let output = self.invoke_worker(&script_path, &request_path).await;
-
-        remove_temp_file(&request_path).await;
-        remove_temp_file(&script_path).await;
-
-        output
+        self.invoke_worker(self.worker_script.path(), request_file.path()).await
     }
 
     async fn invoke_worker(
@@ -267,13 +261,23 @@ impl PowerShellWorker {
         if let Some(virtual_environment) = &self.conf.virtual_environment {
             command.env("PSMODULE_VENV_PATH", virtual_environment);
         }
+        command.kill_on_drop(true);
 
-        let output = command.output().await.with_context(|| {
-            format!(
-                "failed to start PowerShell worker using {}",
-                executable.to_string_lossy()
-            )
-        })?;
+        let output = match tokio::time::timeout(self.execution_timeout, command.output()).await {
+            Ok(output) => output.with_context(|| {
+                format!(
+                    "failed to start PowerShell worker using {}",
+                    executable.to_string_lossy()
+                )
+            })?,
+            Err(_) => {
+                warn!(
+                    timeout_secs = self.execution_timeout.as_secs(),
+                    "PowerShell worker timed out"
+                );
+                return Ok(WebsocketEventResponse::timeout("PowerShell worker timed out."));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -285,6 +289,69 @@ impl PowerShellWorker {
         }
 
         serde_json::from_slice(&output.stdout).context("failed to parse PowerShell worker response")
+    }
+}
+
+#[derive(Debug)]
+struct WorkerScriptFile {
+    path: Utf8PathBuf,
+    _temp_path: tempfile::TempPath,
+}
+
+impl WorkerScriptFile {
+    fn new() -> anyhow::Result<Self> {
+        let temp_path = tempfile::Builder::new()
+            .prefix("devolutions-agent-psu-worker-")
+            .suffix(".ps1")
+            .tempfile_in(temp_dir()?.as_std_path())
+            .context("failed to create temporary PSU worker script")?
+            .into_temp_path();
+        let path = Utf8PathBuf::from_path_buf(temp_path.to_path_buf())
+            .map_err(|path| anyhow::anyhow!("non-UTF-8 PSU worker script path: {path:?}"))?;
+
+        std::fs::write(&path, WORKER_SCRIPT).with_context(|| format!("failed to write PSU worker script at {path}"))?;
+
+        Ok(Self {
+            path,
+            _temp_path: temp_path,
+        })
+    }
+
+    fn path(&self) -> &Utf8Path {
+        &self.path
+    }
+}
+
+#[derive(Debug)]
+struct TempRequestFile {
+    path: Utf8PathBuf,
+    _temp_path: tempfile::TempPath,
+}
+
+impl TempRequestFile {
+    async fn write(request: &WorkerRequest) -> anyhow::Result<Self> {
+        let request_json = serde_json::to_vec(request).context("failed to serialize PSU worker request")?;
+        let temp_path = tempfile::Builder::new()
+            .prefix("devolutions-agent-psu-")
+            .suffix(".json")
+            .tempfile_in(temp_dir()?.as_std_path())
+            .context("failed to create temporary PSU worker request")?
+            .into_temp_path();
+        let path = Utf8PathBuf::from_path_buf(temp_path.to_path_buf())
+            .map_err(|path| anyhow::anyhow!("non-UTF-8 PSU worker request path: {path:?}"))?;
+
+        tokio::fs::write(&path, request_json)
+            .await
+            .with_context(|| format!("failed to write PSU worker request at {path}"))?;
+
+        Ok(Self {
+            path,
+            _temp_path: temp_path,
+        })
+    }
+
+    fn path(&self) -> &Utf8Path {
+        &self.path
     }
 }
 
@@ -377,10 +444,8 @@ fn resolve_powershell_executable(conf: &PsuPowerShellConf) -> OsString {
     }
 }
 
-async fn remove_temp_file(path: &Utf8Path) {
-    if let Err(error) = tokio::fs::remove_file(path).await {
-        debug!(%path, %error, "Failed to remove temporary PSU worker file");
-    }
+fn temp_dir() -> anyhow::Result<Utf8PathBuf> {
+    Utf8PathBuf::from_path_buf(std::env::temp_dir()).map_err(|path| anyhow::anyhow!("non-UTF-8 temp path: {path:?}"))
 }
 
 #[cfg(test)]
@@ -422,9 +487,24 @@ mod tests {
   </Obj>
 </Objs>"#;
 
+    const HASHTABLE_SECONDS: &str = r#"<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <TN RefId="0">
+      <T>System.Collections.Hashtable</T>
+      <T>System.Object</T>
+    </TN>
+    <DCT>
+      <En>
+        <S N="Key">Seconds</S>
+        <I32 N="Value">10</I32>
+      </En>
+    </DCT>
+  </Obj>
+</Objs>"#;
+
     #[tokio::test]
     async fn command_execution_returns_clixml_result() {
-        let worker = PowerShellWorker::new(PsuPowerShellConf::default());
+        let worker = PowerShellWorker::new(PsuPowerShellConf::default()).expect("create worker");
         let response = worker
             .execute_command("Get-Variable".to_owned(), HASHTABLE_PS_VERSION_TABLE.to_owned(), true)
             .await
@@ -437,7 +517,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_execution_captures_error_stream() {
-        let worker = PowerShellWorker::new(PsuPowerShellConf::default());
+        let worker = PowerShellWorker::new(PsuPowerShellConf::default()).expect("create worker");
         let response = worker
             .execute_command("Write-Error".to_owned(), HASHTABLE_MESSAGE.to_owned(), true)
             .await
@@ -455,11 +535,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn command_execution_times_out() {
+        let worker = PowerShellWorker::with_execution_timeout(PsuPowerShellConf::default(), Duration::from_millis(1))
+            .expect("create worker");
+        let response = worker
+            .execute_command("Start-Sleep".to_owned(), HASHTABLE_SECONDS.to_owned(), true)
+            .await
+            .expect("execute command");
+
+        assert!(response.complete);
+        assert!(response.timeout);
+        assert!(response.terminating_error.is_some());
+    }
+
+    #[tokio::test]
     async fn literal_app_token_does_not_require_secret_resolution() {
         let worker = PowerShellWorker::new(PsuPowerShellConf {
             executable_path: Some(Utf8PathBuf::from("missing-pwsh")),
             ..PsuPowerShellConf::default()
-        });
+        })
+        .expect("create worker");
 
         let token = worker.resolve_app_token("literal-token").await.expect("resolve token");
 
