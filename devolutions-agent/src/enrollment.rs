@@ -109,6 +109,14 @@ pub async fn enroll_agent(
     let (key_pem, csr_pem) = generate_key_and_csr(&agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, &csr_pem).await?;
+
+    // TODO(agent-tunnel): enrollment success here only means the HTTPS cert exchange on
+    // POST /jet/tunnel/enroll succeeded and the config was persisted — it does NOT verify the
+    // QUIC tunnel (UDP, quic_endpoint) can actually be established. The installer's
+    // EnrollAgentTunnel custom action reports "success" on this return, so a blocked QUIC port
+    // (e.g. firewall on UDP 4433) yields a green install while the agent never comes online and
+    // silently auto-reconnects forever. Add a short post-enroll QUIC connectivity probe to
+    // enroll_response.quic_endpoint and surface a clear warning/failure when it can't connect.
     persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
