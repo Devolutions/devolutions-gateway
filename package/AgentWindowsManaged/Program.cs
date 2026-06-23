@@ -439,6 +439,17 @@ internal class Program
             strings.Add(s.Attributes["Id"].Value, s.InnerText);
         }
 
+        // TODO(agent-tunnel): these strings are loaded into a LOCAL dict that only feeds the
+        // pre-flight MessageBoxes below (x86 / .NET 4.8 / newer-installed). The custom dialogs
+        // (AgentTunnelDialog, AgentDialog title, etc.) resolve their "[Key]" labels via
+        // MsiRuntime.Localize, which is NOT populated from these custom strings — light.exe only
+        // emits strings referenced via !(loc.X) into the MSI, and the custom "[Key]" labels are
+        // never !(loc.X)-referenced, so they fall back to the raw key name in the UI
+        // (e.g. "AgentTunnelDlgTitle" shows literally). Wire this `strings` dict into the
+        // ManagedUI runtime localization (or have the custom dialogs use a shared I18n backed by
+        // it) so the labels render. Standard dialogs (Welcome/InstallDir) work only because
+        // WixSharp's built-in UI references those standard IDs via !(loc.X).
+
         string I18n(string key)
         {
             if (!strings.TryGetValue(key, out string result))
