@@ -2,6 +2,47 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.2.3 (2026-06-24)
+
+### Bug Fixes
+
+- _jetsocat_: validate JMUX listener destination at CLI parse time ([#1823](https://github.com/Devolutions/devolutions-gateway/issues/1823)) ([eeb90df5a6](https://github.com/Devolutions/devolutions-gateway/commit/eeb90df5a687c58becd0d31eb1d83ffa65a36574))
+
+  Previously, a `tcp-listen://<addr>/<destination>` argument without a
+  port (e.g. a missing `:22`) was accepted at startup, but every incoming
+  connection was then silently dropped with only a debug-level log. The
+  tunnel appeared to work yet forwarded nothing.
+
+  The listener destination is now parsed during CLI argument parsing, so a
+  malformed destination fails immediately and visibly with a clear error,
+  before any listener is bound.
+
+- _dgw_: improve session-level tracing ([#1822](https://github.com/Devolutions/devolutions-gateway/issues/1822)) ([304ecf078a](https://github.com/Devolutions/devolutions-gateway/commit/304ecf078ac90cfaf788f80b32e2733579bb5d18))
+
+- _dgw_: TRP live-shadow sizing + large-line panic ([#1816](https://github.com/Devolutions/devolutions-gateway/issues/1816)) ([9a0c1e6304](https://github.com/Devolutions/devolutions-gateway/commit/9a0c1e63043f394e48ea845a3b28c66f50c0e85d))
+
+  Fixes two TRP-only issues in the terminal "live-shadow" streaming path by correcting terminal sizing metadata in emitted asciicast JSON and preventing panics when decoded lines exceed the caller's read buffer.
+
+- _agent-installer_: pin Newtonsoft ToString overload to avoid GAC binding crash ([#1833](https://github.com/Devolutions/devolutions-gateway/issues/1833)) ([cd66dd1abd](https://github.com/Devolutions/devolutions-gateway/commit/cd66dd1abd8183c7c8daa612f9cc3106f3b89f2a)) ([DGW-396](https://devolutions.atlassian.net/browse/DGW-396))
+
+  Fixes a failure where installing or reconfiguring the Devolutions Agent
+  could roll back with a `MissingMethodException` on machines that already
+  have an older Newtonsoft.Json in the Global Assembly Cache (GAC).
+
+- _agent_: harden PSU Event Hub worker lifecycle ([#1830](https://github.com/Devolutions/devolutions-gateway/issues/1830)) ([1827007dd2](https://github.com/Devolutions/devolutions-gateway/commit/1827007dd23ff9557c8e25a05e3bc57ba4f0eaa4))
+
+  Hardens the experimental PowerShell Universal Event Hub compatibility
+  path so agent deployments are less likely to exhaust local PowerShell
+  workers, leak completed results, or keep stuck scripts running
+  indefinitely.
+
+- _webapp_: pin asciinema-player to 3.8.2 ([#1820](https://github.com/Devolutions/devolutions-gateway/issues/1820)) ([b12e2adfab](https://github.com/Devolutions/devolutions-gateway/commit/b12e2adfabc03d3fa33bff7ee02ce6e44d3745b8)) ([DGW-394](https://devolutions.atlassian.net/browse/DGW-394))
+
+  asciinema-player 3.9.0 reworked its WebSocket driver to use subprotocol
+  negotiation, which the gateway terminal-stream WebSocket does not
+  perform. As a result live terminal playback broke and showed "Stream
+  ended". Pinning to 3.8.2 restores live terminal playback.
+
 ## 2026.2.2 (2026-06-05)
 
 ### Features
