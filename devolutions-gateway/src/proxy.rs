@@ -55,7 +55,7 @@ where
         D: Dissector + Send + 'static,
     {
         if let Some(capture_path) = self.conf.debug.capture_path.as_deref() {
-            let format = time::format_description::parse("[year]-[month]-[day]-[hour]-[minute]-[second]")
+            let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]-[hour]-[minute]-[second]")
                 .expect("valid hardcoded format");
             let date = time::OffsetDateTime::now_utc().format(&format)?;
             let pcap_filename = format!("{date}_from_{}_to_{}.pcap", self.address_a, self.address_b);
