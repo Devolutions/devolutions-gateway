@@ -408,6 +408,7 @@ fn platform_psu_identity() -> Option<PsuIdentity> {
     None
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn split_sam_compatible_name(name: &str) -> PsuIdentity {
     if let Some((domain_name, user_name)) = name.split_once('\\') {
         PsuIdentity {
