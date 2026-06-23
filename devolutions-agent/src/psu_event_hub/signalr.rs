@@ -278,7 +278,13 @@ where
 
 fn log_execution_task_result(result: Result<(), JoinError>) {
     if let Err(error) = result {
-        error!(%error, "PSU Event Hub execution task panicked");
+        if error.is_panic() {
+            error!(%error, "PSU Event Hub execution task panicked");
+        } else {
+            // Cancellation happens during connection shutdown when the JoinSet is
+            // aborted; it is expected and not an error.
+            debug!(%error, "PSU Event Hub execution task was cancelled");
+        }
     }
 }
 

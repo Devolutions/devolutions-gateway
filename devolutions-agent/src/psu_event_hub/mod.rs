@@ -103,7 +103,7 @@ impl Task for PsuEventHubTask {
 fn validate_connection(connection: &dto::PsuEventHubConnectionConf) -> anyhow::Result<()> {
     if connection.use_default_credentials && connection.app_token.is_none() {
         anyhow::bail!(
-            "PSU Event Hub UseDefaultCredentials is configured for hub {}, but Windows default credentials are not implemented",
+            "psu event hub use_default_credentials is configured for hub {} but windows default credentials are not implemented",
             connection.hub
         );
     }
