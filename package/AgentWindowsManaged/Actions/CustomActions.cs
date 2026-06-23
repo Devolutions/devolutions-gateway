@@ -287,7 +287,15 @@ namespace DevolutionsAgent.Actions
                 featureConfig["Enabled"] = enable;
 
                 using StreamWriter writer = new StreamWriter(path);
-                writer.Write(config.ToString(Formatting.None));
+                // WARNING: Always pass an explicit JsonConverter[] to JToken/JObject.ToString(Formatting, ...).
+                // Newtonsoft.Json keeps the same AssemblyVersion (13.0.0.0) across every 13.x patch release, so the
+                // CLR loads whatever 13.x copy is in the GAC in preference to the one bundled in the SFXCA payload,
+                // regardless of what this project references. The single-argument ToString(Formatting) overload was
+                // only added in 13.0.4; binding to it crashes with MissingMethodException when an older 13.x is in
+                // the GAC (common: RDM, PowerShell 7, Dell Command, etc.), which rolls back the whole install. The
+                // two-argument ToString(Formatting, params JsonConverter[]) overload exists in every 13.x, so forcing
+                // it keeps us safe no matter which 13.x wins assembly resolution. See Newtonsoft.Json issue #3084.
+                writer.Write(config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
 
                 return ActionResult.Success;
             }
@@ -674,7 +682,10 @@ namespace DevolutionsAgent.Actions
             // operator's data while falsely reporting success. Write atomically so a mid-write
             // failure can't truncate agent.json — the rollback path re-parses it to restore the
             // original Tunnel section, which a half-written file would make impossible.
-            WriteFileAtomic(configPath, root.ToString(Formatting.Indented));
+            // Pass an explicit JsonConverter[]: the single-argument ToString(Formatting) overload only exists in
+            // Newtonsoft.Json 13.0.4+ and crashes with MissingMethodException against an older 13.x in the GAC.
+            // See the detailed note in ToggleAgentFeature and Newtonsoft.Json issue #3084.
+            WriteFileAtomic(configPath, root.ToString(Formatting.Indented, Array.Empty<JsonConverter>()));
             session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} advertise_domains entries to agent.json");
         }
 
@@ -1020,7 +1031,10 @@ namespace DevolutionsAgent.Actions
                         session.Log("removed Tunnel section from agent.json during enrollment rollback");
                     }
 
-                    WriteFileAtomic(configPath, root.ToString(Formatting.Indented));
+                    // Pass an explicit JsonConverter[]: the single-argument ToString(Formatting) overload only exists
+                    // in Newtonsoft.Json 13.0.4+ and crashes with MissingMethodException against an older 13.x in the
+                    // GAC. See the detailed note in ToggleAgentFeature and Newtonsoft.Json issue #3084.
+                    WriteFileAtomic(configPath, root.ToString(Formatting.Indented, Array.Empty<JsonConverter>()));
                 }
             }
             catch (Exception e)
