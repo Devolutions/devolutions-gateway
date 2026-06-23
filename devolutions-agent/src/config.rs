@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context as _};
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::{default_schedule_window_start, get_data_dir};
 use serde::{Deserialize, Serialize};
@@ -402,7 +402,10 @@ pub mod dto {
         pub schedule: Option<UpdaterSchedule>,
     }
 
-    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
     impl Default for UpdaterConf {
         fn default() -> Self {
             Self {
@@ -471,7 +474,10 @@ pub mod dto {
         pub enabled: bool,
     }
 
-    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
     impl Default for SessionConf {
         fn default() -> Self {
             Self { enabled: false }
@@ -526,9 +532,7 @@ pub mod dto {
     }
 
     /// PowerShell Universal Event Hub compatibility configuration.
-    ///
-    /// Defaults to disabled.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuEventHubConf {
         /// Enable PowerShell Universal Event Hub compatibility.
@@ -545,6 +549,20 @@ pub mod dto {
             skip_serializing_if = "PsuPowerShellConf::is_default"
         )]
         pub powershell: PsuPowerShellConf,
+    }
+
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
+    impl Default for PsuEventHubConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                connections: Vec::new(),
+                powershell: PsuPowerShellConf::default(),
+            }
+        }
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]

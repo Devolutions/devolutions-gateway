@@ -103,7 +103,7 @@ impl Task for PsuEventHubTask {
 fn validate_connection(connection: &dto::PsuEventHubConnectionConf) -> anyhow::Result<()> {
     if connection.use_default_credentials && connection.app_token.is_none() {
         anyhow::bail!(
-            "psu event hub use_default_credentials is configured for hub {} but windows default credentials are not implemented",
+            "PSU Event Hub use_default_credentials is configured for hub {} but Windows default credentials are not implemented",
             connection.hub
         );
     }
@@ -117,6 +117,8 @@ mod tests {
 
     use super::*;
 
+    // THOUGHT(CBenoit): The contract should probably be encoded at the type level instead of providing a separate validate_connection function.
+    // We need to verify if the type can be made stronger without breaking something else though.
     #[test]
     fn default_credentials_without_app_token_are_rejected() {
         let connection = dto::PsuEventHubConnectionConf {
