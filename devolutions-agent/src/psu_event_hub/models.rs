@@ -37,6 +37,16 @@ impl WebsocketEventResponse {
             terminating_error: Some(message.into()),
         }
     }
+
+    pub(super) fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            data: None,
+            job_outputs: Vec::new(),
+            complete: true,
+            timeout: true,
+            terminating_error: Some(message.into()),
+        }
+    }
 }
 
 impl Default for WebsocketEventResponse {

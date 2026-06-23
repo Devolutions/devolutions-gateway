@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, bail};
+use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::{default_schedule_window_start, get_data_dir};
 use serde::{Deserialize, Serialize};
@@ -402,7 +402,10 @@ pub mod dto {
         pub schedule: Option<UpdaterSchedule>,
     }
 
-    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
     impl Default for UpdaterConf {
         fn default() -> Self {
             Self {
@@ -471,7 +474,10 @@ pub mod dto {
         pub enabled: bool,
     }
 
-    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
     impl Default for SessionConf {
         fn default() -> Self {
             Self { enabled: false }
@@ -525,6 +531,7 @@ pub mod dto {
         pub server_spki_sha256: Option<String>,
     }
 
+    /// PowerShell Universal Event Hub compatibility configuration.
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuEventHubConf {
@@ -544,7 +551,10 @@ pub mod dto {
         pub powershell: PsuPowerShellConf,
     }
 
-    #[allow(clippy::derivable_impls)] // Just to be explicit about default disabled behavior.
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
     impl Default for PsuEventHubConf {
         fn default() -> Self {
             Self {
