@@ -498,17 +498,10 @@ namespace DevolutionsAgent.Actions
                         // Observed.
                     }
 
-                    // A hard Kill() bypasses BOTH recovery layers: the agent's transactional
-                    // rollback never runs (we killed it, it didn't gracefully error), and no marker
-                    // has been written yet (the marker write happens after the exit-code-0 check
-                    // below). So if `up` wrote agent.json + cert files but then hung, those would be
-                    // orphaned. Mirror the marker-failure path: best-effort read whatever cert paths
-                    // landed in agent.json and clean them up + restore the pre-snapshot state. The
-                    // snapshot locals (originalTunnel/originalGatewayCaB64/originalStateCaptured) were
-                    // captured before `up` started, so they're valid here. ReadTunnelCertPaths can't
-                    // throw, so this can't escape the timeout path.
-                    List<string> timeoutCertPaths = ReadTunnelCertPaths(agentJsonPath);
-                    CleanUpEnrollmentArtifacts(session, timeoutCertPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+                    // A hard Kill() bypasses the agent's own rollback and no marker exists yet, so a hang
+                    // after `up` persisted its enrollment would orphan it; undo it (guarded so an early
+                    // hang that wrote nothing can't delete the prior install's certs).
+                    RollBackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
 
                     return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
@@ -532,6 +525,11 @@ namespace DevolutionsAgent.Actions
                 if (process.ExitCode != 0)
                 {
                     string detail = !string.IsNullOrWhiteSpace(stderr) ? Redact(stderr).Trim() : $"exit code {process.ExitCode}";
+
+                    // `up` enrolls then probes, so a non-zero exit can leave a freshly-persisted
+                    // enrollment on disk with no marker yet; undo it (guarded against early failures).
+                    RollBackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+
                     return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
 
@@ -914,6 +912,32 @@ namespace DevolutionsAgent.Actions
         /// cleanup when it cannot record the rollback marker. Best-effort: logs and continues past
         /// individual failures so it never aborts a rollback.
         /// </summary>
+        // Only undo when `up` actually persisted a NEW enrollment (client cert path changed from the
+        // pre-`up` snapshot); else an early failure would delete the prior install's still-referenced certs.
+        private static void RollBackFailedEnrollment(Session session, string agentJsonPath, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
+        {
+            if (!originalStateCaptured)
+            {
+                // Snapshot failed, so we can't tell new artifacts from the prior install's — skip
+                // rather than risk deleting cert/key we never observed (a harmless orphan beats deletion).
+                session.Log("skipping enrollment cleanup: pre-enrollment state was not captured");
+                return;
+            }
+
+            List<string> certPaths = ReadTunnelCertPaths(agentJsonPath);
+            string originalClientCert = originalTunnel?["ClientCertPath"]?.Value<string>();
+            string currentClientCert = certPaths.FirstOrDefault(p => p.EndsWith("-cert.pem", StringComparison.OrdinalIgnoreCase));
+
+            if (currentClientCert != null && !string.Equals(currentClientCert, originalClientCert, StringComparison.OrdinalIgnoreCase))
+            {
+                CleanUpEnrollmentArtifacts(session, certPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+            }
+            else
+            {
+                session.Log("skipping enrollment cleanup: `up` did not persist a new enrollment (client cert unchanged)");
+            }
+        }
+
         private static void CleanUpEnrollmentArtifacts(Session session, List<string> newCertPaths, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
         {
             // The client cert/key are uniquely named per enrollment, so they're always deleted —
