@@ -509,7 +509,7 @@ namespace DevolutionsAgent.Actions
                     // A hard Kill() bypasses the agent's own rollback and no marker exists yet, so a hang
                     // after `up` persisted its enrollment would orphan it; undo it (guarded so an early
                     // hang that wrote nothing can't delete the prior install's certs).
-                    RollBackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+                    RollbackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
 
                     return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
@@ -536,7 +536,7 @@ namespace DevolutionsAgent.Actions
 
                     // `up` enrolls then probes, so a non-zero exit can leave a freshly-persisted
                     // enrollment on disk with no marker yet; undo it (guarded against early failures).
-                    RollBackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+                    RollbackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
 
                     return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
@@ -925,7 +925,7 @@ namespace DevolutionsAgent.Actions
         /// </summary>
         // Only undo when `up` actually persisted a NEW enrollment (client cert path changed from the
         // pre-`up` snapshot); else an early failure would delete the prior install's still-referenced certs.
-        private static void RollBackFailedEnrollment(Session session, string agentJsonPath, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
+        private static void RollbackFailedEnrollment(Session session, string agentJsonPath, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
         {
             if (!originalStateCaptured)
             {
