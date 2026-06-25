@@ -22,6 +22,7 @@ pub struct Conf {
     pub session: dto::SessionConf,
     pub tunnel: TunnelConf,
     pub psu_event_hub: dto::PsuEventHubConf,
+    pub psu_grpc_agent: dto::PsuGrpcAgentConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -124,6 +125,7 @@ impl Conf {
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
             psu_event_hub: conf_file.psu_event_hub.clone().unwrap_or_default(),
+            psu_grpc_agent: conf_file.psu_grpc_agent.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -580,6 +582,55 @@ pub mod dto {
         pub description: Option<String>,
     }
 
+    /// PowerShell Universal gRPC remoting agent configuration.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PsuGrpcAgentConf {
+        /// Enable the PSU gRPC agent transport.
+        pub enabled: bool,
+
+        /// PSU gRPC endpoint, for example http://localhost:5000.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub server_url: Option<Url>,
+
+        /// Stable agent identifier presented to PSU. Defaults to the local machine name.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub agent_id: Option<String>,
+
+        /// Friendly display name shown in PSU. Defaults to the agent identifier.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub display_name: Option<String>,
+
+        /// Hubs/queues advertised during registration.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub hubs: Vec<String>,
+
+        /// PowerShell child process configuration.
+        #[serde(
+            default,
+            rename = "PowerShell",
+            skip_serializing_if = "PsuPowerShellConf::is_default"
+        )]
+        pub powershell: PsuPowerShellConf,
+    }
+
+    #[expect(
+        clippy::derivable_impls,
+        reason = "manually implemented so we are being explicit about the defaults"
+    )]
+    impl Default for PsuGrpcAgentConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                server_url: None,
+                agent_id: None,
+                display_name: None,
+                hubs: Vec::new(),
+                powershell: PsuPowerShellConf::default(),
+            }
+        }
+    }
+
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuPowerShellConf {
@@ -685,6 +736,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub psu_event_hub: Option<PsuEventHubConf>,
 
+        /// PowerShell Universal gRPC remoting agent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub psu_grpc_agent: Option<PsuGrpcAgentConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -716,6 +771,7 @@ pub mod dto {
                 session: Some(SessionConf { enabled: false }),
                 tunnel: None,
                 psu_event_hub: None,
+                psu_grpc_agent: None,
                 rest: serde_json::Map::new(),
             }
         }
@@ -936,5 +992,31 @@ mod tests {
         assert!(conf.psu_event_hub.enabled);
         assert_eq!(conf.psu_event_hub.connections[0].hub, "Hub");
         assert_eq!(conf.psu_event_hub.powershell.version_selector.as_deref(), Some("7.4"));
+    }
+
+    #[test]
+    fn psu_grpc_agent_config_deserializes() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuGrpcAgent": {
+                "Enabled": true,
+                "ServerUrl": "http://localhost:5000",
+                "AgentId": "agent-01",
+                "DisplayName": "Agent 01",
+                "Hubs": ["default"],
+                "PowerShell": {
+                    "VersionSelector": "7.5"
+                }
+            }
+        }))
+        .expect("deserialize config");
+
+        let conf = Conf::from_conf_file(&conf_file).expect("load config");
+        assert!(conf.psu_grpc_agent.enabled);
+        assert_eq!(
+            conf.psu_grpc_agent.server_url.as_ref().expect("server url").as_str(),
+            "http://localhost:5000/"
+        );
+        assert_eq!(conf.psu_grpc_agent.agent_id.as_deref(), Some("agent-01"));
+        assert_eq!(conf.psu_grpc_agent.powershell.version_selector.as_deref(), Some("7.5"));
     }
 }
