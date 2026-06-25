@@ -287,7 +287,8 @@ fn main() {
                     // Enrollment only proves HTTPS/TCP; fail the install now if the QUIC/UDP tunnel
                     // path is blocked, while the operator is still here to fix the firewall.
                     let conf = ConfHandle::init().context("load agent configuration for connectivity probe")?;
-                    devolutions_agent::tunnel::probe_connectivity(&conf.get_conf().tunnel, Duration::from_secs(15)).await
+                    devolutions_agent::tunnel::probe_connectivity(&conf.get_conf().tunnel, Duration::from_secs(15))
+                        .await
                 });
 
                 if let Err(error) = result {
