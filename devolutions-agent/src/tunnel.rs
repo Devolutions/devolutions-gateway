@@ -138,8 +138,7 @@ impl Task for TunnelTask {
                     return Ok(());
                 }
                 Ok(ConnectionOutcome::CertRenewed) => {
-                    // Renewal is a successful "completion", not a failure — skip
-                    // the backoff and reconnect immediately with the new cert.
+                    // Renewal is a completion, not a failure.
                     info!("Certificate renewed; reconnecting with new cert immediately");
                     backoff.reset();
                     continue;
@@ -190,25 +189,10 @@ enum ConnectionOutcome {
     CertRenewed,
 }
 
-/// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
-///
-/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
-/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
-/// - `Err(...)`: connection lost or handshake failed — caller should retry with backoff.
-async fn run_single_connection(
-    conf_handle: &ConfHandle,
-    shutdown_signal: &mut ShutdownSignal,
-) -> anyhow::Result<ConnectionOutcome> {
-    // Ensure rustls crypto provider is installed (ring).
-    let _ = rustls::crypto::ring::default_provider().install_default();
-
-    let agent_conf = conf_handle.get_conf();
-    let tunnel_conf = &agent_conf.tunnel;
-
-    let cert_path = &tunnel_conf.client_cert_path;
-    let key_path = &tunnel_conf.client_key_path;
-    let ca_path = &tunnel_conf.gateway_ca_cert_path;
-
+/// Build the route advertisement payload from the current tunnel configuration.
+fn route_advertisements(
+    tunnel_conf: &crate::config::TunnelConf,
+) -> anyhow::Result<(Vec<Ipv4Network>, Vec<agent_tunnel_proto::DomainAdvertisement>)> {
     let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
         .advertise_subnets
         .iter()
@@ -260,23 +244,33 @@ async fn run_single_connection(
         "Advertising subnets and domains"
     );
 
+    Ok((advertise_subnets, advertise_domains))
+}
+
+/// Build the mTLS client config, resolve the gateway endpoint, and perform the
+/// QUIC handshake, returning the live endpoint and connection.
+async fn connect_to_gateway(
+    tunnel_conf: &crate::config::TunnelConf,
+) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
+    // Ensure rustls crypto provider is installed (ring).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // -- Build rustls ClientConfig --
 
     let certs: Vec<rustls_pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut std::io::BufReader::new(
-        std::fs::File::open(cert_path.as_str()).context("open client cert file")?,
+        std::fs::File::open(tunnel_conf.client_cert_path.as_str()).context("open client cert file")?,
     ))
     .collect::<Result<Vec<_>, _>>()
     .context("parse client certificates")?;
 
     let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(
-        std::fs::File::open(key_path.as_str()).context("open client key file")?,
+        std::fs::File::open(tunnel_conf.client_key_path.as_str()).context("open client key file")?,
     ))
     .context("parse private key file")?
     .context("no private key found in file")?;
 
     let mut roots = rustls::RootCertStore::empty();
     let ca_certs: Vec<rustls_pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut std::io::BufReader::new(
-        std::fs::File::open(ca_path.as_str()).context("open CA cert file")?,
+        std::fs::File::open(tunnel_conf.gateway_ca_cert_path.as_str()).context("open CA cert file")?,
     ))
     .collect::<Result<Vec<_>, _>>()
     .context("parse CA certificates")?;
@@ -362,6 +356,47 @@ async fn run_single_connection(
         .context("QUIC handshake")?;
 
     info!("QUIC connection established");
+
+    Ok((endpoint, connection))
+}
+
+/// Confirm the QUIC/UDP path to the gateway is open by completing one mTLS+QUIC handshake, then
+/// draining the connection, bounded by `timeout`.
+pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout: Duration) -> anyhow::Result<()> {
+    if !tunnel_conf.enabled {
+        bail!("agent tunnel is not enabled");
+    }
+
+    let (endpoint, connection) = tokio::time::timeout(timeout, connect_to_gateway(tunnel_conf))
+        .await
+        .context("tunnel connectivity probe timed out")??;
+
+    // Flush the CONNECTION_CLOSE so the gateway unregisters this probe's connection promptly
+    // (keyed by agent_id) rather than after its idle timeout.
+    connection.close(0u32.into(), b"probe-complete");
+    let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
+
+    Ok(())
+}
+
+/// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
+///
+/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
+/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
+/// - `Err(_)`: connection lost or handshake failed — caller should retry with backoff.
+async fn run_single_connection(
+    conf_handle: &ConfHandle,
+    shutdown_signal: &mut ShutdownSignal,
+) -> anyhow::Result<ConnectionOutcome> {
+    let agent_conf = conf_handle.get_conf();
+    let tunnel_conf = &agent_conf.tunnel;
+
+    let cert_path = &tunnel_conf.client_cert_path;
+    let key_path = &tunnel_conf.client_key_path;
+    let ca_path = &tunnel_conf.gateway_ca_cert_path;
+
+    let (advertise_subnets, advertise_domains) = route_advertisements(tunnel_conf)?;
+    let (_endpoint, connection) = connect_to_gateway(tunnel_conf).await?;
 
     // -- Open control stream --
 
@@ -637,4 +672,68 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
     }
     .await
     .inspect_err(|e| error!(%e, "Session proxy failed"));
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+
+    use super::*;
+    use crate::config::TunnelConf;
+
+    fn tunnel_conf_template() -> TunnelConf {
+        TunnelConf {
+            enabled: true,
+            gateway_endpoint: String::new(),
+            client_cert_path: Utf8PathBuf::new(),
+            client_key_path: Utf8PathBuf::new(),
+            gateway_ca_cert_path: Utf8PathBuf::new(),
+            advertise_subnets: Vec::new(),
+            advertise_domains: Vec::new(),
+            auto_detect_domain: false,
+            heartbeat_interval_secs: 15,
+            route_advertise_interval_secs: 60,
+            server_spki_sha256: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_fails_fast_when_tunnel_disabled() {
+        let mut conf = tunnel_conf_template();
+        conf.enabled = false;
+
+        let error = probe_connectivity(&conf, Duration::from_secs(5))
+            .await
+            .expect_err("probe must fail when the tunnel is disabled");
+
+        assert!(format!("{error:#}").contains("not enabled"), "unexpected error: {error:#}");
+    }
+
+    #[tokio::test]
+    async fn probe_times_out_when_gateway_unreachable() {
+        // Throwaway PEMs so the pre-connect file reads succeed; nothing listens on the target
+        // port, so the handshake never completes and the probe must hit its own timeout.
+        let cert_key =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("generate self-signed cert");
+        let dir = tempfile::tempdir().expect("temp dir");
+        let cert_path = dir.path().join("client.crt");
+        let key_path = dir.path().join("client.key");
+        let ca_path = dir.path().join("ca.crt");
+        std::fs::write(&cert_path, cert_key.cert.pem()).expect("write client cert");
+        std::fs::write(&key_path, cert_key.key_pair.serialize_pem()).expect("write client key");
+        std::fs::write(&ca_path, cert_key.cert.pem()).expect("write ca cert");
+
+        let mut conf = tunnel_conf_template();
+        // 127.0.0.1:1 is reserved and unbound; the QUIC handshake cannot complete.
+        conf.gateway_endpoint = "127.0.0.1:1".to_owned();
+        conf.client_cert_path = Utf8PathBuf::from_path_buf(cert_path).expect("utf8 cert path");
+        conf.client_key_path = Utf8PathBuf::from_path_buf(key_path).expect("utf8 key path");
+        conf.gateway_ca_cert_path = Utf8PathBuf::from_path_buf(ca_path).expect("utf8 ca path");
+
+        let started = std::time::Instant::now();
+        let result = probe_connectivity(&conf, Duration::from_secs(2)).await;
+
+        assert!(result.is_err(), "probe must fail when the gateway is unreachable");
+        assert!(started.elapsed() < Duration::from_secs(15), "probe must fail fast");
+    }
 }
