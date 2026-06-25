@@ -189,10 +189,22 @@ enum ConnectionOutcome {
     CertRenewed,
 }
 
-/// Build the route advertisement payload from the current tunnel configuration.
-fn route_advertisements(
-    tunnel_conf: &crate::config::TunnelConf,
-) -> anyhow::Result<(Vec<Ipv4Network>, Vec<agent_tunnel_proto::DomainAdvertisement>)> {
+/// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
+///
+/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
+/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
+/// - `Err(_)`: connection lost or handshake failed — caller should retry with backoff.
+async fn run_single_connection(
+    conf_handle: &ConfHandle,
+    shutdown_signal: &mut ShutdownSignal,
+) -> anyhow::Result<ConnectionOutcome> {
+    let agent_conf = conf_handle.get_conf();
+    let tunnel_conf = &agent_conf.tunnel;
+
+    let cert_path = &tunnel_conf.client_cert_path;
+    let key_path = &tunnel_conf.client_key_path;
+    let ca_path = &tunnel_conf.gateway_ca_cert_path;
+
     let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
         .advertise_subnets
         .iter()
@@ -244,7 +256,86 @@ fn route_advertisements(
         "Advertising subnets and domains"
     );
 
-    Ok((advertise_subnets, advertise_domains))
+    let (_endpoint, connection) = connect_to_gateway(tunnel_conf).await?;
+
+    // -- Open control stream --
+
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.context("open control stream")?.into();
+
+    // Send initial RouteAdvertise.
+    let epoch = 1u64;
+    let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
+
+    ctrl.send(&msg).await.context("send initial RouteAdvertise")?;
+
+    info!(epoch, "Sent initial RouteAdvertise");
+
+    // -- Certificate renewal (post-connect, pre-traffic) --
+    //
+    // Run once per reconnect rather than on a periodic timer: the QUIC session
+    // has a 120s idle timeout and 15s keep-alive, so any blip / VPN reconnect
+    // / host sleep / gateway restart drops the connection within minutes and
+    // sends us back through this path. With a 1-year cert and a 15-day
+    // threshold, the renewal window will be hit on the first reconnect after
+    // T-15d, which is more than often enough in any real deployment.
+    if let Some(outcome) = try_renew_certificate(&mut ctrl, &connection, cert_path, key_path, ca_path).await? {
+        return Ok(outcome);
+    }
+
+    // Split: recv half goes to a reader task, send half stays for periodic messages.
+    let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
+    let mut task_handles = tokio::task::JoinSet::new();
+    task_handles.spawn(run_control_reader(ctrl_recv));
+
+    // -- Main loop: accept incoming session streams + periodic tasks --
+
+    let route_interval = tunnel_conf.route_advertise_interval_secs;
+    let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs;
+    let mut route_tick = tokio::time::interval(Duration::from_secs(route_interval));
+    let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(heartbeat_interval_secs));
+    // Skip the first immediate tick (we already sent the initial RouteAdvertise).
+    route_tick.tick().await;
+    heartbeat_tick.tick().await;
+
+    loop {
+        tokio::select! {
+            biased;
+
+            _ = shutdown_signal.wait() => {
+                info!("Tunnel task shutting down");
+                connection.close(0u32.into(), b"shutting down");
+                break;
+            }
+
+            _ = route_tick.tick() => {
+                let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
+                let _ = ctrl_send.send(&msg).await
+                    .inspect(|_| trace!(epoch, "Sent RouteAdvertise (refresh)"))
+                    .inspect_err(|e| error!(%e, "Failed to send RouteAdvertise"));
+            }
+
+            _ = heartbeat_tick.tick() => {
+                // TODO: track actual active_stream_count instead of hardcoded 0.
+                let msg = ControlMessage::heartbeat(current_time_millis(), 0);
+                let _ = ctrl_send.send(&msg).await
+                    .inspect(|_| trace!("Sent Heartbeat"))
+                    .inspect_err(|e| error!(%e, "Failed to send Heartbeat"));
+            }
+
+            result = connection.accept_bi() => {
+                let (send, recv) = result.context("accept incoming bidi stream")?;
+                let subnets = advertise_subnets.clone();
+                task_handles.spawn(run_session_proxy(subnets, send, recv));
+            }
+
+            // Reap completed session tasks.
+            Some(_) = task_handles.join_next() => {}
+        }
+    }
+
+    task_handles.shutdown().await;
+
+    Ok(ConnectionOutcome::Shutdown)
 }
 
 /// Build the mTLS client config, resolve the gateway endpoint, and perform the
@@ -377,105 +468,6 @@ pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout
     let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
 
     Ok(())
-}
-
-/// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
-///
-/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
-/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
-/// - `Err(_)`: connection lost or handshake failed — caller should retry with backoff.
-async fn run_single_connection(
-    conf_handle: &ConfHandle,
-    shutdown_signal: &mut ShutdownSignal,
-) -> anyhow::Result<ConnectionOutcome> {
-    let agent_conf = conf_handle.get_conf();
-    let tunnel_conf = &agent_conf.tunnel;
-
-    let cert_path = &tunnel_conf.client_cert_path;
-    let key_path = &tunnel_conf.client_key_path;
-    let ca_path = &tunnel_conf.gateway_ca_cert_path;
-
-    let (advertise_subnets, advertise_domains) = route_advertisements(tunnel_conf)?;
-    let (_endpoint, connection) = connect_to_gateway(tunnel_conf).await?;
-
-    // -- Open control stream --
-
-    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.context("open control stream")?.into();
-
-    // Send initial RouteAdvertise.
-    let epoch = 1u64;
-    let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
-
-    ctrl.send(&msg).await.context("send initial RouteAdvertise")?;
-
-    info!(epoch, "Sent initial RouteAdvertise");
-
-    // -- Certificate renewal (post-connect, pre-traffic) --
-    //
-    // Run once per reconnect rather than on a periodic timer: the QUIC session
-    // has a 120s idle timeout and 15s keep-alive, so any blip / VPN reconnect
-    // / host sleep / gateway restart drops the connection within minutes and
-    // sends us back through this path. With a 1-year cert and a 15-day
-    // threshold, the renewal window will be hit on the first reconnect after
-    // T-15d, which is more than often enough in any real deployment.
-    if let Some(outcome) = try_renew_certificate(&mut ctrl, &connection, cert_path, key_path, ca_path).await? {
-        return Ok(outcome);
-    }
-
-    // Split: recv half goes to a reader task, send half stays for periodic messages.
-    let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
-    let mut task_handles = tokio::task::JoinSet::new();
-    task_handles.spawn(run_control_reader(ctrl_recv));
-
-    // -- Main loop: accept incoming session streams + periodic tasks --
-
-    let route_interval = tunnel_conf.route_advertise_interval_secs;
-    let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs;
-    let mut route_tick = tokio::time::interval(Duration::from_secs(route_interval));
-    let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(heartbeat_interval_secs));
-    // Skip the first immediate tick (we already sent the initial RouteAdvertise).
-    route_tick.tick().await;
-    heartbeat_tick.tick().await;
-
-    loop {
-        tokio::select! {
-            biased;
-
-            _ = shutdown_signal.wait() => {
-                info!("Tunnel task shutting down");
-                connection.close(0u32.into(), b"shutting down");
-                break;
-            }
-
-            _ = route_tick.tick() => {
-                let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
-                let _ = ctrl_send.send(&msg).await
-                    .inspect(|_| trace!(epoch, "Sent RouteAdvertise (refresh)"))
-                    .inspect_err(|e| error!(%e, "Failed to send RouteAdvertise"));
-            }
-
-            _ = heartbeat_tick.tick() => {
-                // TODO: track actual active_stream_count instead of hardcoded 0.
-                let msg = ControlMessage::heartbeat(current_time_millis(), 0);
-                let _ = ctrl_send.send(&msg).await
-                    .inspect(|_| trace!("Sent Heartbeat"))
-                    .inspect_err(|e| error!(%e, "Failed to send Heartbeat"));
-            }
-
-            result = connection.accept_bi() => {
-                let (send, recv) = result.context("accept incoming bidi stream")?;
-                let subnets = advertise_subnets.clone();
-                task_handles.spawn(run_session_proxy(subnets, send, recv));
-            }
-
-            // Reap completed session tasks.
-            Some(_) = task_handles.join_next() => {}
-        }
-    }
-
-    task_handles.shutdown().await;
-
-    Ok(ConnectionOutcome::Shutdown)
 }
 
 // ---------------------------------------------------------------------------
