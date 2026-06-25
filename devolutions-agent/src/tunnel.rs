@@ -706,7 +706,10 @@ mod tests {
             .await
             .expect_err("probe must fail when the tunnel is disabled");
 
-        assert!(format!("{error:#}").contains("not enabled"), "unexpected error: {error:#}");
+        assert!(
+            format!("{error:#}").contains("not enabled"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[tokio::test]
