@@ -451,8 +451,8 @@ async fn connect_to_gateway(
     Ok((endpoint, connection))
 }
 
-/// Confirm the QUIC/UDP path to the gateway is open by completing one mTLS+QUIC handshake, then
-/// draining the connection, bounded by `timeout`.
+/// Confirm the QUIC/UDP path to the gateway is open by completing one mTLS+QUIC handshake within
+/// `timeout`, then draining the connection (a best-effort teardown that adds up to ~3s).
 pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout: Duration) -> anyhow::Result<()> {
     if !tunnel_conf.enabled {
         bail!("agent tunnel is not enabled");
@@ -707,7 +707,7 @@ mod tests {
     #[tokio::test]
     async fn probe_times_out_when_gateway_unreachable() {
         // Throwaway PEMs so the pre-connect file reads succeed; nothing listens on the target
-        // port, so the handshake never completes and the probe must hit its own timeout.
+        // port, so the probe fails quickly — via its own timeout or an immediate connect error.
         let cert_key =
             rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("generate self-signed cert");
         let dir = tempfile::tempdir().expect("temp dir");
