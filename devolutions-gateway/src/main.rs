@@ -81,7 +81,13 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn write_boot_stacktrace(error: &anyhow::Error) {
-    let bootstacktrace_path = devolutions_gateway::config::get_data_dir().join("boot.stacktrace");
+    let data_dir = devolutions_gateway::config::get_data_dir();
+    let bootstacktrace_path = data_dir.join("boot.stacktrace");
+
+    // Best-effort directory creation: in service mode the eprintln fallback below is not visible, so make sure the write can succeed.
+    if let Err(create_error) = std::fs::create_dir_all(&data_dir) {
+        eprintln!("Failed to create the data directory {data_dir}: {create_error}");
+    }
 
     if let Err(write_error) = std::fs::write(&bootstacktrace_path, format!("{error:?}")) {
         eprintln!("Failed to write the boot stacktrace to {bootstacktrace_path}: {write_error}");
