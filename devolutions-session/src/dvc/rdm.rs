@@ -1,4 +1,3 @@
-use std::io::{Read as _, Write as _};
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -19,7 +18,7 @@ use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tracing::{error, info, trace, warn};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
-use win_api_wrappers::process::{Process, ProcessEntry32Iterator, get_current_session_id};
+use win_api_wrappers::process::{Process, ProcessEntry32Iterator, get_current_session_id, process_id_to_session};
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Foundation::ERROR_ALREADY_EXISTS;
 use windows::Win32::System::Threading::{
@@ -687,41 +686,43 @@ async fn launch_rdm_process(rdm_app_start_msg: &NowRdmAppStartMsg) -> anyhow::Re
     Ok(process_info.dwProcessId)
 }
 
-fn rdm_pid_hint_file_path() -> anyhow::Result<tempfile::NamedTempFile> {
-    // Keep file after drop so the PID hint persists across devolutions-session
-    // restarts (which occur on every RDP reconnection). See `find_rdm_pid` doc
-    // comment. The file is still cleaned up on Windows reboot since `tempfile`
-    // crate calls `MoveFileEx` with `MOVEFILE_DELAY_UNTIL_REBOOT` flag internally.
-    let file = tempfile::Builder::new()
-        .prefix("devolutions-session-rdm")
-        .suffix(".pid")
-        .rand_bytes(0)
-        // Keep file after drop, while still removing on reboot on Windows.
-        .disable_cleanup(true)
-        .make(|path| std::fs::File::create(path))
-        .context("create temporary file for RDM PID hint")?;
-
-    info!(
-        path = %file.path().display(),
-        "Using temporary file for RDM PID hint"
-    );
-
-    Ok(file)
+fn rdm_pid_hint_file_path() -> anyhow::Result<std::path::PathBuf> {
+    // The hint persists across devolutions-session restarts (which occur on every RDP
+    // reconnection; see `find_rdm_pid` doc comment). It is stored in the per-user temp
+    // directory and namespaced by the Windows session ID so that concurrent sessions of the
+    // same user neither share nor clobber each other's hint.
+    let session_id = get_current_session_id().context("get current session ID")?;
+    let mut path = std::env::temp_dir();
+    path.push(format!("devolutions-session-rdm-{session_id}.pid"));
+    Ok(path)
 }
 
-fn try_get_read_rdm_pid_hint() -> anyhow::Result<u32> {
-    let mut file = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
+fn try_get_read_rdm_pid_hint() -> anyhow::Result<Option<u32>> {
+    let path = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
 
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .context("read RDM PID hint from temporary file")?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        // The hint file is created only after the first successful launch; its absence is the
+        // normal case on first connection (or after temp cleanup) and is not an error.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("read RDM PID hint from temporary file"),
+    };
 
-    text.trim().parse::<u32>().context("parse RDM PID hint as u32")
+    match text.trim().parse::<u32>() {
+        Ok(pid) => Ok(Some(pid)),
+        Err(error) => {
+            // A corrupted (non-numeric) hint would otherwise warn on every connection; remove it
+            // so the next run self-recovers and starts fresh.
+            warn!(%error, "RDM PID hint file is corrupted; removing it");
+            clear_rdm_pid_hint();
+            Ok(None)
+        }
+    }
 }
 
 fn get_rdm_pid_hint() -> Option<u32> {
     match try_get_read_rdm_pid_hint() {
-        Ok(pid) => Some(pid),
+        Ok(pid) => pid,
         Err(error) => {
             warn!(%error, "Failed to get RDM PID hint");
             None
@@ -730,10 +731,9 @@ fn get_rdm_pid_hint() -> Option<u32> {
 }
 
 fn try_set_rdm_pid_hint(pid: u32) -> anyhow::Result<()> {
-    let mut file = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
+    let path = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
 
-    file.write_all(pid.to_string().as_bytes())
-        .context("write RDM PID hint to temporary file")
+    std::fs::write(&path, pid.to_string().as_bytes()).context("write RDM PID hint to temporary file")
 }
 
 fn set_rdm_pid_hint(pid: u32) {
@@ -742,14 +742,45 @@ fn set_rdm_pid_hint(pid: u32) {
     }
 }
 
+fn try_clear_rdm_pid_hint() -> anyhow::Result<()> {
+    let path = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
+
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        // The hint file may simply not exist; treat that as success.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("remove RDM PID hint file"),
+    }
+}
+
+fn clear_rdm_pid_hint() {
+    if let Err(error) = try_clear_rdm_pid_hint() {
+        warn!(%error, "Failed to clear RDM PID hint");
+    }
+}
+
 /// Get RDM process pid:
+/// - Only RDM instances running in the *current* Windows session are considered. The rendezvous
+///   pipe/event names are built from the current session ID (see `get_rdm_pipe_name` /
+///   `get_rdm_ready_event_name`), so a PID from another session could never match what its RDM
+///   instance actually registered. This is what makes concurrent jump sessions of the same user
+///   work when the jump host allows multiple simultaneous logins.
 /// - First tries to read PID hint from temporary file to use the same instance each time
 ///   client connects (devolutions-session.exe is restarted each time user connects). This improves
-///   user experience by reusing the same RDM instance as much as possible instead of using random
+///   user experience by reusing the same RDM instance (which also disambiguates between several RDM
+///   instances in the same session when multi-instance mode is enabled) instead of using a random
 ///   running instance.
 /// - If PID hint is not available or invalid, enumerates processes to find first matching RDM
-///   executable PID.
+///   executable PID in the current session.
 async fn find_rdm_pid() -> Option<u32> {
+    let current_session = match get_current_session_id() {
+        Ok(session) => session,
+        Err(error) => {
+            warn!(%error, "Failed to get current session ID for RDM detection");
+            return None;
+        }
+    };
+
     let pid_hint = get_rdm_pid_hint();
 
     let rdm_exe_path = get_rdm_executable_path()?;
@@ -766,6 +797,12 @@ async fn find_rdm_pid() -> Option<u32> {
 
     for process_entry in process_iterator {
         let pid = process_entry.process_id();
+
+        // The process snapshot is machine-wide; restrict matches to the current Windows session.
+        match process_id_to_session(pid) {
+            Ok(session) if session == current_session => {}
+            _ => continue,
+        }
 
         let process = match Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION) {
             Ok(proc) => proc,
@@ -812,6 +849,15 @@ async fn find_rdm_pid() -> Option<u32> {
             pid,
             "Found RDM instance"
         );
+    }
+
+    // A hint that did not resolve to a live RDM instance in this session is stale; remove it so it
+    // does not linger in the temp directory between sessions that reuse this session ID.
+    if let Some(hint) = pid_hint
+        && found_pid != Some(hint)
+    {
+        info!(stale_hint = hint, "Clearing stale RDM PID hint");
+        clear_rdm_pid_hint();
     }
 
     found_pid
