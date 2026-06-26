@@ -77,13 +77,15 @@ use tap::prelude::*;
 use crate::service::{DESCRIPTION, DISPLAY_NAME, GatewayService, SERVICE_NAME};
 
 fn main() -> anyhow::Result<()> {
-    run().inspect_err(|error| {
-        let bootstacktrace_path = devolutions_gateway::config::get_data_dir().join("boot.stacktrace");
+    run().inspect_err(write_boot_stacktrace)
+}
 
-        if let Err(write_error) = std::fs::write(&bootstacktrace_path, format!("{error:?}")) {
-            eprintln!("Failed to write the boot stacktrace to {bootstacktrace_path}: {write_error}");
-        }
-    })
+fn write_boot_stacktrace(error: &anyhow::Error) {
+    let bootstacktrace_path = devolutions_gateway::config::get_data_dir().join("boot.stacktrace");
+
+    if let Err(write_error) = std::fs::write(&bootstacktrace_path, format!("{error:?}")) {
+        eprintln!("Failed to write the boot stacktrace to {bootstacktrace_path}: {write_error}");
+    }
 }
 
 fn run() -> anyhow::Result<()> {
@@ -179,6 +181,8 @@ fn gateway_service_main(
                 &error,
                 devolutions_gateway::config::get_data_dir().join("gateway.json"),
             ));
+            // Also write the boot stacktrace, because the logging subsystem may never come up in service mode.
+            write_boot_stacktrace(&error);
             return BAD_CONFIG_ERR_CODE;
         }
     };
@@ -189,6 +193,8 @@ fn gateway_service_main(
             // At this point, the logger may or may not be initialized.
             error!(error = format!("{error:#}"), "Failed to load service");
             let _ = SYSTEM_LOGGER.emit(sysevent_codes::start_failed(&error, "service_load"));
+            // Also write the boot stacktrace, because the logging subsystem may never come up in service mode.
+            write_boot_stacktrace(&error);
             return START_FAILED_ERR_CODE;
         }
     };
@@ -201,6 +207,8 @@ fn gateway_service_main(
         Err(error) => {
             error!(error = format!("{error:#}"), "Failed to start");
             let _ = SYSTEM_LOGGER.emit(sysevent_codes::start_failed(&error, "service_start"));
+            // Also write the boot stacktrace, because the logging subsystem may never come up in service mode.
+            write_boot_stacktrace(&error);
             return START_FAILED_ERR_CODE;
         }
     }
