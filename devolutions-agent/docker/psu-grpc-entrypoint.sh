@@ -26,6 +26,11 @@ if [ -z "${hubs_json}" ]; then
     hubs_json='"default"'
 fi
 
+app_token_property=""
+if [ -n "${PSU_APP_TOKEN:-}" ]; then
+    app_token_property="    \"AppToken\": \"$(json_escape "${PSU_APP_TOKEN}")\","
+fi
+
 cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
 {
   "Updater": {
@@ -39,6 +44,7 @@ cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
     "ServerUrl": "$(json_escape "${PSU_SERVER_URL:-http://host.docker.internal:5006}")",
     "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",
     "DisplayName": "$(json_escape "${PSU_DISPLAY_NAME:-Devolutions Agent Linux}")",
+${app_token_property}
     "Hubs": [ ${hubs_json} ],
     "PowerShell": {
       "ExecutablePath": "$(json_escape "${POWERSHELL_EXECUTABLE:-pwsh}")"

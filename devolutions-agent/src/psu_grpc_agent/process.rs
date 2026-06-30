@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::process::Command;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::process::{Child, Command};
+use tokio::sync::{Mutex, mpsc};
+use tokio::task::JoinHandle;
 
 use crate::psu_grpc_agent::protocol::agent_message::Payload as AgentPayload;
 use crate::psu_grpc_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted, StartProcess, StreamData};
@@ -16,7 +17,7 @@ const PWSH_STDIN_CLOSED_EXIT_CODE: i32 = 160;
 
 #[derive(Debug)]
 pub(super) struct ProcessControl {
-    pub(super) stop: oneshot::Sender<bool>,
+    pub(super) stop: mpsc::Sender<bool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -57,9 +58,17 @@ impl ProcessRegistry {
     }
 
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
-        let control = self.inner.lock().await.processes.remove(correlation_id);
+        let control = {
+            let mut inner = self.inner.lock().await;
+            if kill_process {
+                inner.processes.remove(correlation_id).map(|control| control.stop)
+            } else {
+                inner.processes.get(correlation_id).map(|control| control.stop.clone())
+            }
+        };
+
         if let Some(control) = control {
-            let _ = control.stop.send(kill_process);
+            let _ = control.send(kill_process).await;
         }
     }
 
@@ -72,9 +81,39 @@ impl ProcessRegistry {
 pub(super) async fn run_process(
     request: StartProcess,
     incoming_rx: mpsc::Receiver<StreamData>,
-    mut control_rx: oneshot::Receiver<bool>,
+    control_rx: mpsc::Receiver<bool>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     registry: ProcessRegistry,
+    agent_id: String,
+    connection_id: String,
+    default_executable: String,
+) -> anyhow::Result<()> {
+    let correlation_id = request.correlation_id.clone();
+    let stream_id = request.stream_id.clone();
+
+    let result = run_process_inner(
+        request,
+        incoming_rx,
+        control_rx,
+        outgoing_tx,
+        agent_id,
+        connection_id,
+        default_executable,
+    )
+    .await;
+
+    registry.close_stream(&stream_id).await;
+    registry.remove_process(&correlation_id).await;
+
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_process_inner(
+    request: StartProcess,
+    incoming_rx: mpsc::Receiver<StreamData>,
+    mut control_rx: mpsc::Receiver<bool>,
+    outgoing_tx: mpsc::Sender<AgentMessage>,
     agent_id: String,
     connection_id: String,
     default_executable: String,
@@ -103,9 +142,32 @@ pub(super) async fn run_process(
         command.env(key, value);
     }
 
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start PSU gRPC child process using {executable}"))?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let error =
+                anyhow::Error::new(error).context(format!("failed to start PSU gRPC child process using {executable}"));
+            let error_message = format!("{error:#}");
+            let _ = outgoing_tx
+                .send(agent_message(
+                    &agent_id,
+                    &connection_id,
+                    AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+                ))
+                .await;
+            let _ = send_process_completed(
+                &outgoing_tx,
+                &agent_id,
+                &connection_id,
+                &request.correlation_id,
+                -1,
+                false,
+                error_message,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let process_id_u32 = child.id().unwrap_or(0);
     let process_id = i32::try_from(process_id_u32).unwrap_or(i32::MAX);
 
@@ -140,47 +202,55 @@ pub(super) async fn run_process(
         connection_id.clone(),
         process_id,
     ));
-    let stdin_task = tokio::spawn(pump_server_to_stdin(incoming_rx, stdin, process_id));
-    tokio::pin!(stdin_task);
+    let mut stdin_task = tokio::spawn(pump_server_to_stdin(incoming_rx, stdin, process_id));
 
     let mut stdin_closed_from_end_of_stream = false;
+    let mut stdin_task_completed = false;
     let mut canceled = false;
 
     let status = loop {
         tokio::select! {
             status = child.wait() => break status.context("failed to wait for PSU gRPC child process")?,
             stdin_result = &mut stdin_task => {
+                stdin_task_completed = true;
                 stdin_closed_from_end_of_stream = stdin_result.unwrap_or(false);
                 info!(process_id, "Finished receiving PSU gRPC stdin data; waiting for graceful child process exit");
 
-                match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
-                    Ok(status) => break status.context("failed to wait for PSU gRPC child process")?,
-                    Err(_) => {
-                        warn!(process_id, "PSU gRPC child process did not exit after stdin closed; killing process tree");
-                        child.start_kill().context("failed to kill PSU gRPC child process")?;
-                        canceled = true;
-                    }
-                }
+                let (exit_status, killed) = wait_for_graceful_child_exit(&mut child, process_id).await?;
+                canceled |= killed;
+                break exit_status;
             }
-            kill_process = &mut control_rx => {
+            kill_process = control_rx.recv() => {
                 match kill_process {
-                    Ok(true) => {
+                    Some(true) => {
                         info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
                         child.start_kill().context("failed to kill PSU gRPC child process")?;
                         canceled = true;
                         break child.wait().await.context("failed to wait for killed PSU gRPC child process")?;
                     }
-                    Ok(false) => {
-                        info!(process_id, correlation_id = %request.correlation_id, "Graceful stop requested for PSU gRPC child process; waiting for stream shutdown");
+                    Some(false) => {
+                        info!(process_id, correlation_id = %request.correlation_id, "Gracefully stopping PSU gRPC child process by closing stdin");
+                        canceled = true;
+                        stdin_task.abort();
+                        let _ = (&mut stdin_task).await;
+                        stdin_task_completed = true;
+                        let (exit_status, killed) = wait_for_graceful_child_exit(&mut child, process_id).await?;
+                        canceled |= killed;
+                        break exit_status;
                     }
-                    Err(_) => {}
+                    None => {}
                 }
             }
         }
     };
 
-    stdout_task.abort();
-    stderr_task.abort();
+    if !stdin_task_completed {
+        stdin_task.abort();
+        let _ = stdin_task.await;
+    }
+
+    await_pump_task(stdout_task, process_id, "stdout").await;
+    await_pump_task(stderr_task, process_id, "stderr").await;
 
     let exit_code = status.code().unwrap_or(-1);
     if stdin_closed_from_end_of_stream && exit_code == PWSH_STDIN_CLOSED_EXIT_CODE {
@@ -204,24 +274,76 @@ pub(super) async fn run_process(
         ))
         .await;
 
+    send_process_completed(
+        &outgoing_tx,
+        &agent_id,
+        &connection_id,
+        &request.correlation_id,
+        exit_code,
+        canceled,
+        String::new(),
+    )
+    .await
+    .context("failed to send PSU gRPC ProcessCompleted message")?;
+
+    Ok(())
+}
+
+async fn wait_for_graceful_child_exit(child: &mut Child, process_id: i32) -> anyhow::Result<(ExitStatus, bool)> {
+    match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+        Ok(status) => Ok((status.context("failed to wait for PSU gRPC child process")?, false)),
+        Err(_) => {
+            warn!(
+                process_id,
+                "PSU gRPC child process did not exit after stdin closed; killing child process"
+            );
+            child.start_kill().context("failed to kill PSU gRPC child process")?;
+            let status = child
+                .wait()
+                .await
+                .context("failed to wait for killed PSU gRPC child process")?;
+            Ok((status, true))
+        }
+    }
+}
+
+async fn await_pump_task(mut task: JoinHandle<anyhow::Result<()>>, process_id: i32, stream_name: &'static str) {
+    tokio::select! {
+        result = &mut task => match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => warn!(process_id, stream_name, error = format!("{error:#}"), "PSU gRPC child stream pump failed"),
+            Err(error) => warn!(process_id, stream_name, %error, "PSU gRPC child stream pump panicked"),
+        },
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            warn!(process_id, stream_name, "Timed out draining PSU gRPC child stream pump");
+            task.abort();
+            let _ = task.await;
+        }
+    }
+}
+
+async fn send_process_completed(
+    outgoing_tx: &mpsc::Sender<AgentMessage>,
+    agent_id: &str,
+    connection_id: &str,
+    correlation_id: &str,
+    exit_code: i32,
+    canceled: bool,
+    error_message: String,
+) -> anyhow::Result<()> {
     outgoing_tx
         .send(agent_message(
-            &agent_id,
-            &connection_id,
+            agent_id,
+            connection_id,
             AgentPayload::ProcessCompleted(ProcessCompleted {
-                correlation_id: request.correlation_id.clone(),
+                correlation_id: correlation_id.to_owned(),
                 exit_code,
                 canceled,
-                error_message: String::new(),
+                error_message,
             }),
         ))
         .await
-        .context("failed to send PSU gRPC ProcessCompleted message")?;
-
-    registry.close_stream(&request.stream_id).await;
-    registry.remove_process(&request.correlation_id).await;
-
-    Ok(())
+        .context("failed to send PSU gRPC ProcessCompleted message")
 }
 
 async fn pump_stdout_to_server<R>(
@@ -378,4 +500,91 @@ where
 
 fn ends_with_line_ending(data: &[u8]) -> bool {
     data.ends_with(b"\n") || data.ends_with(b"\r")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn graceful_stop_keeps_process_registered_for_later_kill() {
+        let registry = ProcessRegistry::default();
+        let (control_tx, mut control_rx) = mpsc::channel(8);
+
+        registry
+            .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
+            .await;
+
+        registry.stop_process("correlation-id", false).await;
+        assert_eq!(control_rx.recv().await, Some(false));
+        assert!(registry.inner.lock().await.processes.contains_key("correlation-id"));
+
+        registry.stop_process("correlation-id", true).await;
+        assert_eq!(control_rx.recv().await, Some(true));
+        assert!(!registry.inner.lock().await.processes.contains_key("correlation-id"));
+    }
+
+    #[tokio::test]
+    async fn run_process_cleans_registry_and_reports_spawn_failure() {
+        let registry = ProcessRegistry::default();
+        let incoming_rx = registry.register_stream("stream-id").await;
+        let (control_tx, control_rx) = mpsc::channel(8);
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
+
+        registry
+            .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
+            .await;
+
+        let result = run_process(
+            StartProcess {
+                correlation_id: "correlation-id".to_owned(),
+                stream_id: "stream-id".to_owned(),
+                executable: "definitely-not-a-devolutions-agent-test-command".to_owned(),
+                arguments: Vec::new(),
+                working_directory: String::new(),
+                environment: HashMap::new(),
+                metadata: HashMap::new(),
+            },
+            incoming_rx,
+            control_rx,
+            outgoing_tx,
+            registry.clone(),
+            "agent-id".to_owned(),
+            "connection-id".to_owned(),
+            "pwsh".to_owned(),
+        )
+        .await;
+
+        assert!(result.is_err());
+
+        let registry = registry.inner.lock().await;
+        assert!(registry.streams.is_empty());
+        assert!(registry.processes.is_empty());
+        drop(registry);
+
+        let stream_message = outgoing_rx.recv().await.expect("stream closed message");
+        match stream_message.payload {
+            Some(AgentPayload::StreamClosed(closed)) => {
+                assert_eq!(closed.stream_id, "stream-id");
+                assert!(closed.error);
+                assert!(closed.reason.contains("failed to start PSU gRPC child process"));
+            }
+            payload => panic!("unexpected payload: {payload:?}"),
+        }
+
+        let completed_message = outgoing_rx.recv().await.expect("process completed message");
+        match completed_message.payload {
+            Some(AgentPayload::ProcessCompleted(completed)) => {
+                assert_eq!(completed.correlation_id, "correlation-id");
+                assert_eq!(completed.exit_code, -1);
+                assert!(!completed.canceled);
+                assert!(
+                    completed
+                        .error_message
+                        .contains("failed to start PSU gRPC child process")
+                );
+            }
+            payload => panic!("unexpected payload: {payload:?}"),
+        }
+    }
 }

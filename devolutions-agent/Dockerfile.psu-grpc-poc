@@ -2,8 +2,7 @@ FROM rust:1.90-bookworm AS build
 
 WORKDIR /workspace
 
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
-    GIT_SSL_NO_VERIFY=true
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential clang cmake git libclang-dev pkg-config \
@@ -29,6 +28,11 @@ ENV DAGENT_CONFIG_PATH=/etc/devolutions-agent \
 COPY --from=build /workspace/target/release/devolutions-agent /opt/devolutions/agent/devolutions-agent
 COPY devolutions-agent/docker/psu-grpc-entrypoint.sh /usr/local/bin/psu-grpc-entrypoint.sh
 
-RUN chmod +x /opt/devolutions/agent/devolutions-agent /usr/local/bin/psu-grpc-entrypoint.sh
+RUN useradd --system --create-home --home-dir /var/lib/devolutions-agent --shell /usr/sbin/nologin devolutions-agent \
+    && mkdir -p /etc/devolutions-agent \
+    && chown -R devolutions-agent:devolutions-agent /etc/devolutions-agent /opt/devolutions/agent \
+    && chmod +x /opt/devolutions/agent/devolutions-agent /usr/local/bin/psu-grpc-entrypoint.sh
+
+USER devolutions-agent
 
 ENTRYPOINT ["/usr/local/bin/psu-grpc-entrypoint.sh"]

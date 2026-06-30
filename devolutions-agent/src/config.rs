@@ -601,6 +601,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub display_name: Option<String>,
 
+        /// PSU application token used to authenticate the gRPC agent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub app_token: Option<String>,
+
         /// Hubs/queues advertised during registration.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub hubs: Vec<String>,
@@ -625,6 +629,7 @@ pub mod dto {
                 server_url: None,
                 agent_id: None,
                 display_name: None,
+                app_token: None,
                 hubs: Vec::new(),
                 powershell: PsuPowerShellConf::default(),
             }
@@ -1002,6 +1007,7 @@ mod tests {
                 "ServerUrl": "http://localhost:5000",
                 "AgentId": "agent-01",
                 "DisplayName": "Agent 01",
+                "AppToken": "app-token",
                 "Hubs": ["default"],
                 "PowerShell": {
                     "VersionSelector": "7.5"
@@ -1017,6 +1023,7 @@ mod tests {
             "http://localhost:5000/"
         );
         assert_eq!(conf.psu_grpc_agent.agent_id.as_deref(), Some("agent-01"));
+        assert_eq!(conf.psu_grpc_agent.app_token.as_deref(), Some("app-token"));
         assert_eq!(conf.psu_grpc_agent.powershell.version_selector.as_deref(), Some("7.5"));
     }
 }

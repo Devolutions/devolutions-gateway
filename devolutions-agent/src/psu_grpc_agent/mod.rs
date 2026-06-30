@@ -7,17 +7,18 @@ use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use backoff::backoff::Backoff as _;
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
+use tonic::metadata::MetadataValue;
 use tonic::transport::Endpoint;
 use uuid::Uuid;
 
 use crate::config::{ConfHandle, dto};
 use crate::psu_grpc_agent::process::{ProcessControl, ProcessRegistry};
 
-#[allow(unused_qualifications)]
+#[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
     tonic::include_proto!("devolutions.psu.agent.poc.v1");
 }
@@ -63,6 +64,7 @@ struct PsuGrpcAgent {
     agent_id: String,
     display_name: String,
     machine_name: String,
+    app_token: Option<String>,
     powershell_executable: String,
 }
 
@@ -76,6 +78,7 @@ impl PsuGrpcAgent {
         let machine_name = machine_name();
         let agent_id = conf.agent_id.clone().unwrap_or_else(|| machine_name.clone());
         let display_name = conf.display_name.clone().unwrap_or_else(|| agent_id.clone());
+        let app_token = conf.app_token.clone().filter(|token| !token.trim().is_empty());
         let powershell_executable = resolve_powershell_executable(&conf.powershell)
             .to_string_lossy()
             .into_owned();
@@ -86,6 +89,7 @@ impl PsuGrpcAgent {
             agent_id,
             display_name,
             machine_name,
+            app_token,
             powershell_executable,
         })
     }
@@ -151,7 +155,10 @@ impl PsuGrpcAgent {
             .context("failed to queue PSU gRPC agent registration")?;
 
         let mut response_stream = client
-            .connect(Request::new(ReceiverStream::new(outgoing_rx)))
+            .connect(connect_request(
+                ReceiverStream::new(outgoing_rx),
+                self.app_token.as_deref(),
+            )?)
             .await
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
@@ -211,7 +218,7 @@ impl PsuGrpcAgent {
             }
             Some(ServerPayload::StartProcess(start_process)) => {
                 let incoming_rx = registry.register_stream(&start_process.stream_id).await;
-                let (control_tx, control_rx) = oneshot::channel();
+                let (control_tx, control_rx) = mpsc::channel(8);
                 registry
                     .register_process(
                         start_process.correlation_id.clone(),
@@ -324,6 +331,20 @@ pub(crate) fn diagnostic(level: &str, message: String) -> AgentDiagnostic {
     }
 }
 
+fn connect_request<T>(stream: T, app_token: Option<&str>) -> anyhow::Result<Request<T>> {
+    let mut request = Request::new(stream);
+
+    if let Some(token) = app_token {
+        let authorization = format!("Bearer {token}");
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from(authorization).context("invalid PSU gRPC AppToken metadata")?,
+        );
+    }
+
+    Ok(request)
+}
+
 fn timestamp_now() -> prost_types::Timestamp {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -388,5 +409,32 @@ async fn get_powershell_version(executable: &str) -> String {
             }
         }
         _ => "unknown".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_request_omits_authorization_without_app_token() {
+        let request = connect_request((), None).expect("create request");
+
+        assert!(!request.metadata().contains_key("authorization"));
+    }
+
+    #[test]
+    fn connect_request_adds_authorization_with_app_token() {
+        let request = connect_request((), Some("token")).expect("create request");
+
+        assert_eq!(
+            request
+                .metadata()
+                .get("authorization")
+                .expect("authorization metadata")
+                .to_str()
+                .expect("metadata string"),
+            "Bearer token"
+        );
     }
 }
