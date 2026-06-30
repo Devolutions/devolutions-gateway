@@ -1,4 +1,6 @@
 **/target
+**/node_modules
+.vs/
 .git/
 .dockerignore
 Dockerfile

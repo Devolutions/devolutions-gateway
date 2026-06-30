@@ -1,6 +1,19 @@
 fn main() {
+    generate_psu_agent_proto();
+
     #[cfg(target_os = "windows")]
     win::embed_version_rc();
+}
+
+fn generate_psu_agent_proto() {
+    let protoc = protoc_bin_vendored::protoc_bin_path().expect("failed to locate vendored protoc");
+    // SAFETY: Build scripts run single-threaded for this crate before prost-build reads PROTOC.
+    unsafe { std::env::set_var("PROTOC", protoc) };
+
+    tonic_build::configure()
+        .build_transport(false)
+        .compile_protos(&["proto/psu_agent.proto"], &["proto"])
+        .expect("failed to compile PSU agent proto");
 }
 
 #[cfg(target_os = "windows")]
