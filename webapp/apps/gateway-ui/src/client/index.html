@@ -14,12 +14,30 @@
 
   <link id="favicon" rel="icon" type="image/png" href="./assets/images/favicon.png" />
 
+  <script>
+    (function () {
+      var theme = 'default';
+      var storageKey = 'gateway.theme';
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+      try {
+        theme = JSON.parse(localStorage.getItem(storageKey) || '"default"');
+      } catch (error) {
+        console.warn('Unable to load Gateway theme preference', error);
+      }
+
+      var effectiveTheme = theme === 'dark' || (theme !== 'light' && prefersDark) ? 'dark' : 'light';
+      document.documentElement.classList.add(effectiveTheme + '-theme');
+      document.documentElement.dataset.theme = effectiveTheme;
+    })();
+  </script>
+
   <!--[if IE]>
   <link rel="shortcut icon" type="image/x-icon" href="./assets/images/favicon.ico"/>
   <![endif]-->
 
 </head>
-<body class="light-theme" spellcheck="false">
+<body spellcheck="false">
 <app-root>
   <div id="gateway-loading">
     <i class="dvl-icon dvl-icon-logo-gateway"></i>

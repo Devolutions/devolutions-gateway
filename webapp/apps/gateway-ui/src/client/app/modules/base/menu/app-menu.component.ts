@@ -4,6 +4,7 @@ import { ApiService } from '@gateway/shared/services/api.service';
 import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
+import { ThemeService } from '@shared/services/theme.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { noop } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -23,9 +24,10 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
   version: string;
   latestVersion: string;
   gatewayLatestUpdateLink: string;
+  isDarkTheme = false;
 
   // Resize properties
-  menuWidth = '200px';
+  menuWidth = '250px';
   isResizing = false;
   private startX = 0;
   private startWidthPx = 0;
@@ -38,6 +40,7 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
     private apiService: ApiService,
     private cdr: ChangeDetectorRef,
     private zone: NgZone,
+    private readonly themeService: ThemeService,
   ) {
     super();
     this.initMenu();
@@ -46,6 +49,7 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
   ngOnInit(): void {
     this.subscribeRouteChange();
     this.subscribeToIsAutoLoginOn();
+    this.subscribeToTheme();
     this.apiService.getVersion().subscribe((result) => {
       this.version = result.version;
     });
@@ -126,16 +130,38 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
     this.isMenuSlim = !this.isMenuSlim;
   }
 
+  toggleTheme(): void {
+    this.themeService.toggleTheme();
+  }
+
+  get themeToggleLabel(): string {
+    return this.isDarkTheme ? 'Light mode' : 'Dark mode';
+  }
+
+  get themeToggleIcon(): string {
+    return this.isDarkTheme ? 'pi pi-sun' : 'pi pi-moon';
+  }
+
   logout(): void {
     this.authService.logout();
   }
 
   downloadVersionToolTip() {
-    return `New version ${this.latestVersion} available`;
+    if (this.hasNewVersion()) {
+      return `New version ${this.latestVersion} available`;
+    }
+
+    return this.gatewayLatestUpdateLink ? 'Download latest Gateway version' : 'Latest version unavailable';
   }
 
   hasNewVersion() {
     return this.version && this.latestVersion && compareVersion(this.version, this.latestVersion) < 0;
+  }
+
+  private subscribeToTheme(): void {
+    this.themeService.effectiveThemeObservable.pipe(takeUntil(this.destroyed$)).subscribe((theme) => {
+      this.isDarkTheme = theme === 'dark';
+    });
   }
 
   // Resize methods

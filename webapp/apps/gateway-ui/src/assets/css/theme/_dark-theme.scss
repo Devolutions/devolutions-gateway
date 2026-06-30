@@ -281,8 +281,8 @@
   /* Inputs */
   --input-txt-border-hover-color: #00539c;
   --input-txt-border-focus-color: #3aa3ff;
-  --input-txt-bg-color: var(--dialog-base-bg-color, #1a1a1a);
-  --input-txt-bg-disabled-color: #292929;
+  --input-txt-bg-color: #0f1420;
+  --input-txt-bg-disabled-color: var(--bg-300);
   --input-txt-border-disabled-color: #333333;
   --input-txt-bg-read-only-color: rgba(var(--base-color-rgb), 0.07);
   --input-txt-color: #ffffff;
@@ -293,7 +293,7 @@
   --input-txt-error-color: #cb0000;
 
 
-  --input-background-color: var(--dialog-base-bg-color, #1a1a1a);
+  --input-background-color: #0f1420;
   --input-border-color: rgba(var(--base-border-rgb), .3);
   --input-box-shadow: none;
   --input-accent-color: rgb(var(--base-accent-rgb));
@@ -482,4 +482,13 @@
 
   --bg-primary-color: rgba(30, 31, 36, 1);
   --bg-secondary-color: #1a1a1a;
+
+  /* Gateway surface tokens */
+  --gateway-workspace-background-color: var(--main-body-bg);
+  --gateway-session-background-color: var(--main-body-bg);
+  --gateway-panel-background-color: #161b26;
+  --gateway-panel-border-color: #2f3441;
+  --gateway-panel-shadow: none;
+  --gateway-panel-hover-background-color: #1c222e;
+  --gateway-sidebar-border-width: 1px;
 }
