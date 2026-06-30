@@ -27,7 +27,8 @@ use protocol::agent_control_client::AgentControlClient;
 use protocol::agent_message::Payload as AgentPayload;
 use protocol::server_message::Payload as ServerPayload;
 use protocol::{
-    AgentCapability, AgentDiagnostic, AgentMessage, PowerShellRuntime, RegisterAgent, StreamClosed, StreamData,
+    AgentCapability, AgentDiagnostic, AgentMessage, PowerShellRuntime, ProcessCompleted, RegisterAgent, StreamClosed,
+    StreamData,
 };
 
 const PROTOCOL_VERSION: &str = "poc.v1";
@@ -217,14 +218,67 @@ impl PsuGrpcAgent {
                 info!(connection_id = %accepted.connection_id, "PSU gRPC agent registration accepted");
             }
             Some(ServerPayload::StartProcess(start_process)) => {
-                let incoming_rx = registry.register_stream(&start_process.stream_id).await;
+                if let Some(error_message) = start_process_validation_error(&start_process) {
+                    outgoing_tx
+                        .send(agent_message(
+                            &self.agent_id,
+                            connection_id,
+                            AgentPayload::ProcessCompleted(ProcessCompleted {
+                                correlation_id: start_process.correlation_id,
+                                exit_code: -1,
+                                canceled: false,
+                                error_message: error_message.to_owned(),
+                            }),
+                        ))
+                        .await
+                        .context("failed to send PSU gRPC invalid StartProcess response")?;
+                    return Ok(());
+                }
+
                 let (control_tx, control_rx) = mpsc::channel(8);
-                registry
+                let registered = registry
                     .register_process(
                         start_process.correlation_id.clone(),
                         ProcessControl { stop: control_tx },
                     )
                     .await;
+
+                if !registered {
+                    let error_message = "process correlation id is already in use".to_owned();
+                    outgoing_tx
+                        .send(agent_message(
+                            &self.agent_id,
+                            connection_id,
+                            AgentPayload::ProcessCompleted(ProcessCompleted {
+                                correlation_id: start_process.correlation_id,
+                                exit_code: -1,
+                                canceled: false,
+                                error_message,
+                            }),
+                        ))
+                        .await
+                        .context("failed to send PSU gRPC duplicate ProcessCompleted message")?;
+                    return Ok(());
+                }
+
+                let Some(incoming_rx) = registry.register_stream(&start_process.stream_id).await else {
+                    registry.remove_process(&start_process.correlation_id).await;
+                    let error_message = "process stream id is already in use".to_owned();
+                    outgoing_tx
+                        .send(agent_message(
+                            &self.agent_id,
+                            connection_id,
+                            AgentPayload::ProcessCompleted(ProcessCompleted {
+                                correlation_id: start_process.correlation_id,
+                                exit_code: -1,
+                                canceled: false,
+                                error_message,
+                            }),
+                        ))
+                        .await
+                        .context("failed to send PSU gRPC duplicate stream ProcessCompleted message")?;
+                    return Ok(());
+                };
 
                 let agent_id = self.agent_id.clone();
                 let connection_id = connection_id.clone();
@@ -355,6 +409,18 @@ fn timestamp_now() -> prost_types::Timestamp {
     }
 }
 
+fn start_process_validation_error(start_process: &protocol::StartProcess) -> Option<&'static str> {
+    if start_process.correlation_id.trim().is_empty() {
+        return Some("process correlation id is required");
+    }
+
+    if start_process.stream_id.trim().is_empty() {
+        return Some("process stream id is required");
+    }
+
+    None
+}
+
 fn machine_name() -> String {
     hostname::get()
         .ok()
@@ -436,5 +502,35 @@ mod tests {
                 .expect("metadata string"),
             "Bearer token"
         );
+    }
+
+    #[test]
+    fn start_process_validation_requires_ids() {
+        let mut start_process = protocol::StartProcess {
+            correlation_id: String::new(),
+            stream_id: "stream-id".to_owned(),
+            executable: String::new(),
+            arguments: Vec::new(),
+            working_directory: String::new(),
+            environment: HashMap::new(),
+            metadata: HashMap::new(),
+        };
+
+        assert_eq!(
+            start_process_validation_error(&start_process),
+            Some("process correlation id is required")
+        );
+
+        start_process.correlation_id = "correlation-id".to_owned();
+        start_process.stream_id.clear();
+
+        assert_eq!(
+            start_process_validation_error(&start_process),
+            Some("process stream id is required")
+        );
+
+        start_process.stream_id = "stream-id".to_owned();
+
+        assert_eq!(start_process_validation_error(&start_process), None);
     }
 }

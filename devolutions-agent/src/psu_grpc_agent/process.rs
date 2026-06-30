@@ -1,18 +1,34 @@
 use std::collections::HashMap;
+#[cfg(not(windows))]
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
+#[cfg(not(windows))]
 use std::time::Duration;
 
 use anyhow::Context as _;
+#[cfg(windows)]
+use devolutions_session::dvc::encoding::DataEncoding;
+#[cfg(windows)]
+use devolutions_session::dvc::process::{ExecError, ServerChannelEvent, WinApiProcessBuilder};
+#[cfg(windows)]
+use now_proto_pdu::NowExecDataStreamKind;
+#[cfg(windows)]
+use sha2::Digest as _;
+#[cfg(not(windows))]
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+#[cfg(not(windows))]
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc};
+#[cfg(not(windows))]
 use tokio::task::JoinHandle;
+#[cfg(windows)]
+use win_api_wrappers::utils::CommandLine;
 
 use crate::psu_grpc_agent::protocol::agent_message::Payload as AgentPayload;
 use crate::psu_grpc_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted, StartProcess, StreamData};
 use crate::psu_grpc_agent::{agent_message, diagnostic, stream_closed, stream_data};
 
+#[cfg(not(windows))]
 const PWSH_STDIN_CLOSED_EXIT_CODE: i32 = 160;
 
 #[derive(Debug)]
@@ -32,10 +48,15 @@ struct ProcessRegistryInner {
 }
 
 impl ProcessRegistry {
-    pub(super) async fn register_stream(&self, stream_id: &str) -> mpsc::Receiver<StreamData> {
+    pub(super) async fn register_stream(&self, stream_id: &str) -> Option<mpsc::Receiver<StreamData>> {
         let (tx, rx) = mpsc::channel(256);
-        self.inner.lock().await.streams.insert(stream_id.to_owned(), tx);
-        rx
+        let mut inner = self.inner.lock().await;
+        if inner.streams.contains_key(stream_id) {
+            return None;
+        }
+
+        inner.streams.insert(stream_id.to_owned(), tx);
+        Some(rx)
     }
 
     pub(super) async fn dispatch_stream_data(&self, stream_data: StreamData) {
@@ -53,8 +74,14 @@ impl ProcessRegistry {
         self.inner.lock().await.streams.remove(stream_id);
     }
 
-    pub(super) async fn register_process(&self, correlation_id: String, control: ProcessControl) {
-        self.inner.lock().await.processes.insert(correlation_id, control);
+    pub(super) async fn register_process(&self, correlation_id: String, control: ProcessControl) -> bool {
+        let mut inner = self.inner.lock().await;
+        if inner.processes.contains_key(&correlation_id) {
+            return false;
+        }
+
+        inner.processes.insert(correlation_id, control);
+        true
     }
 
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
@@ -72,7 +99,7 @@ impl ProcessRegistry {
         }
     }
 
-    async fn remove_process(&self, correlation_id: &str) {
+    pub(super) async fn remove_process(&self, correlation_id: &str) {
         self.inner.lock().await.processes.remove(correlation_id);
     }
 }
@@ -108,6 +135,30 @@ pub(super) async fn run_process(
     result
 }
 
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+async fn run_process_inner(
+    request: StartProcess,
+    incoming_rx: mpsc::Receiver<StreamData>,
+    control_rx: mpsc::Receiver<bool>,
+    outgoing_tx: mpsc::Sender<AgentMessage>,
+    agent_id: String,
+    connection_id: String,
+    default_executable: String,
+) -> anyhow::Result<()> {
+    run_process_inner_windows(
+        request,
+        incoming_rx,
+        control_rx,
+        outgoing_tx,
+        agent_id,
+        connection_id,
+        default_executable,
+    )
+    .await
+}
+
+#[cfg(not(windows))]
 #[allow(clippy::too_many_arguments)]
 async fn run_process_inner(
     request: StartProcess,
@@ -134,7 +185,29 @@ async fn run_process_inner(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    if !request.working_directory.trim().is_empty() && std::path::Path::new(&request.working_directory).is_dir() {
+    if !request.working_directory.trim().is_empty() {
+        if !std::path::Path::new(&request.working_directory).is_dir() {
+            let error_message = format!("working directory does not exist: {}", request.working_directory);
+            let _ = outgoing_tx
+                .send(agent_message(
+                    &agent_id,
+                    &connection_id,
+                    AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+                ))
+                .await;
+            send_process_completed(
+                &outgoing_tx,
+                &agent_id,
+                &connection_id,
+                &request.correlation_id,
+                -1,
+                false,
+                error_message.clone(),
+            )
+            .await?;
+            return Err(anyhow::anyhow!(error_message));
+        }
+
         command.current_dir(&request.working_directory);
     }
 
@@ -289,6 +362,320 @@ async fn run_process_inner(
     Ok(())
 }
 
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+async fn run_process_inner_windows(
+    request: StartProcess,
+    mut incoming_rx: mpsc::Receiver<StreamData>,
+    mut control_rx: mpsc::Receiver<bool>,
+    outgoing_tx: mpsc::Sender<AgentMessage>,
+    agent_id: String,
+    connection_id: String,
+    default_executable: String,
+) -> anyhow::Result<()> {
+    let session_id = session_id_from_correlation_id(&request.correlation_id);
+    let executable = if request.executable.trim().is_empty() {
+        default_executable
+    } else {
+        request.executable.clone()
+    };
+
+    info!(
+        correlation_id = %request.correlation_id,
+        session_id,
+        executable = %executable,
+        arguments = ?request.arguments,
+        "Starting PSU gRPC child process through NOW_EXEC backend"
+    );
+
+    let command_line = CommandLine::new(request.arguments.clone()).to_command_line();
+
+    let mut process_builder = WinApiProcessBuilder::new(&executable)
+        .with_command_line(&command_line)
+        .with_io_redirection(true)
+        .with_encoding(DataEncoding::Raw)
+        .with_kill_on_drop(true);
+
+    if !request.working_directory.trim().is_empty() {
+        let working_directory = std::path::Path::new(&request.working_directory);
+        if !working_directory.is_dir() {
+            let error_message = format!("working directory does not exist: {}", request.working_directory);
+            let _ = outgoing_tx
+                .send(agent_message(
+                    &agent_id,
+                    &connection_id,
+                    AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+                ))
+                .await;
+            send_process_completed(
+                &outgoing_tx,
+                &agent_id,
+                &connection_id,
+                &request.correlation_id,
+                -1,
+                false,
+                error_message.clone(),
+            )
+            .await?;
+            return Err(anyhow::anyhow!(error_message));
+        }
+
+        process_builder = process_builder.with_current_directory(&request.working_directory);
+    }
+
+    for (key, value) in &request.environment {
+        process_builder = process_builder.with_env(key, value);
+    }
+
+    let (io_notification_tx, mut io_notification_rx) = mpsc::channel(100);
+    let mut process = match process_builder.run(session_id, io_notification_tx) {
+        Ok(process) => process,
+        Err(error) => {
+            let error_message = format!(
+                "failed to start PSU gRPC child process using {executable}: {}",
+                format_exec_error(error)
+            );
+            let _ = outgoing_tx
+                .send(agent_message(
+                    &agent_id,
+                    &connection_id,
+                    AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+                ))
+                .await;
+            let _ = send_process_completed(
+                &outgoing_tx,
+                &agent_id,
+                &connection_id,
+                &request.correlation_id,
+                -1,
+                false,
+                error_message.clone(),
+            )
+            .await;
+            return Err(anyhow::anyhow!(error_message));
+        }
+    };
+
+    let mut canceled = false;
+    let mut stdout_closed = false;
+    let mut stderr_closed = false;
+    let mut stdin_closed = false;
+    let mut control_closed = false;
+    let mut stdout_sequence = 0;
+    let mut stderr_sequence = 0;
+
+    loop {
+        tokio::select! {
+            event = io_notification_rx.recv() => {
+                match event {
+                    Some(ServerChannelEvent::SessionStarted { process_id, .. }) => {
+                        let process_id = i32::try_from(process_id).unwrap_or(i32::MAX);
+                        outgoing_tx
+                            .send(agent_message(
+                                &agent_id,
+                                &connection_id,
+                                AgentPayload::ProcessStarted(ProcessStarted {
+                                    correlation_id: request.correlation_id.clone(),
+                                    process_id,
+                                }),
+                            ))
+                            .await
+                            .context("failed to send PSU gRPC ProcessStarted message")?;
+                    }
+                    Some(ServerChannelEvent::SessionDataOut { stream, last, data, .. }) => {
+                        match stream {
+                            NowExecDataStreamKind::Stdout => {
+                                if !data.is_empty() || last {
+                                    send_stream_frame(
+                                        &outgoing_tx,
+                                        &agent_id,
+                                        &connection_id,
+                                        &request.stream_id,
+                                        stdout_sequence,
+                                        data,
+                                        last,
+                                    )
+                                    .await?;
+                                    stdout_sequence += 1;
+                                }
+                                stdout_closed |= last;
+                            }
+                            NowExecDataStreamKind::Stderr => {
+                                if !data.is_empty() {
+                                    send_stderr_diagnostic(
+                                        &outgoing_tx,
+                                        &agent_id,
+                                        &connection_id,
+                                        &request.correlation_id,
+                                        stderr_sequence,
+                                        data,
+                                    )
+                                    .await?;
+                                    stderr_sequence += 1;
+                                }
+                                stderr_closed |= last;
+                            }
+                            NowExecDataStreamKind::Stdin => {}
+                        }
+                    }
+                    Some(ServerChannelEvent::SessionCancelSuccess { .. }) => {
+                        canceled = true;
+                    }
+                    Some(ServerChannelEvent::SessionCancelFailed { error, .. }) => {
+                        warn!(error = %error, correlation_id = %request.correlation_id, "PSU gRPC NOW_EXEC cancel failed");
+                    }
+                    Some(ServerChannelEvent::SessionExited { exit_code, .. }) => {
+                        process.disable_kill_on_drop();
+
+                        if !stdout_closed {
+                            send_stream_frame(
+                                &outgoing_tx,
+                                &agent_id,
+                                &connection_id,
+                                &request.stream_id,
+                                stdout_sequence,
+                                Vec::new(),
+                                true,
+                            )
+                            .await?;
+                        }
+                        if !stderr_closed {
+                            send_stderr_diagnostic(
+                                &outgoing_tx,
+                                &agent_id,
+                                &connection_id,
+                                &request.correlation_id,
+                                stderr_sequence,
+                                Vec::new(),
+                            )
+                            .await?;
+                        }
+
+                        let _ = outgoing_tx
+                            .send(agent_message(
+                                &agent_id,
+                                &connection_id,
+                                AgentPayload::StreamClosed(stream_closed(
+                                    request.stream_id.clone(),
+                                    "child process completed".to_owned(),
+                                    false,
+                                )),
+                            ))
+                            .await;
+
+                        let exit_code = i32::try_from(exit_code).unwrap_or(i32::MAX);
+                        send_process_completed(
+                            &outgoing_tx,
+                            &agent_id,
+                            &connection_id,
+                            &request.correlation_id,
+                            exit_code,
+                            canceled,
+                            String::new(),
+                        )
+                        .await
+                        .context("failed to send PSU gRPC ProcessCompleted message")?;
+                        return Ok(());
+                    }
+                    Some(ServerChannelEvent::SessionFailed { error, .. }) => {
+                        let error_message = format_exec_error(error);
+                        let _ = outgoing_tx
+                            .send(agent_message(
+                                &agent_id,
+                                &connection_id,
+                                AgentPayload::StreamClosed(stream_closed(
+                                    request.stream_id.clone(),
+                                    error_message.clone(),
+                                    true,
+                                )),
+                            ))
+                            .await;
+                        send_process_completed(
+                            &outgoing_tx,
+                            &agent_id,
+                            &connection_id,
+                            &request.correlation_id,
+                            -1,
+                            canceled,
+                            error_message,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    Some(ServerChannelEvent::CloseChannel | ServerChannelEvent::WindowRecordingEvent { .. }) => {}
+                    None => {
+                        let error_message = "NOW_EXEC process event channel closed before completion".to_owned();
+                        send_process_completed(
+                            &outgoing_tx,
+                            &agent_id,
+                            &connection_id,
+                            &request.correlation_id,
+                            -1,
+                            canceled,
+                            error_message.clone(),
+                        )
+                        .await?;
+                        return Err(anyhow::anyhow!(error_message));
+                    }
+                }
+            }
+            frame = incoming_rx.recv(), if !stdin_closed => {
+                match frame {
+                    Some(frame) => {
+                        stdin_closed = frame.end_of_stream;
+                        if let Err(error) = process.send_stdin(frame.data, frame.end_of_stream).await {
+                            warn!(
+                                error = format!("{error:#}"),
+                                correlation_id = %request.correlation_id,
+                                "Failed to send PSU gRPC stdin frame through NOW_EXEC backend"
+                            );
+                            stdin_closed = true;
+                        }
+                    }
+                    None => {
+                        stdin_closed = true;
+                        if let Err(error) = process.send_stdin(Vec::new(), true).await {
+                            warn!(
+                                error = format!("{error:#}"),
+                                correlation_id = %request.correlation_id,
+                                "Failed to close PSU gRPC stdin through NOW_EXEC backend"
+                            );
+                        }
+                    }
+                }
+            }
+            kill_process = control_rx.recv(), if !control_closed => {
+                match kill_process {
+                    Some(true) => {
+                        canceled = true;
+                        control_closed = true;
+                        if let Err(error) = process.abort_execution(1).await {
+                            warn!(
+                                error = format!("{error:#}"),
+                                correlation_id = %request.correlation_id,
+                                "Failed to abort PSU gRPC NOW_EXEC process"
+                            );
+                        }
+                    }
+                    Some(false) => {
+                        if let Err(error) = process.cancel_execution().await {
+                            warn!(
+                                error = format!("{error:#}"),
+                                correlation_id = %request.correlation_id,
+                                "Failed to cancel PSU gRPC NOW_EXEC process"
+                            );
+                        }
+                    }
+                    None => {
+                        control_closed = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
 async fn wait_for_graceful_child_exit(child: &mut Child, process_id: i32) -> anyhow::Result<(ExitStatus, bool)> {
     match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
         Ok(status) => Ok((status.context("failed to wait for PSU gRPC child process")?, false)),
@@ -307,6 +694,7 @@ async fn wait_for_graceful_child_exit(child: &mut Child, process_id: i32) -> any
     }
 }
 
+#[cfg(not(windows))]
 async fn await_pump_task(mut task: JoinHandle<anyhow::Result<()>>, process_id: i32, stream_name: &'static str) {
     tokio::select! {
         result = &mut task => match result {
@@ -346,6 +734,7 @@ async fn send_process_completed(
         .context("failed to send PSU gRPC ProcessCompleted message")
 }
 
+#[cfg(not(windows))]
 async fn pump_stdout_to_server<R>(
     mut stdout: R,
     stream_id: String,
@@ -358,7 +747,6 @@ where
     R: AsyncRead + Unpin,
 {
     let mut buffer = [0u8; 4096];
-    let mut line = Vec::new();
     let mut sequence = 0;
 
     loop {
@@ -367,35 +755,13 @@ where
             break;
         }
 
-        for byte in &buffer[..read] {
-            match *byte {
-                b'\r' => {}
-                b'\n' => {
-                    send_stream_frame(
-                        &outgoing_tx,
-                        &agent_id,
-                        &connection_id,
-                        &stream_id,
-                        sequence,
-                        std::mem::take(&mut line),
-                        false,
-                    )
-                    .await?;
-                    sequence += 1;
-                }
-                byte => line.push(byte),
-            }
-        }
-    }
-
-    if !line.is_empty() {
         send_stream_frame(
             &outgoing_tx,
             &agent_id,
             &connection_id,
             &stream_id,
             sequence,
-            line,
+            buffer[..read].to_vec(),
             false,
         )
         .await?;
@@ -435,6 +801,48 @@ async fn send_stream_frame(
         .context("failed to send PSU gRPC stdout frame")
 }
 
+#[cfg(windows)]
+async fn send_stderr_diagnostic(
+    outgoing_tx: &mpsc::Sender<AgentMessage>,
+    agent_id: &str,
+    connection_id: &str,
+    correlation_id: &str,
+    sequence: u64,
+    data: Vec<u8>,
+) -> anyhow::Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+
+    let message = String::from_utf8_lossy(&data);
+    outgoing_tx
+        .send(agent_message(
+            agent_id,
+            connection_id,
+            AgentPayload::Diagnostic(diagnostic(
+                "warning",
+                format!("stderr[{correlation_id}:{sequence}] {message}"),
+            )),
+        ))
+        .await
+        .context("failed to send PSU gRPC stderr diagnostic")
+}
+
+#[cfg(windows)]
+fn session_id_from_correlation_id(correlation_id: &str) -> u32 {
+    let digest = sha2::Sha256::digest(correlation_id.as_bytes());
+    u32::from_le_bytes(digest[..4].try_into().expect("BUG: SHA-256 digest is at least 4 bytes"))
+}
+
+#[cfg(windows)]
+fn format_exec_error(error: ExecError) -> String {
+    match error {
+        ExecError::Other(error) => format!("{error:#}"),
+        error => error.to_string(),
+    }
+}
+
+#[cfg(not(windows))]
 async fn pump_server_to_stdin(
     mut incoming_rx: mpsc::Receiver<StreamData>,
     mut stdin: tokio::process::ChildStdin,
@@ -449,12 +857,7 @@ async fn pump_server_to_stdin(
             break;
         }
 
-        let mut data = frame.data;
-        if !ends_with_line_ending(&data) {
-            data.push(b'\n');
-        }
-
-        if let Err(error) = stdin.write_all(&data).await {
+        if let Err(error) = stdin.write_all(&frame.data).await {
             warn!(process_id, %error, "Failed to write PSU gRPC frame to child stdin");
             break;
         }
@@ -469,6 +872,7 @@ async fn pump_server_to_stdin(
     closed_from_end_of_stream
 }
 
+#[cfg(not(windows))]
 async fn pump_stderr_diagnostics<R>(
     stderr: R,
     outgoing_tx: mpsc::Sender<AgentMessage>,
@@ -498,10 +902,6 @@ where
     Ok(())
 }
 
-fn ends_with_line_ending(data: &[u8]) -> bool {
-    data.ends_with(b"\n") || data.ends_with(b"\r")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,9 +911,11 @@ mod tests {
         let registry = ProcessRegistry::default();
         let (control_tx, mut control_rx) = mpsc::channel(8);
 
-        registry
-            .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
-            .await;
+        assert!(
+            registry
+                .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
+                .await
+        );
 
         registry.stop_process("correlation-id", false).await;
         assert_eq!(control_rx.recv().await, Some(false));
@@ -527,13 +929,15 @@ mod tests {
     #[tokio::test]
     async fn run_process_cleans_registry_and_reports_spawn_failure() {
         let registry = ProcessRegistry::default();
-        let incoming_rx = registry.register_stream("stream-id").await;
+        let incoming_rx = registry.register_stream("stream-id").await.expect("register stream");
         let (control_tx, control_rx) = mpsc::channel(8);
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
-        registry
-            .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
-            .await;
+        assert!(
+            registry
+                .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
+                .await
+        );
 
         let result = run_process(
             StartProcess {
@@ -586,5 +990,26 @@ mod tests {
             }
             payload => panic!("unexpected payload: {payload:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn registry_rejects_duplicate_processes_and_streams() {
+        let registry = ProcessRegistry::default();
+        let (control_tx, _control_rx) = mpsc::channel(8);
+        let (duplicate_tx, _duplicate_rx) = mpsc::channel(8);
+
+        assert!(
+            registry
+                .register_process("correlation-id".to_owned(), ProcessControl { stop: control_tx })
+                .await
+        );
+        assert!(
+            !registry
+                .register_process("correlation-id".to_owned(), ProcessControl { stop: duplicate_tx })
+                .await
+        );
+
+        assert!(registry.register_stream("stream-id").await.is_some());
+        assert!(registry.register_stream("stream-id").await.is_none());
     }
 }

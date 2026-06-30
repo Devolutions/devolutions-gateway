@@ -71,6 +71,7 @@ pub enum ServerChannelEvent {
     CloseChannel,
     SessionStarted {
         session_id: u32,
+        process_id: u32,
     },
     SessionDataOut {
         session_id: u32,
@@ -159,7 +160,10 @@ impl WinApiProcessCtx {
         const WAIT_OBJECT_INPUT_MESSAGE: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_PROCESS_EXIT: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted {
+            session_id,
+            process_id: self.pid,
+        })?;
 
         loop {
             // SAFETY: No preconditions.
@@ -288,7 +292,10 @@ impl WinApiProcessCtx {
 
         // Signal client side about started execution
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted {
+            session_id,
+            process_id: self.pid,
+        })?;
 
         info!(session_id, "Process IO is ready for async loop execution");
         loop {
@@ -557,6 +564,7 @@ pub struct WinApiProcessBuilder {
     encoding: DataEncoding,
     env: HashMap<String, String>,
     temp_files: Vec<TmpFileGuard>,
+    kill_on_drop: bool,
 }
 
 impl WinApiProcessBuilder {
@@ -569,6 +577,7 @@ impl WinApiProcessBuilder {
             encoding: DataEncoding::from_oem_codepage(),
             env: HashMap::new(),
             temp_files: Vec::new(),
+            kill_on_drop: false,
         }
     }
 
@@ -608,6 +617,12 @@ impl WinApiProcessBuilder {
         self
     }
 
+    #[must_use]
+    pub fn with_kill_on_drop(mut self, enable: bool) -> Self {
+        self.kill_on_drop = enable;
+        self
+    }
+
     fn run_impl(
         mut self,
         session_id: u32,
@@ -637,6 +652,7 @@ impl WinApiProcessBuilder {
 
         let io_redirection = self.enable_io_redirection;
         let encoding = self.encoding;
+        let kill_on_drop = self.kill_on_drop;
 
         let process_ctx = if io_redirection {
             prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding)?
@@ -666,6 +682,9 @@ impl WinApiProcessBuilder {
 
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
+        let kill_on_drop_process = kill_on_drop
+            .then(|| process_ctx.process.handle.try_clone().map(Process::from))
+            .transpose()?;
 
         let io_notification_tx =
             io_notification_tx.expect("BUG: io_notification_tx must be Some for non-detached mode");
@@ -690,6 +709,7 @@ impl WinApiProcessBuilder {
         Ok(Some(WinApiProcess {
             input_event_tx,
             join_handle,
+            kill_on_drop_process,
             _temp_files: temp_files,
         }))
     }
@@ -870,11 +890,18 @@ fn prepare_process_with_io_redirection(
 pub struct WinApiProcess {
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
     join_handle: std::thread::JoinHandle<()>,
+    kill_on_drop_process: Option<Process>,
     _temp_files: Vec<TmpFileGuard>,
 }
 
 impl Drop for WinApiProcess {
     fn drop(&mut self) {
+        if let Some(process) = self.kill_on_drop_process.take()
+            && let Err(error) = process.terminate(1)
+        {
+            trace!(%error, "Failed to terminate process on drop");
+        }
+
         // Ensure that the input event channel is closed when the process is dropped.
         // This will signal the IO thread to terminate if it is still running.
         let _ = self.input_event_tx.try_send(ProcessIoInputEvent::TerminateIo);
@@ -901,6 +928,10 @@ impl WinApiProcess {
     pub async fn shutdown(&self) -> anyhow::Result<()> {
         self.input_event_tx.send(ProcessIoInputEvent::TerminateIo).await?;
         Ok(())
+    }
+
+    pub fn disable_kill_on_drop(&mut self) {
+        self.kill_on_drop_process = None;
     }
 
     pub fn is_session_terminated(&self) -> bool {
