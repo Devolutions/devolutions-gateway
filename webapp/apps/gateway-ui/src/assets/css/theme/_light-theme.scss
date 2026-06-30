@@ -254,6 +254,7 @@
   --tree-selector-border-color: #e8e8e8;
   --tree-selector-text-color: #424242;
   --tree-selector-text-highlight-color: #000;
+  --main-tree-item-highlight-color: #e7f4ff;
   --tree-item-selected-bg-color: #e7f4ff;
   --tree-item-hover-bg-color: #e7f4ff;
   --tree-search-input-bg-color: #fff;
@@ -264,7 +265,7 @@
   --input-txt-border-hover-color: #88C8FF;
   --input-txt-border-focus-color: #0068c3;
   --input-txt-bg-color: #fff;
-  --input-txt-bg-disabled-color: #f5f5f5;
+  --input-txt-bg-disabled-color: var(--bg-300);
   --input-txt-bg-read-only-color: #F3F3F3;
   --input-txt-border-disabled-color: #dcdcdc;
   --input-txt-color: #212121;
@@ -463,5 +464,14 @@
   --bg-secondary-color: rgba(240, 242, 247, 1);
 
   /* Version */
-  --label-version-color:rgba(82, 82, 82, 1)
+  --label-version-color: rgba(189, 189, 189, 1);
+
+  /* Gateway surface tokens */
+  --gateway-workspace-background-color: var(--main-body-bg);
+  --gateway-session-background-color: var(--main-body-bg);
+  --gateway-panel-background-color: #ffffff;
+  --gateway-panel-border-color: rgba(0, 0, 0, 0.07);
+  --gateway-panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --gateway-panel-hover-background-color: #f5f5f5;
+  --gateway-sidebar-border-width: 1px;
 }

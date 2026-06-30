@@ -76,7 +76,7 @@ button:after {
   color: #fff;
   font-weight: 400;
   padding: $buttonPadding;
-  border: 0;
+  border: 1px solid transparent;
   margin-right: 6px;
   border-radius: $buttonRadius;
   line-height: 14px;
@@ -129,6 +129,29 @@ button:after {
   }
 }
 
+.p-button.p-button-secondary {
+  background: var(--button-secondary-fill, var(--action-btn-outline-secondary-bg-color));
+  border-color: var(--button-secondary-border, var(--action-btn-outline-secondary-border-color));
+  color: var(--button-secondary-text, var(--action-btn-outline-secondary-color));
+
+  &:hover:not(.p-disabled):not([disabled]) {
+    background: var(--button-secondary-hover-fill, var(--action-btn-outline-secondary-bg-hover-color));
+    border-color: var(--button-secondary-hover-border, var(--action-btn-outline-secondary-border-hover-color));
+    color: var(--button-secondary-text, var(--action-btn-outline-secondary-color));
+  }
+}
+
+.p-button.p-button-text {
+  background: transparent;
+  border-color: transparent;
+  color: $default-btn-link-text-color;
+
+  &:hover:not(.p-disabled):not([disabled]) {
+    background: var(--action-btn-hover-bg-color);
+    color: $default-btn-link-text-color;
+  }
+}
+
 .p-btn-link {
   color: $default-btn-link-text-color !important;
   cursor: pointer;
@@ -140,21 +163,20 @@ button:after {
 
 .p-button.p-button-outlined {
   background-color: transparent;
-  color: $checkoutRequestIconNeutralColor;
-  border: 0 none;
+  color: var(--button-secondary-text, $checkoutRequestIconNeutralColor);
+  border: 1px solid var(--button-secondary-border, transparent);
 
   .p-button-label {
-    color: var(--message-font-color);
+    color: currentColor;
   }
 
   &:enabled:hover {
-    background: rgba(159, 168, 218, 0.16);
-    border: 0 none;
+    background: var(--button-secondary-hover-fill, rgba(159, 168, 218, 0.16));
+    border-color: var(--button-secondary-hover-border, var(--button-secondary-border, transparent));
   }
 
   &:enabled:active {
-    background: rgba(159, 168, 218, 0.30);
-    border: 0 none;
+    background: var(--action-btn-outline-secondary-bg-pressed-color, rgba(159, 168, 218, 0.30));
   }
 }
 

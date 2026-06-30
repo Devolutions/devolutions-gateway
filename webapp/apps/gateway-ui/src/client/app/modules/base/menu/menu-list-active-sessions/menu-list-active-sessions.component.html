@@ -1,6 +1,6 @@
 @for (activeWebSession of activeWebSessions; track activeWebSession.id) {
   <div class="menu-list-item-container">
-    <div class="menu-list-item"
+    <div class="web-client-session-list-item"
          [class.selected]="activeWebSessionIndex === activeWebSession.tabIndex"
          (click)="onMenuListItemClick($event, activeWebSession)">
 

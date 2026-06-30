@@ -3,18 +3,65 @@
 @use '../../../../assets/css/theme/theme-mode-variables' as *;
 
 :host {
-  --box-background-color: white;
-  --box-text-color: rgb(var(--base-color-rgb));
+  --box-background-color: var(--bg-100);
+  --box-text-color: var(--text-400);
+  --login-card-shadow: var(--gateway-panel-shadow);
+  --login-input-bg-color: var(--bg-100);
+  --login-input-border-color: var(--border-200);
+  --login-input-text-color: var(--text-400);
+  --login-input-placeholder-color: var(--text-100);
+  --login-input-focus-border-color: var(--accent-brand-400);
 }
 
 .login-background {
-  background: url('../../../../assets/images/background-login.jpg') no-repeat;
+  background:
+    radial-gradient(circle at 72% 22%, color-mix(in srgb, var(--accent-brand-400) 20%, transparent), transparent 34%),
+    radial-gradient(circle at 28% 105%, color-mix(in srgb, var(--bg-brand-600) 32%, transparent), transparent 38%),
+    linear-gradient(135deg, var(--main-body-bg) 0%, var(--main-content-bg) 100%);
+  background-color: var(--main-body-bg);
   -webkit-background-size: cover;
   -moz-background-size: cover;
   -o-background-size: cover;
   background-size: cover;
   height: 100%;
   overflow: auto;
+  position: relative;
+  z-index: 10;
+
+  &::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--bg-100) 70%, transparent), color-mix(in srgb, var(--bg-100) 20%, transparent)),
+      radial-gradient(circle at 14% 12%, color-mix(in srgb, var(--accent-brand-400) 8%, transparent), transparent 28%);
+    z-index: 0;
+  }
+
+  .login-background-icon {
+    position: fixed;
+    z-index: 0;
+    color: var(--products-gateway-logo);
+    line-height: 1;
+    pointer-events: none;
+    transform: rotate(-18deg);
+    transform-origin: center;
+  }
+
+  .login-background-icon-top {
+    top: -330px;
+    left: -170px;
+    font-size: 640px;
+    opacity: 0.04;
+  }
+
+  .login-background-icon-bottom {
+    bottom: -250px;
+    right: -40px;
+    font-size: 720px;
+    opacity: 0.08;
+  }
 
   &::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, .4) !important;
@@ -36,9 +83,10 @@
   width: 460px;
   min-height: auto;
   border-radius: 4px;
-  z-index: 1;
-  background-color: rgba(var(--base-background-color), 1);
-  margin-top: 10vh;
+  z-index: 10;
+  background-color: var(--box-background-color);
+  box-shadow: var(--login-card-shadow);
+  margin-top: min(20vh, 120px);
   margin-bottom: 10vh;
   position: absolute;
   left: 50%;
@@ -47,16 +95,58 @@
 }
 
 .login-box-header {
-  padding: 40px 40px 10px 40px;
+  padding: 31px 44px 0;
   text-align: center;
+}
+
+.gateway-product-lockup {
+  align-items: center;
+  display: inline-flex;
+  gap: 14px;
+  justify-content: center;
+  color: var(--box-text-color);
+}
+
+.gateway-product-lockup > .dvl-icon {
+  color: var(--products-gateway-logo);
+  font-size: 48px;
+  line-height: 1;
+}
+
+.gateway-product-name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  text-align: left;
+}
+
+.gateway-product-brand {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.gateway-product-title {
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.login-box-separator {
+  border-bottom: 1px solid var(--login-input-border-color);
+  margin: 24px 44px 0;
+}
+
+.login-box-separator-title {
+  margin: 0 0 20px;
 }
 
 .login-form {
   background-color: var(--box-background-color);
-  width: 377px;
-  border-radius: 8px;
-  padding: 24px;
-  margin-bottom: 20px;
+  width: auto;
+  border-radius: 4px;
+  padding: 15px 44px 32px;
+  margin-bottom: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .centered-login-form {
@@ -69,14 +159,18 @@
 
 .login-form-title {
   color: var(--box-text-color);
-  font-size: 24px;
+  display: block;
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 28px;
   letter-spacing: 0em;
+  margin: 0 auto 20px;
+  text-align: center;
+  width: 100%;
 }
 
 .login-form-content {
-  margin-top: 24px !important;
+  margin-top: 0 !important;
   overflow: visible;
 }
 
@@ -101,9 +195,33 @@
   
   input {
     width: 100%;
-    padding: 10px 12px;
+    padding: 9px 15px;
     font-size: 14px;
   }
+}
+
+:host ::ng-deep .login-form-input .p-inputtext,
+:host ::ng-deep .login-form-input input {
+  background: var(--login-input-bg-color) !important;
+  border-color: var(--login-input-border-color) !important;
+  border-radius: 3px !important;
+  color: var(--login-input-text-color) !important;
+  caret-color: var(--login-input-text-color) !important;
+}
+
+:host ::ng-deep .login-form-input .p-inputtext::placeholder,
+:host ::ng-deep .login-form-input input::placeholder {
+  color: var(--login-input-placeholder-color) !important;
+}
+
+:host ::ng-deep .login-form-input .p-inputtext:enabled:focus,
+:host ::ng-deep .login-form-input input:enabled:focus {
+  border-color: var(--login-input-focus-border-color) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--login-input-focus-border-color) 20%, transparent) !important;
+}
+
+:host ::ng-deep .password-container span {
+  color: var(--login-input-text-color);
 }
 
 .login-form-message {
@@ -169,15 +287,16 @@
 
 :host ::ng-deep .btn-login button {
     width: 100%;
-    padding: 12px 24px !important;
+    height: 50px;
+    padding: 9px 5px !important;
     background-color: $default-btn-bg-color !important;
     background: $default-btn-bg-color !important;
     color: white !important;
     border: none !important;
     border-radius: 4px !important;
     cursor: pointer;
-    font-size: 16px !important;
-    font-weight: 500 !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
     transition: background-color 0.2s ease;
     box-shadow: none !important;
     outline: none !important;
@@ -214,4 +333,35 @@
   align-items: flex-start;
   gap: 10px;
   display: inline-flex
+}
+
+@media screen and (max-width: 992px) {
+  .login-background .login-background-icon {
+    font-size: 360px;
+  }
+
+  .login-background .login-background-icon-top {
+    top: -185px;
+    left: -105px;
+  }
+
+  .login-background .login-background-icon-bottom {
+    bottom: -125px;
+    right: -65px;
+  }
+
+  .login-box {
+    width: 100%;
+    min-height: 100%;
+    margin-top: 0;
+    margin-bottom: 0;
+    box-shadow: none;
+    left: 0 !important;
+    transform: translateX(0%) !important;
+  }
+
+  .login-form {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
 }

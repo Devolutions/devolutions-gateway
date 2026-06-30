@@ -15,6 +15,8 @@
   width: 100%;
   min-width: 210px;
   border: 1px solid $input-default-border-color;
+  background: $input-txt-bg-color;
+  color: $input-txt-color;
 
   @include text-ellipsis();
   @include transition(box-shadow $transitionDuration, border-color $transitionDuration);
@@ -23,6 +25,7 @@
   .p-dropdown-label:focus,
   .p-dropdown-label:hover {
     border: none;
+    color: $input-txt-color;
     margin-right: 1.5em;
   }
 
@@ -68,7 +71,8 @@
 }
 
 .p-dropdown-panel {
-  background: $dropdown-container-bg-color;
+  background: var(--main-body-bg);
+  color: $dropdown-item-txt-color;
   margin-top: -1px; /* hack to simulate a thin line */
   border: 1px solid $dropdown-overlay-border-color;
   box-shadow: $defaultBoxShadow;
@@ -89,7 +93,7 @@
   .p-dropdown-filter-container {
     padding: $headerPadding;
     border-bottom: 1px solid $admin-separator-color;
-    background: $dropdown-container-bg-color;
+    background: var(--main-body-bg);
 
     .p-dropdown-filter {
       width: 100%;
@@ -118,11 +122,11 @@
     @include custom-scrollbar();
 
     .p-dropdown-items {
-      background: $dropdown-container-bg-color;
+      background: var(--main-body-bg);
       padding: 0;
 
       .p-dropdown-item {
-        background: $dropdown-item-bg-color;
+        background: var(--main-body-bg);
         color: $dropdown-item-txt-color;
         margin: 0;
         padding: $listItemPadding;

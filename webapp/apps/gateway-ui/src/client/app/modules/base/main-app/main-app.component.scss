@@ -17,14 +17,9 @@
 }
 
 .layout-menu-container {
-  background-color: var(--bg-primary-color);
-}
-
-:host-context(.dark-theme) {
-  .layout-menu-container.dark {
-    // TODO TO REMOVE, for now the dark is dirty with the "dark-theme". This hack is temporary
-    background-color: #101112;
-  }
+  background-color: var(--main-content-bg);
+  border-right: var(--gateway-sidebar-border-width, 1px) solid var(--border-100);
+  flex-shrink: 0;
 }
 
 .layout-data {
@@ -54,14 +49,14 @@
 }
 
 .layout-main {
-  background: $layout-container-bg-color;
+  background: var(--gateway-workspace-background-color, $layout-container-bg-color);
   flex-grow: 1;
   min-width: 0; // Prevent container from going beyond screen
   display: flex;
   flex-direction: column;
 
   .layout-main-content {
-    background-color: var(--bg-secondary-color);
+    background-color: var(--gateway-workspace-background-color, var(--bg-secondary-color));
     flex-grow: 1;
     overflow: hidden;
   }

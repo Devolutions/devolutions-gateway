@@ -67,8 +67,8 @@ importers:
         specifier: ^0.7.0
         version: 0.7.0
       '@devolutions/iron-remote-desktop-vnc':
-        specifier: ^0.7.1
-        version: 0.7.1
+        specifier: 0.7.0
+        version: 0.7.0
       '@devolutions/terminal-shared':
         specifier: ^1.4.1
         version: 1.4.1(typescript@5.9.3)
@@ -1323,8 +1323,8 @@ packages:
   '@devolutions/iron-remote-desktop-rdp@0.7.0':
     resolution: {integrity: sha512-CclAh4OS9aBoPJT0l7bih7ETOHPnB9KjT0drB0a6r5+Qh95pTEuQCx7uFN/XA2AlkFlrqx+DBAMDGYXmgsjHAQ==}
 
-  '@devolutions/iron-remote-desktop-vnc@0.7.1':
-    resolution: {integrity: sha512-YaFM6vPFu5dQgEBPpUAMFd/9nxYBFLi02i9Y4z51Ipam5QL4Ra3TN7pJVQOvhaepCJEfP3asZzgeudo2lsFEhQ==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/iron-remote-desktop-vnc/-/@devolutions/iron-remote-desktop-vnc-0.7.1.tgz}
+  '@devolutions/iron-remote-desktop-vnc@0.7.0':
+    resolution: {integrity: sha512-fdxwJuBytLTdxrm6GrJ4po5ZI0bWP+yKNo4TZhKNRqkbRsUNOoqEK+9U1VwPYRlrTkrDryR57xeHRpxg/tDbOQ==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/iron-remote-desktop-vnc/-/@devolutions/iron-remote-desktop-vnc-0.7.0.tgz}
 
   '@devolutions/iron-remote-desktop@0.11.0':
     resolution: {integrity: sha512-ZH8xfabDA+6rAXkW2V3XgRdj0LHOsHoXAzars/H22DmKsHM39LdMfheKFUR3qLaFDM8mjf6DTFngzjgr+Byx0Q==}
@@ -8180,7 +8180,7 @@ snapshots:
 
   '@devolutions/iron-remote-desktop-rdp@0.7.0': {}
 
-  '@devolutions/iron-remote-desktop-vnc@0.7.1': {}
+  '@devolutions/iron-remote-desktop-vnc@0.7.0': {}
 
   '@devolutions/iron-remote-desktop@0.11.0': {}
 

@@ -29,13 +29,13 @@
   </div>
 
   <div class="col-12 gateway-form-group">
-    <a href="#" (click)="toggleMoreSettings($event)"
+    <a class="gateway-more-settings-link" href="#" (click)="toggleMoreSettings($event)"
     >More Settings
       @if (!showMoreSettings) {
-        <span>+</span>
+        <span class="gateway-more-settings-indicator">+</span>
       }
       @if (showMoreSettings) {
-        <span>-</span>
+        <span class="gateway-more-settings-indicator">-</span>
       }
     </a>
   </div>

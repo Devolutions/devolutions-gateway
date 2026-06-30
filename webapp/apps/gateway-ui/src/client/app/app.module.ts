@@ -8,7 +8,6 @@ import { ExtraOptions, RouterModule } from '@angular/router';
 import { AuthInterceptor } from '@gateway/app-auth.interceptor';
 import { MenuListActiveSessionsComponent } from '@gateway/modules/base/menu/menu-list-active-sessions/menu-list-active-sessions.component';
 import { LoginComponent } from '@gateway/modules/login/login.component';
-import Aura from '@primeuix/themes/aura';
 import { GatewayAlertMessageComponent } from '@shared/components/gateway-alert-message/gateway-alert-message.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { LoadingService } from '@shared/services/loading.service';
@@ -28,6 +27,7 @@ import { AppComponent } from './app.component';
 // Other
 import { routes } from './app.routes';
 import { AppHeaderComponent } from './modules/base/header/app-header.component';
+import DvlPreset from './styles/dvl.preset';
 import { MainAppComponent } from './modules/base/main-app/main-app.component';
 import { AppMenuComponent } from './modules/base/menu/app-menu.component';
 import { MenuGroupListItemComponent } from './modules/base/menu/menu-group-list-item/menu-group-list-item.component';
@@ -75,13 +75,13 @@ const routerOptions: ExtraOptions = {
     provideAnimationsAsync(),
     providePrimeNG({
       theme: {
-        preset: Aura,
+        preset: DvlPreset,
         options: {
           prefix: 'p',
-          darkModeSelector: 'system',
+          darkModeSelector: '.dark-theme',
           cssLayer: {
             name: 'primeng',
-            order: 'primeng, custom',
+            order: 'reset, theme, base, general, components, utilities, primeng, fixes',
           },
         },
       },

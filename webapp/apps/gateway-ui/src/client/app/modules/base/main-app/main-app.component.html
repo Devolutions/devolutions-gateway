@@ -3,7 +3,8 @@
   [ngClass]="{'layout-mobile-active': staticMenuMobileActive}">
 
   <div class="layout-data">
-    <div class="layout-menu-container dark-theme dark">
+    <!-- Match DVLS: keep the sidebar in the fixed dark theme scope even when the main workspace theme changes. -->
+    <div class="layout-menu-container" data-theme="dark">
       <app-menu></app-menu>
     </div>
 

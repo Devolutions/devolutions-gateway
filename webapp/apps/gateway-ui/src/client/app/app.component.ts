@@ -2,6 +2,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
+import { ThemeService } from '@shared/services/theme.service';
 import { BehaviorSubject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -18,11 +19,13 @@ export class AppComponent extends BaseComponent implements OnInit, OnDestroy {
   constructor(
     private authService: AuthService,
     private readonly navigationService: NavigationService,
+    private readonly themeService: ThemeService,
   ) {
     super();
   }
 
   ngOnInit(): void {
+    this.themeService.initialize();
     this.subscribeRouteChanged();
     this.authService.startExpirationCheck();
   }

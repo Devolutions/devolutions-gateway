@@ -19,16 +19,33 @@
       </div>
     }
 
-    <div class="menu-mode-toggler" (click)="onMenuModeTogglerClick()">
+  </div>
+
+  <div
+    class="menu-mode-toggler"
+    [attr.aria-label]="isMenuSlim ? 'Expand sidebar' : 'Collapse sidebar'"
+    role="button"
+    tabindex="0"
+    (click)="onMenuModeTogglerClick()"
+    (keydown.enter)="onMenuModeTogglerClick()"
+    (keydown.space)="onMenuModeTogglerClick()">
+    @if (!isMenuSlim) {
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <g id="sidebar">
-          <path id="Vector" d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z" stroke="#78797C" stroke-linecap="round" stroke-linejoin="round"/>
-          <path id="Vector_2" d="M4 2V14" stroke="#78797C" stroke-linecap="round" stroke-linejoin="round"/>
-          <path id="Rectangle 386" d="M2 4C2 2.89543 2.89543 2 4 2H5V14H4C2.89543 14 2 13.1046 2 12V4Z" fill="#78797C"/>
+        <g id="sidebar-collapse">
+          <path d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 2V14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 4C2 2.89543 2.89543 2 4 2H5V14H4C2.89543 14 2 13.1046 2 12V4Z" fill="currentColor"/>
         </g>
       </svg>
-
-    </div>
+    } @else {
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g id="sidebar-expand">
+          <path d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 4C2 2.89543 2.89543 2 4 2H7V14H4C2.89543 14 2 13.1046 2 12V4Z" fill="currentColor"/>
+          <path d="M7 2V14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
+    }
   </div>
 
   <!-- Primary -->
@@ -43,7 +60,7 @@
     <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
     </gateway-menu-list-active-sessions>
 
-    <div class="menu-list-item">
+    <div class="menu-list-item new-session-menu-item">
       <p-button [type]="'button'"
                 [icon]="isMenuSlim ? 'dvl-icon dvl-icon-add' : ''"
                 [label]="!isMenuSlim ? 'New Session' : ''"
@@ -53,13 +70,23 @@
     </div>
   </gateway-menu-group-list-item>
 
-  <!-- Logout -->
-  @if (!isAutoLoginOn) {
-    <gateway-menu-group-list-item
-      class="primary-menu-group-list"
-      [accordion]="false">
+  <gateway-menu-group-list-item
+    class="footer-menu-group"
+    [accordion]="false">
 
-      <div class="footer-group-list">
+    <div class="footer-group-list">
+      <div
+        class="menu-list-item footer-menu-list theme-toggle-menu-list"
+        [pTooltip]="isMenuSlim ? themeToggleLabel : ''"
+        [tooltipDisabled]="!isMenuSlim"
+        (click)="toggleTheme()">
+        <i class="theme-toggle-icon" [ngClass]="themeToggleIcon"></i>
+        @if (!isMenuSlim) {
+          <span class="menu-list-item-label">{{ themeToggleLabel }}</span>
+        }
+      </div>
+
+      @if (!isAutoLoginOn) {
         <div class="menu-list-item footer-menu-list"
              [pTooltip]="isMenuSlim ? 'Logout' : ''"
              [tooltipDisabled]="!isMenuSlim"
@@ -69,16 +96,23 @@
             <span class="menu-list-item-label">Logout</span>
           }
         </div>
-      </div>
-    </gateway-menu-group-list-item>
-  }
+      }
+    </div>
+  </gateway-menu-group-list-item>
 
     <div class="dgw-version">
       <label for="version">
         {{ version }}
       </label>
-        <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
-          @if (hasNewVersion()) {
+        <a
+          class="download-link"
+          [href]="gatewayLatestUpdateLink"
+          target="_blank"
+          rel="noopener noreferrer"
+          [pTooltip]="downloadVersionToolTip()"
+          [class.disabled]="!gatewayLatestUpdateLink"
+          [attr.aria-label]="downloadVersionToolTip()">
+          @if (gatewayLatestUpdateLink) {
             <i class="dvl-icon dvl-icon-download download-icon"></i>
           }
         </a>

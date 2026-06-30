@@ -29,7 +29,7 @@
     "@devolutions/icons": "^5.0.10",
     "@devolutions/iron-remote-desktop": "^0.11.0",
     "@devolutions/iron-remote-desktop-rdp": "^0.7.0",
-    "@devolutions/iron-remote-desktop-vnc": "^0.7.1",
+    "@devolutions/iron-remote-desktop-vnc": "0.7.0",
     "@devolutions/terminal-shared": "^1.4.1",
     "@devolutions/web-ssh-gui": "^0.7.0",
     "@devolutions/web-telnet-gui": "^0.4.4",
