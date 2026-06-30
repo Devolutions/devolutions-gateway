@@ -7,7 +7,7 @@ use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use backoff::backoff::Backoff as _;
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::config::{ConfHandle, dto};
 use crate::psu_grpc_agent::process::{ProcessControl, ProcessRegistry};
 
-#[allow(unused_qualifications)]
+#[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
     tonic::include_proto!("devolutions.psu.agent.poc.v1");
 }
@@ -211,7 +211,7 @@ impl PsuGrpcAgent {
             }
             Some(ServerPayload::StartProcess(start_process)) => {
                 let incoming_rx = registry.register_stream(&start_process.stream_id).await;
-                let (control_tx, control_rx) = oneshot::channel();
+                let (control_tx, control_rx) = mpsc::channel(8);
                 registry
                     .register_process(
                         start_process.correlation_id.clone(),
