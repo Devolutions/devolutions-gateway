@@ -186,9 +186,9 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "arc-swap"
@@ -602,6 +602,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base45"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"
+
+[[package]]
 name = "base64"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -863,9 +869,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.2.3"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce8d3bd5823c7504d3f579f13e7b2f3da252fcb938c594d5680ee508bf846f"
+checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
 dependencies = [
  "serde_core",
 ]
@@ -4306,12 +4312,13 @@ dependencies = [
 
 [[package]]
 name = "multibase"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8694bb4835f452b0e3bb06dbebb1d6fc5385b6ca1caf2e55fd165c042390ec77"
+checksum = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
 dependencies = [
  "base-x",
  "base256emoji",
+ "base45",
  "data-encoding",
  "data-encoding-macro",
 ]
@@ -8136,9 +8143,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.23.3"
+version = "1.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
+checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
