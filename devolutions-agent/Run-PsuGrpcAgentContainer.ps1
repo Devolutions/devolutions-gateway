@@ -5,6 +5,7 @@ param(
     [string] $ServerUrl = 'http://host.docker.internal:5006',
     [string] $AgentId = 'devo-agent-linux',
     [string] $DisplayName = 'Devolutions Agent Linux',
+    [string] $AppToken,
     [string[]] $Hubs = @('default'),
     [switch] $NoBuild
 )
@@ -24,11 +25,22 @@ if ($existing) {
     docker rm -f $ContainerName | Out-Null
 }
 
-docker run --rm -it `
-    --name $ContainerName `
-    --add-host host.docker.internal:host-gateway `
-    -e "PSU_SERVER_URL=$ServerUrl" `
-    -e "PSU_AGENT_ID=$AgentId" `
-    -e "PSU_DISPLAY_NAME=$DisplayName" `
-    -e "PSU_HUBS=$($Hubs -join ',')" `
-    $ImageName
+$dockerArgs = @(
+    'run',
+    '--rm',
+    '-it',
+    '--name', $ContainerName,
+    '--add-host', 'host.docker.internal:host-gateway',
+    '-e', "PSU_SERVER_URL=$ServerUrl",
+    '-e', "PSU_AGENT_ID=$AgentId",
+    '-e', "PSU_DISPLAY_NAME=$DisplayName",
+    '-e', "PSU_HUBS=$($Hubs -join ',')"
+)
+
+if (-not [string]::IsNullOrWhiteSpace($AppToken)) {
+    $dockerArgs += @('-e', "PSU_APP_TOKEN=$AppToken")
+}
+
+$dockerArgs += $ImageName
+
+docker @dockerArgs
