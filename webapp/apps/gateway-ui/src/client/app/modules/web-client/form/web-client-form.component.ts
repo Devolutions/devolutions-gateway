@@ -45,8 +45,8 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   messages: ToastMessageOptions[] = [];
 
-  hostnames!: HostnameObject[];
-  filteredHostnames!: HostnameObject[];
+  hostnames: HostnameObject[] = [];
+  filteredHostnames: HostnameObject[] = [];
 
   formData: unknown;
 
@@ -143,6 +143,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
         takeUntil(this.destroyed$),
         switchMap((formGroup: FormGroup<unknown>) => {
           this.connectSessionForm = formGroup;
+
           return forkJoin({
             protocolOptions: this.formService.getProtocolOptions(),
             hostnames: this.getHostnames(),
@@ -150,13 +151,13 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
         }),
         catchError((error) => {
           console.error('Initialization failed', error);
-          return [];
+          return of({ protocolOptions: [], hostnames: [] });
         }),
       )
       .subscribe({
         next: ({ protocolOptions, hostnames }) => {
           this.protocolOptions = protocolOptions;
-          this.hostnames = hostnames;
+          this.hostnames = hostnames ?? [];
 
           this.subscribeToProtocolChanges();
           this.updateProtocolTooltip();
@@ -208,7 +209,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   }
 
   private populateHostnameList(): Observable<void> {
-    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
     return of(undefined);
   }
 

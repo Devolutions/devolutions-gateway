@@ -11,8 +11,14 @@
   flex-direction: row;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  background-color: #ECECEC;
+  overflow: auto;
+  background-color: var(--gateway-workspace-background-color, #ececec);
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  padding: 3vw;
+
+  > * {
+    margin-bottom: auto;
+    margin-top: auto;
+  }
 }

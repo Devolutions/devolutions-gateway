@@ -4,23 +4,27 @@
 
 :host {
   display: flex;
-  --box-background-color: white;
-  --box-text-color: rgb(var(--base-color-rgb));
+  --box-background-color: var(--gateway-panel-background-color, white);
+  --box-border-color: var(--gateway-panel-border-color, transparent);
+  --box-shadow: var(--gateway-panel-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+  --box-text-color: var(--text-color-primary, rgb(var(--base-color-rgb)));
 }
 
 .net-scan-container {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
 
   .net-scan-main-box {
     display: block;
     background-color: var(--box-background-color);
+    border: 1px solid var(--box-border-color);
     width: 291px;
     height: 418px;
     border-radius: 8px;
-    margin: 3vw;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin: 0 3vw;
+    box-shadow: var(--box-shadow);
+    color: var(--box-text-color);
 
     .net-scan-main-header {
       display: flex;
@@ -54,7 +58,7 @@
         width: calc(100% - 20px);
         height: 51px;
         padding: 8px 16px 8px 16px;
-        border-bottom: 1px solid var(--Borders-Colors-border-tertiary-color, rgba(0, 0, 0, 0.07));
+        border-bottom: 1px solid var(--gateway-panel-border-color, rgba(0, 0, 0, 0.07));
 
         i {
           margin-right: 10px;
@@ -85,13 +89,32 @@
           margin-left: auto;
           display: flex;
           align-items: center;
-          padding-left: 5px;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border-radius: 4px;
+          color: var(--text-color-secondary, $default-text-color);
+          flex-shrink: 0;
+
+          i {
+            font-size: 16px;
+            margin-right: 0;
+          }
         }
 
         &:hover,
         &.selected {
-          background-color: lightgray;
+          background-color: var(--gateway-panel-hover-background-color, lightgray);
           cursor: pointer;
+
+          .net-scan-prefill-form {
+            color: var(--text-brand, var(--default-btn-link-text-color));
+          }
+        }
+
+        .net-scan-prefill-form:hover {
+          background-color: var(--button-secondary-fill, rgba(58, 163, 255, 0.12));
+          color: var(--text-brand, var(--default-btn-link-text-color));
         }
       }
     }
@@ -111,7 +134,7 @@
         font-weight: 600;
         line-height: 21.79px;
         text-align: left;
-        color: var(--Text-Colors-text-primary-color, rgba(0, 0, 0, 0.8));
+        color: var(--text-color-primary, rgba(0, 0, 0, 0.8));
       }
 
       .not-found-body {
@@ -119,7 +142,7 @@
         font-weight: 400;
         line-height: 19.07px;
         text-align: center;
-        color: var(--Text-Colors-text-secondary-color, rgba(0, 0, 0, 0.6));
+        color: var(--text-color-secondary, rgba(0, 0, 0, 0.6));
         margin-bottom: 10px;
       }
     }
@@ -143,18 +166,18 @@
 }
 
 .scan-button ::ng-deep .p-button {
-  border: 1px solid rgba(0, 104, 195, 1);
+  border: 1px solid var(--button-secondary-border, rgba(0, 104, 195, 1));
   font-size: 12px;
   font-weight: 600;
   line-height: 16.34px;
   text-align: left;
-  background-color: rgba(240, 246, 251, 1);
-  color: rgba(0, 104, 195, 1);
+  background-color: var(--button-secondary-fill, rgba(240, 246, 251, 1));
+  color: var(--button-secondary-text, rgba(0, 104, 195, 1));
 }
 
 .scan-button ::ng-deep .p-button:hover {
-  background-color: rgba(0, 104, 195, 1);
-  color: white;
+  background-color: var(--default-btn-bg-color, rgba(0, 104, 195, 1));
+  color: var(--default-btn-text-color, white);
 }
 
 .spinner {
@@ -162,6 +185,11 @@
   animation: spin 2s linear infinite;
   width: 24px;
   height: 24px;
+}
+
+.spinner svg path,
+.net-scan-main-header svg path {
+  fill: currentColor;
 }
 
 @keyframes spin {

@@ -41,7 +41,7 @@ body {
   color: $default-text-color;
   overflow: hidden;
   min-height: 100%;
-  background-color: #f5f5f5;
+  background-color: var(--background-secondary-color, #f5f5f5);
 }
 
 router-outlet {
@@ -69,6 +69,29 @@ a,
   cursor: pointer;
   font-weight: normal;
   text-decoration: none;
+}
+
+.gateway-icon-action {
+  transition:
+    background-color $transitionDuration ease-in-out,
+    color $transitionDuration ease-in-out;
+}
+
+.gateway-more-settings-link {
+  align-items: center;
+  color: var(--text-brand, $default-btn-link-text-color);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 4px;
+  line-height: 18px;
+
+  &:hover {
+    color: var(--accent-brand-300, $default-btn-link-text-color-darker);
+  }
+}
+
+.gateway-more-settings-indicator {
+  font-weight: 700;
 }
 
 label {
@@ -639,6 +662,8 @@ body.login-mobile-device {
   top: 0;
   right: 0;
   bottom: 0;
+  pointer-events: none;
+  z-index: 0;
 
   i.dvl-icon.dvl-icon-logo-gateway
   {

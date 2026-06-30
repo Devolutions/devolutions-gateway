@@ -1,5 +1,5 @@
 :host {
-  background: #F9F9F9 url('../../../../../assets/images/session_background.png');
+  background: var(--gateway-session-background-color, #f9f9f9) url('../../../../../assets/images/session_background.png');
   display: flex;
   flex: 1;
   min-height: 0;
@@ -51,6 +51,5 @@
   position: absolute;
   inset: 0;
   z-index: 20;
-  pointer-events: none; // anchor is transparent — the toolbar children opt-in via pointer-events: auto
+  pointer-events: none; // anchor is transparent - the toolbar children opt-in via pointer-events: auto
 }
-

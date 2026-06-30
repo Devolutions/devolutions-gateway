@@ -46,7 +46,7 @@
 }
 
 .p-multiselect-panel .p-multiselect-items-wrapper {
-  background: $dropdown-container-bg-color;
+  background: var(--main-body-bg);
   border-bottom-right-radius: $borderRadius;
   border-bottom-left-radius: $borderRadius;
 
@@ -98,7 +98,7 @@
 
 .p-multiselect-panel {
   padding: 0;
-  background: $dropdown-container-bg-color;
+  background: var(--main-body-bg);
   min-width: 12em;
   margin-top: -1px; /* hack to simulate a thin line */
   border: 1px solid $dropdown-overlay-border-color;
@@ -107,14 +107,14 @@
 
   .p-multiselect-header {
     padding: $headerPadding;
-    background: $dropdown-container-bg-color;
+    background: var(--main-body-bg);
     border-bottom: 1px solid $dropdown-filter-container-separator-color;
     border-radius: 0;
 
     .p-multiselect-filter-container {
       padding: $headerPadding;
       border-bottom: 1px solid $dropdown-filter-container-separator-color;
-      background: $dropdown-container-bg-color;
+      background: var(--main-body-bg);
 
       .p-multiselect-filter {
         width: 100%;
@@ -160,6 +160,7 @@
 
   .p-multiselect-items {
     .p-multiselect-item {
+      background: var(--main-body-bg);
       padding: $listItemPadding;
 
       .p-checkbox {
@@ -204,7 +205,7 @@
 }
 
 .p-multiselect-list, .p-multiselect-header {
-  background: $dropdown-item-bg-color;
+  background: var(--main-body-bg);
   color: $dropdown-item-txt-color;
 }
 

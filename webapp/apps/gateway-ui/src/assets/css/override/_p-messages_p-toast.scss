@@ -33,19 +33,19 @@
   display: flex;
   flex-direction: column;
   top: 64px;
-  right: 34px;
+  right: 12px;
+  width: min(400px, calc(100vw - 24px));
 
   p-toastItem {
-    min-height: 60px;
-    width: 285px !important;
+    min-height: 52px;
+    width: 100% !important;
     margin-left: auto;
     margin-bottom: 8px;
   }
 
   .p-toast-message {
-    border: 0;
-    box-shadow: 0 8px 8px 0 rgba(0, 0, 0, 0.16);
-    padding: 20px 12px 20px 20px;
+    box-shadow: none;
+    padding: 0;
   }
 }
 
@@ -86,15 +86,13 @@
   --status-banner-border-color: rgba(var(--status-banner-color-rgb), var(--status-banner-background-opacity));
   --status-banner-radius: 6px;
 
-  // We layer 2 colors (status color + white or black) on top of each other so the bg color isn't transparent but we still maintain 1 color by status
   background-image: linear-gradient(0deg, var(--status-banner-background-color), var(--status-banner-background-color)), linear-gradient(0deg, rgb(var(--base-color-inverted-rgb)), rgb(var(--base-color-inverted-rgb)));
   border: 1px solid var(--status-banner-border-color);
   border-radius: var(--status-banner-radius);
   color: $messageFontColor;
   margin-bottom: 0;
   position: relative;
-  text-align: center;
-
+  text-align: left;
 
   &::before {
     border-radius: var(--status-banner-radius) 0 0 var(--status-banner-radius);
@@ -129,7 +127,11 @@
   }
 
   .p-toast-message-content {
-    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 12px 14px;
   }
 
   .p-toast-summary,
@@ -142,11 +144,19 @@
 
   .p-toast-detail {
     text-align: left;
-    max-width: 209px;
+    max-width: 320px;
+    margin: 0;
   }
 
   .p-toast-message-text {
-    margin: auto;
+    margin: 0;
+    flex: 1 1 auto;
+    text-align: left;
+  }
+
+  .p-toast-summary,
+  .p-toast-detail:empty {
+    display: none;
   }
 
   .p-messages-close i {
@@ -191,4 +201,3 @@
     padding-left: 1em;
   }
 }
-
