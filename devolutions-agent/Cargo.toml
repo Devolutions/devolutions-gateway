@@ -80,7 +80,9 @@ features = [
 aws-lc-rs = "1.15"
 time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
+devolutions-session = { path = "../devolutions-session", default-features = false, features = ["dvc"] }
 notify-debouncer-mini = "0.6"
+now-proto-pdu = { version = "0.4.3", features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }

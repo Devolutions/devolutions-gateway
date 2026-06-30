@@ -201,7 +201,7 @@ async fn process_messages(
                 match task_rx {
                     Some(notification) => {
                         match notification {
-                            ServerChannelEvent::SessionStarted { session_id } => {
+                            ServerChannelEvent::SessionStarted { session_id, .. } => {
                                 info!(session_id, "Session started");
                                 let message = NowExecStartedMsg::new(session_id);
                                 dvc_tx.send(message.into()).await?;
