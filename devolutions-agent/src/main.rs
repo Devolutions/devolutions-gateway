@@ -14,6 +14,8 @@ use http_client_proxy as _;
 use ipnetwork as _;
 use ironrdp as _;
 use parking_lot as _;
+use prost as _;
+use prost_types as _;
 use quinn as _;
 use rand as _;
 use reqwest as _;
@@ -22,6 +24,8 @@ use serde_json as _;
 use tap as _;
 use tokio as _;
 use tokio_rustls as _;
+use tokio_stream as _;
+use tonic as _;
 use url as _;
 use uuid as _;
 #[cfg(windows)]
