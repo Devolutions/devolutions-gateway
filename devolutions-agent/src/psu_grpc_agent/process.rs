@@ -43,7 +43,10 @@ impl ProcessRegistry {
         if let Some(sender) = sender {
             let end_of_stream = stream_data.end_of_stream;
             let stream_id = stream_data.stream_id.clone();
-            if sender.send(stream_data).await.is_ok() && end_of_stream {
+            // Close the stream when it is the last frame, or when the receiver is
+            // gone (send failed), so the mapping is never leaked in the registry.
+            let send_failed = sender.send(stream_data).await.is_err();
+            if end_of_stream || send_failed {
                 self.close_stream(&stream_id).await;
             }
         }
@@ -253,7 +256,8 @@ async fn run_process_inner(
     await_pump_task(stderr_task, process_id, "stderr").await;
 
     let exit_code = status.code().unwrap_or(-1);
-    if stdin_closed_from_end_of_stream && exit_code == PWSH_STDIN_CLOSED_EXIT_CODE {
+    let expected_pwsh_exit = stdin_closed_from_end_of_stream && exit_code == PWSH_STDIN_CLOSED_EXIT_CODE;
+    if expected_pwsh_exit {
         info!(
             process_id,
             exit_code, "PSU gRPC child process exited with expected code after stdin EOF for pwsh -s"
@@ -262,14 +266,25 @@ async fn run_process_inner(
         info!(process_id, exit_code, "PSU gRPC child process exited");
     }
 
+    // Reflect the actual outcome so the server can distinguish success from
+    // cancellation or a non-zero exit based on the StreamClosed message.
+    let stream_error = canceled || (exit_code != 0 && !expected_pwsh_exit);
+    let stream_reason = if canceled {
+        "child process canceled".to_owned()
+    } else if stream_error {
+        format!("child process exited with code {exit_code}")
+    } else {
+        "child process completed".to_owned()
+    };
+
     let _ = outgoing_tx
         .send(agent_message(
             &agent_id,
             &connection_id,
             AgentPayload::StreamClosed(stream_closed(
                 request.stream_id.clone(),
-                "child process completed".to_owned(),
-                false,
+                stream_reason,
+                stream_error,
             )),
         ))
         .await;

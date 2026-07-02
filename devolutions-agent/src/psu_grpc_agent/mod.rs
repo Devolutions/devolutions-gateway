@@ -73,7 +73,7 @@ impl PsuGrpcAgent {
         let server_url = conf
             .server_url
             .as_ref()
-            .context("PsuGrpcAgent is enabled but ServerUrl is not configured")?
+            .context("server URL is not configured but the PSU gRPC agent is enabled")?
             .to_string();
         let machine_name = machine_name();
         let agent_id = conf.agent_id.clone().unwrap_or_else(|| machine_name.clone());
@@ -372,7 +372,7 @@ fn resolve_powershell_executable(conf: &dto::PsuPowerShellConf) -> std::ffi::OsS
         if selector.eq_ignore_ascii_case("pwsh")
             || selector.eq_ignore_ascii_case("pwsh-preview")
             || selector.eq_ignore_ascii_case("pwsh-lts")
-            || selector.starts_with("pwsh-")
+            || selector.to_ascii_lowercase().starts_with("pwsh-")
         {
             return selector.into();
         }
