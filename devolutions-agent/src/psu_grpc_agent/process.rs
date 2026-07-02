@@ -281,11 +281,7 @@ async fn run_process_inner(
         .send(agent_message(
             &agent_id,
             &connection_id,
-            AgentPayload::StreamClosed(stream_closed(
-                request.stream_id.clone(),
-                stream_reason,
-                stream_error,
-            )),
+            AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), stream_reason, stream_error)),
         ))
         .await;
 
