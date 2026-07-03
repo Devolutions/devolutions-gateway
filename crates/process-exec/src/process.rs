@@ -73,12 +73,24 @@ pub enum ProcessIoInputEvent {
 /// they are delivered on (the engine's `session_id` parameter is echoed by the caller).
 #[derive(Debug)]
 pub enum ProcessEvent {
-    Started { process_id: u32 },
-    Output { stream: StdioStream, last: bool, data: Vec<u8> },
+    Started {
+        process_id: u32,
+    },
+    Output {
+        stream: StdioStream,
+        last: bool,
+        data: Vec<u8>,
+    },
     CancelSucceeded,
-    CancelFailed { error: ExecError },
-    Exited { exit_code: u32 },
-    Failed { error: ExecError },
+    CancelFailed {
+        error: ExecError,
+    },
+    Exited {
+        exit_code: u32,
+    },
+    Failed {
+        error: ExecError,
+    },
 }
 
 pub struct WinApiProcessCtx {
@@ -670,11 +682,7 @@ impl WinApiProcessBuilder {
     }
 
     /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
-    pub fn run(
-        self,
-        session_id: u32,
-        io_notification_tx: Sender<ProcessEvent>,
-    ) -> Result<WinApiProcess, ExecError> {
+    pub fn run(self, session_id: u32, io_notification_tx: Sender<ProcessEvent>) -> Result<WinApiProcess, ExecError> {
         Ok(self
             .run_impl(session_id, Some(io_notification_tx), false)?
             .expect("result should be non-optional when running in non-detached mode"))

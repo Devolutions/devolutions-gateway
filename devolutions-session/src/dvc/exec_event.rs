@@ -11,12 +11,7 @@ use process_exec::ProcessEvent;
 #[derive(Debug)]
 pub enum ServerChannelEvent {
     /// A process execution event, tagged with the session it belongs to.
-    Process {
-        session_id: u32,
-        event: ProcessEvent,
-    },
+    Process { session_id: u32, event: ProcessEvent },
     /// A window recording event produced by the window monitor.
-    WindowRecordingEvent {
-        message: OwnedNowSessionWindowRecEventMsg,
-    },
+    WindowRecordingEvent { message: OwnedNowSessionWindowRecEventMsg },
 }

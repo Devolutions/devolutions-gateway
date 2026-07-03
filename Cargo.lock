@@ -1922,7 +1922,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tap",
- "tempfile",
  "thiserror 2.0.18",
  "tokio 1.52.3",
  "tracing",

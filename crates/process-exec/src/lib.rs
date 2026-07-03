@@ -19,9 +19,7 @@ pub mod fs;
 pub mod pipes;
 pub mod process;
 
-pub use channel::{
-    WinapiSignaledReceiver, WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel,
-};
+pub use channel::{WinapiSignaledReceiver, WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 pub use encoding::{DataEncoding, InputEncoder, OutputDecoder};
 pub use env::make_environment_block;
 pub use fs::TmpFileGuard;

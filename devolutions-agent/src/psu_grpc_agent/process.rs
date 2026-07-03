@@ -903,7 +903,11 @@ mod imp {
                     .send(agent_message(
                         &agent_id,
                         &connection_id,
-                        AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+                        AgentPayload::StreamClosed(stream_closed(
+                            request.stream_id.clone(),
+                            error_message.clone(),
+                            true,
+                        )),
                     ))
                     .await;
                 send_process_completed(
@@ -980,10 +984,7 @@ mod imp {
 
         #[test]
         fn command_line_escapes_quotes_and_backslashes() {
-            assert_eq!(
-                build_command_line(&[r#"a"b"#.to_owned()]),
-                r#""a\"b""#
-            );
+            assert_eq!(build_command_line(&[r#"a"b"#.to_owned()]), r#""a\"b""#);
             assert_eq!(build_command_line(&[String::new()]), "\"\"");
         }
     }

@@ -13,6 +13,7 @@ use now_proto_pdu::{
     NowChannelCapsetMsg, NowMessage, NowProtoVersion, NowRdmAppNotifyMsg, NowRdmAppStartMsg, NowRdmAppState,
     NowRdmCapabilitiesMsg, NowRdmMessage, NowRdmReason,
 };
+use process_exec::WinapiSignaledSender;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tracing::{error, info, trace, warn};
@@ -27,8 +28,6 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{SW_MAXIMIZE, SW_RESTORE};
 use windows::core::{PCWSTR, PWSTR};
-
-use process_exec::WinapiSignaledSender;
 
 use crate::dvc::now_message_dissector::NowMessageDissector;
 

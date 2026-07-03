@@ -13,6 +13,10 @@ use now_proto_pdu::{
     OwnedNowExecResultMsg, OwnedNowMessage, OwnedNowSessionMsgBoxReqMsg, OwnedNowSessionWindowRecEventMsg,
     SetKbdLayoutOption, WindowRecStartFlags,
 };
+use process_exec::{
+    DataEncoding, ExecError, ProcessEvent, StdioStream, TmpFileGuard, WinApiProcess, WinApiProcessBuilder,
+    WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel,
+};
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{error, info, warn};
@@ -34,11 +38,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, PostMessageW, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST,
 };
 use windows::core::PCWSTR;
-
-use process_exec::{
-    DataEncoding, ExecError, ProcessEvent, StdioStream, TmpFileGuard, WinApiProcess, WinApiProcessBuilder,
-    WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel,
-};
 
 use crate::dvc::exec_event::ServerChannelEvent;
 use crate::dvc::io::run_dvc_io;
@@ -769,9 +768,10 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_batch
-            .with_io_redirection(batch_msg.is_with_io_redirection())
-            .run(batch_msg.session_id(), self.process_event_sender(batch_msg.session_id()))?;
+        let process = run_batch.with_io_redirection(batch_msg.is_with_io_redirection()).run(
+            batch_msg.session_id(),
+            self.process_event_sender(batch_msg.session_id()),
+        )?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
@@ -834,7 +834,10 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(winps_msg.session_id(), self.process_event_sender(winps_msg.session_id()))?;
+            .run(
+                winps_msg.session_id(),
+                self.process_event_sender(winps_msg.session_id()),
+            )?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
