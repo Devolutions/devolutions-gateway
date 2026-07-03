@@ -1613,6 +1613,7 @@ dependencies = [
  "ironrdp",
  "notify-debouncer-mini",
  "parking_lot",
+ "process-exec",
  "prost 0.13.5",
  "prost-types",
  "protoc-bin-vendored",
