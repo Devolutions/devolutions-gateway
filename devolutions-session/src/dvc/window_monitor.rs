@@ -30,7 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_GETTEXT, WM_QUIT,
 };
 
-use crate::dvc::process::ServerChannelEvent;
+use crate::dvc::exec_event::ServerChannelEvent;
 
 /// Minimum allowed polling interval in milliseconds.
 const MIN_POLL_INTERVAL_MS: u64 = 100;

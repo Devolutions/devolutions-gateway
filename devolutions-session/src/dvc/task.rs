@@ -37,9 +37,10 @@ use windows::core::PCWSTR;
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
+use crate::dvc::exec_event::ServerChannelEvent;
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
-use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
+use crate::dvc::process::{ExecError, ProcessEvent, StdioStream, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 
@@ -50,6 +51,63 @@ const HANDSHAKE_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(
 const GENERIC_ERROR_CODE_ENCODING: u32 = 0x00000001;
 const GENERIC_ERROR_CODE_TOO_LONG_ERROR: u32 = 0x00000002;
 const GENERIC_ERROR_CODE_OTHER: u32 = 0xFFFFFFFF;
+
+/// Session-local execution error.
+///
+/// The process execution engine only surfaces protocol-neutral [`ExecError`]s. NOW-PROTO
+/// specific failures (status errors, encoding errors) are represented here and mapped to
+/// wire messages by [`handle_exec_error`].
+#[derive(Debug, thiserror::Error)]
+enum SessionExecError {
+    #[error(transparent)]
+    NowStatus(NowStatusError),
+    #[error("Execution was aborted by user")]
+    Aborted,
+    #[error("Failed to encode now-proto message")]
+    Encode(#[from] now_proto_pdu::ironrdp_core::EncodeError),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl From<ExecError> for SessionExecError {
+    fn from(error: ExecError) -> Self {
+        match error {
+            ExecError::Aborted => SessionExecError::Aborted,
+            ExecError::WinApi(error) => {
+                #[allow(clippy::cast_sign_loss)] // Not relevant for Windows error codes.
+                SessionExecError::NowStatus(NowStatusError::new_winapi(error.code().0 as u32))
+            }
+            ExecError::Other(error) => SessionExecError::Other(error),
+        }
+    }
+}
+
+impl<T: Send + Sync + 'static> From<mpsc::error::SendError<T>> for SessionExecError {
+    fn from(error: mpsc::error::SendError<T>) -> Self {
+        SessionExecError::Other(error.into())
+    }
+}
+
+impl SessionExecError {
+    /// Best-effort mapping to a NOW-PROTO status error (used for cancel responses).
+    fn into_now_status(self) -> NowStatusError {
+        match self {
+            SessionExecError::NowStatus(status) => status,
+            SessionExecError::Aborted => NowStatusError::new_proto(NowProtoError::Aborted),
+            SessionExecError::Encode(_) => NowStatusError::new_generic(GENERIC_ERROR_CODE_ENCODING),
+            SessionExecError::Other(_) => NowStatusError::new_generic(GENERIC_ERROR_CODE_OTHER),
+        }
+    }
+}
+
+/// Maps a neutral engine stream discriminator to the NOW-PROTO data stream kind.
+fn now_stream_kind(stream: StdioStream) -> NowExecDataStreamKind {
+    match stream {
+        StdioStream::Stdout => NowExecDataStreamKind::Stdout,
+        StdioStream::Stderr => NowExecDataStreamKind::Stderr,
+        StdioStream::Stdin => NowExecDataStreamKind::Stdin,
+    }
+}
 
 #[derive(Default)]
 pub struct DvcIoTask {}
@@ -201,52 +259,48 @@ async fn process_messages(
                 match task_rx {
                     Some(notification) => {
                         match notification {
-                            ServerChannelEvent::SessionStarted { session_id } => {
-                                info!(session_id, "Session started");
-                                let message = NowExecStartedMsg::new(session_id);
-                                dvc_tx.send(message.into()).await?;
-                            }
-                            ServerChannelEvent::SessionDataOut { session_id, stream, last, data } => {
-                                let message = NowExecDataMsg::new(session_id, stream, last, data)?;
-                                dvc_tx.send(message.into()).await?;
-                            }
-                            ServerChannelEvent::SessionCancelSuccess { session_id } => {
-                                info!(session_id, "Session cancelled");
-                                let message = NowExecCancelRspMsg::new_success(session_id);
-                                dvc_tx.send(message.into()).await?;
-                            }
-                            ServerChannelEvent::SessionCancelFailed { session_id, error } => {
-                                error!(session_id, %error, "Session cancel failed");
-                                let message = NowExecCancelRspMsg::new_error(session_id, error)?;
-                                dvc_tx.send(message.into()).await?;
-                            }
-                            ServerChannelEvent::SessionExited { session_id, exit_code } => {
-                                info!(session_id, %exit_code, "Session exited");
-                                processor.remove_session(session_id);
+                            ServerChannelEvent::Process { session_id, event } => {
+                                match event {
+                                    ProcessEvent::Started { process_id: _ } => {
+                                        info!(session_id, "Session started");
+                                        let message = NowExecStartedMsg::new(session_id);
+                                        dvc_tx.send(message.into()).await?;
+                                    }
+                                    ProcessEvent::Output { stream, last, data } => {
+                                        let message = NowExecDataMsg::new(session_id, now_stream_kind(stream), last, data)?;
+                                        dvc_tx.send(message.into()).await?;
+                                    }
+                                    ProcessEvent::CancelSucceeded => {
+                                        info!(session_id, "Session cancelled");
+                                        let message = NowExecCancelRspMsg::new_success(session_id);
+                                        dvc_tx.send(message.into()).await?;
+                                    }
+                                    ProcessEvent::CancelFailed { error } => {
+                                        let error = SessionExecError::from(error);
+                                        error!(session_id, %error, "Session cancel failed");
+                                        let message = NowExecCancelRspMsg::new_error(session_id, error.into_now_status())?;
+                                        dvc_tx.send(message.into()).await?;
+                                    }
+                                    ProcessEvent::Exited { exit_code } => {
+                                        info!(session_id, %exit_code, "Session exited");
+                                        processor.remove_session(session_id);
 
-                                let message = NowExecResultMsg::new_success(session_id, exit_code);
-                                dvc_tx.send(message.into()).await?;
-                            }
-                            ServerChannelEvent::SessionFailed { session_id, error } => {
-                                error!(session_id, %error, "Session error");
-                                processor.remove_session(session_id);
+                                        let message = NowExecResultMsg::new_success(session_id, exit_code);
+                                        dvc_tx.send(message.into()).await?;
+                                    }
+                                    ProcessEvent::Failed { error } => {
+                                        let error = SessionExecError::from(error);
+                                        error!(session_id, %error, "Session error");
+                                        processor.remove_session(session_id);
 
-                                handle_exec_error(&dvc_tx, session_id, error).await;
+                                        handle_exec_error(&dvc_tx, session_id, error).await;
+                                    }
+                                }
                             }
                             ServerChannelEvent::WindowRecordingEvent { message } => {
                                 if let Err(error) = handle_window_recording_event(&dvc_tx, message).await {
                                     error!(%error, "Failed to handle window recording event");
                                 }
-                            }
-                            ServerChannelEvent::CloseChannel => {
-                                info!("Received close channel notification, shutting down...");
-
-                                let message = NowChannelCloseMsg::default();
-                                dvc_tx.send(message.into()).await?;
-
-                                processor.shutdown_all_sessions().await;
-
-                                return Ok(());
                             }
                         }
                     }
@@ -325,10 +379,12 @@ impl MessageProcessor {
         }
     }
 
-    async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
+    async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), SessionExecError> {
         if self.sessions.contains_key(&session_id) {
             warn!(session_id, "Session ID is in use");
-            return Err(ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::InUse)));
+            return Err(SessionExecError::NowStatus(NowStatusError::new_proto(
+                NowProtoError::InUse,
+            )));
         }
 
         warn!(session_id, "Session ID is free for use");
@@ -336,14 +392,35 @@ impl MessageProcessor {
         Ok(())
     }
 
-    async fn send_detached_process_success(&self, session_id: u32) -> Result<(), ExecError> {
+    async fn send_detached_process_success(&self, session_id: u32) -> Result<(), SessionExecError> {
         self.io_notification_tx
-            .send(ServerChannelEvent::SessionExited {
+            .send(ServerChannelEvent::Process {
                 session_id,
-                exit_code: 0,
+                event: ProcessEvent::Exited { exit_code: 0 },
             })
             .await?;
         Ok(())
+    }
+
+    /// Creates a per-session [`ProcessEvent`] sender that forwards events to the shared task
+    /// channel, tagging each with `session_id`.
+    fn process_event_sender(&self, session_id: u32) -> Sender<ProcessEvent> {
+        let task_tx = self.io_notification_tx.clone();
+        let (tx, mut rx) = mpsc::channel::<ProcessEvent>(100);
+
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if task_tx
+                    .send(ServerChannelEvent::Process { session_id, event })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        tx
     }
 
     pub(crate) async fn process_message(&mut self, message: OwnedNowMessage) -> anyhow::Result<ProcessMessageAction> {
@@ -573,7 +650,7 @@ impl MessageProcessor {
         Ok(ProcessMessageAction::Continue)
     }
 
-    async fn process_exec_run(&self, params: NowExecRunMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_run(&self, params: NowExecRunMsg<'_>) -> Result<(), SessionExecError> {
         self.ensure_session_id_free(params.session_id()).await?;
 
         let session_id = params.session_id();
@@ -604,7 +681,7 @@ impl MessageProcessor {
             let code = win_api_wrappers::Error::last_error().code() as u32;
             error!("ShellExecuteW failed, error code: {}", code);
 
-            return Err(ExecError::NowStatus(NowStatusError::new_winapi(code)));
+            return Err(SessionExecError::NowStatus(NowStatusError::new_winapi(code)));
         };
 
         let message = NowExecResultMsg::new_success(session_id, 0).into_owned().into();
@@ -616,7 +693,7 @@ impl MessageProcessor {
         Ok(())
     }
 
-    async fn process_exec_process(&mut self, exec_msg: NowExecProcessMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_process(&mut self, exec_msg: NowExecProcessMsg<'_>) -> Result<(), SessionExecError> {
         self.ensure_session_id_free(exec_msg.session_id()).await?;
 
         // Process exec: no assumptions about encoding by default (raw passthrough).
@@ -646,14 +723,14 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(exec_msg.is_with_io_redirection())
-            .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(exec_msg.session_id(), self.process_event_sender(exec_msg.session_id()))?;
 
         self.sessions.insert(exec_msg.session_id(), process);
 
         Ok(())
     }
 
-    async fn process_exec_batch(&mut self, batch_msg: NowExecBatchMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_batch(&mut self, batch_msg: NowExecBatchMsg<'_>) -> Result<(), SessionExecError> {
         self.ensure_session_id_free(batch_msg.session_id()).await?;
 
         let mut script = batch_msg.command().to_owned();
@@ -693,14 +770,14 @@ impl MessageProcessor {
 
         let process = run_batch
             .with_io_redirection(batch_msg.is_with_io_redirection())
-            .run(batch_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(batch_msg.session_id(), self.process_event_sender(batch_msg.session_id()))?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
         Ok(())
     }
 
-    async fn process_exec_winps(&mut self, winps_msg: NowExecWinPsMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_winps(&mut self, winps_msg: NowExecWinPsMsg<'_>) -> Result<(), SessionExecError> {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
         let mut params = Vec::new();
@@ -756,14 +833,14 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(winps_msg.session_id(), self.process_event_sender(winps_msg.session_id()))?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
         Ok(())
     }
 
-    async fn process_exec_pwsh(&mut self, pwsh_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_pwsh(&mut self, pwsh_msg: NowExecPwshMsg<'_>) -> Result<(), SessionExecError> {
         self.ensure_session_id_free(pwsh_msg.session_id()).await?;
 
         let mut params = Vec::new();
@@ -820,7 +897,7 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(pwsh_msg.is_with_io_redirection())
-            .run(pwsh_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(pwsh_msg.session_id(), self.process_event_sender(pwsh_msg.session_id()))?;
 
         self.sessions.insert(pwsh_msg.session_id(), process);
 
@@ -1071,17 +1148,17 @@ async fn handle_window_recording_event(
     Ok(())
 }
 
-async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<OwnedNowMessage>, session_id: u32, error: ExecError) {
+async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<OwnedNowMessage>, session_id: u32, error: SessionExecError) {
     let msg = match error {
-        ExecError::NowStatus(status) => {
+        SessionExecError::NowStatus(status) => {
             warn!(%session_id, %status, "Process execution failed with NOW-PROTO error");
             make_status_error_failsafe(session_id, status)
         }
-        ExecError::Aborted => {
+        SessionExecError::Aborted => {
             info!(%session_id, "Process execution was aborted due to service shutdown");
             make_status_error_failsafe(session_id, NowStatusError::new_proto(NowProtoError::Aborted))
         }
-        ExecError::Encode(error) => {
+        SessionExecError::Encode(error) => {
             error!(%error, session_id, "Process execution thread failed with encoding error");
 
             // Convert to anyhow for pretty formatting with source.
@@ -1089,7 +1166,7 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<OwnedNowMessage>, sessi
 
             make_generic_error_failsafe(session_id, GENERIC_ERROR_CODE_ENCODING, format!("{error:#}"))
         }
-        ExecError::Other(error) => {
+        SessionExecError::Other(error) => {
             error!(%error, session_id, "Process execution thread failed with unknown error");
 
             make_generic_error_failsafe(session_id, GENERIC_ERROR_CODE_OTHER, format!("{error:#}"))

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info, trace};
 use win_api_wrappers::event::Event;
@@ -27,29 +26,32 @@ use crate::dvc::env::make_environment_block;
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::{IoRedirectionPipes, ensure_overlapped_io_result};
 
+/// Protocol-neutral error type surfaced by the process execution engine.
+///
+/// This carries only engine-level failures. Any mapping to a higher-level protocol status
+/// (e.g. NOW-PROTO) is the responsibility of the consumer.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
-    #[error(transparent)]
-    NowStatus(NowStatusError),
     #[error("Execution was aborted by user")]
     Aborted,
-    #[error("Failed to encode now-proto message")]
-    Encode(#[from] now_proto_pdu::ironrdp_core::EncodeError),
+    #[error(transparent)]
+    WinApi(#[from] windows::core::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-impl From<windows::core::Error> for ExecError {
-    fn from(error: windows::core::Error) -> Self {
-        #[allow(clippy::cast_sign_loss)] // Not relevant for Windows error codes.
-        ExecError::NowStatus(NowStatusError::new_winapi(error.code().0 as u32))
-    }
 }
 
 impl<T: Send + Sync + 'static> From<tokio::sync::mpsc::error::SendError<T>> for ExecError {
     fn from(error: tokio::sync::mpsc::error::SendError<T>) -> Self {
         ExecError::Other(error.into())
     }
+}
+
+/// Identifies one of the standard IO streams of a child process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdioStream {
+    Stdout,
+    Stderr,
+    Stdin,
 }
 
 #[derive(Debug)]
@@ -65,37 +67,18 @@ pub enum ProcessIoInputEvent {
     TerminateIo,
 }
 
-/// Message, sent from Process IO thread to task to finalize process execution.
+/// Protocol-neutral event, emitted by the process execution engine to its consumer.
+///
+/// The consumer correlates these events with a specific execution by owning the channel
+/// they are delivered on (the engine's `session_id` parameter is echoed by the caller).
 #[derive(Debug)]
-pub enum ServerChannelEvent {
-    CloseChannel,
-    SessionStarted {
-        session_id: u32,
-    },
-    SessionDataOut {
-        session_id: u32,
-        stream: NowExecDataStreamKind,
-        last: bool,
-        data: Vec<u8>,
-    },
-    SessionCancelSuccess {
-        session_id: u32,
-    },
-    SessionCancelFailed {
-        session_id: u32,
-        error: NowStatusError,
-    },
-    SessionExited {
-        session_id: u32,
-        exit_code: u32,
-    },
-    SessionFailed {
-        session_id: u32,
-        error: ExecError,
-    },
-    WindowRecordingEvent {
-        message: now_proto_pdu::OwnedNowSessionWindowRecEventMsg,
-    },
+pub enum ProcessEvent {
+    Started { process_id: u32 },
+    Output { stream: StdioStream, last: bool, data: Vec<u8> },
+    CancelSucceeded,
+    CancelFailed { error: ExecError },
+    Exited { exit_code: u32 },
+    Failed { error: ExecError },
 }
 
 pub struct WinApiProcessCtx {
@@ -126,7 +109,7 @@ impl WinApiProcessCtx {
         Ok(())
     }
 
-    pub fn process_cancel(&mut self, io_notification_tx: Sender<ServerChannelEvent>) -> Result<(), ExecError> {
+    pub fn process_cancel(&mut self, io_notification_tx: Sender<ProcessEvent>) -> Result<(), ExecError> {
         info!(
             session_id = self.session_id,
             "Cancelling process execution by user request"
@@ -138,9 +121,7 @@ impl WinApiProcessCtx {
 
         // Acknowledge client that cancel request has been processed
         // successfully.
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionCancelSuccess {
-            session_id: self.session_id,
-        })?;
+        io_notification_tx.blocking_send(ProcessEvent::CancelSucceeded)?;
 
         Ok(())
     }
@@ -148,7 +129,7 @@ impl WinApiProcessCtx {
     pub fn wait(
         mut self,
         mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: Sender<ProcessEvent>,
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
@@ -159,7 +140,7 @@ impl WinApiProcessCtx {
         const WAIT_OBJECT_INPUT_MESSAGE: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_PROCESS_EXIT: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ProcessEvent::Started { process_id: self.pid })?;
 
         loop {
             // SAFETY: No preconditions.
@@ -214,7 +195,7 @@ impl WinApiProcessCtx {
     pub fn wait_with_io_redirection(
         mut self,
         mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: Sender<ProcessEvent>,
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
@@ -288,7 +269,7 @@ impl WinApiProcessCtx {
 
         // Signal client side about started execution
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ProcessEvent::Started { process_id: self.pid })?;
 
         info!(session_id, "Process IO is ready for async loop execution");
         loop {
@@ -415,17 +396,15 @@ impl WinApiProcessCtx {
                                 // Flush any remaining decoder state at EOF.
                                 let flushed = stdout_decoder.flush();
                                 if !flushed.is_empty() {
-                                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                        session_id,
-                                        stream: NowExecDataStreamKind::Stdout,
+                                    io_notification_tx.blocking_send(ProcessEvent::Output {
+                                        stream: StdioStream::Stdout,
                                         last: false,
                                         data: flushed,
                                     })?;
                                 }
 
-                                io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                    session_id,
-                                    stream: NowExecDataStreamKind::Stdout,
+                                io_notification_tx.blocking_send(ProcessEvent::Output {
+                                    stream: StdioStream::Stdout,
                                     last: true,
                                     data: Vec::new(),
                                 })?;
@@ -440,9 +419,8 @@ impl WinApiProcessCtx {
                     let decoded_data = stdout_decoder.decode(&stdout_buffer[..raw_len]);
 
                     if !decoded_data.is_empty() {
-                        io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                            session_id,
-                            stream: NowExecDataStreamKind::Stdout,
+                        io_notification_tx.blocking_send(ProcessEvent::Output {
+                            stream: StdioStream::Stdout,
                             last: false,
                             data: decoded_data.into_owned(),
                         })?;
@@ -494,17 +472,15 @@ impl WinApiProcessCtx {
                                 // Flush any remaining decoder state at EOF.
                                 let flushed = stderr_decoder.flush();
                                 if !flushed.is_empty() {
-                                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                        session_id,
-                                        stream: NowExecDataStreamKind::Stderr,
+                                    io_notification_tx.blocking_send(ProcessEvent::Output {
+                                        stream: StdioStream::Stderr,
                                         last: false,
                                         data: flushed,
                                     })?;
                                 }
 
-                                io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                    session_id,
-                                    stream: NowExecDataStreamKind::Stderr,
+                                io_notification_tx.blocking_send(ProcessEvent::Output {
+                                    stream: StdioStream::Stderr,
                                     last: true,
                                     data: Vec::new(),
                                 })?;
@@ -518,9 +494,8 @@ impl WinApiProcessCtx {
                     let decoded_data = stderr_decoder.decode(&stderr_buffer[..bytes_read as usize]);
 
                     if !decoded_data.is_empty() {
-                        io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                            session_id,
-                            stream: NowExecDataStreamKind::Stderr,
+                        io_notification_tx.blocking_send(ProcessEvent::Output {
+                            stream: StdioStream::Stderr,
                             last: false,
                             data: decoded_data.into_owned(),
                         })?;
@@ -611,7 +586,7 @@ impl WinApiProcessBuilder {
     fn run_impl(
         mut self,
         session_id: u32,
-        io_notification_tx: Option<Sender<ServerChannelEvent>>,
+        io_notification_tx: Option<Sender<ProcessEvent>>,
         detached: bool,
     ) -> Result<Option<WinApiProcess>, ExecError> {
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
@@ -678,8 +653,8 @@ impl WinApiProcessBuilder {
             };
 
             let notification = match run_result {
-                Ok(exit_code) => ServerChannelEvent::SessionExited { session_id, exit_code },
-                Err(error) => ServerChannelEvent::SessionFailed { session_id, error },
+                Ok(exit_code) => ProcessEvent::Exited { exit_code },
+                Err(error) => ProcessEvent::Failed { error },
             };
 
             if let Err(error) = io_notification_tx.blocking_send(notification) {
@@ -698,7 +673,7 @@ impl WinApiProcessBuilder {
     pub fn run(
         self,
         session_id: u32,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: Sender<ProcessEvent>,
     ) -> Result<WinApiProcess, ExecError> {
         Ok(self
             .run_impl(session_id, Some(io_notification_tx), false)?
