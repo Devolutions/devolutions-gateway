@@ -24,7 +24,7 @@ use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_s
 use crate::dvc::encoding::{DataEncoding, InputEncoder, OutputDecoder};
 use crate::dvc::env::make_environment_block;
 use crate::dvc::fs::TmpFileGuard;
-use crate::dvc::io::{IoRedirectionPipes, ensure_overlapped_io_result};
+use crate::dvc::pipes::{IoRedirectionPipes, ensure_overlapped_io_result};
 
 /// Protocol-neutral error type surfaced by the process execution engine.
 ///
