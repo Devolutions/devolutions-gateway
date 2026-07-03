@@ -20,11 +20,11 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
 
-use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
-use crate::dvc::encoding::{DataEncoding, InputEncoder, OutputDecoder};
-use crate::dvc::env::make_environment_block;
-use crate::dvc::fs::TmpFileGuard;
-use crate::dvc::pipes::{IoRedirectionPipes, ensure_overlapped_io_result};
+use crate::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
+use crate::encoding::{DataEncoding, InputEncoder, OutputDecoder};
+use crate::env::make_environment_block;
+use crate::fs::TmpFileGuard;
+use crate::pipes::{IoRedirectionPipes, ensure_overlapped_io_result};
 
 /// Protocol-neutral error type surfaced by the process execution engine.
 ///

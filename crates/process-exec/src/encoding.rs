@@ -2,8 +2,8 @@
 //!
 //! When IO redirection is enabled, the child process writes its stdout/stderr using
 //! the console's OEM codepage (e.g., `cmd.exe`, `powershell.exe`, `pwsh.exe`). This module
-//! provides transcoding between the process's native encoding and UTF-8, which is
-//! the encoding used on the wire (NowProto).
+//! provides transcoding between the process's native encoding and UTF-8, which is the
+//! encoding this engine exposes to its consumer.
 
 use std::borrow::Cow;
 

@@ -35,12 +35,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
-use crate::dvc::encoding::DataEncoding;
+use process_exec::{
+    DataEncoding, ExecError, ProcessEvent, StdioStream, TmpFileGuard, WinApiProcess, WinApiProcessBuilder,
+    WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel,
+};
+
 use crate::dvc::exec_event::ServerChannelEvent;
-use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
-use crate::dvc::process::{ExecError, ProcessEvent, StdioStream, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 

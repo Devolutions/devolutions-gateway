@@ -1917,6 +1917,7 @@ dependencies = [
  "futures",
  "now-proto-pdu",
  "parking_lot",
+ "process-exec",
  "serde",
  "serde_json",
  "tap",
@@ -5607,6 +5608,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process-exec"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio 1.52.3",
+ "tracing",
+ "win-api-wrappers",
+ "windows 0.61.3",
 ]
 
 [[package]]

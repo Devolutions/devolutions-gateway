@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tracing::error;
 
-use crate::dvc::encoding::DataEncoding;
+use crate::encoding::DataEncoding;
 
 /// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);

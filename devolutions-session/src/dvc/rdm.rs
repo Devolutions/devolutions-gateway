@@ -28,7 +28,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{SW_MAXIMIZE, SW_RESTORE};
 use windows::core::{PCWSTR, PWSTR};
 
-use crate::dvc::channel::WinapiSignaledSender;
+use process_exec::WinapiSignaledSender;
+
 use crate::dvc::now_message_dissector::NowMessageDissector;
 
 const PIPE_READ_BUFFER_SIZE: usize = 4096;

@@ -11,9 +11,9 @@ use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::RemoteDesktop::CHANNEL_PDU_HEADER;
 use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects};
 
-use crate::dvc::channel::WinapiSignaledReceiver;
+use process_exec::{WinapiSignaledReceiver, ensure_overlapped_io_result};
+
 use crate::dvc::now_message_dissector::NowMessageDissector;
-use crate::dvc::pipes::ensure_overlapped_io_result;
 
 const DVC_CHANNEL_NAME: &str = "Devolutions::Now::Agent";
 

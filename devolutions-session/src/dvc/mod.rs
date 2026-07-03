@@ -33,16 +33,9 @@
 //!   critical error and act on the best-effort basis to close the DVC channel gracefully and send
 //!   session result with error to the client (if possible).
 
-pub mod channel;
-pub mod encoding;
 pub mod exec_event;
-pub mod fs;
 pub mod io;
 pub mod now_message_dissector;
-pub mod pipes;
-pub mod process;
 pub mod rdm;
 pub mod task;
 pub mod window_monitor;
-
-mod env;

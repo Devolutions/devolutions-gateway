@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-pub(crate) fn make_environment_block(env: HashMap<String, String>) -> anyhow::Result<Vec<u16>> {
+pub fn make_environment_block(env: HashMap<String, String>) -> anyhow::Result<Vec<u16>> {
     let ensure_no_nulls = |s: &str| {
         if s.contains('\0') {
             return Err(anyhow::anyhow!("Environment variable contains null byte"));
