@@ -7,13 +7,8 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  color: var(--text-primary-color);
+  color: var(--main-menu-item-color, var(--main-menu-text-color, var(--text-primary-color)));
   font-size: 12px;
-
-  // Override color instead of duplicating all props
-  .light-theme & {
-    --scrollbar-color: rgba(255, 255, 255, .3);
-  }
 }
 
 .app-menu-container {
@@ -22,11 +17,13 @@
   width: 0;
   overflow-x: hidden;
   height: 100%;
+  background-color: var(--main-content-bg);
+  position: relative;
   transition: all ease-in-out .3s;
 
   @include media-breakpoint-up(md) {
-    width: 200px;
-    position: relative;
+    width: 250px;
+    overflow-x: visible;
     flex-shrink: 0;
   }
 
@@ -34,7 +31,7 @@
     z-index: 900;
 
     .layout-mobile-active & {
-      width: 200px;
+      width: 250px;
     }
   }
 
@@ -44,12 +41,6 @@
 
     .logo-container {
       justify-content: center;
-
-      .menu-mode-toggler {
-        position: absolute;
-        right: -13px;
-        top: 19px;
-      }
     }
 
     .menu-list-item {
@@ -64,7 +55,7 @@
 
   &:hover {
     .menu-mode-toggler {
-      display: block;
+      opacity: 1;
     }
   }
 }
@@ -79,7 +70,7 @@
   display: flex;
   align-items: center;
   margin: 16px 8px 8px 8px;
-  color: var(--text-accent-color);
+  color: var(--main-menu-item-color, var(--main-menu-text-color, var(--text-accent-color)));
 
   .logo {
     display: flex;
@@ -107,23 +98,53 @@
   }
 
   .menu-mode-toggler {
-    display: none;
     cursor: pointer;
-    top: 0;
-    right: 0;
-    height: 26px;
-    width: 26px;
-    padding: 4px;
-    border-radius: 71px;
-    border: 1px solid var(--border-secondary-color);
-    background-color: var(--bg-primary-color);
+  }
+}
 
-    margin-left: auto;
+.menu-mode-toggler {
+  align-items: center;
+  background-color: var(--main-content-bg);
+  border: 1px solid var(--border-100);
+  border-radius: 50%;
+  color: var(--text-100);
+  cursor: pointer;
+  display: flex;
+  height: 26px;
+  justify-content: center;
+  opacity: 0;
+  padding: 4px;
+  position: absolute;
+  right: -13px;
+  top: 19px;
+  transition: opacity 200ms ease-in-out;
+  width: 26px;
+  z-index: 2;
+
+  svg path[stroke] {
+    stroke: currentColor;
+  }
+
+  svg path[fill] {
+    fill: currentColor;
+  }
+
+  &:focus-visible,
+  &:hover {
+    opacity: 1;
   }
 }
 
 .primary-menu-group-list {
   flex: 1;
+  min-height: 0;
+}
+
+.footer-menu-group {
+  border-top: var(--gateway-sidebar-border-width, 1px) solid var(--border-100);
+  flex: 0 0 104px;
+  min-height: 104px;
+  margin-top: auto;
 }
 
 .footer-group-list {
@@ -134,9 +155,13 @@
 .footer-menu-list {
   padding: 8px;
   position: absolute;
-  bottom: 0;
+  bottom: 12px;
   display: flex !important;
   justify-content: center !important;
+}
+
+.theme-toggle-menu-list {
+  bottom: 52px;
 }
 
 .menu-list-item-container {
@@ -159,14 +184,14 @@
     }
 
     &:hover {
-      color: var(--text-accent-color);
-      background-color: rgba(255, 255, 255, 0.05);
+      color: var(--main-menu-item-active-color);
+      background-color: var(--main-menu-item-hover-background-color);
       cursor: pointer;
     }
 
     &.selected {
-      color: var(--text-accent-color);
-      background-color: #424242;
+      color: var(--main-menu-item-active-color);
+      background-color: var(--main-menu-item-hover-background-color);
       cursor: pointer;
     }
 
@@ -198,14 +223,14 @@
   }
 
   &:hover {
-    color: var(--text-accent-color);
-    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--main-menu-item-active-color);
+    background-color: var(--main-menu-item-hover-background-color);
     cursor: pointer;
   }
 
   &.selected {
-    color: var(--text-accent-color);
-    background-color: #424242;
+    color: var(--main-menu-item-active-color);
+    background-color: var(--main-menu-item-hover-background-color);
     cursor: pointer;
   }
 
@@ -240,6 +265,10 @@
   }
 }
 
+.new-session-menu-item {
+  margin-top: 8px;
+}
+
 :host-context(.app-menu-container.layout-menu-slim) {
   .menu-list-item-container {
     justify-content: center;
@@ -268,9 +297,10 @@
 .dgw-version {
     font-size: 11px;
     color: var(--label-version-color);
-    background: var(--bg-primary-color);
+    background: var(--main-content-bg);
+    border-top: var(--gateway-sidebar-border-width, 1px) solid var(--border-100);
     font-weight: 700;
-    padding: 2px 5px;
+    padding: 8px 5px;
     text-align: center;
     display: flex;
     justify-content: center;
@@ -281,6 +311,17 @@
   font-size: 16px;
   margin-left: 5px;
   color: var(--input-hint-color-important);
+}
+
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+
+  &.disabled {
+    pointer-events: none;
+  }
 }
 
 .resize-handle {
@@ -298,6 +339,6 @@
   }
   
   &:active {
-    background-color: var(--text-accent-color);
+    background-color: var(--main-menu-item-active-color, var(--text-accent-color));
   }
 }

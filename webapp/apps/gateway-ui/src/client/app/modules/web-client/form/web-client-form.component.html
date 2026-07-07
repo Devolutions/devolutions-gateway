@@ -30,6 +30,8 @@
                 appendTo="body"
                 formControlName="protocol"
                 [options]="protocolOptions"
+                optionLabel="label"
+                optionValue="value"
                 pTooltip="{{ protocolSelectedTooltip }}"
                 required
               >
@@ -46,7 +48,7 @@
           </div>
 
           <div class="col-8 gateway-form-group">
-            <label for="protocol">Hostname</label>
+            <label for="hostname">Hostname</label>
             <div class="gateway-form-input">
               <span class="p-fluid">
                 <p-autoComplete

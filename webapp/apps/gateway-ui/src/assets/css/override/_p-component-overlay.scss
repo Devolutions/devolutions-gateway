@@ -2,17 +2,26 @@
 @use '../style/variables' as *;
 @use '../theme/theme-mode-variables' as *;
 
-.p-component-overlay {
+.p-component-overlay,
+.p-dialog-mask {
   background-color: $overlay-bg-color;
   transition-duration: 0.2s;
   z-index: 1;
 }
 
-.p-component-overlay-enter {
+.p-component-overlay-leave,
+.p-dialog-mask.p-overlay-mask-leave,
+.p-dialog-mask:not(:has(.p-dialog)) {
+  pointer-events: none;
+}
+
+.p-component-overlay-enter,
+.p-dialog-mask.p-overlay-mask-enter {
   animation: p-component-overlay-enter-animation 150ms forwards;
 }
 
-.p-component-overlay-leave {
+.p-component-overlay-leave,
+.p-dialog-mask.p-overlay-mask-leave {
   animation: p-component-overlay-leave-animation 150ms forwards;
 }
 

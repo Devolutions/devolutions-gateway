@@ -6,6 +6,9 @@
 @use 'theme/root-theme' as *;
 @use 'theme/dark-theme' as *;
 @use 'theme/light-theme' as *;
+@use 'dvls-stack/variables.generated' as *;
+@use 'dvls-stack/theme/light-theme' as *;
+@use 'dvls-stack/theme/dark-theme' as *;
 
 @use 'style/base' as *;
 @use 'style/entry-status' as *;
@@ -21,6 +24,7 @@
 
 /* Dropdowns & Selections */
 @use 'override/_p-autocomplete' as *;
+@use 'override/_p-dialog' as *;
 @use 'override/_p-dropdown' as *;
 @use 'override/_p-multiselect' as *;
 @use 'override/_p-select' as *;

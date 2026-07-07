@@ -5,6 +5,9 @@
 body .p-inputtext {
   padding: 5px 0 5px 8px;
   line-height: 24px;
+  background: var(--input-txt-bg-color);
+  border-color: $input-txt-border-color;
+  color: $input-txt-color;
 }
 
 .p-inputtext {
@@ -24,6 +27,29 @@ body .p-inputtext {
 
   &:enabled:hover:not(.p-state-error) {
     border-color: $input-txt-border-hover-color;
+  }
+
+  &:enabled:focus:not(.p-state-error) {
+    border-color: $input-txt-border-focus-color;
+    box-shadow: 0 0 0 3px rgba(var(--base-accent-rgb), 0.2);
+  }
+
+  &:disabled {
+    background: var(--input-txt-bg-disabled-color);
+    border-color: $input-txt-border-disabled-color;
+    color: var(--disabled-text-color);
+  }
+
+  &::placeholder {
+    color: var(--input-txt-placeholder);
+  }
+
+  &:-webkit-autofill,
+  &:-webkit-autofill:hover,
+  &:-webkit-autofill:focus {
+    -webkit-text-fill-color: $input-txt-color;
+    box-shadow: 0 0 0 1000px var(--input-txt-bg-color) inset;
+    transition: background-color 9999s ease-in-out 0s;
   }
 
   &.read-only {

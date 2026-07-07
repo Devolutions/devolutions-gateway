@@ -1,0 +1,122 @@
+.p-dialog .p-dialog-header {
+  display: flex;
+  height: 4rem;
+  justify-content: space-between;
+  gap: 2rem;
+  line-height: 1.75rem;
+  border-bottom: 1px solid var(--border-brand-100);
+}
+
+.p-dialog .p-dialog-header-icon {
+  color: var(--dialog-header-icon-text-color, var(--text-400));
+}
+
+.p-dialog .p-dialog-close-button {
+  color: var(--dialog-header-icon-text-color, var(--title-color, var(--text-400))) !important;
+}
+
+.p-dialog .p-dialog-close-button timesicon,
+.p-dialog .p-dialog-close-button .p-icon {
+  display: none;
+}
+
+.p-dialog .p-dialog-close-button::before {
+  font-family: devolutions-icons, serif;
+  content: '\e93e';
+  color: currentColor;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.p-dialog .p-dialog-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.p-dialog .p-dialog-content > form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.p-dialog .p-dialog-content > .dialog-body,
+.p-dialog .p-dialog-content > .content,
+.p-dialog .p-dialog-content > .body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.p-dialog .p-dialog-footer {
+  border-top: 1px solid var(--border-brand-100);
+  padding-top: 0.875rem !important;
+}
+
+.p-dialog .p-dialog-close-button.p-button-text.p-button-secondary:not(:disabled):hover,
+.p-dialog .p-dialog-maximize-button.p-button-text.p-button-secondary:not(:disabled):hover {
+  background: var(--bg-200) !important;
+  color: var(--text-400) !important;
+  border-color: transparent !important;
+}
+
+.p-dialog .button-default-footer.p-button,
+.p-dialog .button-default-footer .p-button {
+  background: var(--dialog-footer-default-button-background-color);
+  color: var(--dialog-footer-default-button-text-color);
+  font-weight: 600;
+  padding: 7px 10px;
+  border: 0;
+  margin-right: 16px;
+  border-radius: 6px;
+  line-height: 14px;
+  font-size: 14px;
+  height: 33px;
+  min-width: 76px;
+}
+
+.p-dialog .button-default-footer.p-button:not(.p-disabled):hover,
+.p-dialog .button-default-footer .p-button:not(.p-disabled):hover {
+  background: var(--dialog-footer-default-button-background-hover-color);
+  color: var(--dialog-footer-default-button-text-color);
+}
+
+.p-dialog .button-cancel-footer.p-button,
+.p-dialog .button-cancel-footer .p-button {
+  background-color: var(--dialog-header-background-color);
+  border: 1px solid var(--cancel-button-footer-border);
+  color: var(--dialog-footer-default-button-background-color);
+  font-weight: 600;
+  min-width: 76px;
+  font-size: 14px;
+  height: 33px;
+  padding: 7px 10px;
+  line-height: 14px;
+  border-radius: 6px;
+}
+
+.p-dialog .button-cancel-footer.p-button:not(.p-disabled):hover,
+.p-dialog .button-cancel-footer .p-button:not(.p-disabled):hover {
+  background-color: var(--cancel-button-footer-border-hover);
+}
+
+.p-dialog .button-default-footer .p-button-label,
+.p-dialog .button-cancel-footer .p-button-label {
+  line-height: 14px;
+}
+
+.p-confirm-dialog .p-dialog-content .p-confirm-dialog-icon {
+  font-size: 1.5em;
+  margin-right: 10px;
+}
+
+.p-confirm-dialog .p-dialog-footer {
+  gap: 10px;
+  display: flex;
+  justify-content: end;
+  align-items: center;
+}
+
+.p-confirm-dialog.p-dialog .p-dialog-content {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  line-height: normal;
+}

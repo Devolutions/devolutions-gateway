@@ -3,15 +3,27 @@
 @use "../../../../../assets/css/theme/theme-mode-variables" as *;
 
 :host {
-  --box-background-color: white;
-  --box-text-color: rgb(var(--base-color-rgb));
+  --box-background-color: var(--gateway-panel-background-color, white);
+  --box-border-color: var(--gateway-panel-border-color, transparent);
+  --box-shadow: var(--gateway-panel-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+  --box-text-color: var(--text-color-primary, rgb(var(--base-color-rgb)));
   display: flex;
   flex-direction: column;
   flex: 1;
   max-width: 560px;
-  align-self: center;
   min-width: 0;
   min-height: 0;
+}
+
+:host-context(web-client-dynamic-tab) {
+  align-self: center;
+  flex: 0 1 auto;
+  margin: auto;
+  width: 100%;
+}
+
+:host-context(web-client-dynamic-tab) .container {
+  padding: 3vw;
 }
 
 :host ::ng-deep .p-dropdown {
@@ -68,24 +80,22 @@
   justify-content: center;
   align-items: center;
   width: 100%;
-  flex: 1;
   min-width: 0;
-  min-height: 0;
-  overflow: auto;
+  min-height: max-content;
 }
 .form-message {
   margin-bottom: 10px;
+  margin-top: 12px;
 }
 
 .box {
   background-color: var(--box-background-color);
   width: 447px;
+  border: 1px solid var(--box-border-color);
   border-radius: 8px;
   padding: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  margin: 3vw;
-  max-height: calc(100% - 6vw);
-  overflow-y: auto;
+  box-shadow: var(--box-shadow);
+  margin: 0;
 
   // Force border-radius to work with flex
   &.flex {
@@ -94,7 +104,7 @@
 }
 
 .centered-box {
-  margin: auto;
+  margin: 0 auto;
 }
 
 .box-header {
@@ -150,7 +160,7 @@ rdp-form, ssh-form, vnc-form, ard-form {
   font-style: normal;
   font-weight: 400;
   font-family: $fontFamily;
-  color: $default-text-color !important;
+  color: var(--text-color-primary) !important;
   line-height: 11px;
 }
 

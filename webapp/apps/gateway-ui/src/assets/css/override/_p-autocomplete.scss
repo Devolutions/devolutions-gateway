@@ -98,7 +98,8 @@
 }
 
 .p-autocomplete-panel {
-  background-color: $dropdown-bg-color;
+  background-color: var(--main-body-bg);
+  color: $dropdown-item-txt-color;
   border: 1px solid $dropdown-overlay-border-color;
   box-shadow: $defaultBoxShadow;
   margin-top: -1px; /* hack to simulate a thin line */
@@ -119,6 +120,7 @@
 
     .p-autocomplete-item {
       align-items: center;
+      background: var(--main-body-bg);
       display: flex;
       margin: 0;
       padding: $listItemPadding;
@@ -246,11 +248,13 @@
 }
 
 .p-autocomplete-list {
-  background: $dropdown-item-bg-color;
+  background: var(--main-body-bg);
   color: $dropdown-item-txt-color;
 }
 
 .p-autocomplete-overlay {
+  background: var(--main-body-bg);
+  color: $dropdown-item-txt-color;
   border-radius: 0 0 $borderRadius $borderRadius;
   border: 1px solid $input-txt-border-focus-color;
 }
