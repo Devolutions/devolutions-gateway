@@ -1,7 +1,7 @@
 pub(crate) mod compat;
 mod executor;
 mod models;
-mod powershell_worker;
+pub(crate) mod powershell_worker;
 mod result_store;
 mod signalr;
 

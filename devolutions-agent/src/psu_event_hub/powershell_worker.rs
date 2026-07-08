@@ -169,7 +169,7 @@ $response | ConvertTo-Json -Compress -Depth 16
 const POWERSHELL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone)]
-pub(super) struct PowerShellWorker {
+pub(crate) struct PowerShellWorker {
     conf: PsuPowerShellConf,
     permits: Arc<Semaphore>,
     worker_script: Arc<WorkerScriptFile>,
@@ -177,7 +177,7 @@ pub(super) struct PowerShellWorker {
 }
 
 impl PowerShellWorker {
-    pub(super) fn new(conf: PsuPowerShellConf) -> anyhow::Result<Self> {
+    pub(crate) fn new(conf: PsuPowerShellConf) -> anyhow::Result<Self> {
         Self::with_execution_timeout(conf, POWERSHELL_EXECUTION_TIMEOUT)
     }
 
@@ -191,8 +191,8 @@ impl PowerShellWorker {
         })
     }
 
-    pub(super) async fn resolve_app_token(&self, app_token: &str) -> anyhow::Result<String> {
-        let Some(secret_name) = secret_reference_name(app_token) else {
+    pub(crate) async fn resolve_app_token(&self, app_token: &str) -> anyhow::Result<String> {
+        let Some(secret_name) = app_token_secret_reference_name(app_token) else {
             return Ok(app_token.to_owned());
         };
 
@@ -399,7 +399,7 @@ impl WorkerRequest {
     }
 }
 
-fn secret_reference_name(app_token: &str) -> Option<&str> {
+pub(crate) fn app_token_secret_reference_name(app_token: &str) -> Option<&str> {
     let prefix = "$secret:";
     app_token
         .get(..prefix.len())
@@ -563,9 +563,9 @@ mod tests {
 
     #[test]
     fn secret_reference_name_is_case_insensitive() {
-        assert_eq!(secret_reference_name("$secret:AppToken"), Some("AppToken"));
-        assert_eq!(secret_reference_name("$SECRET:AppToken"), Some("AppToken"));
-        assert_eq!(secret_reference_name("literal-token"), None);
+        assert_eq!(app_token_secret_reference_name("$secret:AppToken"), Some("AppToken"));
+        assert_eq!(app_token_secret_reference_name("$SECRET:AppToken"), Some("AppToken"));
+        assert_eq!(app_token_secret_reference_name("literal-token"), None);
     }
 
     #[test]
