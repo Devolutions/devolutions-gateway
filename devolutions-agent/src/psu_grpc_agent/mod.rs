@@ -16,8 +16,8 @@ use tonic::transport::Endpoint;
 use uuid::Uuid;
 
 use crate::config::{ConfHandle, dto};
-use crate::psu_event_hub::powershell_worker::{PowerShellWorker, app_token_secret_reference_name};
 use crate::psu_grpc_agent::process::{ProcessControl, ProcessRegistry};
+use crate::psu_powershell::{PowerShellWorker, app_token_secret_reference_name};
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {

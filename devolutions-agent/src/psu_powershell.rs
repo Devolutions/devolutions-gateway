@@ -1,16 +1,166 @@
 use std::ffi::OsString;
+use std::fmt;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 use crate::config::dto::PsuPowerShellConf;
-use crate::psu_event_hub::models::WebsocketEventResponse;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PowerShellWorkerResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub job_outputs: Vec<JobOutput>,
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub timeout: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminating_error: Option<String>,
+}
+
+impl PowerShellWorkerResponse {
+    pub(crate) fn pending() -> Self {
+        Self {
+            data: None,
+            job_outputs: Vec::new(),
+            complete: false,
+            timeout: false,
+            terminating_error: None,
+        }
+    }
+
+    pub(crate) fn terminating_error(message: impl Into<String>) -> Self {
+        Self {
+            data: None,
+            job_outputs: Vec::new(),
+            complete: true,
+            timeout: false,
+            terminating_error: Some(message.into()),
+        }
+    }
+
+    fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            data: None,
+            job_outputs: Vec::new(),
+            complete: true,
+            timeout: true,
+            terminating_error: Some(message.into()),
+        }
+    }
+}
+
+impl Default for PowerShellWorkerResponse {
+    fn default() -> Self {
+        Self::pending()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JobOutput {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(rename = "type")]
+    pub output_type: JobOutputType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub timestamp: String,
+    #[serde(default)]
+    pub job_id: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum JobOutputType {
+    Information = 0,
+    Verbose = 1,
+    Debug = 2,
+    Warning = 3,
+    Error = 4,
+    Progress = 5,
+}
+
+impl JobOutputType {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Information),
+            1 => Some(Self::Verbose),
+            2 => Some(Self::Debug),
+            3 => Some(Self::Warning),
+            4 => Some(Self::Error),
+            5 => Some(Self::Progress),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for JobOutputType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.as_u8())
+    }
+}
+
+impl<'de> Deserialize<'de> for JobOutputType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = JobOutputType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a PSU JobOutputType numeric value or name")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                let value = u8::try_from(value).map_err(|_| E::custom("JobOutputType value is out of range"))?;
+                JobOutputType::from_u8(value).ok_or_else(|| E::custom("unknown JobOutputType value"))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "Information" => Ok(JobOutputType::Information),
+                    "Verbose" => Ok(JobOutputType::Verbose),
+                    "Debug" => Ok(JobOutputType::Debug),
+                    "Warning" => Ok(JobOutputType::Warning),
+                    "Error" => Ok(JobOutputType::Error),
+                    "Progress" => Ok(JobOutputType::Progress),
+                    _ => Err(E::custom("unknown JobOutputType name")),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
 
 const WORKER_SCRIPT: &str = r#"
 param([string] $RequestPath)
@@ -207,27 +357,27 @@ impl PowerShellWorker {
             .with_context(|| format!("PSU AppToken secret {secret_name} resolved to an empty value"))
     }
 
-    pub(super) async fn execute_command(
+    pub(crate) async fn execute_command(
         &self,
         command: String,
         data: String,
         return_result: bool,
-    ) -> anyhow::Result<WebsocketEventResponse> {
+    ) -> anyhow::Result<PowerShellWorkerResponse> {
         self.run_request(WorkerRequest::command(command, data, return_result))
             .await
     }
 
-    pub(super) async fn execute_script(
+    pub(crate) async fn execute_script(
         &self,
         script_path: Utf8PathBuf,
         data: String,
         return_result: bool,
-    ) -> anyhow::Result<WebsocketEventResponse> {
+    ) -> anyhow::Result<PowerShellWorkerResponse> {
         self.run_request(WorkerRequest::script(script_path, data, return_result))
             .await
     }
 
-    async fn run_request(&self, request: WorkerRequest) -> anyhow::Result<WebsocketEventResponse> {
+    async fn run_request(&self, request: WorkerRequest) -> anyhow::Result<PowerShellWorkerResponse> {
         let _permit = self
             .permits
             .acquire()
@@ -242,7 +392,7 @@ impl PowerShellWorker {
         &self,
         script_path: &Utf8Path,
         request_path: &Utf8Path,
-    ) -> anyhow::Result<WebsocketEventResponse> {
+    ) -> anyhow::Result<PowerShellWorkerResponse> {
         let executable = resolve_powershell_executable(&self.conf);
         let mut command = Command::new(&executable);
         command
@@ -275,7 +425,7 @@ impl PowerShellWorker {
                     timeout_secs = self.execution_timeout.as_secs(),
                     "PowerShell worker timed out"
                 );
-                return Ok(WebsocketEventResponse::timeout("PowerShell worker timed out."));
+                return Ok(PowerShellWorkerResponse::timeout("PowerShell worker timed out."));
             }
         };
 
@@ -451,7 +601,6 @@ fn temp_dir() -> anyhow::Result<Utf8PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::psu_event_hub::models::JobOutputType;
 
     const HASHTABLE_PS_VERSION_TABLE: &str = r#"<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
   <Obj RefId="0">

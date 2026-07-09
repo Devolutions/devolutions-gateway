@@ -1,7 +1,5 @@
 pub(crate) mod compat;
 mod executor;
-mod models;
-pub(crate) mod powershell_worker;
 mod result_store;
 mod signalr;
 
@@ -14,7 +12,7 @@ use tokio::task::JoinSet;
 
 use crate::config::{ConfHandle, dto};
 use crate::psu_event_hub::executor::EventHubExecutor;
-use crate::psu_event_hub::powershell_worker::PowerShellWorker;
+use crate::psu_powershell::PowerShellWorker;
 
 pub struct PsuEventHubTask {
     conf_handle: ConfHandle,

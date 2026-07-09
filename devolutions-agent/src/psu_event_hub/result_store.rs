@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
-use crate::psu_event_hub::models::WebsocketEventResponse;
+use crate::psu_powershell::PowerShellWorkerResponse;
 
 const RESULT_TTL: Duration = Duration::from_secs(15 * 60);
 const MAX_RESULTS: usize = 1024;
@@ -25,7 +25,7 @@ impl ResultStore {
         }
     }
 
-    pub(super) fn insert(&self, execution_id: String, response: WebsocketEventResponse) {
+    pub(super) fn insert(&self, execution_id: String, response: PowerShellWorkerResponse) {
         let mut inner = self.inner.lock();
         let now = Instant::now();
 
@@ -41,14 +41,14 @@ impl ResultStore {
         inner.enforce_limit(self.max_results);
     }
 
-    pub(super) fn take(&self, execution_id: &str) -> WebsocketEventResponse {
+    pub(super) fn take(&self, execution_id: &str) -> PowerShellWorkerResponse {
         let mut inner = self.inner.lock();
         inner.remove_expired(Instant::now(), self.ttl);
         inner
             .results
             .remove(execution_id)
             .map(|stored| stored.response)
-            .unwrap_or_else(WebsocketEventResponse::pending)
+            .unwrap_or_else(PowerShellWorkerResponse::pending)
     }
 }
 
@@ -95,7 +95,7 @@ impl ResultStoreInner {
 #[derive(Debug)]
 struct StoredResult {
     inserted_at: Instant,
-    response: WebsocketEventResponse,
+    response: PowerShellWorkerResponse,
 }
 
 #[cfg(test)]
@@ -113,9 +113,9 @@ mod tests {
         let store = ResultStore::default();
         store.insert(
             "execution-id".to_owned(),
-            WebsocketEventResponse {
+            PowerShellWorkerResponse {
                 complete: true,
-                ..WebsocketEventResponse::default()
+                ..PowerShellWorkerResponse::default()
             },
         );
 
@@ -128,16 +128,16 @@ mod tests {
         let store = ResultStore::test_with_limits(Duration::from_secs(60), 1);
         store.insert(
             "first".to_owned(),
-            WebsocketEventResponse {
+            PowerShellWorkerResponse {
                 complete: true,
-                ..WebsocketEventResponse::default()
+                ..PowerShellWorkerResponse::default()
             },
         );
         store.insert(
             "second".to_owned(),
-            WebsocketEventResponse {
+            PowerShellWorkerResponse {
                 complete: true,
-                ..WebsocketEventResponse::default()
+                ..PowerShellWorkerResponse::default()
             },
         );
 
@@ -150,9 +150,9 @@ mod tests {
         let store = ResultStore::test_with_limits(Duration::ZERO, 10);
         store.insert(
             "execution-id".to_owned(),
-            WebsocketEventResponse {
+            PowerShellWorkerResponse {
                 complete: true,
-                ..WebsocketEventResponse::default()
+                ..PowerShellWorkerResponse::default()
             },
         );
 
