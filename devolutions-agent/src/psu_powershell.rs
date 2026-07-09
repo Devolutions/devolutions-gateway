@@ -711,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn secret_reference_name_is_case_insensitive() {
+    fn app_token_secret_reference_name_is_case_insensitive() {
         assert_eq!(app_token_secret_reference_name("$secret:AppToken"), Some("AppToken"));
         assert_eq!(app_token_secret_reference_name("$SECRET:AppToken"), Some("AppToken"));
         assert_eq!(app_token_secret_reference_name("literal-token"), None);
