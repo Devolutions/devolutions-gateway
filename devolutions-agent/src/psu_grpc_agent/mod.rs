@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::config::{ConfHandle, dto};
 use crate::psu_grpc_agent::process::{ProcessControl, ProcessRegistry};
+use crate::psu_powershell::{PowerShellWorker, app_token_secret_reference_name};
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
@@ -106,11 +107,15 @@ impl PsuGrpcAgent {
             .with_multiplier(RETRY_MULTIPLIER)
             .with_max_elapsed_time(None)
             .build();
+        let app_token = self.resolve_app_token().await?;
 
         loop {
             let start = Instant::now();
 
-            match self.run_single_connection(&mut shutdown_signal).await {
+            match self
+                .run_single_connection(&mut shutdown_signal, app_token.as_deref())
+                .await
+            {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
@@ -139,7 +144,11 @@ impl PsuGrpcAgent {
         }
     }
 
-    async fn run_single_connection(&self, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+    async fn run_single_connection(
+        &self,
+        shutdown_signal: &mut ShutdownSignal,
+        app_token: Option<&str>,
+    ) -> anyhow::Result<()> {
         let endpoint = Endpoint::from_shared(self.server_url.clone())?;
         let channel = endpoint
             .connect()
@@ -155,10 +164,7 @@ impl PsuGrpcAgent {
             .context("failed to queue PSU gRPC agent registration")?;
 
         let mut response_stream = client
-            .connect(connect_request(
-                ReceiverStream::new(outgoing_rx),
-                self.app_token.as_deref(),
-            )?)
+            .connect(connect_request(ReceiverStream::new(outgoing_rx), app_token)?)
             .await
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
@@ -257,6 +263,26 @@ impl PsuGrpcAgent {
         }
 
         Ok(())
+    }
+
+    async fn resolve_app_token(&self) -> anyhow::Result<Option<String>> {
+        let Some(app_token) = self.app_token.as_deref() else {
+            return Ok(None);
+        };
+
+        // Avoid constructing a PowerShell worker unless the token is a secret reference.
+        if app_token_secret_reference_name(app_token).is_none() {
+            return Ok(Some(app_token.to_owned()));
+        }
+
+        let worker = PowerShellWorker::new(self.conf.powershell.clone())
+            .context("failed to initialize PSU PowerShell worker for gRPC AppToken secret resolution")?;
+
+        worker
+            .resolve_app_token(app_token)
+            .await
+            .map(Some)
+            .context("failed to resolve PSU gRPC AppToken secret")
     }
 
     fn create_registration_message(&self, powershell_version: String) -> AgentMessage {
@@ -436,5 +462,42 @@ mod tests {
                 .expect("metadata string"),
             "Bearer token"
         );
+    }
+
+    #[tokio::test]
+    async fn literal_app_token_does_not_require_secret_resolution() {
+        let agent = PsuGrpcAgent::new(dto::PsuGrpcAgentConf {
+            enabled: true,
+            server_url: Some("http://localhost:5000".parse().expect("server URL")),
+            agent_id: Some("agent-01".to_owned()),
+            display_name: None,
+            app_token: Some("literal-token".to_owned()),
+            hubs: Vec::new(),
+            powershell: dto::PsuPowerShellConf {
+                executable_path: Some("missing-pwsh".into()),
+                ..dto::PsuPowerShellConf::default()
+            },
+        })
+        .expect("create agent");
+
+        let app_token = agent.resolve_app_token().await.expect("resolve AppToken");
+
+        assert_eq!(app_token.as_deref(), Some("literal-token"));
+    }
+
+    #[test]
+    fn empty_app_token_is_ignored() {
+        let agent = PsuGrpcAgent::new(dto::PsuGrpcAgentConf {
+            enabled: true,
+            server_url: Some("http://localhost:5000".parse().expect("server URL")),
+            agent_id: Some("agent-01".to_owned()),
+            display_name: None,
+            app_token: Some("   ".to_owned()),
+            hubs: Vec::new(),
+            powershell: dto::PsuPowerShellConf::default(),
+        })
+        .expect("create agent");
+
+        assert!(agent.app_token.is_none());
     }
 }

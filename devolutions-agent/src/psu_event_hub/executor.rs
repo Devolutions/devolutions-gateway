@@ -7,9 +7,8 @@ use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::config::dto::PsuEventHubConnectionConf;
-use crate::psu_event_hub::models::WebsocketEventResponse;
-use crate::psu_event_hub::powershell_worker::PowerShellWorker;
 use crate::psu_event_hub::result_store::ResultStore;
+use crate::psu_powershell::{PowerShellWorker, PowerShellWorkerResponse};
 
 #[derive(Debug, Clone)]
 pub(super) struct EventHubExecutor {
@@ -92,7 +91,7 @@ impl EventHubExecutor {
                 Err(error) if return_result => {
                     result_store.insert(
                         stored_execution_id,
-                        WebsocketEventResponse::terminating_error(error.to_string()),
+                        PowerShellWorkerResponse::terminating_error(error.to_string()),
                     );
                 }
                 Err(error) => warn!(error = format!("{error:#}"), "PSU command execution failed"),
@@ -108,7 +107,7 @@ impl EventHubExecutor {
             if return_result {
                 self.result_store.insert(
                     execution_id.clone(),
-                    WebsocketEventResponse::terminating_error("No script block found."),
+                    PowerShellWorkerResponse::terminating_error("No script block found."),
                 );
             }
             return execution_id;
@@ -125,7 +124,7 @@ impl EventHubExecutor {
                 Err(error) if return_result => {
                     result_store.insert(
                         stored_execution_id,
-                        WebsocketEventResponse::terminating_error(error.to_string()),
+                        PowerShellWorkerResponse::terminating_error(error.to_string()),
                     );
                 }
                 Err(error) => warn!(error = format!("{error:#}"), "PSU script execution failed"),

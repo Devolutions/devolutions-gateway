@@ -11,6 +11,7 @@ pub mod enrollment;
 pub mod log;
 pub mod psu_event_hub;
 pub mod psu_grpc_agent;
+pub(crate) mod psu_powershell;
 pub mod remote_desktop;
 pub mod tunnel;
 mod tunnel_helpers;
