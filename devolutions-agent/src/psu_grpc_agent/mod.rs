@@ -270,6 +270,7 @@ impl PsuGrpcAgent {
             return Ok(None);
         };
 
+        // Avoid constructing a PowerShell worker unless the token is a secret reference.
         if app_token_secret_reference_name(app_token).is_none() {
             return Ok(Some(app_token.to_owned()));
         }
