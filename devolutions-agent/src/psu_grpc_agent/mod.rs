@@ -107,11 +107,15 @@ impl PsuGrpcAgent {
             .with_multiplier(RETRY_MULTIPLIER)
             .with_max_elapsed_time(None)
             .build();
+        let app_token = self.resolve_app_token().await?;
 
         loop {
             let start = Instant::now();
 
-            match self.run_single_connection(&mut shutdown_signal).await {
+            match self
+                .run_single_connection(&mut shutdown_signal, app_token.as_deref())
+                .await
+            {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
@@ -140,8 +144,11 @@ impl PsuGrpcAgent {
         }
     }
 
-    async fn run_single_connection(&self, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
-        let app_token = self.resolve_app_token().await?;
+    async fn run_single_connection(
+        &self,
+        shutdown_signal: &mut ShutdownSignal,
+        app_token: Option<&str>,
+    ) -> anyhow::Result<()> {
         let endpoint = Endpoint::from_shared(self.server_url.clone())?;
         let channel = endpoint
             .connect()
@@ -157,7 +164,7 @@ impl PsuGrpcAgent {
             .context("failed to queue PSU gRPC agent registration")?;
 
         let mut response_stream = client
-            .connect(connect_request(ReceiverStream::new(outgoing_rx), app_token.as_deref())?)
+            .connect(connect_request(ReceiverStream::new(outgoing_rx), app_token)?)
             .await
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
