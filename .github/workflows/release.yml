@@ -310,10 +310,17 @@ jobs:
             Remove-Item -Path $StageDir -Recurse -Force
           }
 
-          # Agent Windows MSI + symbols; Linux Agent artifacts are not yet published.
+          # Agent Windows MSI + symbols
           foreach ($Arch in @('x64', 'arm64')) {
             Move-Item "$Dl/devolutions-agent/windows/${Arch}/DevolutionsAgent.msi"         "$Release/DevolutionsAgent-${Version}-${Arch}.msi"
             Move-Item "$Dl/devolutions-agent/windows/${Arch}/DevolutionsAgent.symbols.zip" "$Release/DevolutionsAgent-${Version}-${Arch}.symbols.zip"
+          }
+
+          # Agent Linux DEB/RPM/changes
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item "$Dl/devolutions-agent/linux/${Arch}/devolutions-agent.deb"     "$Release/devolutions-agent-${Version}-${Arch}.deb"
+            Move-Item "$Dl/devolutions-agent/linux/${Arch}/devolutions-agent.rpm"     "$Release/devolutions-agent-${Version}-${Arch}.rpm"
+            Move-Item "$Dl/devolutions-agent/linux/${Arch}/devolutions-agent.changes" "$Release/devolutions-agent-${Version}-${Arch}.changes"
           }
 
           # Jetsocat archives: .tar.xz for Linux, .zip for Windows and macOS
