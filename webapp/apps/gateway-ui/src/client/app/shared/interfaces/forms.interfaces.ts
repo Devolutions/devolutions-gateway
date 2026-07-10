@@ -19,7 +19,8 @@ export type FormDataUnion =
   | VncFormDataInput
   | ArdFormDataInput
   | SSHFormDataInput
-  | TelnetFormDataInput;
+  | TelnetFormDataInput
+  | ActiveDirectoryFormDataInput;
 
 export interface RdpFormDataInput {
   autoComplete: AutoCompleteInput;
@@ -85,4 +86,16 @@ export interface SSHFormDataInput {
   extraData?: {
     sshPrivateKey?: string;
   };
+}
+
+export interface ActiveDirectoryFormDataInput {
+  autoComplete: AutoCompleteInput;
+  hostname: string;
+  username: string;
+  password: string;
+  domain?: string;
+  port: number;
+  useLdaps: boolean;
+  organizationalUnit?: string;
+  protocol: number;
 }

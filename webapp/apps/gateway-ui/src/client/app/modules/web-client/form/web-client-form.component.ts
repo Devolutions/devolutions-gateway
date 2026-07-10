@@ -50,6 +50,10 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   formData: unknown;
 
+  private readonly hostnameLabels: Partial<Record<Protocol, string>> = {
+    [Protocol.ActiveDirectory]: 'Domain Controller',
+  };
+
   constructor(
     private fb: FormBuilder,
     private formService: WebFormService,
@@ -246,6 +250,14 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   isSelectedProtocolArd(): boolean {
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
+  }
+
+  isSelectedProtocolActiveDirectory(): boolean {
+    return WebClientProtocol.isProtocolActiveDirectory(this.getSelectedProtocol());
+  }
+
+  getHostnameLabel(): string {
+    return this.hostnameLabels[this.getSelectedProtocol()] ?? 'Hostname';
   }
 
   private addMessages(newMessages: ToastMessageOptions[]): void {

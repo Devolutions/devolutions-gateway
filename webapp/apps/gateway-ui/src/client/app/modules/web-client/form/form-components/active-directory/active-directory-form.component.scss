@@ -1,0 +1,17 @@
+.active-directory-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+
+  .gateway-form-group {
+    margin-bottom: 0;
+  }
+
+  .gateway-form-input {
+    margin-top: 0.25rem;
+  }
+
+  .organizational-unit-form-group {
+    padding-bottom: 1rem;
+  }
+}

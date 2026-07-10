@@ -1,0 +1,80 @@
+<div class="active-directory-form" [formGroup]="form">
+  <div class="col-12 gateway-form-group">
+    <web-client-username-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+    ></web-client-username-control>
+  </div>
+
+  <div class="col-12 gateway-form-group">
+    <web-client-password-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+    ></web-client-password-control>
+  </div>
+
+  <div class="col-12 gateway-form-group">
+    <label for="domain">Domain Override</label>
+    <div class="gateway-form-input">
+      <input
+        pInputText
+        id="domain"
+        type="text"
+        autocomplete="on"
+        placeholder="Optional domain override"
+        formControlName="domain"
+      />
+    </div>
+  </div>
+
+  <div class="col-12 gateway-form-group">
+    <label for="port">Port</label>
+    <div class="gateway-form-input">
+      <input
+        pInputText
+        id="port"
+        type="number"
+        min="1"
+        max="65535"
+        placeholder="389 or 636"
+        formControlName="port"
+        required
+      />
+    </div>
+    @if (form.get('port').hasError('invalidPort') && form.get('port').touched) {
+      <div class="form-helper-text">
+        Port must be between 1 and 65535.
+      </div>
+    }
+  </div>
+
+  <div class="col-12 gateway-form-group">
+    <div class="gateway-form-input">
+      <p-checkbox
+        formControlName="useLdaps"
+        inputId="useLdaps"
+        [binary]="true"
+      ></p-checkbox>
+      <label
+        for="useLdaps"
+        pTooltip="Use LDAP over TLS."
+      >
+        Use LDAPS
+      </label>
+    </div>
+  </div>
+
+  <div class="col-12 gateway-form-group organizational-unit-form-group">
+    <label for="organizationalUnit">Organizational Unit</label>
+    <div class="gateway-form-input">
+      <input
+        pInputText
+        id="organizationalUnit"
+        type="text"
+        autocomplete="on"
+        placeholder="Optional OU, e.g. OU=Users,DC=example,DC=com"
+        formControlName="organizationalUnit"
+      />
+    </div>
+  </div>
+</div>

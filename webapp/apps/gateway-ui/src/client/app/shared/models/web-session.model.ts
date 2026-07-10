@@ -1,4 +1,5 @@
 import { ComponentRef, ElementRef, Type } from '@angular/core';
+import type { WebClientActiveDirectoryComponent } from '@gateway/modules/web-client/active-directory/web-client-active-directory.component';
 import type { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import type { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import type { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
@@ -11,6 +12,7 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import { v4 as uuidv4 } from 'uuid';
 import { BaseComponent } from '../bases/base.component';
 import {
+  ActiveDirectoryFormDataInput,
   ArdFormDataInput,
   RdpFormDataInput,
   SSHFormDataInput,
@@ -19,6 +21,7 @@ import {
 } from '../interfaces/forms.interfaces';
 
 export type WebSessionComponentType =
+  | Type<WebClientActiveDirectoryComponent>
   | Type<WebClientTelnetComponent>
   | Type<WebClientSshComponent>
   | Type<WebClientRdpComponent>
@@ -30,6 +33,7 @@ export type WebSessionComponentType =
 export interface SessionDataTypeMap {
   WebClientFormComponent: never;
   MainPanelComponent: never;
+  WebClientActiveDirectoryComponent: ActiveDirectoryFormDataInput;
   WebClientArdComponent: ArdFormDataInput;
   WebClientRdpComponent: RdpFormDataInput;
   WebClientSshComponent: SSHFormDataInput;
@@ -38,6 +42,7 @@ export interface SessionDataTypeMap {
 }
 
 export interface SessionTypeMap {
+  WebClientActiveDirectoryComponent: WebClientActiveDirectoryComponent;
   WebClientArdComponent: WebClientArdComponent;
   WebClientFormComponent: WebClientFormComponent;
   WebClientRdpComponent: WebClientRdpComponent;
