@@ -93,10 +93,21 @@ export interface ActiveDirectoryConnectionParameters {
 }
 
 export function isActiveDirectoryConnectionParameters(params: unknown): params is ActiveDirectoryConnectionParameters {
+  if (typeof params !== 'object' || params === null) {
+    return false;
+  }
+
+  const candidate = params as Partial<ActiveDirectoryConnectionParameters>;
+
   return (
-    typeof params === 'object' &&
-    params !== null &&
-    'useLdaps' in params &&
-    typeof (params as ActiveDirectoryConnectionParameters).useLdaps === 'boolean'
+    typeof candidate.host === 'string' &&
+    typeof candidate.port === 'number' &&
+    Number.isInteger(candidate.port) &&
+    candidate.port >= 1 &&
+    candidate.port <= 65535 &&
+    typeof candidate.username === 'string' &&
+    typeof candidate.password === 'string' &&
+    typeof candidate.gatewayAddress === 'string' &&
+    typeof candidate.useLdaps === 'boolean'
   );
 }

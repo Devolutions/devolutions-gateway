@@ -41,7 +41,7 @@
         required
       />
     </div>
-    @if (form.get('port').hasError('invalidPort') && form.get('port').touched) {
+    @if (form.get('port')?.hasError('invalidPort') && form.get('port')?.touched) {
       <div class="form-helper-text">
         Port must be between 1 and 65535.
       </div>

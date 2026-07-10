@@ -5,7 +5,7 @@ export const DVL_TELNET_ICON = 'dvl-icon-entry-session-telnet';
 export const DVL_SSH_ICON = 'dvl-icon-entry-session-ssh';
 export const DVL_VNC_ICON = 'dvl-icon-entry-session-vnc';
 export const DVL_ARD_ICON = 'dvl-icon-entry-session-apple-remote-desktop';
-export const DVL_ACTIVE_DIRECTORY_ICON = 'dvl-icon-entry-ActiveDirectory';
+export const DVL_ACTIVE_DIRECTORY_ICON = 'dvl-icon-active-directory';
 export const DVL_WARNING_ICON = 'dvl-icon-warning';
 
 export const JET_RDP_URL = '/jet/rdp';

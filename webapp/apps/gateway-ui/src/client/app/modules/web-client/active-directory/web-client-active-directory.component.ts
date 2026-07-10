@@ -27,7 +27,7 @@ import { ActiveDirectoryFormDataInput } from '@shared/interfaces/forms.interface
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { AnalyticService, ProtocolString } from '@shared/services/analytic.service';
 import { UtilsService } from '@shared/services/utils.service';
-import { DefaultLdapPort, WebClientService } from '@shared/services/web-client.service';
+import { DefaultLdapPort, DefaultLdapsPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { EMPTY, from, Observable, of, Subscription } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
@@ -168,9 +168,10 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
 
   private fetchParameters(formData: ActiveDirectoryFormDataInput): Observable<ActiveDirectoryConnectionParameters> {
     const sessionId = uuidv4();
+    const defaultPort = formData.useLdaps ? DefaultLdapsPort : DefaultLdapPort;
     const extractedData = this.utils.string.extractHostnameAndPort(
       formData.hostname,
-      Number(formData.port) || DefaultLdapPort,
+      Number(formData.port) || defaultPort,
     );
     const gatewayAddress = new URL(JET_AD_URL, window.location.href).href;
 

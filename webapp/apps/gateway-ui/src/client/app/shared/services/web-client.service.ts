@@ -98,7 +98,7 @@ export class WebClientService extends BaseComponent {
   ): string {
     if (protocol === Protocol.ActiveDirectory) {
       if (!isActiveDirectoryConnectionParameters(connectionParameters)) {
-        console.error('invalid active directory connection settings', connectionParameters);
+        console.error('invalid active directory connection settings');
 
         const error = new Error('errConnectionFailed') as Error & { code: string };
         error.code = 'errConnectionFailed';
