@@ -41,9 +41,7 @@ export class ActiveDirectoryUiService implements AdUi, OnDestroy {
   }
 
   clearToast(key?: string): void {
-    if (key) {
-      this.messageService.clear(this.resolveToastKey(key));
-    }
+    this.messageService.clear(this.resolveToastKey(key));
   }
 
   confirm(input: AdUiConfirmOptions): void {
