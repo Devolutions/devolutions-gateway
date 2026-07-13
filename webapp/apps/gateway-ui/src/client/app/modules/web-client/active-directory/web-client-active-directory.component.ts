@@ -68,6 +68,7 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
   private activeDirectoryHandle: ActiveDirectoryMainHandle | null = null;
   private activeDirectoryEventsSubscription: Subscription | null = null;
   private renderActiveDirectoryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private activeDirectoryForwardingSessionId: string | null = null;
 
   constructor(
     protected gatewayAlertMessageService: GatewayAlertMessageService,
@@ -84,6 +85,8 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
   }
 
   ngAfterViewInit(): void {
+    this.activeDirectoryUiService.setOverlayKeySuffix(this.webSessionId);
+
     this.renderActiveDirectoryTimeout = setTimeout(() => {
       this.renderActiveDirectory = true;
       this.renderActiveDirectoryTimeout = null;
@@ -98,14 +101,37 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
 
     this.activeDirectoryEventsSubscription?.unsubscribe();
 
-    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
-      this.activeDirectoryHandle?.close();
-      this.webClientConnectionClosed();
+    if (this.activeDirectoryHandle && !this.currentStatus.isDisabled) {
+      const wasInitialized = this.currentStatus.isInitialized;
+      this.closeActiveDirectoryHandle();
+
+      if (wasInitialized) {
+        this.currentStatus.isInitialized = false;
+        this.webClientConnectionClosed();
+      }
     }
 
-    this.activeDirectorySessionManager.clearWebSessionConfig(this.webSessionId);
+    if (this.activeDirectoryForwardingSessionId) {
+      this.activeDirectorySessionManager.clearWebSessionConfig(this.activeDirectoryForwardingSessionId);
+      this.activeDirectoryForwardingSessionId = null;
+    }
 
     super.ngOnDestroy();
+  }
+
+  private closeActiveDirectoryHandle(): void {
+    if (this.activeDirectoryHandle) {
+      this.activeDirectoryHandle.close();
+      this.activeDirectoryHandle = null;
+    }
+  }
+
+  get confirmDialogKey(): string {
+    return this.activeDirectoryUiService.confirmKey;
+  }
+
+  get toastKey(): string {
+    return this.activeDirectoryUiService.toastKey;
   }
 
   onMainReady(handle: ActiveDirectoryMainHandle): void {
@@ -122,12 +148,13 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
   }
 
   sendTerminateSessionCmd(): void {
-    if (!this.activeDirectoryHandle || !this.currentStatus.isInitialized) {
+    if (!this.activeDirectoryHandle) {
       return;
     }
 
     this.currentStatus.isInitialized = false;
-    this.activeDirectoryHandle.close();
+
+    this.closeActiveDirectoryHandle();
   }
 
   private startConnectionProcess(): void {
@@ -168,6 +195,7 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
 
   private fetchParameters(formData: ActiveDirectoryFormDataInput): Observable<ActiveDirectoryConnectionParameters> {
     const sessionId = uuidv4();
+    this.activeDirectoryForwardingSessionId = sessionId;
     const defaultPort = formData.useLdaps ? DefaultLdapsPort : DefaultLdapPort;
     const extractedData = this.utils.string.extractHostnameAndPort(
       formData.hostname,

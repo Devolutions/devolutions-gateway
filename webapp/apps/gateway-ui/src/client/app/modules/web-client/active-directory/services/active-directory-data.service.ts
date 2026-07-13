@@ -423,10 +423,26 @@ export class ActiveDirectoryDataService implements AdDataProvider {
     domain: string | undefined,
     serverComputerName: string,
   ): { domain: string | undefined; serverComputerName: string } {
-    if (domain) {
+    const trimmedDomain = domain?.trim();
+
+    if (trimmedDomain) {
+      if (this.isDnsQualifiedName(serverComputerName) || !this.isDnsSuffix(trimmedDomain)) {
+        return {
+          domain: trimmedDomain,
+          serverComputerName,
+        };
+      }
+
       return {
-        domain,
-        serverComputerName: `${serverComputerName.replace(`.${domain}`, '')}.${domain}`,
+        domain: trimmedDomain,
+        serverComputerName: `${serverComputerName}.${trimmedDomain}`,
+      };
+    }
+
+    if (this.isIpLiteral(serverComputerName)) {
+      return {
+        domain: undefined,
+        serverComputerName,
       };
     }
 
@@ -436,5 +452,33 @@ export class ActiveDirectoryDataService implements AdDataProvider {
       domain: parts.length > 1 ? parts.slice(1).join('.') : undefined,
       serverComputerName,
     };
+  }
+
+  private isDnsQualifiedName(serverComputerName: string): boolean {
+    return !this.isIpLiteral(serverComputerName) && serverComputerName.includes('.');
+  }
+
+  private isDnsSuffix(domain: string): boolean {
+    return domain.includes('.');
+  }
+
+  private isIpLiteral(hostname: string): boolean {
+    return this.isIpv4Literal(hostname) || hostname.includes(':');
+  }
+
+  private isIpv4Literal(hostname: string): boolean {
+    const parts = hostname.split('.');
+
+    return (
+      parts.length === 4 &&
+      parts.every((part) => {
+        if (!/^\d+$/.test(part)) {
+          return false;
+        }
+
+        const value = Number(part);
+        return value >= 0 && value <= 255;
+      })
+    );
   }
 }

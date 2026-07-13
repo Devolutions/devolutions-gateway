@@ -18,6 +18,7 @@ import { BaseSessionComponent, SessionType, WebSession } from '@shared/models/we
 import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';
+import { DefaultLdapPort, DefaultLdapsPort } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import type { ToastMessageOptions } from 'primeng/api';
 import { EMPTY, forkJoin, Observable, of } from 'rxjs';
@@ -305,10 +306,31 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
         hostname: entry.ip,
       });
 
+      this.applyNetScanActiveDirectoryDefaults(entry);
+
       const protocol = this.connectSessionForm.get('protocol');
       if (protocol && protocol.value !== entry.protocol) {
         protocol.setValue(entry.protocol);
       }
     });
+  }
+
+  private applyNetScanActiveDirectoryDefaults(entry: NetScanEntry): void {
+    if (entry.protocol !== Protocol.ActiveDirectory) {
+      return;
+    }
+
+    const useLdaps = entry.serviceProtocol === 'ldaps';
+    const port = useLdaps ? DefaultLdapsPort : DefaultLdapPort;
+    const inputFormData =
+      typeof this.inputFormData === 'object' && this.inputFormData !== null ? this.inputFormData : {};
+
+    this.inputFormData = {
+      ...inputFormData,
+      port,
+      useLdaps,
+    };
+    this.connectSessionForm.get('useLdaps')?.setValue(useLdaps);
+    this.connectSessionForm.get('port')?.setValue(port);
   }
 }

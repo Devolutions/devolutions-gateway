@@ -14,7 +14,7 @@
 </div>
 
 <p-confirmDialog
-  key="adc-confirm-dialog"
+  [key]="confirmDialogKey"
   appendTo="body"
   styleClass="ad-dvls-confirm-dialog"
   maskStyleClass="ad-dvls-confirm-mask"
@@ -24,7 +24,7 @@
 ></p-confirmDialog>
 
 <p-toast
-  key="adc-toast"
+  [key]="toastKey"
   position="top-right"
   styleClass="ad-dvl-toast"
   [baseZIndex]="10050"

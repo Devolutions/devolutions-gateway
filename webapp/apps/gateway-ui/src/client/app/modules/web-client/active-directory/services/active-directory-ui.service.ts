@@ -1,14 +1,22 @@
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
 import { AdUi, AdUiConfirmOptions, AdUiToastOptions } from '@devolutions/web-active-directory-gui';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { ActiveDirectoryTranslatorService } from './active-directory-translator.service';
 
 const AD_CONFIRM_KEY = 'adc-confirm-dialog';
 const AD_TOAST_KEY = 'adc-toast';
+let nextOverlayId = 0;
 
 @Injectable()
-export class ActiveDirectoryUiService implements AdUi {
+export class ActiveDirectoryUiService implements AdUi, OnDestroy {
+  private static globalLoadingCount = 0;
+  private static previousCursor: string | null = null;
+
+  private readonly fallbackOverlayId = ++nextOverlayId;
   private loadingCount = 0;
+
+  confirmKey = `${AD_CONFIRM_KEY}-${this.fallbackOverlayId}`;
+  toastKey = `${AD_TOAST_KEY}-${this.fallbackOverlayId}`;
 
   constructor(
     private readonly confirmationService: ConfirmationService,
@@ -16,9 +24,14 @@ export class ActiveDirectoryUiService implements AdUi {
     private readonly translator: ActiveDirectoryTranslatorService,
   ) {}
 
+  setOverlayKeySuffix(suffix: string): void {
+    this.confirmKey = `${AD_CONFIRM_KEY}-${suffix}`;
+    this.toastKey = `${AD_TOAST_KEY}-${suffix}`;
+  }
+
   toast(input: AdUiToastOptions): void {
     this.messageService.add({
-      key: input.key ?? AD_TOAST_KEY,
+      key: this.resolveToastKey(input.key),
       severity: input.severity,
       summary: input.summary,
       detail: input.detail,
@@ -28,12 +41,14 @@ export class ActiveDirectoryUiService implements AdUi {
   }
 
   clearToast(key?: string): void {
-    this.messageService.clear(key);
+    if (key) {
+      this.messageService.clear(this.resolveToastKey(key));
+    }
   }
 
   confirm(input: AdUiConfirmOptions): void {
     this.confirmationService.confirm({
-      key: input.key ?? AD_CONFIRM_KEY,
+      key: this.resolveConfirmKey(input.key),
       header: this.translator.translate('lblConfirm'),
       message: input.message,
       acceptLabel: input.acceptLabel ?? this.translator.translate('lblYes'),
@@ -45,16 +60,45 @@ export class ActiveDirectoryUiService implements AdUi {
     });
   }
 
+  private resolveConfirmKey(key?: string): string {
+    return !key || key === AD_CONFIRM_KEY ? this.confirmKey : key;
+  }
+
+  private resolveToastKey(key?: string): string {
+    return !key || key === AD_TOAST_KEY ? this.toastKey : key;
+  }
+
   showLoading(): void {
+    if (ActiveDirectoryUiService.globalLoadingCount === 0) {
+      ActiveDirectoryUiService.previousCursor = document.body.style.cursor;
+    }
+
     this.loadingCount++;
+    ActiveDirectoryUiService.globalLoadingCount++;
     document.body.style.cursor = 'wait';
   }
 
   hideLoading(): void {
-    this.loadingCount = Math.max(0, this.loadingCount - 1);
+    this.releaseLoading();
+  }
 
+  ngOnDestroy(): void {
+    while (this.loadingCount > 0) {
+      this.releaseLoading();
+    }
+  }
+
+  private releaseLoading(): void {
     if (this.loadingCount === 0) {
-      document.body.style.cursor = 'default';
+      return;
+    }
+
+    this.loadingCount--;
+    ActiveDirectoryUiService.globalLoadingCount = Math.max(0, ActiveDirectoryUiService.globalLoadingCount - 1);
+
+    if (ActiveDirectoryUiService.globalLoadingCount === 0) {
+      document.body.style.cursor = ActiveDirectoryUiService.previousCursor ?? '';
+      ActiveDirectoryUiService.previousCursor = null;
     }
   }
 

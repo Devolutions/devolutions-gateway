@@ -9,6 +9,7 @@ export type NetScanEntry = {
   ip: string;
   hostname: string;
   protocol: Protocol;
+  serviceProtocol: keyof typeof ProtocolNameToProtocolMap;
   icon: () => string;
 };
 
@@ -91,7 +92,8 @@ export class NetScanService {
       protocol: string;
     } = JSON.parse(event.data);
 
-    const protocol = ProtocolNameToProtocolMap[entry.protocol];
+    const serviceProtocol = entry.protocol.toLowerCase() as keyof typeof ProtocolNameToProtocolMap;
+    const protocol = ProtocolNameToProtocolMap[serviceProtocol];
     // We don't yet support this protocol
     if (!protocol) {
       return;
@@ -101,6 +103,7 @@ export class NetScanService {
       ip: entry.ip,
       hostname: entry.hostname,
       protocol: protocol,
+      serviceProtocol,
     };
 
     if (this.serviceCache.has(JSON.stringify(value))) {
