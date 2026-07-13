@@ -1,21 +1,81 @@
+use std::time::Duration;
+
 use anyhow::Context;
 use now_proto_pdu::NowMessage;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::utils::Pipe;
 use win_api_wrappers::wts::WtsVirtualChannel;
-use windows::Win32::Foundation::{ERROR_IO_PENDING, GetLastError, WAIT_EVENT, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{
+    ERROR_GEN_FAILURE, ERROR_IO_PENDING, GetLastError, HANDLE, WAIT_EVENT, WAIT_OBJECT_0,
+};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::RemoteDesktop::CHANNEL_PDU_HEADER;
-use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects};
+use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects, WaitForSingleObject};
+use windows::core::Owned;
 
 use crate::dvc::channel::WinapiSignaledReceiver;
 use crate::dvc::now_message_dissector::NowMessageDissector;
 
 const DVC_CHANNEL_NAME: &str = "Devolutions::Now::Agent";
+const DVC_RETRY_DELAYS: [Duration; 5] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+];
+const WAIT_TIMEOUT: WAIT_EVENT = WAIT_EVENT(258);
+
+#[derive(Debug, Clone, Copy)]
+enum DvcInitializationStage {
+    Open,
+    QueryFileHandle,
+    StartRead,
+}
+
+impl std::fmt::Display for DvcInitializationStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Open => f.write_str("opening the DVC channel"),
+            Self::QueryFileHandle => f.write_str("querying the DVC file handle"),
+            Self::StartRead => f.write_str("starting the initial DVC read"),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DvcInitializationError {
+    stage: DvcInitializationStage,
+    error: anyhow::Error,
+}
+
+impl DvcInitializationError {
+    fn is_retryable(&self) -> bool {
+        self.error.chain().any(|source| {
+            source
+                .downcast_ref::<windows::core::Error>()
+                .is_some_and(|error| error.code() == ERROR_GEN_FAILURE.to_hresult())
+        })
+    }
+
+    fn into_anyhow(self) -> anyhow::Error {
+        self.error.context(self.stage.to_string())
+    }
+}
+
+struct DvcIoContext {
+    _wts: WtsVirtualChannel,
+    channel_file: Owned<HANDLE>,
+    pdu_chunk_buffer: Box<[u8]>,
+    overlapped: OVERLAPPED,
+    bytes_read: u32,
+    message_dissector: NowMessageDissector,
+    read_event: Event,
+}
 
 /// Run main DVC IO loop for `Devolutions::Now::Agent` channel.
 pub fn run_dvc_io(
@@ -23,34 +83,19 @@ pub fn run_dvc_io(
     read_tx: Sender<NowMessage<'static>>,
     stop_event: Event,
 ) -> Result<(), anyhow::Error> {
-    trace!("Opening DVC channel");
-    let wts = WtsVirtualChannel::open_dvc(DVC_CHANNEL_NAME)?;
-
-    trace!("Querying DVC channel");
-    let channel_file = wts.query_file_handle()?;
-
-    trace!("DVC channel opened");
-
-    // All DVC messages should be under CHANNEL_CHUNK_LENGTH size, but sometimes RDP stack
-    // sends a few messages together; 128Kb buffer should be enough to hold a few dozen messages.
-    let mut pdu_chunk_buffer = [0u8; 128 * 1024];
-    let mut overlapped = OVERLAPPED::default();
-    let mut bytes_read: u32 = 0;
-
-    let mut message_dissector = NowMessageDissector::default();
-
-    let read_event = Event::new_unnamed()?;
-    overlapped.hEvent = read_event.raw();
-
-    info!("DVC IO thread is running");
-
-    // Prepare async read operation.
-    // SAFETY: Both `channel_file` and event passed to `overlapped` are valid during this call,
-    // therefore it is safe to call.
-    let read_result: Result<(), windows::core::Error> =
-        unsafe { ReadFile(*channel_file, Some(&mut pdu_chunk_buffer), None, Some(&mut overlapped)) };
-
-    ensure_overlapped_io_result(read_result)?;
+    let Some(DvcIoContext {
+        _wts,
+        channel_file,
+        mut pdu_chunk_buffer,
+        mut overlapped,
+        mut bytes_read,
+        mut message_dissector,
+        read_event,
+    }) = initialize_dvc_with_retry(&stop_event)?
+    else {
+        info!("DVC IO thread stopped during initialization");
+        return Ok(());
+    };
 
     loop {
         let events = [read_event.raw(), write_rx.raw_wait_handle(), stop_event.raw()];
@@ -144,6 +189,104 @@ pub fn run_dvc_io(
     }
 }
 
+fn initialize_dvc_with_retry(stop_event: &Event) -> anyhow::Result<Option<DvcIoContext>> {
+    let mut attempt = 1usize;
+
+    loop {
+        match initialize_dvc() {
+            Ok(context) => {
+                info!(attempt, "DVC IO thread is running");
+                return Ok(Some(context));
+            }
+            Err(error) if error.is_retryable() => {
+                let Some(delay) = dvc_retry_delay(attempt - 1) else {
+                    return Err(error.into_anyhow());
+                };
+
+                warn!(
+                    attempt,
+                    stage = %error.stage,
+                    error = %error.error,
+                    retry_delay_ms = delay.as_millis(),
+                    "Transient DVC initialization failure; retrying"
+                );
+
+                if !wait_for_retry_delay(stop_event, delay)? {
+                    return Ok(None);
+                }
+
+                attempt += 1;
+            }
+            Err(error) => return Err(error.into_anyhow()),
+        }
+    }
+}
+
+fn initialize_dvc() -> Result<DvcIoContext, DvcInitializationError> {
+    trace!("Opening DVC channel");
+    let wts = WtsVirtualChannel::open_dvc(DVC_CHANNEL_NAME).map_err(|error| DvcInitializationError {
+        stage: DvcInitializationStage::Open,
+        error,
+    })?;
+
+    trace!("Querying DVC channel");
+    let channel_file = wts.query_file_handle().map_err(|error| DvcInitializationError {
+        stage: DvcInitializationStage::QueryFileHandle,
+        error,
+    })?;
+
+    // All DVC messages should be under CHANNEL_CHUNK_LENGTH size, but sometimes RDP stack
+    // sends a few messages together; 128Kb buffer should be enough to hold a few dozen messages.
+    let mut pdu_chunk_buffer = vec![0u8; 128 * 1024].into_boxed_slice();
+    let read_event = Event::new_unnamed().map_err(|error| DvcInitializationError {
+        stage: DvcInitializationStage::StartRead,
+        error,
+    })?;
+    let mut overlapped = OVERLAPPED {
+        hEvent: read_event.raw(),
+        ..Default::default()
+    };
+
+    // Prepare async read operation.
+    // SAFETY: Both `channel_file` and event passed to `overlapped` are valid during this call,
+    // therefore it is safe to call.
+    let read_result: Result<(), windows::core::Error> =
+        unsafe { ReadFile(*channel_file, Some(&mut pdu_chunk_buffer), None, Some(&mut overlapped)) };
+    ensure_overlapped_io_result(read_result).map_err(|error| DvcInitializationError {
+        stage: DvcInitializationStage::StartRead,
+        error: error.into(),
+    })?;
+
+    trace!("DVC channel opened");
+
+    Ok(DvcIoContext {
+        _wts: wts,
+        channel_file,
+        pdu_chunk_buffer,
+        overlapped,
+        bytes_read: 0,
+        message_dissector: NowMessageDissector::default(),
+        read_event,
+    })
+}
+
+fn dvc_retry_delay(retry: usize) -> Option<Duration> {
+    DVC_RETRY_DELAYS.get(retry).copied()
+}
+
+fn wait_for_retry_delay(stop_event: &Event, delay: Duration) -> anyhow::Result<bool> {
+    let timeout = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
+
+    // SAFETY: stop_event is a valid event handle for the lifetime of this call.
+    let status = unsafe { WaitForSingleObject(stop_event.raw(), timeout) };
+
+    match status {
+        WAIT_OBJECT_0 => Ok(false),
+        WAIT_TIMEOUT => Ok(true),
+        _ => anyhow::bail!("waiting for DVC retry delay failed with status {}", status.0),
+    }
+}
+
 pub fn ensure_overlapped_io_result(result: windows::core::Result<()>) -> Result<(), windows::core::Error> {
     if let Err(error) = result {
         // SAFETY: GetLastError is alwayі safe to call
@@ -180,5 +323,19 @@ impl IoRedirectionPipes {
             stdin_read_pipe,
             stdin_write_pipe,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::dvc_retry_delay;
+
+    #[test]
+    fn dvc_retry_delays_are_bounded() {
+        assert_eq!(dvc_retry_delay(0), Some(Duration::from_millis(250)));
+        assert_eq!(dvc_retry_delay(4), Some(Duration::from_secs(4)));
+        assert_eq!(dvc_retry_delay(5), None);
     }
 }
