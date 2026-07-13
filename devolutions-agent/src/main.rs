@@ -276,23 +276,30 @@ fn main() {
                 };
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-                let result = rt.block_on(async {
-                    devolutions_agent::enrollment::enroll_agent(
-                        &command.gateway_url,
-                        &command.enrollment_token,
-                        command.advertise_subnets,
-                    )
-                    .await?;
+                let result = rt.block_on(devolutions_agent::enrollment::enroll_agent(
+                    &command.gateway_url,
+                    &command.enrollment_token,
+                    command.advertise_subnets,
+                ));
 
-                    // Enrollment only proves HTTPS/TCP; fail the install now if the QUIC/UDP tunnel
-                    // path is blocked, while the operator is still here to fix the firewall.
+                if let Err(error) = result {
+                    eprintln!("[ERROR] Enrollment failed: {error:#}");
+                    std::process::exit(1);
+                }
+            }
+            "probe" => {
+                // Enrollment only proves the HTTPS/TCP path; this probes the QUIC/UDP tunnel path
+                // separately so it can be run as a standalone diagnostic (and so the installer can
+                // fail the install while the operator is still here to fix the firewall).
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                let result = rt.block_on(async {
                     let conf = ConfHandle::init().context("load agent configuration for connectivity probe")?;
                     devolutions_agent::tunnel::probe_connectivity(&conf.get_conf().tunnel, Duration::from_secs(15))
                         .await
                 });
 
                 if let Err(error) = result {
-                    eprintln!("[ERROR] Bootstrap failed: {error:#}");
+                    eprintln!("[ERROR] Connectivity probe failed: {error:#}");
                     std::process::exit(1);
                 }
             }

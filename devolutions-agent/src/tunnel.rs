@@ -451,23 +451,85 @@ async fn connect_to_gateway(
     Ok((endpoint, connection))
 }
 
-/// Confirm the QUIC/UDP path to the gateway is open by completing one mTLS+QUIC handshake within
-/// `timeout`, then draining the connection (a best-effort teardown that adds up to ~3s).
+/// Reachability probe: confirm the gateway's QUIC/UDP endpoint answers within `timeout`.
+///
+/// This deliberately does NOT complete a QUIC/mTLS handshake. A real handshake would register
+/// this agent's connection on the gateway (keyed by the enrolled `agent_id`) and, on close,
+/// unregister it — so a probe run against a machine whose service tunnel is live would evict the
+/// real connection. Instead we send a QUIC long-header packet carrying an unsupported version and
+/// wait for the gateway to reply with a Version Negotiation packet. That reply proves UDP/4433
+/// reaches the gateway while creating zero connection state on it, and needs no client cert.
 pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout: Duration) -> anyhow::Result<()> {
     if !tunnel_conf.enabled {
         bail!("agent tunnel is not enabled");
     }
 
-    let (endpoint, connection) = tokio::time::timeout(timeout, connect_to_gateway(tunnel_conf))
+    // The whole probe — DNS resolution, socket setup, and the retransmit loop — is bounded by
+    // `timeout`, so a stalled resolver or a black-holed path can't hang past it.
+    match tokio::time::timeout(timeout, reach_gateway(tunnel_conf)).await {
+        Ok(result) => result,
+        Err(_elapsed) => bail!("gateway QUIC endpoint did not respond within {timeout:?}"),
+    }
+}
+
+async fn reach_gateway(tunnel_conf: &crate::config::TunnelConf) -> anyhow::Result<()> {
+    let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
         .await
-        .context("tunnel connectivity probe timed out")??;
+        .context("failed to resolve gateway endpoint")?
+        .next()
+        .context("no addresses resolved for gateway endpoint")?;
 
-    // Flush the CONNECTION_CLOSE so the gateway unregisters this probe's connection promptly
-    // (keyed by agent_id) rather than after its idle timeout.
-    connection.close(0u32.into(), b"probe-complete");
-    let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
+    // Match the local bind family to the resolved gateway address (see connect_to_gateway).
+    let bind_addr: SocketAddr = if gateway_addr.is_ipv4() {
+        (Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (Ipv6Addr::UNSPECIFIED, 0).into()
+    };
 
-    Ok(())
+    let socket = tokio::net::UdpSocket::bind(bind_addr)
+        .await
+        .with_context(|| format!("bind probe socket ({bind_addr})"))?;
+    socket
+        .connect(gateway_addr)
+        .await
+        .with_context(|| format!("connect probe socket to {gateway_addr}"))?;
+
+    info!(gateway_addr = %gateway_addr, "Probing gateway QUIC reachability");
+
+    let packet = version_negotiation_probe_packet();
+    let mut buf = [0u8; 1500];
+
+    // Retransmit until we get a reply (the caller's timeout cancels us otherwise) — UDP can drop the
+    // probe, and on some platforms a prior ICMP "port unreachable" surfaces here as a recv error.
+    loop {
+        let next_attempt_at = tokio::time::Instant::now() + Duration::from_millis(100);
+
+        let _ = socket.send(&packet).await;
+
+        match tokio::time::timeout(Duration::from_millis(100), socket.recv(&mut buf)).await {
+            Ok(Ok(n)) if n > 0 => {
+                info!("Gateway QUIC endpoint is reachable");
+                return Ok(());
+            }
+            // A fast recv error must not turn the retransmit into a tight resend flood — hold off
+            // until the next interval before trying again.
+            _ => tokio::time::sleep_until(next_attempt_at).await,
+        }
+    }
+}
+
+/// A QUIC long-header packet whose version (`0x1a2a3a4a`) is reserved to always trigger Version
+/// Negotiation (RFC 9000 §15), padded to the 1200-byte minimum so the server won't drop it. Any
+/// reply to it proves the path is open without establishing a connection.
+fn version_negotiation_probe_packet() -> Vec<u8> {
+    let mut packet = Vec::with_capacity(1200);
+    packet.push(0xC0); // long header + fixed bit
+    packet.extend_from_slice(&[0x1a, 0x2a, 0x3a, 0x4a]); // force-VN version
+    packet.push(8); // Destination Connection ID length
+    packet.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe]);
+    packet.push(0); // Source Connection ID length
+    packet.resize(1200, 0);
+    packet
 }
 
 // ---------------------------------------------------------------------------
@@ -694,7 +756,7 @@ mod tests {
         let mut conf = tunnel_conf_template();
         conf.enabled = false;
 
-        let error = probe_connectivity(&conf, Duration::from_secs(5))
+        let error = probe_connectivity(&conf, Duration::from_millis(200))
             .await
             .expect_err("probe must fail when the tunnel is disabled");
 
@@ -706,29 +768,24 @@ mod tests {
 
     #[tokio::test]
     async fn probe_times_out_when_gateway_unreachable() {
-        // Throwaway PEMs so the pre-connect file reads succeed; nothing listens on the target
-        // port, so the probe fails quickly — via its own timeout or an immediate connect error.
-        let cert_key =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("generate self-signed cert");
-        let dir = tempfile::tempdir().expect("temp dir");
-        let cert_path = dir.path().join("client.crt");
-        let key_path = dir.path().join("client.key");
-        let ca_path = dir.path().join("ca.crt");
-        std::fs::write(&cert_path, cert_key.cert.pem()).expect("write client cert");
-        std::fs::write(&key_path, cert_key.key_pair.serialize_pem()).expect("write client key");
-        std::fs::write(&ca_path, cert_key.cert.pem()).expect("write ca cert");
+        // Bind a local UDP socket and never read/answer it: the port is definitely ours (no flaky
+        // assumption about a fixed port being free) and it silently black-holes the probe packets,
+        // so the probe never gets a reply and must time out.
+        let blackhole = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind blackhole socket");
+        let blackhole_addr = blackhole.local_addr().expect("blackhole addr");
 
         let mut conf = tunnel_conf_template();
-        // 127.0.0.1:1 is reserved and unbound; the QUIC handshake cannot complete.
-        conf.gateway_endpoint = "127.0.0.1:1".to_owned();
-        conf.client_cert_path = Utf8PathBuf::from_path_buf(cert_path).expect("utf8 cert path");
-        conf.client_key_path = Utf8PathBuf::from_path_buf(key_path).expect("utf8 key path");
-        conf.gateway_ca_cert_path = Utf8PathBuf::from_path_buf(ca_path).expect("utf8 ca path");
+        conf.gateway_endpoint = blackhole_addr.to_string();
 
         let started = std::time::Instant::now();
-        let result = probe_connectivity(&conf, Duration::from_secs(2)).await;
+        let result = probe_connectivity(&conf, Duration::from_millis(300)).await;
 
         assert!(result.is_err(), "probe must fail when the gateway is unreachable");
-        assert!(started.elapsed() < Duration::from_secs(15), "probe must fail fast");
+        // The real runtime is ~300ms; the 5s ceiling only has to stay well under quinn's ~120s idle
+        // so it catches a "probe hangs instead of timing out" regression without flaking on a loaded
+        // runner where the timer fires late.
+        assert!(started.elapsed() < Duration::from_secs(5), "probe must fail fast");
     }
 }
