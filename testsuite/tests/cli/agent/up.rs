@@ -45,7 +45,7 @@ fn up_enrollment_string_from_stdin() {
         "argument parsing should succeed; stderr was: {stderr}"
     );
     assert!(
-        stderr.contains("Bootstrap failed"),
+        stderr.contains("Enrollment failed"),
         "should fail at enrollment, not parsing; stderr was: {stderr}"
     );
 }
@@ -118,7 +118,7 @@ async fn up_enrollment_against_real_gateway() {
 
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     assert!(
-        !stderr.contains("Bootstrap failed"),
+        !stderr.contains("Enrollment failed"),
         "enrollment should succeed; stderr was: {stderr}"
     );
 
