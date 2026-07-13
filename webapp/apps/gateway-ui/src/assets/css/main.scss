@@ -9,6 +9,8 @@
 @use 'dvls-stack/variables.generated' as *;
 @use 'dvls-stack/theme/light-theme' as *;
 @use 'dvls-stack/theme/dark-theme' as *;
+@use '@devolutions/web-active-directory-gui/assets/css/ad-styles' as *;
+@use '../../client/app/styles/ad-theme-bridge.gateway' as *;
 
 @use 'style/base' as *;
 @use 'style/entry-status' as *;
@@ -52,6 +54,16 @@
 .dvl-icon,
 [class*="dvl-icon-"] {
   font-family: 'devolutions-icons' !important;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+}
+
+/* PrimeIcons must always win over generic PrimeNG font overrides. */
+.pi,
+[class^="pi-"],
+[class*=" pi-"] {
+  font-family: 'primeicons' !important;
   font-style: normal;
   font-weight: normal;
   line-height: 1;

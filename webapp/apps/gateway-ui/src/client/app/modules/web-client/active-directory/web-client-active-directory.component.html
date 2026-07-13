@@ -1,0 +1,32 @@
+<div
+  #activeDirectoryContainer
+  class="active-directory-session-container"
+>
+  @if (renderActiveDirectory) {
+    <web-active-directory
+      [sessionContainerParent]="activeDirectoryContainerRef"
+      [renderMain]="renderActiveDirectory"
+      [organizationalUnit]="formData?.organizationalUnit"
+      (mainReady)="onMainReady($event)"
+      (onTerminate)="startTerminationProcess()"
+    ></web-active-directory>
+  }
+</div>
+
+<p-confirmDialog
+  [key]="confirmDialogKey"
+  appendTo="body"
+  styleClass="ad-dvls-confirm-dialog"
+  maskStyleClass="ad-dvls-confirm-mask"
+  [baseZIndex]="10000"
+  acceptButtonStyleClass="p-button-sm"
+  rejectButtonStyleClass="p-button-sm p-button-text"
+></p-confirmDialog>
+
+<p-toast
+  [key]="toastKey"
+  position="top-right"
+  styleClass="ad-dvl-toast"
+  [baseZIndex]="10050"
+  [preventOpenDuplicates]="true"
+></p-toast>

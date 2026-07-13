@@ -4,9 +4,11 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import {
+  ActiveDirectoryConnectionParameters,
   IronARDConnectionParameters,
   IronRDPConnectionParameters,
   IronVNCConnectionParameters,
+  isActiveDirectoryConnectionParameters,
   SessionTokenParameters,
   SshConnectionParameters,
   TelnetConnectionParameters,
@@ -28,6 +30,8 @@ export const DefaultSshPort: number = 22;
 export const DefaultTelnetPort: number = 23;
 export const DefaultVncPort: number = 5900;
 export const DefaultArdPort: number = 5900;
+export const DefaultLdapPort: number = 389;
+export const DefaultLdapsPort: number = 636;
 
 @Injectable()
 export class WebClientService extends BaseComponent {
@@ -75,9 +79,36 @@ export class WebClientService extends BaseComponent {
         return DefaultVncPort;
       case Protocol.ARD:
         return DefaultArdPort;
+      case Protocol.ActiveDirectory:
+        return DefaultLdapPort;
       default:
         throw new Error(`Getting default port, unsupported protocol: ${protocol}`);
     }
+  }
+
+  private getApplicationProtocol(
+    protocol: Protocol,
+    connectionParameters:
+      | TelnetConnectionParameters
+      | SshConnectionParameters
+      | IronRDPConnectionParameters
+      | IronVNCConnectionParameters
+      | IronARDConnectionParameters
+      | ActiveDirectoryConnectionParameters,
+  ): string {
+    if (protocol === Protocol.ActiveDirectory) {
+      if (!isActiveDirectoryConnectionParameters(connectionParameters)) {
+        console.error('invalid active directory connection settings');
+
+        const error = new Error('errConnectionFailed') as Error & { code: string };
+        error.code = 'errConnectionFailed';
+        throw error;
+      }
+
+      return connectionParameters.useLdaps ? 'ldaps' : 'ldap';
+    }
+
+    return WebClientProtocol.getEnumKey(protocol).toLowerCase();
   }
 
   private handleProtocolTokenRequest<
@@ -86,7 +117,8 @@ export class WebClientService extends BaseComponent {
       | SshConnectionParameters
       | IronRDPConnectionParameters
       | IronVNCConnectionParameters
-      | IronARDConnectionParameters,
+      | IronARDConnectionParameters
+      | ActiveDirectoryConnectionParameters,
   >(protocol: Protocol, connectionParameters: T): Observable<T> {
     return this.generateProtocolToken(protocol, connectionParameters).pipe(
       takeUntil(this.destroyed$),
@@ -102,20 +134,22 @@ export class WebClientService extends BaseComponent {
       | SshConnectionParameters
       | IronRDPConnectionParameters
       | IronVNCConnectionParameters
-      | IronARDConnectionParameters,
+      | IronARDConnectionParameters
+      | ActiveDirectoryConnectionParameters,
   ): Observable<
     | TelnetConnectionParameters
     | SshConnectionParameters
     | IronRDPConnectionParameters
     | IronVNCConnectionParameters
     | IronARDConnectionParameters
+    | ActiveDirectoryConnectionParameters
   > {
-    const protocolStr: string = WebClientProtocol.getEnumKey(protocol).toLowerCase();
+    const protocolStr: string = this.getApplicationProtocol(protocol, connectionParameters);
 
     const data: SessionTokenParameters = {
       content_type: 'ASSOCIATION',
       protocol: protocolStr,
-      destination: `tcp://${connectionParameters.host}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
+      destination: `tcp://${this.formatDestinationHost(connectionParameters.host)}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
       lifetime: 60,
       session_id: connectionParameters.sessionId || uuidv4(),
     };
@@ -129,6 +163,12 @@ export class WebClientService extends BaseComponent {
         return throwError(() => new Error('Failed to fetch protocol token'));
       }),
     );
+  }
+
+  private formatDestinationHost(host: string): string {
+    const normalizedHost = host.replace(/^\[|\]$/g, '');
+
+    return normalizedHost.includes(':') ? `[${normalizedHost}]` : normalizedHost;
   }
 
   fetchTelnetToken(connectionParameters: TelnetConnectionParameters): Observable<TelnetConnectionParameters> {
@@ -149,6 +189,12 @@ export class WebClientService extends BaseComponent {
 
   fetchArdToken(connectionParameters: IronARDConnectionParameters): Observable<IronARDConnectionParameters> {
     return this.handleProtocolTokenRequest(Protocol.ARD, connectionParameters);
+  }
+
+  fetchActiveDirectoryToken(
+    connectionParameters: ActiveDirectoryConnectionParameters,
+  ): Observable<ActiveDirectoryConnectionParameters> {
+    return this.handleProtocolTokenRequest(Protocol.ActiveDirectory, connectionParameters);
   }
 
   fetchNetScanToken(): Observable<string> {

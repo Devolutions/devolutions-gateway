@@ -2,8 +2,10 @@ import { NgOptimizedImage } from '@angular/common';
 import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
+import { WebActiveDirectoryComponent } from '@devolutions/web-active-directory-gui';
 import { ArdToolbarWrapperComponent } from '@gateway/modules/web-client/ard/ard-toolbar-wrapper.component';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
+import { ActiveDirectoryFormComponent } from '@gateway/modules/web-client/form/form-components/active-directory/active-directory-form.component';
 import { ArdFormComponent } from '@gateway/modules/web-client/form/form-components/ard/ard-form.component';
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
 import { SshFormComponent } from '@gateway/modules/web-client/form/form-components/ssh/ssh-form.component';
@@ -31,6 +33,7 @@ import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
+import { WebClientActiveDirectoryComponent } from './active-directory/web-client-active-directory.component';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 import { AutoClipboardControlComponent } from './form/form-controls/auto-clipboard-control/auto-clipboard-control.component';
 import { ColorFormatControlComponent } from './form/form-controls/color-format-control/color-format-control.component';
@@ -72,6 +75,7 @@ const routes: Routes = [
     ArdToolbarWrapperComponent,
     RdpToolbarWrapperComponent,
     VncToolbarWrapperComponent,
+    WebActiveDirectoryComponent,
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   declarations: [
@@ -82,11 +86,13 @@ const routes: Routes = [
     WebClientTelnetComponent,
     WebClientSshComponent,
     WebClientArdComponent,
+    WebClientActiveDirectoryComponent,
     WebClientFormComponent,
     RdpFormComponent,
     SshFormComponent,
     VncFormComponent,
     ArdFormComponent,
+    ActiveDirectoryFormComponent,
     UsernameControlComponent,
     PasswordControlComponent,
     ExtendedClipboardControlComponent,
@@ -114,7 +120,6 @@ const routes: Routes = [
     NetScanComponent,
   ],
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
-  providers: [],
 })
 export class WebClientModule {
   constructor(webSessionService: WebSessionService) {
@@ -124,6 +129,7 @@ export class WebClientModule {
       [Protocol.SSH]: WebClientSshComponent,
       [Protocol.VNC]: WebClientVncComponent,
       [Protocol.ARD]: WebClientArdComponent,
+      [Protocol.ActiveDirectory]: WebClientActiveDirectoryComponent,
     });
   }
 }

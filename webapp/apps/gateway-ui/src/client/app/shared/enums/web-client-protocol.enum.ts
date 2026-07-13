@@ -6,6 +6,7 @@ export enum Protocol {
   SSH = 2,
   VNC = 3,
   ARD = 4,
+  ActiveDirectory = 5,
 }
 
 enum Tooltips {
@@ -14,11 +15,16 @@ enum Tooltips {
   'Secure Shell' = 'SSH',
   'Virtual Network Computing' = 'VNC',
   'Apple Remote Desktop' = 'ARD',
+  'Active Directory' = 'ActiveDirectory',
 }
 
 export type ProtocolControlMap = { [key in Protocol]?: string[] };
 
 namespace WebClientProtocol {
+  const DisplayNames: Partial<Record<keyof typeof Protocol, string>> = {
+    ActiveDirectory: 'Active Directory',
+  };
+
   export function getEnumKey(value: Protocol): string {
     return Protocol[value];
   }
@@ -33,7 +39,7 @@ namespace WebClientProtocol {
     return Object.keys(Protocol)
       .filter((key) => Number.isNaN(Number(key)) && typeof Protocol[key] === 'number')
       .map((key) => {
-        const label: string = key;
+        const label: string = DisplayNames[key as keyof typeof Protocol] ?? key;
         const value: Protocol = Protocol[key as keyof typeof Protocol];
         const tooltipText = tooltipsLookup[key] || '';
 
@@ -55,6 +61,10 @@ namespace WebClientProtocol {
 
   export function isProtocolArd(protocol: Protocol): boolean {
     return protocol === Protocol.ARD;
+  }
+
+  export function isProtocolActiveDirectory(protocol: Protocol): boolean {
+    return protocol === Protocol.ActiveDirectory;
   }
 }
 export { WebClientProtocol };

@@ -1,0 +1,254 @@
+:where(
+  [data-ad-theme-bridge],
+  .ad-bitlocker-search,
+  .ad-dvls-confirm-dialog,
+  .ad-entry-properties-modal,
+  .ad-new-group-modal,
+  .ad-new-user-modal,
+  .ad-update-password-modal,
+  .edit-boolean-dialog,
+  .edit-list-dialog,
+  .edit-number-dialog,
+  .edit-string-dialog,
+  .new-members-dialog
+) {
+  --ad-color-primary: var(--blue-primary);
+  --ad-on-primary: #fff;
+  --ad-text-primary: var(--text-color-primary);
+  --ad-text-secondary: var(--text-color-secondary);
+  --ad-text-disabled: var(--grey-600);
+  --ad-border: var(--border-secondary-color);
+  --ad-border-color: var(--border-secondary-color);
+  --ad-input-border: var(--input-border-color);
+  --ad-bg: var(--connection-view-default-background-color);
+  --ad-bg-muted: var(--background-secondary-color);
+  --ad-error: var(--message-error-color);
+  --ad-toolbar-bg: var(--connection-view-default-background-color);
+  --ad-title: var(--title-color);
+  --ad-accent-text: var(--tree-selector-text-highlight-color);
+  --ad-splitter: var(--border-secondary-color);
+  --ad-tree-item-highlight-bg: var(--main-tree-item-highlight-color, #e7f4ff);
+  --ad-tab-list-border-color: var(--dialog-menu-border-color);
+  --ad-tab-text-color: var(--dialog-menu-text-color);
+  --ad-tab-hover-text-color: var(--dialog-menu-highlight-text-color);
+  --ad-tab-active-color: var(--fieldset-title-color);
+  --ad-tab-nav-button-color: var(--ad-tab-text-color);
+  --ad-tab-nav-button-hover-color: var(--ad-tab-hover-text-color);
+  --ad-table-border-color: var(--table-border-color);
+  --ad-table-header-bg: #f9f9f9;
+  --ad-table-header-hover-bg: #f2f2f2;
+  --ad-table-header-text: #404040;
+  --ad-table-row-text: var(--table-row-text-color);
+  --ad-table-row-bg: var(--table-row-background-color);
+  --ad-table-row-alt-bg: var(--table-child-row-background-color);
+  --ad-table-row-hover-bg: var(--hover-bg-color);
+  --ad-table-results-text: var(--table-row-text-color);
+  --ad-table-action-color: var(--table-row-text-color);
+  --ad-table-action-hover-bg: var(--hover-bg-color);
+  --ad-table-action-hover-color: var(--table-link-color);
+  --ad-attributes-grid-row-bg: var(--table-row-background-color);
+  --ad-attributes-grid-row-hover-bg: var(--table-row-background-color);
+  --ad-attributes-grid-header-bg: #f9f9f9;
+  --ad-attributes-grid-header-hover-bg: #f2f2f2;
+  --ad-attributes-grid-header-border-color: #f9f9f9;
+  --ad-attributes-grid-border-color: var(--table-border-color);
+  --ad-attributes-grid-text-color: var(--table-row-text-color);
+  --ad-attributes-grid-header-text-color: #404040;
+  --ad-attributes-grid-icon-color: var(--btn-icon-color, var(--table-row-text-color));
+  --ad-attributes-grid-icon-hover-color: var(--btn-icon-color, var(--table-link-color));
+  --ad-members-action-icon-color: var(--ad-attributes-grid-icon-color);
+  --ad-members-action-icon-hover-color: var(--ad-attributes-grid-icon-hover-color);
+  --ad-members-search-icon-color: var(--ad-attributes-grid-icon-color);
+  --ad-members-search-icon-hover-color: var(--ad-attributes-grid-icon-hover-color);
+  --ad-attributes-grid-paginator-page-bg: transparent;
+  --ad-attributes-grid-paginator-page-color: var(--table-row-text-color);
+  --ad-attributes-grid-paginator-page-selected-bg: var(--dropdown-item-highlight-background-color, #21374f);
+  --ad-attributes-grid-paginator-page-selected-color: var(--table-link-color, #3aa3ff);
+  --ad-attributes-grid-paginator-dropdown-bg: transparent;
+  --ad-attributes-grid-paginator-dropdown-color: var(--text-color-primary, #fff);
+  --ad-attributes-grid-paginator-dropdown-border-color: var(--input-border-color, var(--table-border-color));
+  --ad-attributes-grid-paginator-dropdown-border-width: 0.8px;
+  --ad-attributes-grid-paginator-dropdown-border-radius: 8px;
+  --ad-attributes-grid-results-text: var(--table-column-title-color, var(--text-color-secondary));
+  --ad-tree-bg: var(--connection-view-default-background-color, var(--background-secondary-color));
+  --ad-tree-menu-bg: var(--panel-menu-background-color, var(--ad-tree-bg));
+  --ad-tree-menu-item-color: var(--dialog-menu-text-color, var(--text-color-secondary));
+  --ad-tree-menu-item-hover-bg: var(--panel-menu-hover-background-color, var(--hover-bg-color));
+  --ad-tree-menu-item-active-bg: var(--panel-menu-highlight-background-color, var(--ad-tree-item-highlight-bg));
+  --ad-tree-menu-item-active-color: var(--panel-menu-highlight-text-color, var(--ad-accent-text));
+  --ad-tree-menu-muted-color: var(--text-color-secondary, var(--ad-text-secondary));
+  --ad-font-family: var(--font-open-sans, 'Open Sans');
+  --ad-accent-rgb: var(--base-accent-rgb);
+  --ad-sensitive: var(--sensitive-color, #ffa500);
+  --ad-label-readonly: var(--label-readonly-color);
+
+  /* Button colors */
+  --ad-button-primary-bg: var(--dialog-footer-default-button-background-color, var(--blue-primary));
+  --ad-button-primary-bg-hover: var(--dialog-footer-default-button-background-hover-color, var(--blue-800));
+  --ad-button-primary-text: var(--dialog-footer-default-button-text-color, var(--blue-primary-text-color, #fff));
+  --ad-button-cancel-bg: var(--bg-100, #f2f7fc);
+  --ad-button-cancel-bg-hover: var(--bg-200, #e6edf5);
+  --ad-button-cancel-border-color: var(--border-neutral-200, #c2c3c6);
+  --ad-button-cancel-border-color-hover: var(--border-neutral-200, #c2c3c6);
+  --ad-button-cancel-border-width: 0.8px;
+  --ad-button-cancel-text: var(--text-brand, #0068c3);
+
+  /* Secondary button — light */
+  --ad-button-secondary-bg: var(--button-secondary-fill, color-mix(in srgb, var(--ad-color-primary) 10%, white));
+  --ad-button-secondary-bg-hover: var(--button-secondary-hover-fill, color-mix(in srgb, var(--ad-color-primary) 18%, white));
+  --ad-button-secondary-border-color: var(--button-secondary-border, color-mix(in srgb, var(--ad-color-primary) 30%, transparent));
+  --ad-button-secondary-border-color-hover: var(--button-secondary-hover-border, color-mix(in srgb, var(--ad-color-primary) 50%, transparent));
+  --ad-button-secondary-border-width: 1px;
+  --ad-button-secondary-text: var(--button-secondary-text, var(--ad-color-primary));
+}
+
+html[data-theme='dark']
+  :where(
+    [data-ad-theme-bridge],
+    .ad-bitlocker-search,
+    .ad-dvls-confirm-dialog,
+    .ad-entry-properties-modal,
+    .ad-new-group-modal,
+    .ad-new-user-modal,
+    .ad-update-password-modal,
+    .edit-boolean-dialog,
+    .edit-list-dialog,
+    .edit-number-dialog,
+    .edit-string-dialog,
+    .new-members-dialog
+  ),
+body[data-theme='dark']
+  :where(
+    [data-ad-theme-bridge],
+    .ad-bitlocker-search,
+    .ad-dvls-confirm-dialog,
+    .ad-entry-properties-modal,
+    .ad-new-group-modal,
+    .ad-new-user-modal,
+    .ad-update-password-modal,
+    .edit-boolean-dialog,
+    .edit-list-dialog,
+    .edit-number-dialog,
+    .edit-string-dialog,
+    .new-members-dialog
+  ),
+html.dark-theme
+  :where(
+    [data-ad-theme-bridge],
+    .ad-bitlocker-search,
+    .ad-dvls-confirm-dialog,
+    .ad-entry-properties-modal,
+    .ad-new-group-modal,
+    .ad-new-user-modal,
+    .ad-update-password-modal,
+    .edit-boolean-dialog,
+    .edit-list-dialog,
+    .edit-number-dialog,
+    .edit-string-dialog,
+    .new-members-dialog
+  ),
+body.dark-theme
+  :where(
+    [data-ad-theme-bridge],
+    .ad-bitlocker-search,
+    .ad-dvls-confirm-dialog,
+    .ad-entry-properties-modal,
+    .ad-new-group-modal,
+    .ad-new-user-modal,
+    .ad-update-password-modal,
+    .edit-boolean-dialog,
+    .edit-list-dialog,
+    .edit-number-dialog,
+    .edit-string-dialog,
+    .new-members-dialog
+  ) {
+  --connection-view-default-background-color: #0c111d;
+  --ad-color-primary: var(--blue-800);
+  --ad-on-primary: #fff;
+  --ad-text-primary: var(--text-color-primary);
+  --ad-text-secondary: var(--text-color-secondary);
+  --ad-text-disabled: var(--grey-600);
+  --ad-border: var(--border-secondary-color);
+  --ad-border-color: var(--border-secondary-color);
+  --ad-input-border: var(--input-border-color);
+  --ad-bg: #0c111d;
+  --ad-bg-muted: var(--background-secondary-color);
+  --ad-error: var(--message-error-color);
+  --ad-toolbar-bg: var(--connection-view-default-background-color);
+  --ad-title: var(--title-color);
+  --ad-accent-text: var(--tree-selector-text-highlight-color);
+  --ad-splitter: var(--border-secondary-color);
+  --ad-tree-item-highlight-bg: var(--main-tree-item-highlight-color, #143857);
+  --ad-tab-list-border-color: var(--dialog-menu-border-color);
+  --ad-tab-text-color: var(--dialog-menu-text-color);
+  --ad-tab-hover-text-color: var(--dialog-menu-highlight-text-color);
+  --ad-tab-active-color: var(--fieldset-title-color);
+  --ad-tab-nav-button-color: var(--ad-tab-text-color);
+  --ad-tab-nav-button-hover-color: var(--ad-tab-hover-text-color);
+  --ad-table-border-color: var(--table-border-color);
+  --ad-table-header-bg: #0c111d;
+  --ad-table-header-hover-bg: #1c222e;
+  --ad-table-header-text: var(--table-column-title-color);
+  --ad-table-row-text: var(--table-row-text-color);
+  --ad-table-row-bg: var(--table-row-background-color);
+  --ad-table-row-alt-bg: var(--table-child-row-background-color);
+  --ad-table-row-hover-bg: var(--hover-bg-color);
+  --ad-table-results-text: var(--table-row-text-color);
+  --ad-table-action-color: var(--table-row-text-color);
+  --ad-table-action-hover-bg: var(--hover-bg-color);
+  --ad-table-action-hover-color: var(--table-link-color);
+  --ad-attributes-grid-row-bg: #161b26;
+  --ad-attributes-grid-row-hover-bg: #161b26;
+  --ad-attributes-grid-header-bg: #0c111d;
+  --ad-attributes-grid-header-hover-bg: #1c222e;
+  --ad-attributes-grid-header-border-color: #0c111d;
+  --ad-attributes-grid-border-color: #2a2e39;
+  --ad-attributes-grid-text-color: #c2c3c6;
+  --ad-attributes-grid-header-text-color: #c2c3c6;
+  --ad-attributes-grid-icon-color: var(--btn-icon-color, var(--table-row-text-color));
+  --ad-attributes-grid-icon-hover-color: var(--btn-icon-color, var(--table-link-color));
+  --ad-members-action-icon-color: var(--ad-attributes-grid-icon-color);
+  --ad-members-action-icon-hover-color: var(--ad-attributes-grid-icon-hover-color);
+  --ad-members-search-icon-color: var(--ad-attributes-grid-icon-color);
+  --ad-members-search-icon-hover-color: var(--ad-attributes-grid-icon-hover-color);
+  --ad-attributes-grid-paginator-page-bg: transparent;
+  --ad-attributes-grid-paginator-page-color: #c2c3c6;
+  --ad-attributes-grid-paginator-page-selected-bg: #21374f;
+  --ad-attributes-grid-paginator-page-selected-color: #3aa3ff;
+  --ad-attributes-grid-paginator-dropdown-bg: #0c111d;
+  --ad-attributes-grid-paginator-dropdown-color: #96989d;
+  --ad-attributes-grid-paginator-dropdown-border-color: #2f3441;
+  --ad-attributes-grid-paginator-dropdown-border-width: 0.8px;
+  --ad-attributes-grid-paginator-dropdown-border-radius: 8px;
+  --ad-attributes-grid-results-text: #96989d;
+  --ad-tree-bg: var(--background-secondary-color, var(--connection-view-default-background-color));
+  --ad-tree-menu-bg: #0c111d;
+  --ad-tree-menu-item-color: #96989d;
+  --ad-tree-menu-item-hover-bg: #0f1f33;
+  --ad-tree-menu-item-active-bg: #102a45;
+  --ad-tree-menu-item-active-color: #3aa3ff;
+  --ad-tree-menu-muted-color: #96989d;
+  --ad-font-family: var(--font-open-sans, 'Open Sans');
+  --ad-accent-rgb: var(--base-accent-rgb);
+  --ad-sensitive: var(--sensitive-color, #ffa500);
+  --ad-label-readonly: var(--label-readonly-color);
+
+  /* Button colors */
+  --ad-button-primary-bg: var(--dialog-footer-default-button-background-color, var(--blue-primary));
+  --ad-button-primary-bg-hover: var(--dialog-footer-default-button-background-hover-color, var(--blue-800));
+  --ad-button-primary-text: var(--dialog-footer-default-button-text-color, var(--blue-primary-text-color, #fff));
+  --ad-button-cancel-bg: #161b26;
+  --ad-button-cancel-bg-hover: #1c222e;
+  --ad-button-cancel-border-color: #2f3441;
+  --ad-button-cancel-border-color-hover: #2f3441;
+  --ad-button-cancel-border-width: 0.8px;
+  --ad-button-cancel-text: #3aa3ff;
+
+  /* Secondary button — exact values from computed dvl-button[variant=secondary] dark */
+  --ad-button-secondary-bg: #1a2b40;
+  --ad-button-secondary-bg-hover: #1f3552;
+  --ad-button-secondary-border-color: rgba(58, 163, 255, 0.15);
+  --ad-button-secondary-border-color-hover: rgba(58, 163, 255, 0.28);
+  --ad-button-secondary-border-width: 0.8px;
+  --ad-button-secondary-text: #3aa3ff;
+}

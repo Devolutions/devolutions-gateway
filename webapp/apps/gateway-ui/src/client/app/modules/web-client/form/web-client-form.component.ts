@@ -17,6 +17,7 @@ import { ComponentStatus } from '@shared/models/component-status.model';
 import { BaseSessionComponent, SessionType, WebSession } from '@shared/models/web-session.model';
 import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
+import { DefaultLdapPort, DefaultLdapsPort } from '@shared/services/web-client.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import type { ToastMessageOptions } from 'primeng/api';
@@ -49,6 +50,10 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   filteredHostnames: HostnameObject[] = [];
 
   formData: unknown;
+
+  private readonly hostnameLabels: Partial<Record<Protocol, string>> = {
+    [Protocol.ActiveDirectory]: 'Domain Controller',
+  };
 
   constructor(
     private fb: FormBuilder,
@@ -248,6 +253,14 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
+  isSelectedProtocolActiveDirectory(): boolean {
+    return WebClientProtocol.isProtocolActiveDirectory(this.getSelectedProtocol());
+  }
+
+  getHostnameLabel(): string {
+    return this.hostnameLabels[this.getSelectedProtocol()] ?? 'Hostname';
+  }
+
   private addMessages(newMessages: ToastMessageOptions[]): void {
     const areThereNewMessages: boolean = newMessages.some(
       (newMsg) =>
@@ -293,10 +306,31 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
         hostname: entry.ip,
       });
 
+      this.applyNetScanActiveDirectoryDefaults(entry);
+
       const protocol = this.connectSessionForm.get('protocol');
       if (protocol && protocol.value !== entry.protocol) {
         protocol.setValue(entry.protocol);
       }
     });
+  }
+
+  private applyNetScanActiveDirectoryDefaults(entry: NetScanEntry): void {
+    if (entry.protocol !== Protocol.ActiveDirectory) {
+      return;
+    }
+
+    const useLdaps = entry.serviceProtocol === 'ldaps';
+    const port = useLdaps ? DefaultLdapsPort : DefaultLdapPort;
+    const inputFormData =
+      typeof this.inputFormData === 'object' && this.inputFormData !== null ? this.inputFormData : {};
+
+    this.inputFormData = {
+      ...inputFormData,
+      port,
+      useLdaps,
+    };
+    this.connectSessionForm.get('useLdaps')?.setValue(useLdaps);
+    this.connectSessionForm.get('port')?.setValue(port);
   }
 }

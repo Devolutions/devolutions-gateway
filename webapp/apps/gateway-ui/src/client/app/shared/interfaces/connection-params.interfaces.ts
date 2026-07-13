@@ -77,3 +77,37 @@ export interface SshConnectionParameters {
   privateKey?: string;
   privateKeyPassphrase?: string;
 }
+
+export interface ActiveDirectoryConnectionParameters {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  domain?: string;
+  gatewayAddress: string;
+  token?: string;
+  kdcUrl?: string;
+  sessionId?: string;
+  useLdaps: boolean;
+  organizationalUnit?: string;
+}
+
+export function isActiveDirectoryConnectionParameters(params: unknown): params is ActiveDirectoryConnectionParameters {
+  if (typeof params !== 'object' || params === null) {
+    return false;
+  }
+
+  const candidate = params as Partial<ActiveDirectoryConnectionParameters>;
+
+  return (
+    typeof candidate.host === 'string' &&
+    typeof candidate.port === 'number' &&
+    Number.isInteger(candidate.port) &&
+    candidate.port >= 1 &&
+    candidate.port <= 65535 &&
+    typeof candidate.username === 'string' &&
+    typeof candidate.password === 'string' &&
+    typeof candidate.gatewayAddress === 'string' &&
+    typeof candidate.useLdaps === 'boolean'
+  );
+}

@@ -48,7 +48,7 @@
           </div>
 
           <div class="col-8 gateway-form-group">
-            <label for="hostname">Hostname</label>
+            <label for="hostname">{{ getHostnameLabel() }}</label>
             <div class="gateway-form-input">
               <span class="p-fluid">
                 <p-autoComplete
@@ -107,6 +107,14 @@
               [form]="connectSessionForm"
               [inputFormData]="inputFormData"
             ></ard-form>
+          }
+
+          @if (isSelectedProtocolActiveDirectory()) {
+            <active-directory-form
+              class="col-12"
+              [form]="connectSessionForm"
+              [inputFormData]="inputFormData"
+            ></active-directory-form>
           }
 
           <div class="col-12 gateway-form-group">
