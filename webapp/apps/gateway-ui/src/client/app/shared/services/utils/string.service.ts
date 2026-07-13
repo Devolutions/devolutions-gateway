@@ -39,17 +39,48 @@ export class StringService {
     return `${url}${defaultPort}`;
   }
 
-  extractHostnameAndPort(urlString: string, DefaultPort: number): ExtractedHostnamePort {
-    // This regex assumes the URL might start with a protocol and captures hostname and optional port
-    const regex = /^(?:.*:\/\/)?([^:/]+)(?::(\d+))?/;
-    const match = urlString.match(regex);
+  extractHostnameAndPort(urlString: string, defaultPort: number): ExtractedHostnamePort {
+    const input = urlString.trim();
 
-    if (match) {
-      const hostname: string = match[1];
-      const port: number = match[2] ? Number.parseInt(match[2], 10) : DefaultPort;
-      return { hostname, port };
+    if (!input) {
+      return null;
     }
-    return null;
+
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(input)) {
+      try {
+        const url = new URL(input);
+
+        return {
+          hostname: url.hostname.replace(/^\[|\]$/g, ''),
+          port: url.port ? Number.parseInt(url.port, 10) : defaultPort,
+        };
+      } catch {
+        // Fall through to host[:port] parsing if URL parsing fails.
+      }
+    }
+
+    const bracketedIpv6Match = input.match(/^\[([^\]]+)](?::(\d+))?$/);
+
+    if (bracketedIpv6Match) {
+      return {
+        hostname: bracketedIpv6Match[1],
+        port: bracketedIpv6Match[2] ? Number.parseInt(bracketedIpv6Match[2], 10) : defaultPort,
+      };
+    }
+
+    const hostPortMatch = input.match(/^([^:]+):(\d+)$/);
+
+    if (hostPortMatch) {
+      return {
+        hostname: hostPortMatch[1],
+        port: Number.parseInt(hostPortMatch[2], 10),
+      };
+    }
+
+    return {
+      hostname: input,
+      port: defaultPort,
+    };
   }
 
   replaceNewlinesWithBR(text: string): string {

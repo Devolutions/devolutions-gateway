@@ -149,7 +149,7 @@ export class WebClientService extends BaseComponent {
     const data: SessionTokenParameters = {
       content_type: 'ASSOCIATION',
       protocol: protocolStr,
-      destination: `tcp://${connectionParameters.host}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
+      destination: `tcp://${this.formatDestinationHost(connectionParameters.host)}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
       lifetime: 60,
       session_id: connectionParameters.sessionId || uuidv4(),
     };
@@ -163,6 +163,12 @@ export class WebClientService extends BaseComponent {
         return throwError(() => new Error('Failed to fetch protocol token'));
       }),
     );
+  }
+
+  private formatDestinationHost(host: string): string {
+    const normalizedHost = host.replace(/^\[|\]$/g, '');
+
+    return normalizedHost.includes(':') ? `[${normalizedHost}]` : normalizedHost;
   }
 
   fetchTelnetToken(connectionParameters: TelnetConnectionParameters): Observable<TelnetConnectionParameters> {

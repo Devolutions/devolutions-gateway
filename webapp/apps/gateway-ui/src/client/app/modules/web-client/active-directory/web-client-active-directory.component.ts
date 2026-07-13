@@ -85,9 +85,8 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
   }
 
   ngAfterViewInit(): void {
-    this.activeDirectoryUiService.setOverlayKeySuffix(this.webSessionId);
-
     this.renderActiveDirectoryTimeout = setTimeout(() => {
+      this.activeDirectoryUiService.setOverlayKeySuffix(this.webSessionId);
       this.renderActiveDirectory = true;
       this.renderActiveDirectoryTimeout = null;
     });
@@ -101,11 +100,11 @@ export class WebClientActiveDirectoryComponent extends WebClientBaseComponent im
 
     this.activeDirectoryEventsSubscription?.unsubscribe();
 
-    if (this.activeDirectoryHandle && !this.currentStatus.isDisabled) {
-      const wasInitialized = this.currentStatus.isInitialized;
+    if (this.activeDirectoryHandle) {
+      const shouldNotifyClose = this.currentStatus.isInitialized && !this.currentStatus.isDisabled;
       this.closeActiveDirectoryHandle();
 
-      if (wasInitialized) {
+      if (shouldNotifyClose) {
         this.currentStatus.isInitialized = false;
         this.webClientConnectionClosed();
       }
