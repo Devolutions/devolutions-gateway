@@ -21,8 +21,7 @@ pub struct Conf {
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
     pub tunnel: TunnelConf,
-    pub psu_event_hub: dto::PsuEventHubConf,
-    pub psu_grpc_agent: dto::PsuGrpcAgentConf,
+    pub psu_agent: Option<PsuConf>,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -100,6 +99,51 @@ impl TryFrom<dto::TunnelConf> for TunnelConf {
     }
 }
 
+/// Validated PSU agent configuration.
+///
+/// Constructed from `dto::PsuConf` via `TryFrom<dto::PsuConf> for Option<PsuConf>`.
+/// Illegal states are made unrepresentable: a disabled PSU agent is `None`, and an
+/// enabled one is `Some(PsuConf)` with all required fields (server URL and application
+/// token) guaranteed present.
+#[derive(Debug, Clone)]
+pub struct PsuConf {
+    pub server_url: Url,
+    pub agent_id: Option<String>,
+    pub display_name: Option<String>,
+    pub app_token: String,
+    pub hubs: Vec<String>,
+    pub powershell: dto::PsuPowerShellConf,
+}
+
+impl TryFrom<dto::PsuConf> for Option<PsuConf> {
+    type Error = anyhow::Error;
+
+    fn try_from(conf: dto::PsuConf) -> anyhow::Result<Self> {
+        if !conf.enabled {
+            // Disabled PSU agent — nothing is required.
+            return Ok(None);
+        }
+
+        // Enabled PSU agent — all required fields must be present.
+        let server_url = conf
+            .server_url
+            .context("PSU agent enabled but ServerUrl is not configured")?;
+        let app_token = conf
+            .app_token
+            .filter(|token| !token.trim().is_empty())
+            .context("PSU agent enabled but AppToken is not configured")?;
+
+        Ok(Some(PsuConf {
+            server_url,
+            agent_id: conf.agent_id,
+            display_name: conf.display_name,
+            app_token,
+            hubs: conf.hubs,
+            powershell: conf.powershell,
+        }))
+    }
+}
+
 impl Conf {
     pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
         let data_dir = get_data_dir();
@@ -124,8 +168,12 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
-            psu_event_hub: conf_file.psu_event_hub.clone().unwrap_or_default(),
-            psu_grpc_agent: conf_file.psu_grpc_agent.clone().unwrap_or_default(),
+            psu_agent: conf_file
+                .psu_agent
+                .clone()
+                .unwrap_or_default()
+                .pipe(Option::<PsuConf>::try_from)
+                .context("invalid PSU agent config")?,
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -291,7 +339,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
-    let mut conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
+    let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
         Some(conf_file) => conf_file,
         None => {
             let defaults = dto::ConfFile::generate_new();
@@ -301,30 +349,7 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
         }
     };
 
-    // FIXME: Remove the merge logic in favor of a migration procedure performed
-    // once at install time. The migration could be suggested via a checkbox to
-    // the user if the installer detects old PSU Event Hub configuration files.
-    // The migration would update the agent.json file to be equivalent to the
-    // previous configuration, at which point the old files are not necessary
-    // anymore, and we don’t need to import & merge logic anymore.
-    let enable_unstable = conf_file.debug.as_ref().is_some_and(|debug| debug.enable_unstable);
-    let psu_event_hub_enabled = conf_file.psu_event_hub.as_ref().is_some_and(|cfg| cfg.enabled);
-    if enable_unstable && psu_event_hub_enabled {
-        import_psu_event_hub_compat(&mut conf_file);
-    }
-
     Ok(conf_file)
-}
-
-/// Imports legacy PowerShell Universal agent configuration into `conf_file`.
-///
-/// Importing is best-effort and must never block agent startup, since those
-/// artifacts belong to a separate product and may be missing or malformed.
-#[allow(clippy::print_stderr)] // Logger is likely not yet initialized at this point.
-pub(crate) fn import_psu_event_hub_compat(conf_file: &mut dto::ConfFile) {
-    if let Err(error) = crate::psu_event_hub::compat::merge_into_conf_file(conf_file) {
-        eprintln!("Failed to import PowerShell Universal agent configuration; ignoring: {error:#}");
-    }
 }
 
 pub mod dto {
@@ -533,63 +558,14 @@ pub mod dto {
         pub server_spki_sha256: Option<String>,
     }
 
-    /// PowerShell Universal Event Hub compatibility configuration.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    /// PowerShell Universal remoting agent configuration.
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
-    pub struct PsuEventHubConf {
-        /// Enable PowerShell Universal Event Hub compatibility.
+    pub struct PsuConf {
+        /// Enable the PSU agent transport.
         pub enabled: bool,
 
-        /// Event Hub connections to maintain.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub connections: Vec<PsuEventHubConnectionConf>,
-
-        /// PowerShell worker process configuration.
-        #[serde(
-            default,
-            rename = "PowerShell",
-            skip_serializing_if = "PsuPowerShellConf::is_default"
-        )]
-        pub powershell: PsuPowerShellConf,
-    }
-
-    #[expect(
-        clippy::derivable_impls,
-        reason = "manually implemented so we are being explicit about the defaults"
-    )]
-    impl Default for PsuEventHubConf {
-        fn default() -> Self {
-            Self {
-                enabled: false,
-                connections: Vec::new(),
-                powershell: PsuPowerShellConf::default(),
-            }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct PsuEventHubConnectionConf {
-        pub hub: String,
-        pub url: Url,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub app_token: Option<String>,
-        #[serde(default)]
-        pub use_default_credentials: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub script_path: Option<Utf8PathBuf>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub description: Option<String>,
-    }
-
-    /// PowerShell Universal gRPC remoting agent configuration.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct PsuGrpcAgentConf {
-        /// Enable the PSU gRPC agent transport.
-        pub enabled: bool,
-
-        /// PSU gRPC endpoint, for example http://localhost:5000.
+        /// PSU endpoint, for example http://localhost:5000.
         #[serde(skip_serializing_if = "Option::is_none")]
         pub server_url: Option<Url>,
 
@@ -601,8 +577,8 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub display_name: Option<String>,
 
-        /// PSU application token used to authenticate the gRPC agent.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        /// PSU application token used to authenticate the agent. Required when enabled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         pub app_token: Option<String>,
 
         /// Hubs/queues advertised during registration.
@@ -616,24 +592,6 @@ pub mod dto {
             skip_serializing_if = "PsuPowerShellConf::is_default"
         )]
         pub powershell: PsuPowerShellConf,
-    }
-
-    #[expect(
-        clippy::derivable_impls,
-        reason = "manually implemented so we are being explicit about the defaults"
-    )]
-    impl Default for PsuGrpcAgentConf {
-        fn default() -> Self {
-            Self {
-                enabled: false,
-                server_url: None,
-                agent_id: None,
-                display_name: None,
-                app_token: None,
-                hubs: Vec::new(),
-                powershell: PsuPowerShellConf::default(),
-            }
-        }
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
@@ -737,13 +695,13 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
 
-        /// PowerShell Universal Event Hub compatibility.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub psu_event_hub: Option<PsuEventHubConf>,
-
-        /// PowerShell Universal gRPC remoting agent.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub psu_grpc_agent: Option<PsuGrpcAgentConf>,
+        /// PowerShell Universal remoting agent.
+        // The `PsuGrpcAgent` alias is accepted on read so existing gRPC installations keep working
+        // on upgrade; new configs are always serialized under the `PsuAgent` key.
+        // Existing installations here are mostly developer setups, so we’ll simply remove the alias once the feature is
+        // stabilized.
+        #[serde(alias = "PsuGrpcAgent", skip_serializing_if = "Option::is_none")]
+        pub psu_agent: Option<PsuConf>,
 
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -775,8 +733,7 @@ pub mod dto {
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
                 tunnel: None,
-                psu_event_hub: None,
-                psu_grpc_agent: None,
+                psu_agent: None,
                 rest: serde_json::Map::new(),
             }
         }
@@ -963,46 +920,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn psu_event_hub_config_is_disabled_by_default() {
-        let conf = Conf::from_conf_file(&dto::ConfFile::generate_new()).expect("load generated config");
-        assert!(!conf.psu_event_hub.enabled);
-        assert!(conf.psu_event_hub.connections.is_empty());
-    }
-
-    #[test]
-    fn psu_event_hub_config_deserializes() {
+    fn psu_config_deserializes() {
         let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
-            "PsuEventHub": {
-                "Enabled": true,
-                "Connections": [
-                    {
-                        "Hub": "Hub",
-                        "Url": "http://localhost:5000",
-                        "AppToken": "token",
-                        "UseDefaultCredentials": false,
-                        "ScriptPath": "event.ps1",
-                        "Description": "test agent"
-                    }
-                ],
-                "PowerShell": {
-                    "VersionSelector": "7.4",
-                    "WorkerPoolSize": 1,
-                    "MaxWorkerPoolSize": 25
-                }
-            }
-        }))
-        .expect("deserialize config");
-
-        let conf = Conf::from_conf_file(&conf_file).expect("load config");
-        assert!(conf.psu_event_hub.enabled);
-        assert_eq!(conf.psu_event_hub.connections[0].hub, "Hub");
-        assert_eq!(conf.psu_event_hub.powershell.version_selector.as_deref(), Some("7.4"));
-    }
-
-    #[test]
-    fn psu_grpc_agent_config_deserializes() {
-        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
-            "PsuGrpcAgent": {
+            "PsuAgent": {
                 "Enabled": true,
                 "ServerUrl": "http://localhost:5000",
                 "AgentId": "agent-01",
@@ -1017,13 +937,39 @@ mod tests {
         .expect("deserialize config");
 
         let conf = Conf::from_conf_file(&conf_file).expect("load config");
-        assert!(conf.psu_grpc_agent.enabled);
-        assert_eq!(
-            conf.psu_grpc_agent.server_url.as_ref().expect("server url").as_str(),
-            "http://localhost:5000/"
-        );
-        assert_eq!(conf.psu_grpc_agent.agent_id.as_deref(), Some("agent-01"));
-        assert_eq!(conf.psu_grpc_agent.app_token.as_deref(), Some("app-token"));
-        assert_eq!(conf.psu_grpc_agent.powershell.version_selector.as_deref(), Some("7.5"));
+        let psu = conf.psu_agent.as_ref().expect("psu enabled");
+        assert_eq!(psu.server_url.as_str(), "http://localhost:5000/");
+        assert_eq!(psu.agent_id.as_deref(), Some("agent-01"));
+        assert_eq!(psu.app_token, "app-token");
+        assert_eq!(psu.powershell.version_selector.as_deref(), Some("7.5"));
+    }
+
+    #[test]
+    fn psu_enabled_rejects_blank_app_token() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuAgent": {
+                "Enabled": true,
+                "ServerUrl": "http://localhost:5000",
+                "AppToken": "   "
+            }
+        }))
+        .expect("deserialize config");
+
+        // A whitespace-only app token must not produce an enabled PSU config; otherwise the agent
+        // would loop on unauthenticated connection attempts instead of failing fast at load time.
+        Conf::from_conf_file(&conf_file).expect_err("blank app token should be rejected");
+    }
+
+    #[test]
+    fn psu_disabled_does_not_require_app_token() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuAgent": {
+                "Enabled": false
+            }
+        }))
+        .expect("deserialize config");
+
+        let conf = Conf::from_conf_file(&conf_file).expect("load config");
+        assert!(conf.psu_agent.is_none());
     }
 }

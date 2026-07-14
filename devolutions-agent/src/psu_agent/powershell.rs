@@ -38,16 +38,6 @@ impl PowerShellWorkerResponse {
         }
     }
 
-    pub(crate) fn terminating_error(message: impl Into<String>) -> Self {
-        Self {
-            data: None,
-            job_outputs: Vec::new(),
-            complete: true,
-            timeout: false,
-            terminating_error: Some(message.into()),
-        }
-    }
-
     fn timeout(message: impl Into<String>) -> Self {
         Self {
             data: None,
@@ -357,26 +347,6 @@ impl PowerShellWorker {
             .with_context(|| format!("PSU AppToken secret {secret_name} resolved to an empty value"))
     }
 
-    pub(crate) async fn execute_command(
-        &self,
-        command: String,
-        data: String,
-        return_result: bool,
-    ) -> anyhow::Result<PowerShellWorkerResponse> {
-        self.run_request(WorkerRequest::command(command, data, return_result))
-            .await
-    }
-
-    pub(crate) async fn execute_script(
-        &self,
-        script_path: Utf8PathBuf,
-        data: String,
-        return_result: bool,
-    ) -> anyhow::Result<PowerShellWorkerResponse> {
-        self.run_request(WorkerRequest::script(script_path, data, return_result))
-            .await
-    }
-
     async fn run_request(&self, request: WorkerRequest) -> anyhow::Result<PowerShellWorkerResponse> {
         let _permit = self
             .permits
@@ -518,26 +488,6 @@ struct WorkerRequest {
 }
 
 impl WorkerRequest {
-    fn command(command: String, data: String, return_result: bool) -> Self {
-        Self {
-            kind: "command",
-            command: Some(command),
-            script_path: None,
-            data,
-            return_result,
-        }
-    }
-
-    fn script(script_path: Utf8PathBuf, data: String, return_result: bool) -> Self {
-        Self {
-            kind: "script",
-            command: None,
-            script_path: Some(script_path),
-            data,
-            return_result,
-        }
-    }
-
     fn secret(secret_name: String) -> Self {
         Self {
             kind: "secret",
@@ -601,101 +551,6 @@ fn temp_dir() -> anyhow::Result<Utf8PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const HASHTABLE_PS_VERSION_TABLE: &str = r#"<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
-  <Obj RefId="0">
-    <TN RefId="0">
-      <T>System.Collections.Hashtable</T>
-      <T>System.Object</T>
-    </TN>
-    <DCT>
-      <En>
-        <S N="Key">ValueOnly</S>
-        <B N="Value">true</B>
-      </En>
-      <En>
-        <S N="Key">Name</S>
-        <S N="Value">PSVersionTable</S>
-      </En>
-    </DCT>
-  </Obj>
-</Objs>"#;
-
-    const HASHTABLE_MESSAGE: &str = r#"<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
-  <Obj RefId="0">
-    <TN RefId="0">
-      <T>System.Collections.Hashtable</T>
-      <T>System.Object</T>
-    </TN>
-    <DCT>
-      <En>
-        <S N="Key">Message</S>
-        <S N="Value">Hello World</S>
-      </En>
-    </DCT>
-  </Obj>
-</Objs>"#;
-
-    const HASHTABLE_SECONDS: &str = r#"<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
-  <Obj RefId="0">
-    <TN RefId="0">
-      <T>System.Collections.Hashtable</T>
-      <T>System.Object</T>
-    </TN>
-    <DCT>
-      <En>
-        <S N="Key">Seconds</S>
-        <I32 N="Value">10</I32>
-      </En>
-    </DCT>
-  </Obj>
-</Objs>"#;
-
-    #[tokio::test]
-    async fn command_execution_returns_clixml_result() {
-        let worker = PowerShellWorker::new(PsuPowerShellConf::default()).expect("create worker");
-        let response = worker
-            .execute_command("Get-Variable".to_owned(), HASHTABLE_PS_VERSION_TABLE.to_owned(), true)
-            .await
-            .expect("execute command");
-
-        assert!(response.complete);
-        assert!(response.terminating_error.is_none());
-        assert!(response.data.expect("serialized response").contains("<Objs"));
-    }
-
-    #[tokio::test]
-    async fn command_execution_captures_error_stream() {
-        let worker = PowerShellWorker::new(PsuPowerShellConf::default()).expect("create worker");
-        let response = worker
-            .execute_command("Write-Error".to_owned(), HASHTABLE_MESSAGE.to_owned(), true)
-            .await
-            .expect("execute command");
-
-        assert!(response.complete);
-        assert_eq!(response.job_outputs[0].output_type, JobOutputType::Error);
-        assert!(
-            response.job_outputs[0]
-                .data
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Hello World")
-        );
-    }
-
-    #[tokio::test]
-    async fn command_execution_times_out() {
-        let worker = PowerShellWorker::with_execution_timeout(PsuPowerShellConf::default(), Duration::from_millis(1))
-            .expect("create worker");
-        let response = worker
-            .execute_command("Start-Sleep".to_owned(), HASHTABLE_SECONDS.to_owned(), true)
-            .await
-            .expect("execute command");
-
-        assert!(response.complete);
-        assert!(response.timeout);
-        assert!(response.terminating_error.is_some());
-    }
 
     #[tokio::test]
     async fn literal_app_token_does_not_require_secret_resolution() {

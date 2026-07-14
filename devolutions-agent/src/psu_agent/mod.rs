@@ -1,5 +1,7 @@
 mod process;
 
+mod powershell;
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,9 +17,9 @@ use tonic::metadata::MetadataValue;
 use tonic::transport::Endpoint;
 use uuid::Uuid;
 
-use crate::config::{ConfHandle, dto};
-use crate::psu_grpc_agent::process::{ProcessControl, ProcessRegistry};
-use crate::psu_powershell::{PowerShellWorker, app_token_secret_reference_name};
+use crate::config::{ConfHandle, PsuConf, dto};
+use crate::psu_agent::powershell::{PowerShellWorker, app_token_secret_reference_name};
+use crate::psu_agent::process::{ProcessControl, ProcessRegistry};
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
@@ -35,51 +37,52 @@ const PROTOCOL_VERSION: &str = "poc.v1";
 const CAPABILITY_JOB_EXECUTION: &str = "job_execution";
 const CAPABILITY_PSREMOTING_TUNNEL: &str = "psremoting_grpc_tunnel";
 
-pub struct PsuGrpcAgentTask {
+pub struct PsuAgentTask {
     conf_handle: ConfHandle,
 }
 
-impl PsuGrpcAgentTask {
+impl PsuAgentTask {
     pub fn new(conf_handle: ConfHandle) -> Self {
         Self { conf_handle }
     }
 }
 
 #[async_trait]
-impl Task for PsuGrpcAgentTask {
+impl Task for PsuAgentTask {
     type Output = anyhow::Result<()>;
 
-    const NAME: &'static str = "psu grpc agent";
+    const NAME: &'static str = "psu agent";
 
     async fn run(self, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
-        let conf = self.conf_handle.get_conf().psu_grpc_agent.clone();
-        let agent = PsuGrpcAgent::new(conf).context("failed to initialize PSU gRPC agent")?;
+        let conf = self
+            .conf_handle
+            .get_conf()
+            .psu_agent
+            .clone()
+            .context("PSU agent task started but the PSU agent is disabled")?;
+        let agent = PsuAgent::new(conf).context("failed to initialize PSU agent")?;
         agent.run(shutdown_signal).await
     }
 }
 
 #[derive(Debug, Clone)]
-struct PsuGrpcAgent {
-    conf: dto::PsuGrpcAgentConf,
+struct PsuAgent {
+    conf: PsuConf,
     server_url: String,
     agent_id: String,
     display_name: String,
     machine_name: String,
-    app_token: Option<String>,
+    app_token: String,
     powershell_executable: String,
 }
 
-impl PsuGrpcAgent {
-    fn new(conf: dto::PsuGrpcAgentConf) -> anyhow::Result<Self> {
-        let server_url = conf
-            .server_url
-            .as_ref()
-            .context("server URL is not configured but the PSU gRPC agent is enabled")?
-            .to_string();
+impl PsuAgent {
+    fn new(conf: PsuConf) -> anyhow::Result<Self> {
+        let server_url = conf.server_url.to_string();
         let machine_name = machine_name();
         let agent_id = conf.agent_id.clone().unwrap_or_else(|| machine_name.clone());
         let display_name = conf.display_name.clone().unwrap_or_else(|| agent_id.clone());
-        let app_token = conf.app_token.clone().filter(|token| !token.trim().is_empty());
+        let app_token = conf.app_token.clone();
         let powershell_executable = resolve_powershell_executable(&conf.powershell)
             .to_string_lossy()
             .into_owned();
@@ -112,10 +115,7 @@ impl PsuGrpcAgent {
         loop {
             let start = Instant::now();
 
-            match self
-                .run_single_connection(&mut shutdown_signal, app_token.as_deref())
-                .await
-            {
+            match self.run_single_connection(&mut shutdown_signal, &app_token).await {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
@@ -144,11 +144,7 @@ impl PsuGrpcAgent {
         }
     }
 
-    async fn run_single_connection(
-        &self,
-        shutdown_signal: &mut ShutdownSignal,
-        app_token: Option<&str>,
-    ) -> anyhow::Result<()> {
+    async fn run_single_connection(&self, shutdown_signal: &mut ShutdownSignal, app_token: &str) -> anyhow::Result<()> {
         let endpoint = Endpoint::from_shared(self.server_url.clone())?;
         let channel = endpoint
             .connect()
@@ -164,7 +160,7 @@ impl PsuGrpcAgent {
             .context("failed to queue PSU gRPC agent registration")?;
 
         let mut response_stream = client
-            .connect(connect_request(ReceiverStream::new(outgoing_rx), app_token)?)
+            .connect(connect_request(ReceiverStream::new(outgoing_rx), Some(app_token))?)
             .await
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
@@ -265,14 +261,12 @@ impl PsuGrpcAgent {
         Ok(())
     }
 
-    async fn resolve_app_token(&self) -> anyhow::Result<Option<String>> {
-        let Some(app_token) = self.app_token.as_deref() else {
-            return Ok(None);
-        };
+    async fn resolve_app_token(&self) -> anyhow::Result<String> {
+        let app_token = self.app_token.as_str();
 
         // Avoid constructing a PowerShell worker unless the token is a secret reference.
         if app_token_secret_reference_name(app_token).is_none() {
-            return Ok(Some(app_token.to_owned()));
+            return Ok(app_token.to_owned());
         }
 
         let worker = PowerShellWorker::new(self.conf.powershell.clone())
@@ -281,7 +275,6 @@ impl PsuGrpcAgent {
         worker
             .resolve_app_token(app_token)
             .await
-            .map(Some)
             .context("failed to resolve PSU gRPC AppToken secret")
     }
 
@@ -466,12 +459,11 @@ mod tests {
 
     #[tokio::test]
     async fn literal_app_token_does_not_require_secret_resolution() {
-        let agent = PsuGrpcAgent::new(dto::PsuGrpcAgentConf {
-            enabled: true,
-            server_url: Some("http://localhost:5000".parse().expect("server URL")),
+        let agent = PsuAgent::new(PsuConf {
+            server_url: "http://localhost:5000".parse().expect("server URL"),
             agent_id: Some("agent-01".to_owned()),
             display_name: None,
-            app_token: Some("literal-token".to_owned()),
+            app_token: "literal-token".to_owned(),
             hubs: Vec::new(),
             powershell: dto::PsuPowerShellConf {
                 executable_path: Some("missing-pwsh".into()),
@@ -482,22 +474,6 @@ mod tests {
 
         let app_token = agent.resolve_app_token().await.expect("resolve AppToken");
 
-        assert_eq!(app_token.as_deref(), Some("literal-token"));
-    }
-
-    #[test]
-    fn empty_app_token_is_ignored() {
-        let agent = PsuGrpcAgent::new(dto::PsuGrpcAgentConf {
-            enabled: true,
-            server_url: Some("http://localhost:5000".parse().expect("server URL")),
-            agent_id: Some("agent-01".to_owned()),
-            display_name: None,
-            app_token: Some("   ".to_owned()),
-            hubs: Vec::new(),
-            powershell: dto::PsuPowerShellConf::default(),
-        })
-        .expect("create agent");
-
-        assert!(agent.app_token.is_none());
+        assert_eq!(app_token, "literal-token");
     }
 }
