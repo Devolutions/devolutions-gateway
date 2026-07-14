@@ -20,6 +20,7 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
+    pub package_broker: dto::PackageBrokerConf,
     pub tunnel: TunnelConf,
     pub psu_agent: Option<PsuConf>,
     pub proxy: dto::ProxyConf,
@@ -174,6 +175,7 @@ impl Conf {
                 .unwrap_or_default()
                 .pipe(Option::<PsuConf>::try_from)
                 .context("invalid PSU agent config")?,
+            package_broker: conf_file.package_broker.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -513,6 +515,30 @@ pub mod dto {
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
+    pub struct PackageBrokerConf {
+        /// Enable package broker module (disabled by default)
+        pub enabled: bool,
+        /// Named pipe name to listen on (optional, uses default if omitted)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub pipe_name: Option<String>,
+        /// Path to the policy JSON file (optional, uses default location if omitted)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub policy_path: Option<String>,
+    }
+
+    #[allow(clippy::derivable_impls)]
+    impl Default for PackageBrokerConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                pipe_name: None,
+                policy_path: None,
+            }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     pub struct TunnelConf {
         /// Enable tunnel module
         pub enabled: bool,
@@ -691,6 +717,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session: Option<SessionConf>,
 
+        /// Package broker configuration
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub package_broker: Option<PackageBrokerConf>,
+
         /// Agent Tunnel configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
@@ -732,6 +762,7 @@ pub mod dto {
                 proxy: None,
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
+                package_broker: None,
                 tunnel: None,
                 psu_agent: None,
                 rest: serde_json::Map::new(),
@@ -810,6 +841,12 @@ pub mod dto {
         /// Useful for testing with unsigned or test-signed packages.
         #[serde(default)]
         pub skip_msi_signature_validation: bool,
+
+        /// Skip package broker client executable signature validation
+        ///
+        /// Useful for testing with unsigned or test-signed broker clients.
+        #[serde(default)]
+        pub skip_broker_signature_validation: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -824,6 +861,7 @@ pub mod dto {
                 allow_unsafe_updater_urls: false,
                 skip_updater_hash_validation: false,
                 skip_msi_signature_validation: false,
+                skip_broker_signature_validation: false,
             }
         }
     }

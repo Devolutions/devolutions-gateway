@@ -6,15 +6,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use uuid::Uuid;
 use win_api_wrappers::utils::WideString;
 
+use crate::code_signing::{certificate_sha1_thumbprint, is_devolutions_certificate_thumbprint};
 use crate::updater::io::remove_file_on_reboot;
 use crate::updater::{AGENT_UPDATE_IN_PROGRESS, Product, UpdaterCtx, UpdaterError};
-
-/// List of allowed thumbprints for Devolutions code signing certificates
-const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
-    "3f5202a9432d54293bdfe6f7e46adb0a6f8b3ba6",
-    "8db5a43bb8afe4d2ffb92da9007d8997a4cc4e13",
-    "50f753333811ff11f1920274afde3ffd4468b210",
-];
 
 /// Filename of the updater shim executable installed alongside the agent.
 const AGENT_UPDATER_SHIM_NAME: &str = "DevolutionsAgentUpdater.exe";
@@ -403,9 +397,7 @@ pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), 
 }
 
 fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
-    use windows::Win32::Security::Cryptography::{
-        CALG_SHA1, CERT_CONTEXT, CertFreeCertificateContext, CryptHashCertificate,
-    };
+    use windows::Win32::Security::Cryptography::{CERT_CONTEXT, CertFreeCertificateContext};
     use windows::Win32::System::ApplicationInstallationAndServicing::{
         MSI_INVALID_HASH_IS_FATAL, MsiGetFileSignatureInformationW,
     };
@@ -458,10 +450,6 @@ fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
         });
     }
 
-    const SHA1_HASH_SIZE: u8 = 20;
-    let mut calculated_cert_sha1 = [0u8; SHA1_HASH_SIZE as usize];
-    let mut calculated_cert_sha1_size = u32::from(SHA1_HASH_SIZE);
-
     // SAFETY: `cert_context.0` validity is checked above.
     let cert_data = unsafe { (*cert_context.0).pbCertEncoded };
     // SAFETY: `cert_context.0` validity is checked above.
@@ -475,32 +463,12 @@ fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
         )
     };
 
-    // SAFETY: `encoded_slice` validity is ensured by `OwnedCertContext`, and `calculated_cert_sha1`
-    // and `calculated_cert_sha1_size` are valid pointers, therefore the function is safe to call.
-    unsafe {
-        CryptHashCertificate(
-            None,
-            CALG_SHA1,
-            0,
-            encoded_slice,
-            Some(&mut calculated_cert_sha1 as *mut u8),
-            &mut calculated_cert_sha1_size as *mut u32,
-        )
-    }
-    .map_err(|_| UpdaterError::MsiCertHash {
+    let calculated_cert_sha1 = certificate_sha1_thumbprint(encoded_slice).map_err(|_| UpdaterError::MsiCertHash {
         product: ctx.product,
         msi_path: path.to_owned(),
     })?;
 
-    let is_thumbprint_valid = DEVOLUTIONS_CERT_THUMBPRINTS.iter().any(|thumbprint| {
-        let mut thumbprint_bytes = [0u8; 20];
-        hex::decode_to_slice(thumbprint, &mut thumbprint_bytes)
-            .expect("BUG: Invalid thumbprint in `DEVOLUTIONS_CERT_THUMBPRINTS`");
-
-        thumbprint_bytes == calculated_cert_sha1
-    });
-
-    if !is_thumbprint_valid {
+    if !is_devolutions_certificate_thumbprint(&calculated_cert_sha1) {
         return Err(UpdaterError::MsiCertificateThumbprint {
             product: ctx.product,
             thumbprint: hex::encode(calculated_cert_sha1),

@@ -5,6 +5,10 @@ use ctrlc as _;
 #[macro_use]
 extern crate tracing;
 
+#[cfg(windows)]
+pub mod broker;
+#[cfg(windows)]
+pub(crate) mod code_signing;
 pub mod config;
 pub mod domain_detect;
 pub mod enrollment;
