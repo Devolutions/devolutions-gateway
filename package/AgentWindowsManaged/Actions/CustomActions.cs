@@ -13,6 +13,8 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -23,6 +25,10 @@ namespace DevolutionsAgent.Actions
     public class CustomActions
     {
         private const string EXPLORER_COMMAND_VERB = "RunElevated";
+
+        // DACL restricting the PSU rollback marker to SYSTEM and Administrators (full access), with
+        // inheritance blocked (P). SetFileSecurity only applies the DACL portion of the descriptor.
+        private const string ROLLBACK_MARKER_SDDL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
         private static readonly string[] ConfigFiles = new[]
         {
@@ -825,6 +831,33 @@ namespace DevolutionsAgent.Actions
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToArray();
 
+        /// <summary>
+        /// Encrypt the PSU rollback marker with machine-scoped DPAPI so a snapshotted plaintext
+        /// AppToken is never written to the temp directory in the clear. LocalMachine scope lets the
+        /// deferred rollback/commit actions (running as SYSTEM) decrypt it later; a restrictive ACL on
+        /// the file is the second layer that keeps other local users from reading it.
+        /// </summary>
+        private static string ProtectMarker(string plaintext)
+        {
+            byte[] cipher = ProtectedData.Protect(
+                Encoding.UTF8.GetBytes(plaintext),
+                optionalEntropy: null,
+                scope: DataProtectionScope.LocalMachine);
+            return Convert.ToBase64String(cipher, Base64FormattingOptions.None);
+        }
+
+        /// <summary>
+        /// Inverse of <see cref="ProtectMarker"/>: decode and DPAPI-decrypt a rollback marker.
+        /// </summary>
+        private static string UnprotectMarker(string protectedBase64)
+        {
+            byte[] plain = ProtectedData.Unprotect(
+                Convert.FromBase64String(protectedBase64),
+                optionalEntropy: null,
+                scope: DataProtectionScope.LocalMachine);
+            return Encoding.UTF8.GetString(plain);
+        }
+
         [CustomAction]
         public static ActionResult ConfigureFeatures(Session session)
         {
@@ -1297,17 +1330,18 @@ namespace DevolutionsAgent.Actions
         [CustomAction]
         public static ActionResult ConfigurePsuAgent(Session session)
         {
-            // Both the URL and the app token are Base64-encoded into CustomActionData (see
-            // EncodePropertyData) because an arbitrary value can contain the ';' or '=' delimiters
-            // (a URL may embed them in a path or query parameter); decode them here.
+            // The URL, token, agent ID, and display name are all Base64-encoded into CustomActionData
+            // (see EncodePropertyData) because an arbitrary value can contain the ';' or '=' delimiters
+            // (a URL may embed them in a path or query parameter, a display name may contain them
+            // verbatim); decode them here.
             string serverUrl = WixProperties.Decode(session, AgentProperties.psuServerUrl)?.Trim() ?? string.Empty;
             string appToken = WixProperties.Decode(session, AgentProperties.psuAppToken)?.Trim() ?? string.Empty;
             bool isSecretReference = string.Equals(
                 session.Property(AgentProperties.psuAppTokenIsSecretReference.Id)?.Trim(),
                 "true",
                 StringComparison.OrdinalIgnoreCase);
-            string agentId = session.Property(AgentProperties.psuAgentId.Id)?.Trim() ?? string.Empty;
-            string displayName = session.Property(AgentProperties.psuDisplayName.Id)?.Trim() ?? string.Empty;
+            string agentId = WixProperties.Decode(session, AgentProperties.psuAgentId)?.Trim() ?? string.Empty;
+            string displayName = WixProperties.Decode(session, AgentProperties.psuDisplayName)?.Trim() ?? string.Empty;
 
             ActionResult Fail(string msg)
             {
@@ -1322,10 +1356,17 @@ namespace DevolutionsAgent.Actions
             // A silent major upgrade migrates this feature and re-runs this action, but the agent
             // self-updater invokes `msiexec /quiet` without any PSU properties. On that path we do
             // not receive the current token, so we must neither rewrite (which would wipe the config)
-            // nor fail (which would roll back every future upgrade). When no PSU properties are
-            // supplied and agent.json already holds a complete configuration, preserve it as-is. The
-            // required-field checks below still apply when the feature is newly selected.
-            if (serverUrl.Length == 0 && appToken.Length == 0 && PsuConfigIsComplete(configPath))
+            // nor fail (which would roll back every future upgrade). Preserve the existing config as-is
+            // only when *no* PSU property is supplied and agent.json already holds a complete
+            // configuration. If any single field is supplied (even an optional one), fall through so
+            // the required-field checks below reject an incomplete update instead of silently
+            // discarding the operator's intent.
+            bool noPsuInput = serverUrl.Length == 0
+                && appToken.Length == 0
+                && agentId.Length == 0
+                && displayName.Length == 0
+                && !isSecretReference;
+            if (noPsuInput && PsuConfigIsComplete(configPath))
             {
                 session.Log("No PowerShell Universal properties supplied; preserving the existing configuration in agent.json");
                 return ActionResult.Success;
@@ -1395,7 +1436,10 @@ namespace DevolutionsAgent.Actions
 
                 // Record the rollback marker BEFORE writing so an MSI rollback triggered by a later
                 // action can restore the original PsuAgent section. The marker is keyed by installId and
-                // scheduled for deletion at reboot; the rollback CA deletes it eagerly.
+                // scheduled for deletion at reboot; the rollback CA deletes it eagerly. The snapshot can
+                // embed the pre-existing plaintext AppToken, so it is encrypted with machine-scoped DPAPI
+                // and locked down to SYSTEM/Administrators — even if best-effort deletion fails, the token
+                // never lingers in cleartext under the temp directory.
                 try
                 {
                     JObject marker = new()
@@ -1404,7 +1448,17 @@ namespace DevolutionsAgent.Actions
                         ["OriginalStateCaptured"] = originalStateCaptured,
                     };
 
-                    WriteFileAtomic(markerPath, marker.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+                    WriteFileAtomic(markerPath, ProtectMarker(marker.ToString(Formatting.None, Array.Empty<JsonConverter>())));
+
+                    try
+                    {
+                        SetFileSecurity(session, markerPath, ROLLBACK_MARKER_SDDL);
+                    }
+                    catch (Exception e)
+                    {
+                        session.Log($"failed to restrict PSU rollback marker ACL (marker remains DPAPI-encrypted): {e.Message}");
+                    }
+
                     WinAPI.MoveFileEx(markerPath, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
                 }
                 catch (Exception e)
@@ -1477,11 +1531,11 @@ namespace DevolutionsAgent.Actions
             JObject marker;
             try
             {
-                marker = JObject.Parse(File.ReadAllText(markerPath));
+                marker = JObject.Parse(UnprotectMarker(File.ReadAllText(markerPath)));
             }
             catch (Exception e)
             {
-                session.Log($"failed to parse PSU rollback marker at {markerPath}: {e}");
+                session.Log($"failed to read PSU rollback marker at {markerPath}: {e}");
                 return ActionResult.Success;
             }
 
@@ -1534,10 +1588,11 @@ namespace DevolutionsAgent.Actions
 
         /// <summary>
         /// Delete the PSU rollback marker once the transaction commits successfully. The marker holds
-        /// the pre-install <c>PsuAgent</c> section, which can include a plaintext <c>AppToken</c>, so it
-        /// must not linger in the temp directory after a successful install (it is otherwise only
-        /// removed at the next reboot, which may never happen). <see cref="RollbackConfigurePsuAgent"/>
-        /// deletes it on failure; this commit action deletes it on success.
+        /// the pre-install <c>PsuAgent</c> section, which can include an <c>AppToken</c> (DPAPI-encrypted
+        /// at rest), so it must not linger in the temp directory after a successful install (it is
+        /// otherwise only removed at the next reboot, which may never happen).
+        /// <see cref="RollbackConfigurePsuAgent"/> deletes it on failure; this commit action deletes it
+        /// on success.
         /// </summary>
         [CustomAction]
         public static ActionResult CommitConfigurePsuAgent(Session session)

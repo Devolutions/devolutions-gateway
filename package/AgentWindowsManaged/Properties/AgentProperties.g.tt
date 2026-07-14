@@ -180,7 +180,7 @@ namespace DevolutionsAgent.Properties
     new PropertyDefinition<string>("PsuServerUrl", "", secure: true, encode: true, comment: "PSU endpoint URL (e.g. http://localhost:5000)"),
     new PropertyDefinition<string>("PsuAppToken", "", secure: true, hidden: true, encode: true, comment: "PSU application token, or a secret name when PsuAppTokenIsSecretReference is true"),
     new PropertyDefinition<bool>("PsuAppTokenIsSecretReference", false, secure: true, comment: "`true` when PsuAppToken holds a SecretManagement secret name to inject as $secret:<name>"),
-    new PropertyDefinition<string>("PsuAgentId", "", secure: true, comment: "Optional stable agent identifier presented to PSU"),
-    new PropertyDefinition<string>("PsuDisplayName", "", secure: true, comment: "Optional friendly display name shown in PSU"),
+    new PropertyDefinition<string>("PsuAgentId", "", secure: true, encode: true, comment: "Optional stable agent identifier presented to PSU"),
+    new PropertyDefinition<string>("PsuDisplayName", "", secure: true, encode: true, comment: "Optional friendly display name shown in PSU"),
   };             
 #>

@@ -425,7 +425,7 @@ namespace DevolutionsAgent.Properties
             Name = "PsuAgentId",
             Secure = true,
             Hidden = false,
-            Encode = false,
+            Encode = true,
             Public = true
         };
 
@@ -445,6 +445,33 @@ namespace DevolutionsAgent.Properties
                 }
             }
         }
+
+        internal static readonly WixProperty<String> psuAgentIdEncoded = new()
+        {
+            Id = "P.PSUAGENTID_ENCODED",
+            Default = string.Empty,
+            Name = "PsuAgentIdEncoded",
+            Secure = true,
+            Hidden = true,
+            Encode = false,
+            Public = true /* Secure properties must be public */
+        };
+
+        public string PsuAgentIdEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuAgentIdEncoded.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuAgentIdEncoded, value); 
+                }
+            }
+        }
  
         internal static readonly WixProperty<String> psuDisplayName = new()
         {
@@ -453,7 +480,7 @@ namespace DevolutionsAgent.Properties
             Name = "PsuDisplayName",
             Secure = true,
             Hidden = false,
-            Encode = false,
+            Encode = true,
             Public = true
         };
 
@@ -470,6 +497,33 @@ namespace DevolutionsAgent.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(psuDisplayName, value); 
+                }
+            }
+        }
+
+        internal static readonly WixProperty<String> psuDisplayNameEncoded = new()
+        {
+            Id = "P.PSUDISPLAYNAME_ENCODED",
+            Default = string.Empty,
+            Name = "PsuDisplayNameEncoded",
+            Secure = true,
+            Hidden = true,
+            Encode = false,
+            Public = true /* Secure properties must be public */
+        };
+
+        public string PsuDisplayNameEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuDisplayNameEncoded.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuDisplayNameEncoded, value); 
                 }
             }
         }
@@ -520,9 +574,11 @@ namespace DevolutionsAgent.Properties
  
  
             psuAgentId,
+            psuAgentIdEncoded,
  
  
             psuDisplayName,
+            psuDisplayNameEncoded,
  
  
         };
