@@ -54,7 +54,7 @@ x509-parser = "0.16"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
 [dependencies.ironrdp]
-version = "0.14"
+version = "0.17"
 default-features = false
 features = [
     "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionally.

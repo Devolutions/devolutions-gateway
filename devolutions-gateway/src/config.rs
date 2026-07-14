@@ -1262,7 +1262,8 @@ fn read_pfx_file(
     let crypto_context = password
         .map(|secret| secret.expose_secret())
         .map(Pkcs12CryptoContext::new_with_password)
-        .unwrap_or_else(Pkcs12CryptoContext::new_without_password);
+        .unwrap_or_else(Pkcs12CryptoContext::new_without_password)
+        .context("failed to create PKCS12 crypto context")?;
     let parsing_params = Pkcs12ParsingParams::default();
 
     let pfx_contents = normalize_data_path(path, &get_data_dir())

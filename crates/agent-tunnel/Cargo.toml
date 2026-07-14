@@ -35,7 +35,7 @@ camino = "1.1"
 ipnetwork = "0.20"
 
 # Crypto / PKI
-picky = { version = "7.0.0-rc.15", default-features = false, features = ["x509", "time_conversion"] }
+picky = { version = "7.0.0-rc.25", default-features = false, features = ["x509", "time_conversion"] }
 picky-asn1-x509 = "0.15"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }

@@ -196,13 +196,13 @@ impl CredentialInjectionKdc {
         Ok(sspi::KerberosServerConfig {
             kerberos_config: sspi::KerberosConfig {
                 kdc_url: Some(kdc_url),
-                client_computer_name: Some(client_addr.to_string()),
+                client_computer_name: client_addr.to_string(),
             },
             server_properties: sspi::kerberos::ServerProperties::new(
                 &["TERMSRV", &self.target_hostname],
                 Some(user),
                 Duration::from_secs(300),
-                Some(self.session.acceptor.long_term_key.expose_secret().clone()),
+                Some(sspi::Secret::new(self.session.acceptor.long_term_key.expose_secret().clone())),
             )?,
         })
     }
