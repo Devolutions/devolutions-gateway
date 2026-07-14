@@ -9,8 +9,8 @@
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
-                <String Id="FeaturePsuEventHubDescription">Enables PowerShell Universal Event Hub remote agent compatibility.</String>
-                <String Id="FeaturePsuEventHubName">PowerShell Universal Event Hub</String>
+                <String Id="FeaturePsuDescription">Enables the PowerShell Universal remote agent.</String>
+                <String Id="FeaturePsuName">PowerShell Universal Agent</String>
                 <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
                 <String Id="FeatureSessionName">RDP Extension</String>
                 <String Id="Language">1033</String>
@@ -69,4 +69,23 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically.</String>
                 <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>
                 <String Id="AgentTunnelDlgTitle">Agent Tunnel</String>
+                    <!-- dialogs.psu -->
+                <String Id="PsuDlgAgentIdHint">Optional. Stable agent ID. Defaults to the machine name.</String>
+                <String Id="PsuDlgAgentIdLabel">Agent ID:</String>
+                <String Id="PsuDlgAppTokenHint">Required. Token value, or a secret name resolved at runtime.</String>
+                <String Id="PsuDlgAppTokenLabel">App Token:</String>
+                <String Id="PsuDlgAppTokenRequired">An app token is required. Enter the token value or a secret name, or go back and deselect the PowerShell Universal Agent feature.</String>
+                <String Id="PsuDlgAppTokenSecretOption">Secret name</String>
+                <String Id="PsuDlgAppTokenValueOption">Token value</String>
+                <String Id="PsuDlgDescription">Configure how this agent connects to PowerShell Universal.</String>
+                <String Id="PsuDlgDisplayNameHint">Optional. Name shown in PowerShell Universal. Defaults to the Agent ID.</String>
+                <String Id="PsuDlgDisplayNameLabel">Display Name:</String>
+                <String Id="PsuDlgServerUnreachable">Could not reach the PowerShell Universal server ({0}).
+
+Do you want to continue anyway?</String>
+                <String Id="PsuDlgServerUrlHint">Required. PowerShell Universal endpoint, e.g. http://localhost:5000.</String>
+                <String Id="PsuDlgServerUrlInvalid">The server URL must be an absolute http or https URL, for example http://localhost:5000.</String>
+                <String Id="PsuDlgServerUrlLabel">Server URL:</String>
+                <String Id="PsuDlgServerUrlRequired">A server URL is required. Enter the PowerShell Universal endpoint, or go back and deselect the PowerShell Universal Agent feature.</String>
+                <String Id="PsuDlgTitle">PowerShell Universal Agent</String>
                     </WixLocalization>

@@ -35,12 +35,12 @@
           "text": "Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle."
         },
         {
-          "id": "FeaturePsuEventHubName",
-          "text": "PowerShell Universal Event Hub"
+          "id": "FeaturePsuName",
+          "text": "Agent PowerShell Universal"
         },
         {
-          "id": "FeaturePsuEventHubDescription",
-          "text": "Active la compatibilité d'agent distant pour PowerShell Universal Event Hub."
+          "id": "FeaturePsuDescription",
+          "text": "Active l'agent distant pour PowerShell Universal."
         }
       ],
       "messages": [
@@ -217,6 +217,72 @@
           {
             "id": "AgentTunnelDlgDomainsHint",
             "text": "Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com."
+          }
+        ],
+        "psu": [
+          {
+            "id": "PsuDlgTitle",
+            "text": "Agent PowerShell Universal"
+          },
+          {
+            "id": "PsuDlgDescription",
+            "text": "Configurez la connexion de cet agent à PowerShell Universal."
+          },
+          {
+            "id": "PsuDlgServerUrlLabel",
+            "text": "URL du serveur :"
+          },
+          {
+            "id": "PsuDlgServerUrlHint",
+            "text": "Requis. Point de terminaison PowerShell Universal, p. ex. http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenLabel",
+            "text": "Jeton d'application :"
+          },
+          {
+            "id": "PsuDlgAppTokenHint",
+            "text": "Requis. Valeur du jeton, ou un nom de secret résolu à l'exécution."
+          },
+          {
+            "id": "PsuDlgAppTokenValueOption",
+            "text": "Valeur du jeton"
+          },
+          {
+            "id": "PsuDlgAppTokenSecretOption",
+            "text": "Nom de secret"
+          },
+          {
+            "id": "PsuDlgAgentIdLabel",
+            "text": "ID de l'agent :"
+          },
+          {
+            "id": "PsuDlgAgentIdHint",
+            "text": "Facultatif. ID stable de l'agent. Par défaut, le nom de la machine."
+          },
+          {
+            "id": "PsuDlgDisplayNameLabel",
+            "text": "Nom d'affichage :"
+          },
+          {
+            "id": "PsuDlgDisplayNameHint",
+            "text": "Facultatif. Nom affiché dans PowerShell Universal. Par défaut, l'ID de l'agent."
+          },
+          {
+            "id": "PsuDlgServerUrlRequired",
+            "text": "Une URL de serveur est requise. Saisissez le point de terminaison PowerShell Universal, ou revenez en arrière et désélectionnez la fonctionnalité Agent PowerShell Universal."
+          },
+          {
+            "id": "PsuDlgServerUrlInvalid",
+            "text": "L'URL du serveur doit être une URL http ou https absolue, par exemple http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenRequired",
+            "text": "Un jeton d'application est requis. Saisissez la valeur du jeton ou un nom de secret, ou revenez en arrière et désélectionnez la fonctionnalité Agent PowerShell Universal."
+          },
+          {
+            "id": "PsuDlgServerUnreachable",
+            "text": "Impossible de joindre le serveur PowerShell Universal ({0}).\n\nVoulez-vous continuer quand même ?"
           }
         ],
         "firewall": [

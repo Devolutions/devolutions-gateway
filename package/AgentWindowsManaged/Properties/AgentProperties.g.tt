@@ -30,6 +30,7 @@ namespace DevolutionsAgent.Properties
             Name = "<#= this.properties[idx].Name #>",
             Secure = <#= this.properties[idx].Secure.ToString().ToLower() #>,
             Hidden = <#= this.properties[idx].Hidden.ToString().ToLower() #>,
+            Encode = <#= this.properties[idx].Encode.ToString().ToLower() #>,
             Public = <#= this.properties[idx].Public.ToString().ToLower() #>
         };
 
@@ -51,12 +52,44 @@ namespace DevolutionsAgent.Properties
                 }
             }
         }
+<# if (this.properties[idx].Encode) { #>
+
+        internal static readonly WixProperty<String> <#= this.properties[idx].PrivateName #>Encoded = new()
+        {
+            Id = "P.<#=id#>_ENCODED",
+            Default = string.Empty,
+            Name = "<#= this.properties[idx].Name #>Encoded",
+            Secure = true,
+            Hidden = true,
+            Encode = false,
+            Public = true /* Secure properties must be public */
+        };
+
+        public string <#= this.properties[idx].Name #>Encoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(<#= this.properties[idx].PrivateName #>Encoded.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(<#= this.properties[idx].PrivateName #>Encoded, value); 
+                }
+            }
+        }
+<# } #>
 <# } #> 
 
         public static IWixProperty[] Properties =
         {
 <# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
             <#= this.properties[idx].PrivateName #>,
+<# if (this.properties[idx].Encode) { #>
+            <#= this.properties[idx].PrivateName #>Encoded,
+<# } #> 
 <# } #> 
         };
     }
@@ -66,6 +99,7 @@ namespace DevolutionsAgent.Properties
     public abstract class BasePropertyDefinition
     {
         public abstract string Comment { get; set; }
+        public abstract bool Encode { get; set; }
         public abstract bool Hidden { get; set; }
         public abstract string Id { get; set; }        
         public abstract string Name { get; set; }
@@ -85,17 +119,19 @@ namespace DevolutionsAgent.Properties
     public override bool Public { get; set; }
     public override bool Secure { get; set; }
     public override bool Hidden { get; set; }
+    public override bool Encode { get; set; }
     public override string Id { get; set; }
     public override string Comment { get; set; }
     public bool Private => !this.Public;
 
-    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null)
+    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, bool encode = false, string id = null, string comment = null)
     {
         this.Name = name;
         this.DefaultValue = defaultValue;
         this.Public = isPublic;
         this.Secure = secure;
         this.Hidden = hidden;
+        this.Encode = encode;
         this.Id = id;
         this.Comment = comment;
     }
@@ -140,5 +176,11 @@ namespace DevolutionsAgent.Properties
     new PropertyDefinition<bool>("Uninstalling", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Maintenance", false, isPublic: false, secure: false),
     new PropertyDefinition<string>("FeaturesToConfigure", "", isPublic: false, secure: false),
+
+    new PropertyDefinition<string>("PsuServerUrl", "", secure: true, encode: true, comment: "PSU endpoint URL (e.g. http://localhost:5000)"),
+    new PropertyDefinition<string>("PsuAppToken", "", secure: true, hidden: true, encode: true, comment: "PSU application token, or a secret name when PsuAppTokenIsSecretReference is true"),
+    new PropertyDefinition<bool>("PsuAppTokenIsSecretReference", false, secure: true, comment: "`true` when PsuAppToken holds a SecretManagement secret name to inject as $secret:<name>"),
+    new PropertyDefinition<string>("PsuAgentId", "", secure: true, encode: true, comment: "Optional stable agent identifier presented to PSU"),
+    new PropertyDefinition<string>("PsuDisplayName", "", secure: true, encode: true, comment: "Optional friendly display name shown in PSU"),
   };             
 #>

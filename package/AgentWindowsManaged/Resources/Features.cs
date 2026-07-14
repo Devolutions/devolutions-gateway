@@ -10,7 +10,7 @@ namespace DevolutionsAgent.Resources
     {
         internal const string FEATURE_ID_PREFIX = "F.";
 
-        internal static IEnumerable<Feature> ExperimentalFeatures => [ PSU_EVENT_HUB_FEATURE ];
+        internal static IEnumerable<Feature> ExperimentalFeatures => [ PSU_FEATURE ];
 
         internal static Feature AGENT_UPDATER_FEATURE = new("!(loc.FeatureAgentUpdaterName)", "!(loc.FeatureAgentUpdaterDescription)", isEnabled: true, allowChange: true)
         {
@@ -22,16 +22,16 @@ namespace DevolutionsAgent.Resources
             Id = $"{FEATURE_ID_PREFIX}Tunnel"
         };
 
-        internal static Feature PSU_EVENT_HUB_FEATURE = new("!(loc.FeaturePsuEventHubName)", "!(loc.FeaturePsuEventHubDescription)", isEnabled: false, allowChange: true)
+        internal static Feature PSU_FEATURE = new("!(loc.FeaturePsuName)", "!(loc.FeaturePsuDescription)", isEnabled: false, allowChange: true)
         {
-            Id = $"{FEATURE_ID_PREFIX}PsuEventHub"
+            Id = $"{FEATURE_ID_PREFIX}PsuAgent"
         };
 
         internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", isEnabled: true, allowChange: false)
         {
             Id = $"{FEATURE_ID_PREFIX}Agent",
             Description = "!(loc.FeatureAgentDescription)",
-            Children = [ AGENT_UPDATER_FEATURE, AGENT_TUNNEL_FEATURE, PSU_EVENT_HUB_FEATURE ]
+            Children = [ AGENT_UPDATER_FEATURE, AGENT_TUNNEL_FEATURE, PSU_FEATURE ]
         };
 
         internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", isEnabled: false)

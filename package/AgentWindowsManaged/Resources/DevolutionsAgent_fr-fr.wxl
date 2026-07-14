@@ -3,8 +3,8 @@
         <!-- metadata -->
                 <String Id="FeatureAgentTunnelDescription">Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle.</String>
                 <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
-                <String Id="FeaturePsuEventHubDescription">Active la compatibilité d'agent distant pour PowerShell Universal Event Hub.</String>
-                <String Id="FeaturePsuEventHubName">PowerShell Universal Event Hub</String>
+                <String Id="FeaturePsuDescription">Active l'agent distant pour PowerShell Universal.</String>
+                <String Id="FeaturePsuName">Agent PowerShell Universal</String>
                 <String Id="FeatureSessionDescription">Installe l'extension RDP</String>
                 <String Id="FeatureSessionName">Extension RDP</String>
                 <String Id="Language">1036</String>
@@ -63,6 +63,25 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="AgentTunnelDlgSubnetsHint">Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement.</String>
                 <String Id="AgentTunnelDlgSubnetsLabel">Sous-réseaux annoncés :</String>
                 <String Id="AgentTunnelDlgTitle">Tunnel d'agent</String>
+                    <!-- dialogs.psu -->
+                <String Id="PsuDlgAgentIdHint">Facultatif. ID stable de l'agent. Par défaut, le nom de la machine.</String>
+                <String Id="PsuDlgAgentIdLabel">ID de l'agent :</String>
+                <String Id="PsuDlgAppTokenHint">Requis. Valeur du jeton, ou un nom de secret résolu à l'exécution.</String>
+                <String Id="PsuDlgAppTokenLabel">Jeton d'application :</String>
+                <String Id="PsuDlgAppTokenRequired">Un jeton d'application est requis. Saisissez la valeur du jeton ou un nom de secret, ou revenez en arrière et désélectionnez la fonctionnalité Agent PowerShell Universal.</String>
+                <String Id="PsuDlgAppTokenSecretOption">Nom de secret</String>
+                <String Id="PsuDlgAppTokenValueOption">Valeur du jeton</String>
+                <String Id="PsuDlgDescription">Configurez la connexion de cet agent à PowerShell Universal.</String>
+                <String Id="PsuDlgDisplayNameHint">Facultatif. Nom affiché dans PowerShell Universal. Par défaut, l'ID de l'agent.</String>
+                <String Id="PsuDlgDisplayNameLabel">Nom d'affichage :</String>
+                <String Id="PsuDlgServerUnreachable">Impossible de joindre le serveur PowerShell Universal ({0}).
+
+Voulez-vous continuer quand même ?</String>
+                <String Id="PsuDlgServerUrlHint">Requis. Point de terminaison PowerShell Universal, p. ex. http://localhost:5000.</String>
+                <String Id="PsuDlgServerUrlInvalid">L'URL du serveur doit être une URL http ou https absolue, par exemple http://localhost:5000.</String>
+                <String Id="PsuDlgServerUrlLabel">URL du serveur :</String>
+                <String Id="PsuDlgServerUrlRequired">Une URL de serveur est requise. Saisissez le point de terminaison PowerShell Universal, ou revenez en arrière et désélectionnez la fonctionnalité Agent PowerShell Universal.</String>
+                <String Id="PsuDlgTitle">Agent PowerShell Universal</String>
                     <!-- dialogs.firewall -->
                 <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
                 <String Id="WixExecFirewallExceptionsInstall">Installation de la configuration du Pare-feu Windows</String>

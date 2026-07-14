@@ -53,6 +53,14 @@ public partial class VerifyReadyDialog : AgentDialog
                 continue;
             }
 
+            // Hidden properties carry secrets (e.g. the PSU app token). Keep the property in the
+            // generated command line so silent-install operators know it is required, but never
+            // render its actual value in the dialog or copy it to the clipboard in plaintext.
+            if (property.Hidden)
+            {
+                propertyValue = "<REDACTED>";
+            }
+
             builder.Append($" {property.Id}=\"{propertyValue}\"");
         }
 
