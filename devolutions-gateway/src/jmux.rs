@@ -10,7 +10,7 @@ use transport::{ErasedRead, ErasedWrite};
 
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{JmuxTokenClaims, RecordingPolicy};
+use crate::token::{ApplicationProtocol, JmuxTokenClaims, Protocol, RecordingPolicy};
 use crate::traffic_audit::TrafficAuditHandle;
 
 pub async fn handle(
@@ -19,6 +19,7 @@ pub async fn handle(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
+    credential_store: crate::credential::CredentialStoreHandle,
 ) -> anyhow::Result<()> {
     match claims.jet_rec {
         RecordingPolicy::None | RecordingPolicy::Stream => (),
@@ -33,6 +34,12 @@ pub async fn handle(
 
     let config = claims_to_jmux_config(&claims);
     debug!(?config, "JMUX config");
+
+    let credential_entry = if claims.jet_ap == ApplicationProtocol::Known(Protocol::Ssh) {
+        credential_store.get(claims.jti).filter(|entry| entry.mapping.is_some())
+    } else {
+        None
+    };
 
     let session_id = claims.jet_aid;
 
@@ -105,10 +112,22 @@ pub async fn handle(
         });
     };
 
-    let proxy_fut = JmuxProxy::new(reader, writer)
+    let mut proxy = JmuxProxy::new(reader, writer)
         .with_config(config)
-        .with_outgoing_traffic_event_callback(traffic_event_callback)
-        .run();
+        .with_outgoing_traffic_event_callback(traffic_event_callback);
+
+    if let Some(credential_entry) = credential_entry {
+        proxy = proxy.with_outgoing_stream_interceptor(move |destination, client_stream, target_stream| {
+            let credential_entry = Arc::clone(&credential_entry);
+            tokio::spawn(async move {
+                if let Err(error) = crate::ssh_proxy::run(client_stream, target_stream, credential_entry).await {
+                    warn!(?error, %destination, "SSH credential proxy failed");
+                }
+            });
+        });
+    }
+
+    let proxy_fut = proxy.run();
     let proxy_handle = ChildTask::spawn(proxy_fut);
     let join_fut = proxy_handle.join();
     tokio::pin!(join_fut);

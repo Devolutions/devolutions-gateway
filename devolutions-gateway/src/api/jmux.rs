@@ -22,6 +22,7 @@ pub async fn handler(
         shutdown_signal,
         conf_handle,
         traffic_audit_handle,
+        credential_store,
         ..
     }): State<DgwState>,
     JmuxToken(claims): JmuxToken,
@@ -35,6 +36,7 @@ pub async fn handler(
             sessions,
             subscriber_tx,
             traffic_audit_handle,
+            credential_store,
             claims,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -54,6 +56,7 @@ async fn handle_socket(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
+    credential_store: crate::credential::CredentialStoreHandle,
     claims: JmuxTokenClaims,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -64,9 +67,16 @@ async fn handle_socket(
         keep_alive_interval,
     );
 
-    let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx, traffic_audit_handle)
-        .instrument(info_span!("jmux", client = %source_addr))
-        .await;
+    let result = crate::jmux::handle(
+        stream,
+        claims,
+        sessions,
+        subscriber_tx,
+        traffic_audit_handle,
+        credential_store,
+    )
+    .instrument(info_span!("jmux", client = %source_addr))
+    .await;
 
     if let Err(error) = result {
         close_handle.server_error("JMUX failure".to_owned()).await;

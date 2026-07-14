@@ -34,6 +34,7 @@ pub mod rdp_pcb;
 pub mod rdp_proxy;
 pub mod recording;
 pub mod session;
+pub mod ssh_proxy;
 pub mod streaming;
 pub mod subscriber;
 pub mod target_addr;

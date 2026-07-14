@@ -69,6 +69,7 @@ thiserror = "2"
 typed-builder = "0.21"
 backoff = "0.4"
 bitflags = "2.9"
+rand = "0.8"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
@@ -81,6 +82,7 @@ x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 hex = "0.4"
 rustls-native-certs = "0.8"
+russh = { version = "0.55.0", default-features = false, features = ["ring"] }
 
 # Logging
 tracing = "0.1"
