@@ -202,7 +202,9 @@ impl CredentialInjectionKdc {
                 &["TERMSRV", &self.target_hostname],
                 Some(user),
                 Duration::from_secs(300),
-                Some(sspi::Secret::new(self.session.acceptor.long_term_key.expose_secret().clone())),
+                Some(sspi::Secret::new(
+                    self.session.acceptor.long_term_key.expose_secret().clone(),
+                )),
             )?,
         })
     }
