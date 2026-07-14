@@ -26,10 +26,11 @@ if [ -z "${hubs_json}" ]; then
     hubs_json='"default"'
 fi
 
-app_token_property=""
-if [ -n "${PSU_APP_TOKEN:-}" ]; then
-    app_token_property="    \"AppToken\": \"$(json_escape "${PSU_APP_TOKEN}")\","
+if [ -z "${PSU_APP_TOKEN:-}" ]; then
+    echo "PSU_APP_TOKEN is required" >&2
+    exit 1
 fi
+app_token_property="    \"AppToken\": \"$(json_escape "${PSU_APP_TOKEN}")\","
 
 cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
 {
@@ -39,7 +40,7 @@ cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
   "Session": {
     "Enabled": false
   },
-  "PsuGrpcAgent": {
+  "PsuAgent": {
     "Enabled": true,
     "ServerUrl": "$(json_escape "${PSU_SERVER_URL:-http://host.docker.internal:5006}")",
     "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",

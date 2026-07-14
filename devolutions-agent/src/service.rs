@@ -4,8 +4,7 @@ use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::log::AgentLog;
-use devolutions_agent::psu_event_hub::PsuEventHubTask;
-use devolutions_agent::psu_grpc_agent::PsuGrpcAgentTask;
+use devolutions_agent::psu_agent::PsuAgentTask;
 use devolutions_agent::remote_desktop::RemoteDesktopTask;
 #[cfg(windows)]
 use devolutions_agent::session_manager::SessionManager;
@@ -237,12 +236,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
         tasks.register(TunnelTask::new(conf_handle.clone()));
     }
 
-    if conf.psu_event_hub.enabled {
-        tasks.register(PsuEventHubTask::new(conf_handle.clone()));
-    }
-
-    if conf.psu_grpc_agent.enabled {
-        tasks.register(PsuGrpcAgentTask::new(conf_handle));
+    if conf.psu_agent.is_some() {
+        tasks.register(PsuAgentTask::new(conf_handle));
     }
 
     Ok(TasksCtx {

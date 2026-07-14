@@ -9,9 +9,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
-use crate::psu_grpc_agent::protocol::agent_message::Payload as AgentPayload;
-use crate::psu_grpc_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted, StartProcess, StreamData};
-use crate::psu_grpc_agent::{agent_message, diagnostic, stream_closed, stream_data};
+use crate::psu_agent::protocol::agent_message::Payload as AgentPayload;
+use crate::psu_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted, StartProcess, StreamData};
+use crate::psu_agent::{agent_message, diagnostic, stream_closed, stream_data};
 
 const PWSH_STDIN_CLOSED_EXIT_CODE: i32 = 160;
 
