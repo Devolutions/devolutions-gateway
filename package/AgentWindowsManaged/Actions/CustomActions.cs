@@ -456,90 +456,38 @@ namespace DevolutionsAgent.Actions
                 string Redact(string s) => s.Replace(enrollmentString, "***");
                 session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
 
-                ProcessStartInfo startInfo = new(exePath, arguments)
+                // The JWT goes to the child via stdin (sentinel `-` in the args), never the command
+                // line — the bearer token would otherwise be visible to any local process via
+                // WMI / Process Explorer / ETW.
+                AgentRunResult enrollResult = RunAgentCommand(exePath, arguments, enrollmentString, ProgramDataDirectory, 60_000);
+
+                if (enrollResult.TimedOut)
                 {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    RedirectStandardInput = true,
-                    CreateNoWindow = true,
-                    WorkingDirectory = ProgramDataDirectory,
-                };
-
-                using Process process = Process.Start(startInfo);
-
-                // Write the JWT to stdin and close it so the child sees EOF. Passing it via stdin
-                // (sentinel `-` in the args) instead of the command line keeps the bearer token out
-                // of the process cmdline. The JWT is small and stdin is closed immediately, so this
-                // write can't block before we start draining stdout/stderr below.
-                process.StandardInput.Write(enrollmentString);
-                process.StandardInput.Close();
-
-                // Drain stdout/stderr concurrently with the wait. The Windows anonymous-pipe
-                // buffer is ~4 KB; if the child writes more than that (verbose logs, cert dumps)
-                // while we block in WaitForExit before reading, the child blocks on write(), the
-                // wait never returns, and we'd Kill() a healthy process — a spurious install
-                // failure. Starting the async readers up front keeps the pipes drained.
-                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
-                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
-
-                if (!process.WaitForExit(60_000))
-                {
-                    try
-                    {
-                        process.Kill();
-                    }
-                    catch
-                    {
-                        // Already exited between WaitForExit timing out and Kill firing.
-                    }
-
-                    // The async readers may still be running against the (now disposing) streams.
-                    // Observe them with a bounded wait so their exceptions don't surface later as
-                    // unobserved task exceptions; swallow whatever they throw — we're already failing.
-                    try
-                    {
-                        Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 5000);
-                    }
-                    catch
-                    {
-                        // Observed.
-                    }
-
-                    // A hard Kill() bypasses BOTH recovery layers: the agent's transactional
-                    // rollback never runs (we killed it, it didn't gracefully error), and no marker
-                    // has been written yet (the marker write happens after the exit-code-0 check
-                    // below). So if `up` wrote agent.json + cert files but then hung, those would be
-                    // orphaned. Mirror the marker-failure path: best-effort read whatever cert paths
-                    // landed in agent.json and clean them up + restore the pre-snapshot state. The
-                    // snapshot locals (originalTunnel/originalGatewayCaB64/originalStateCaptured) were
-                    // captured before `up` started, so they're valid here. ReadTunnelCertPaths can't
-                    // throw, so this can't escape the timeout path.
-                    List<string> timeoutCertPaths = ReadTunnelCertPaths(agentJsonPath);
-                    CleanUpEnrollmentArtifacts(session, timeoutCertPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+                    // A hard Kill() bypasses the agent's own rollback and no marker exists yet, so a hang
+                    // after `up` persisted its enrollment would orphan it; undo it (guarded so an early
+                    // hang that wrote nothing can't delete the prior install's certs).
+                    RollbackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
 
                     return Fail("Agent tunnel enrollment timed out. Verify your Devolutions Gateway is reachable from this machine.");
                 }
 
-                // Parameterless WaitForExit ensures the async stdout/stderr readers have fully
-                // flushed before we read their results. GetAwaiter().GetResult() unwraps IO errors
-                // instead of wrapping them in an AggregateException ("One or more errors occurred.").
-                process.WaitForExit();
-                string stdout = stdoutTask.GetAwaiter().GetResult();
-                string stderr = stderrTask.GetAwaiter().GetResult();
-
-                if (!string.IsNullOrEmpty(stdout))
+                if (!string.IsNullOrEmpty(enrollResult.Stdout))
                 {
-                    session.Log($"enrollment stdout: {Redact(stdout)}");
+                    session.Log($"enrollment stdout: {Redact(enrollResult.Stdout)}");
                 }
-                if (!string.IsNullOrEmpty(stderr))
+                if (!string.IsNullOrEmpty(enrollResult.Stderr))
                 {
-                    session.Log($"enrollment stderr: {Redact(stderr)}");
+                    session.Log($"enrollment stderr: {Redact(enrollResult.Stderr)}");
                 }
 
-                if (process.ExitCode != 0)
+                if (enrollResult.ExitCode != 0)
                 {
-                    string detail = !string.IsNullOrWhiteSpace(stderr) ? Redact(stderr).Trim() : $"exit code {process.ExitCode}";
+                    string detail = !string.IsNullOrWhiteSpace(enrollResult.Stderr) ? Redact(enrollResult.Stderr).Trim() : $"exit code {enrollResult.ExitCode}";
+
+                    // `up` only enrolls, so a non-zero exit can leave a freshly-persisted enrollment
+                    // on disk with no marker yet; undo it (guarded against early failures).
+                    RollbackFailedEnrollment(session, agentJsonPath, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+
                     return Fail($"Agent tunnel enrollment failed: {detail}");
                 }
 
@@ -620,6 +568,33 @@ namespace DevolutionsAgent.Actions
                     WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
                 }
 
+                // Enrollment only proved the HTTPS/TCP path, but the tunnel runs over QUIC/UDP
+                // (4433). Probe that path as a distinct step so a blocked UDP port fails the install
+                // while the operator is still here to fix the firewall. The rollback marker is
+                // already on disk, so a probe failure is undone by the marker-driven rollback.
+                session.Log($"Running connectivity probe: {exePath} probe");
+                AgentRunResult probeResult = RunAgentCommand(exePath, "probe", null, ProgramDataDirectory, 60_000);
+
+                if (!string.IsNullOrEmpty(probeResult.Stdout))
+                {
+                    session.Log($"probe stdout: {probeResult.Stdout}");
+                }
+                if (!string.IsNullOrEmpty(probeResult.Stderr))
+                {
+                    session.Log($"probe stderr: {probeResult.Stderr}");
+                }
+
+                if (probeResult.TimedOut)
+                {
+                    return Fail("Agent tunnel connectivity probe timed out. The agent can't reach the Devolutions Gateway over UDP/QUIC (port 4433); check that the firewall allows it.");
+                }
+
+                if (probeResult.ExitCode != 0)
+                {
+                    string detail = !string.IsNullOrWhiteSpace(probeResult.Stderr) ? probeResult.Stderr.Trim() : $"exit code {probeResult.ExitCode}";
+                    return Fail($"Agent tunnel connectivity probe failed: the agent could not establish the QUIC/UDP tunnel to the Devolutions Gateway (port 4433). If UDP is blocked, open it on the firewall. {detail}");
+                }
+
                 session.Log("Agent tunnel enrollment completed successfully");
                 return ActionResult.Success;
             }
@@ -627,6 +602,92 @@ namespace DevolutionsAgent.Actions
             {
                 return Fail($"Agent tunnel enrollment failed: {e.Message}");
             }
+        }
+
+        // When TimedOut is true the child was killed, so ExitCode/Stdout/Stderr carry no meaning —
+        // callers must check TimedOut first.
+        private sealed class AgentRunResult
+        {
+            public bool TimedOut;
+            public int ExitCode;
+            public string Stdout;
+            public string Stderr;
+        }
+
+        /// <summary>
+        /// Runs an <c>agent.exe</c> subcommand to completion, feeding <paramref name="stdin"/> (if
+        /// any) and capturing stdout/stderr. Kills the child and reports <see cref="AgentRunResult.TimedOut"/>
+        /// if it doesn't exit within <paramref name="timeoutMs"/>.
+        /// </summary>
+        private static AgentRunResult RunAgentCommand(string exePath, string arguments, string stdin, string workingDirectory, int timeoutMs)
+        {
+            ProcessStartInfo startInfo = new(exePath, arguments)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                CreateNoWindow = true,
+                WorkingDirectory = workingDirectory,
+            };
+
+            using Process process = Process.Start(startInfo);
+
+            // Write stdin (if any) and close it so the child sees EOF. The payload is small and
+            // stdin is closed immediately, so this can't block before we start draining the output
+            // pipes below.
+            if (stdin != null)
+            {
+                process.StandardInput.Write(stdin);
+            }
+            process.StandardInput.Close();
+
+            // Drain stdout/stderr concurrently with the wait. The Windows anonymous-pipe buffer is
+            // ~4 KB; if the child writes more than that (verbose logs, cert dumps) while we block in
+            // WaitForExit before reading, the child blocks on write(), the wait never returns, and
+            // we'd Kill() a healthy process — a spurious install failure. Starting the async readers
+            // up front keeps the pipes drained.
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(timeoutMs))
+            {
+                try
+                {
+                    process.Kill();
+                }
+                catch
+                {
+                    // Already exited between WaitForExit timing out and Kill firing.
+                }
+
+                // The async readers may still be running against the (now disposing) streams.
+                // Observe them with a bounded wait so their exceptions don't surface later as
+                // unobserved task exceptions; swallow whatever they throw — we're already failing.
+                try
+                {
+                    Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 5000);
+                }
+                catch
+                {
+                    // Observed.
+                }
+
+                return new AgentRunResult { TimedOut = true };
+            }
+
+            // Parameterless WaitForExit ensures the async stdout/stderr readers have fully flushed
+            // before we read their results. GetAwaiter().GetResult() unwraps IO errors instead of
+            // wrapping them in an AggregateException ("One or more errors occurred.").
+            process.WaitForExit();
+
+            return new AgentRunResult
+            {
+                TimedOut = false,
+                ExitCode = process.ExitCode,
+                Stdout = stdoutTask.GetAwaiter().GetResult(),
+                Stderr = stderrTask.GetAwaiter().GetResult(),
+            };
         }
 
         /// <summary>
@@ -925,6 +986,32 @@ namespace DevolutionsAgent.Actions
         /// cleanup when it cannot record the rollback marker. Best-effort: logs and continues past
         /// individual failures so it never aborts a rollback.
         /// </summary>
+        // Only undo when `up` actually persisted a NEW enrollment (client cert path changed from the
+        // pre-`up` snapshot); else an early failure would delete the prior install's still-referenced certs.
+        private static void RollbackFailedEnrollment(Session session, string agentJsonPath, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
+        {
+            if (!originalStateCaptured)
+            {
+                // Snapshot failed, so we can't tell new artifacts from the prior install's — skip
+                // rather than risk deleting cert/key we never observed (a harmless orphan beats deletion).
+                session.Log("skipping enrollment cleanup: pre-enrollment state was not captured");
+                return;
+            }
+
+            List<string> certPaths = ReadTunnelCertPaths(agentJsonPath);
+            string originalClientCert = originalTunnel?["ClientCertPath"]?.Value<string>();
+            string currentClientCert = certPaths.FirstOrDefault(p => p.EndsWith("-cert.pem", StringComparison.OrdinalIgnoreCase));
+
+            if (currentClientCert != null && !string.Equals(currentClientCert, originalClientCert, StringComparison.OrdinalIgnoreCase))
+            {
+                CleanUpEnrollmentArtifacts(session, certPaths, originalTunnel, originalGatewayCaB64, originalStateCaptured);
+            }
+            else
+            {
+                session.Log("skipping enrollment cleanup: `up` did not persist a new enrollment (client cert unchanged)");
+            }
+        }
+
         private static void CleanUpEnrollmentArtifacts(Session session, List<string> newCertPaths, JToken originalTunnel, string originalGatewayCaB64, bool originalStateCaptured)
         {
             // The client cert/key are uniquely named per enrollment, so they're always deleted —
