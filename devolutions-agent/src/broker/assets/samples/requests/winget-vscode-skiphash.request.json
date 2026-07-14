@@ -1,0 +1,31 @@
+{
+  "RequestKind": "PackageRequest",
+  "RequestVersion": "1.0",
+  "RequestId": "req-winget-vscode-skiphash",
+  "CreatedAt": "2026-05-05T12:10:00Z",
+  "Operation": "Install",
+  "Manager": "Winget",
+  "Source": {
+    "Name": "winget",
+    "Url": "https://cdn.winget.microsoft.com/cache"
+  },
+  "Package": {
+    "Id": "Microsoft.VisualStudioCode",
+    "Architecture": "X64"
+  },
+  "Options": {
+    "Scope": "Machine",
+    "Interactive": false,
+    "SkipHashCheck": true,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
+  },
+  "Client": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0",
+    "Transport": "HttpNamedPipe",
+    "ClientExecutablePath": "C:\\Program Files\\Devolutions\\NOW\\now-client.exe"
+  }
+}

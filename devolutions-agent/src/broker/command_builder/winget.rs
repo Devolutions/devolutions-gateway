@@ -1,0 +1,209 @@
+//! WinGet command-line builder.
+
+use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
+
+use super::{set_if_specified, set_if_true};
+
+/// Build the WinGet command line from a validated request.
+///
+/// Returns the command as a list of arguments (first element is the executable).
+pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
+    let operation = match request.operation {
+        Operation::Install => "install",
+        Operation::Update => "upgrade",
+        Operation::Uninstall => "uninstall",
+    };
+
+    let mut command = vec![
+        "winget.exe".to_owned(),
+        operation.to_owned(),
+        "--id".to_owned(),
+        request.package.id.0.clone(),
+        "--source".to_owned(),
+        request.source.name.clone(),
+        "--exact".to_owned(),
+        "--accept-source-agreements".to_owned(),
+    ];
+
+    // Version pinning applies to install/update; uninstall removes whatever version is
+    // installed (pinning a possibly-mismatched version would fail the uninstall).
+    if !matches!(request.operation, Operation::Uninstall) {
+        set_if_specified(&mut command, "--version", request.package.version.as_deref());
+    }
+
+    set_if_specified(
+        &mut command,
+        "--architecture",
+        request.package.architecture.map(|arch| match arch {
+            Architecture::X86 => "x86",
+            Architecture::X64 => "x64",
+            Architecture::Arm64 => "arm64",
+            Architecture::Neutral => "neutral",
+        }),
+    );
+
+    set_if_specified(
+        &mut command,
+        "--scope",
+        match request.options.scope {
+            Some(Scope::User) => Some("user"),
+            Some(Scope::Machine) => Some("machine"),
+            None => None,
+        },
+    );
+
+    set_if_true(&mut command, "--interactive", request.options.interactive);
+
+    set_if_true(&mut command, "--silent", !request.options.interactive);
+    set_if_true(&mut command, "--disable-interactivity", !request.options.interactive);
+
+    set_if_true(&mut command, "--ignore-security-hash", request.options.skip_hash_check);
+
+    set_if_specified(
+        &mut command,
+        "--location",
+        request.options.custom_install_location.as_deref(),
+    );
+
+    // `--no-upgrade` only applies to install (skip if a version is already present).
+    if matches!(request.operation, Operation::Install) {
+        set_if_true(&mut command, "--no-upgrade", request.options.no_upgrade);
+    }
+
+    // `--uninstall-previous` applies to upgrade (remove the previous version).
+    if matches!(request.operation, Operation::Update) {
+        set_if_true(&mut command, "--uninstall-previous", request.options.uninstall_previous);
+    }
+
+    // Append any custom parameters.
+    for param in &request.options.custom_parameters {
+        if !param.is_empty() {
+            command.push(param.0.clone());
+        }
+    }
+
+    if matches!(request.operation, Operation::Install | Operation::Update) {
+        command.push("--accept-package-agreements".to_owned());
+    }
+
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use now_policy_api::*;
+
+    use super::*;
+
+    fn make_request() -> PackageRequest {
+        PackageRequest {
+            request_kind: PackageRequestKind,
+            request_version: API_VERSION_STR.into(),
+            request_id: ResourceId::from("req-1"),
+            created_at: Utc::now(),
+            operation: Operation::Install,
+            manager: ManagerName::Winget,
+            source: RequestSource {
+                name: "winget".to_owned(),
+                url: None,
+            },
+            package: RequestPackage {
+                id: PackageIdentifier::from("Mozilla.Firefox".to_owned()),
+                version: None,
+                architecture: None,
+                channel: None,
+            },
+            options: RequestOptions {
+                scope: None,
+                interactive: false,
+                skip_hash_check: false,
+                pre_release: false,
+                custom_install_location: None,
+                custom_parameters: Vec::new(),
+                pre_operation_command: None,
+                post_operation_command: None,
+                kill_before_operation: Vec::new(),
+                uninstall_previous: false,
+                no_upgrade: false,
+            },
+            client: ClientContext {
+                transport: Transport::HttpNamedPipe,
+                requested_elevation: Elevation::Elevated,
+                effective_user: "DOMAIN\\user".to_owned(),
+                client_executable_path: "C:\\Program Files\\Devolutions\\Package Broker\\PackageBrokerClient.exe"
+                    .to_owned(),
+                client_version: "1.0.0".to_owned(),
+            },
+            include_command_preview: false,
+            capture_output: false,
+        }
+    }
+
+    #[test]
+    fn test_basic_install_command() {
+        let request = make_request();
+        let cmd = build_winget_command(&request);
+        assert_eq!(cmd[0], "winget.exe");
+        assert_eq!(cmd[1], "install");
+        assert!(cmd.contains(&"--id".to_owned()));
+        assert!(cmd.contains(&"Mozilla.Firefox".to_owned()));
+        assert!(cmd.contains(&"--silent".to_owned()));
+        assert!(cmd.contains(&"--accept-source-agreements".to_owned()));
+    }
+
+    #[test]
+    fn test_upgrade_command() {
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        request.package.version = Some(VersionString("120.0.0".to_owned()));
+
+        let cmd = build_winget_command(&request);
+        assert_eq!(cmd[1], "upgrade");
+        assert!(cmd.contains(&"--version".to_owned()));
+        assert!(cmd.contains(&"120.0.0".to_owned()));
+    }
+
+    #[test]
+    fn test_no_upgrade_flag_on_install_only() {
+        let mut request = make_request();
+        request.options.no_upgrade = true;
+
+        // Install: flag is emitted.
+        let cmd = build_winget_command(&request);
+        assert!(cmd.contains(&"--no-upgrade".to_owned()));
+
+        // Update: `--no-upgrade` is not an upgrade flag, so it must not appear.
+        request.operation = Operation::Update;
+        let cmd = build_winget_command(&request);
+        assert!(!cmd.contains(&"--no-upgrade".to_owned()));
+    }
+
+    #[test]
+    fn test_uninstall_previous_flag_on_update_only() {
+        let mut request = make_request();
+        request.options.uninstall_previous = true;
+
+        // Install: `--uninstall-previous` is an upgrade flag, so it must not appear.
+        let cmd = build_winget_command(&request);
+        assert!(!cmd.contains(&"--uninstall-previous".to_owned()));
+
+        // Update: flag is emitted.
+        request.operation = Operation::Update;
+        let cmd = build_winget_command(&request);
+        assert!(cmd.contains(&"--uninstall-previous".to_owned()));
+    }
+
+    #[test]
+    fn test_uninstall_omits_version() {
+        let mut request = make_request();
+        request.operation = Operation::Uninstall;
+        request.package.version = Some(VersionString("120.0.0".to_owned()));
+
+        // Even when the request carries a version, uninstall must not pin it.
+        let cmd = build_winget_command(&request);
+        assert_eq!(cmd[1], "uninstall");
+        assert!(!cmd.contains(&"--version".to_owned()));
+        assert!(!cmd.contains(&"120.0.0".to_owned()));
+    }
+}
