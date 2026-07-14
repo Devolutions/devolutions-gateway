@@ -2,6 +2,7 @@
 pub mod windows;
 
 mod date_version;
+pub mod temp_file;
 mod update_manifest;
 mod update_status;
 
