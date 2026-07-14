@@ -89,7 +89,7 @@ impl DgwState {
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let (traffic_audit_handle, traffic_audit_rx) = traffic_audit::TrafficAuditHandle::new();
-        let credentials = credential_injection_kdc::CredentialService::new();
+        let credentials = credential_injection_kdc::CredentialService::new(conf_handle.get_conf().hostname.clone());
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
