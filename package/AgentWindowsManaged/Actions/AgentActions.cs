@@ -55,6 +55,19 @@ internal static class AgentActions
         Execute = Execute.immediate
     };
 
+    // Base64-encode arbitrary/secret string properties (e.g. the PSU app token) into their
+    // "*_ENCODED" companion before any deferred action serializes CustomActionData. The raw value
+    // can contain ';' or '=', which are the CustomActionData delimiters and would truncate/corrupt
+    // the payload; base64 removes them so the deferred action can recover the exact value.
+    private static readonly ManagedAction encodePropertyData = new(
+        new Id($"CA.{nameof(encodePropertyData)}"),
+        CustomActions.EncodePropertyData,
+        Return.check, When.Before, Step.InstallInitialize, Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
     /// <summary>
     /// Set the ARP installation location to the chosen install directory
     /// </summary>
@@ -329,6 +342,77 @@ internal static class AgentActions
         UsesProperties = UseProperties(new[] { AgentProperties.installId }),
     };
 
+    private static readonly ElevatedManagedAction configurePsuAgent = new(
+        new Id($"CA.{nameof(configurePsuAgent)}"),
+        CustomActions.ConfigurePsuAgent,
+        Return.check,
+        // Schedule before configureFeatures: that action writes PsuAgent.Enabled, so if it ran
+        // first this action would snapshot the newly created section and rollback would restore
+        // Enabled=true without the required fields instead of the true pre-install state.
+        When.Before, new Step(configureFeatures.Id),
+        Features.PSU_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        // The app token is expanded into this deferred action's CustomActionData, so hide the target
+        // to keep the literal token (or $secret reference) out of verbose MSI logs, mirroring the
+        // gateway installer's password-carrying actions (GatewayActions.cs).
+        AttributesDefinition = "HideTarget=yes",
+        // Deferred CAs only see properties bubbled through CustomActionData. Every UI-entered PSU
+        // property is declared Secure (see AgentProperties.g.tt) so it survives the UAC boundary;
+        // installId is private and locates the per-install PSU rollback marker.
+        UsesProperties = UseProperties(new IWixProperty[]
+        {
+            AgentProperties.psuServerUrl,
+            AgentProperties.psuAppToken,
+            AgentProperties.psuAppTokenIsSecretReference,
+            AgentProperties.psuAgentId,
+            AgentProperties.psuDisplayName,
+            AgentProperties.installId,
+        }),
+    };
+
+    /// <summary>
+    /// Undo a successful PSU configuration write if a later install action triggers an MSI rollback.
+    /// Mirrors <see cref="configurePsuAgent"/>'s condition so it covers every path the forward action
+    /// can run. Marker-driven: it only restores/removes the agent.json <c>PsuAgent</c> section when
+    /// ConfigurePsuAgent recorded a per-install marker.
+    /// </summary>
+    private static readonly ElevatedManagedAction rollbackConfigurePsuAgent = new(
+        new Id($"CA.{nameof(rollbackConfigurePsuAgent)}"),
+        CustomActions.RollbackConfigurePsuAgent,
+        Return.ignore,
+        When.Before, new Step(configurePsuAgent.Id),
+        Features.PSU_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.rollback,
+        Impersonate = false,
+        // installId locates the per-install PSU rollback marker ConfigurePsuAgent writes.
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
+    };
+
+    /// <summary>
+    /// Delete the PSU rollback marker once the transaction commits. The marker holds the pre-install
+    /// <c>PsuAgent</c> section, which can contain a plaintext app token, so it must not linger in the temp
+    /// directory after a successful install. Scheduled after <see cref="configurePsuAgent"/> so it
+    /// runs at commit time; <see cref="rollbackConfigurePsuAgent"/> removes the marker on failure.
+    /// </summary>
+    private static readonly ElevatedManagedAction commitConfigurePsuAgent = new(
+        new Id($"CA.{nameof(commitConfigurePsuAgent)}"),
+        CustomActions.CommitConfigurePsuAgent,
+        Return.ignore,
+        When.After, new Step(configurePsuAgent.Id),
+        Features.PSU_FEATURE.BeingInstall(),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.commit,
+        Impersonate = false,
+        // installId locates the per-install PSU rollback marker ConfigurePsuAgent writes.
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
+    };
+
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
         CustomActions.RegisterExplorerCommand
     )
@@ -385,7 +469,7 @@ internal static class AgentActions
             throw new Exception($"property {properties.First(p => !p.Secure).Id} must be secure");
         }
 
-        return string.Join(";", properties.Distinct().Select(x => $"{x.Id}=[{x.Id}]"));
+        return string.Join(";", properties.Distinct().Select(x => $"{x.EncodedId()}=[{x.EncodedId()}]"));
     }
 
     internal static readonly Action[] Actions =
@@ -396,6 +480,7 @@ internal static class AgentActions
         isUninstalling,
         isMaintenance,
         setInstallId,
+        encodePropertyData,
         getNetFxInstalledVersion,
         checkNetFxInstalledVersion,
         getInstallDirFromRegistry,
@@ -404,6 +489,9 @@ internal static class AgentActions
         configureFeatures,
         enrollAgentTunnel,
         rollbackEnrollAgentTunnel,
+        configurePsuAgent,
+        rollbackConfigurePsuAgent,
+        commitConfigurePsuAgent,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

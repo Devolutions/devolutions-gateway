@@ -1,4 +1,4 @@
-﻿
+
 using System;
 
 namespace DevolutionsAgent.Properties
@@ -16,6 +16,7 @@ namespace DevolutionsAgent.Properties
             Name = "ConfigureAgent",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = true
         };
 
@@ -43,6 +44,7 @@ namespace DevolutionsAgent.Properties
             Name = "DebugPowerShell",
             Secure = true,
             Hidden = false,
+            Encode = false,
             Public = true
         };
 
@@ -69,6 +71,7 @@ namespace DevolutionsAgent.Properties
             Name = "InstallId",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -95,6 +98,7 @@ namespace DevolutionsAgent.Properties
             Name = "NetFx45Version",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -121,6 +125,7 @@ namespace DevolutionsAgent.Properties
             Name = "FirstInstall",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -147,6 +152,7 @@ namespace DevolutionsAgent.Properties
             Name = "Upgrading",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -173,6 +179,7 @@ namespace DevolutionsAgent.Properties
             Name = "RemovingForUpgrade",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -199,6 +206,7 @@ namespace DevolutionsAgent.Properties
             Name = "Uninstalling",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -225,6 +233,7 @@ namespace DevolutionsAgent.Properties
             Name = "Maintenance",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -235,15 +244,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(maintenance.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(maintenance, value);
+                    this.runtimeSession.Set(maintenance, value); 
                 }
             }
         }
-
+ 
         internal static readonly WixProperty<String> featuresToConfigure = new()
         {
             Id = "P.FeaturesToConfigure",
@@ -251,6 +260,7 @@ namespace DevolutionsAgent.Properties
             Name = "FeaturesToConfigure",
             Secure = false,
             Hidden = false,
+            Encode = false,
             Public = false
         };
 
@@ -261,39 +271,260 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(featuresToConfigure.Id);
                 return WixProperties.GetPropertyValue<String>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(featuresToConfigure, value);
+                    this.runtimeSession.Set(featuresToConfigure, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<String> psuServerUrl = new()
+        {
+            Id = "P.PSUSERVERURL",
+            Default = "",
+            Name = "PsuServerUrl",
+            Secure = true,
+            Hidden = false,
+            Encode = true,
+            Public = true
+        };
+
+        /// <summary>PSU endpoint URL (e.g. http://localhost:5000)</summary>
+        public String PsuServerUrl
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuServerUrl.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuServerUrl, value); 
                 }
             }
         }
 
+        internal static readonly WixProperty<String> psuServerUrlEncoded = new()
+        {
+            Id = "P.PSUSERVERURL_ENCODED",
+            Default = string.Empty,
+            Name = "PsuServerUrlEncoded",
+            Secure = true,
+            Hidden = true,
+            Encode = false,
+            Public = true /* Secure properties must be public */
+        };
+
+        public string PsuServerUrlEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuServerUrlEncoded.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuServerUrlEncoded, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<String> psuAppToken = new()
+        {
+            Id = "P.PSUAPPTOKEN",
+            Default = "",
+            Name = "PsuAppToken",
+            Secure = true,
+            Hidden = true,
+            Encode = true,
+            Public = true
+        };
+
+        /// <summary>PSU application token, or a secret name when PsuAppTokenIsSecretReference is true</summary>
+        public String PsuAppToken
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuAppToken.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuAppToken, value); 
+                }
+            }
+        }
+
+        internal static readonly WixProperty<String> psuAppTokenEncoded = new()
+        {
+            Id = "P.PSUAPPTOKEN_ENCODED",
+            Default = string.Empty,
+            Name = "PsuAppTokenEncoded",
+            Secure = true,
+            Hidden = true,
+            Encode = false,
+            Public = true /* Secure properties must be public */
+        };
+
+        public string PsuAppTokenEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuAppTokenEncoded.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuAppTokenEncoded, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<Boolean> psuAppTokenIsSecretReference = new()
+        {
+            Id = "P.PSUAPPTOKENISSECRETREFERENCE",
+            Default = false,
+            Name = "PsuAppTokenIsSecretReference",
+            Secure = true,
+            Hidden = false,
+            Encode = false,
+            Public = true
+        };
+
+        /// <summary>`true` when PsuAppToken holds a SecretManagement secret name to inject as $secret:<name></summary>
+        public Boolean PsuAppTokenIsSecretReference
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuAppTokenIsSecretReference.Id);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuAppTokenIsSecretReference, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<String> psuAgentId = new()
+        {
+            Id = "P.PSUAGENTID",
+            Default = "",
+            Name = "PsuAgentId",
+            Secure = true,
+            Hidden = false,
+            Encode = false,
+            Public = true
+        };
+
+        /// <summary>Optional stable agent identifier presented to PSU</summary>
+        public String PsuAgentId
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuAgentId.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuAgentId, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<String> psuDisplayName = new()
+        {
+            Id = "P.PSUDISPLAYNAME",
+            Default = "",
+            Name = "PsuDisplayName",
+            Secure = true,
+            Hidden = false,
+            Encode = false,
+            Public = true
+        };
+
+        /// <summary>Optional friendly display name shown in PSU</summary>
+        public String PsuDisplayName
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(psuDisplayName.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(psuDisplayName, value); 
+                }
+            }
+        }
+ 
 
         public static IWixProperty[] Properties =
         {
-
+ 
             configureAgent,
-
+ 
+ 
             debugPowerShell,
-
+ 
+ 
             installId,
-
+ 
+ 
             netFx45Version,
-
+ 
+ 
             firstInstall,
-
+ 
+ 
             upgrading,
-
+ 
+ 
             removingForUpgrade,
-
+ 
+ 
             uninstalling,
-
+ 
+ 
             maintenance,
-
+ 
+ 
             featuresToConfigure,
-
+ 
+ 
+            psuServerUrl,
+            psuServerUrlEncoded,
+ 
+ 
+            psuAppToken,
+            psuAppTokenEncoded,
+ 
+ 
+            psuAppTokenIsSecretReference,
+ 
+ 
+            psuAgentId,
+ 
+ 
+            psuDisplayName,
+ 
+ 
         };
     }
 }

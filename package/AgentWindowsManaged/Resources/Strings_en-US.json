@@ -59,12 +59,12 @@
           "text": "Connects the agent to a Devolutions Gateway. Requires an enrollment string from your gateway operator."
         },
         {
-          "id": "FeaturePsuEventHubName",
-          "text": "PowerShell Universal Event Hub"
+          "id": "FeaturePsuName",
+          "text": "PowerShell Universal Agent"
         },
         {
-          "id": "FeaturePsuEventHubDescription",
-          "text": "Enables PowerShell Universal Event Hub remote agent compatibility."
+          "id": "FeaturePsuDescription",
+          "text": "Enables the PowerShell Universal remote agent."
         }
       ],
       "messages": [
@@ -241,6 +241,72 @@
           {
             "id": "AgentTunnelDlgDomainsHint",
             "text": "Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com."
+          }
+        ],
+        "psu": [
+          {
+            "id": "PsuDlgTitle",
+            "text": "PowerShell Universal Agent"
+          },
+          {
+            "id": "PsuDlgDescription",
+            "text": "Configure how this agent connects to PowerShell Universal."
+          },
+          {
+            "id": "PsuDlgServerUrlLabel",
+            "text": "Server URL:"
+          },
+          {
+            "id": "PsuDlgServerUrlHint",
+            "text": "Required. PowerShell Universal endpoint, e.g. http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenLabel",
+            "text": "App Token:"
+          },
+          {
+            "id": "PsuDlgAppTokenHint",
+            "text": "Required. Token value, or a secret name resolved at runtime."
+          },
+          {
+            "id": "PsuDlgAppTokenValueOption",
+            "text": "Token value"
+          },
+          {
+            "id": "PsuDlgAppTokenSecretOption",
+            "text": "Secret name"
+          },
+          {
+            "id": "PsuDlgAgentIdLabel",
+            "text": "Agent ID:"
+          },
+          {
+            "id": "PsuDlgAgentIdHint",
+            "text": "Optional. Stable agent ID. Defaults to the machine name."
+          },
+          {
+            "id": "PsuDlgDisplayNameLabel",
+            "text": "Display Name:"
+          },
+          {
+            "id": "PsuDlgDisplayNameHint",
+            "text": "Optional. Name shown in PowerShell Universal. Defaults to the Agent ID."
+          },
+          {
+            "id": "PsuDlgServerUrlRequired",
+            "text": "A server URL is required. Enter the PowerShell Universal endpoint, or go back and deselect the PowerShell Universal Agent feature."
+          },
+          {
+            "id": "PsuDlgServerUrlInvalid",
+            "text": "The server URL must be an absolute http or https URL, for example http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenRequired",
+            "text": "An app token is required. Enter the token value or a secret name, or go back and deselect the PowerShell Universal Agent feature."
+          },
+          {
+            "id": "PsuDlgServerUnreachable",
+            "text": "Could not reach the PowerShell Universal server ({0}).\n\nDo you want to continue anyway?"
           }
         ]
       }

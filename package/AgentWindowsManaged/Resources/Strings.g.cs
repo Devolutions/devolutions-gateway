@@ -1,4 +1,4 @@
-﻿using WixSharp;
+using WixSharp;
 
 namespace DevolutionsAgent.Resources
 {
@@ -65,13 +65,13 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureAgentTunnelDescription = "FeatureAgentTunnelDescription";		
 		/// <summary>
-		/// PowerShell Universal Event Hub
+		/// PowerShell Universal Agent
 		/// </summary>
-		public const string FeaturePsuEventHubName = "FeaturePsuEventHubName";		
+		public const string FeaturePsuName = "FeaturePsuName";		
 		/// <summary>
-		/// Enables PowerShell Universal Event Hub remote agent compatibility.
+		/// Enables the PowerShell Universal remote agent.
 		/// </summary>
-		public const string FeaturePsuEventHubDescription = "FeaturePsuEventHubDescription";		
+		public const string FeaturePsuDescription = "FeaturePsuDescription";		
 		/// <summary>
 		/// There is a problem with the entered data. Please correct the issue and try again.
 		/// </summary>
@@ -220,5 +220,69 @@ namespace DevolutionsAgent.Resources
 		/// Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.
 		/// </summary>
 		public const string AgentTunnelDlgDomainsHint = "AgentTunnelDlgDomainsHint";		
+		/// <summary>
+		/// PowerShell Universal Agent
+		/// </summary>
+		public const string PsuDlgTitle = "PsuDlgTitle";		
+		/// <summary>
+		/// Configure how this agent connects to PowerShell Universal.
+		/// </summary>
+		public const string PsuDlgDescription = "PsuDlgDescription";		
+		/// <summary>
+		/// Server URL:
+		/// </summary>
+		public const string PsuDlgServerUrlLabel = "PsuDlgServerUrlLabel";		
+		/// <summary>
+		/// Required. PowerShell Universal endpoint, e.g. http://localhost:5000.
+		/// </summary>
+		public const string PsuDlgServerUrlHint = "PsuDlgServerUrlHint";		
+		/// <summary>
+		/// App Token:
+		/// </summary>
+		public const string PsuDlgAppTokenLabel = "PsuDlgAppTokenLabel";		
+		/// <summary>
+		/// Required. Token value, or a secret name resolved at runtime.
+		/// </summary>
+		public const string PsuDlgAppTokenHint = "PsuDlgAppTokenHint";		
+		/// <summary>
+		/// Token value
+		/// </summary>
+		public const string PsuDlgAppTokenValueOption = "PsuDlgAppTokenValueOption";		
+		/// <summary>
+		/// Secret name
+		/// </summary>
+		public const string PsuDlgAppTokenSecretOption = "PsuDlgAppTokenSecretOption";		
+		/// <summary>
+		/// Agent ID:
+		/// </summary>
+		public const string PsuDlgAgentIdLabel = "PsuDlgAgentIdLabel";		
+		/// <summary>
+		/// Optional. Stable agent ID. Defaults to the machine name.
+		/// </summary>
+		public const string PsuDlgAgentIdHint = "PsuDlgAgentIdHint";		
+		/// <summary>
+		/// Display Name:
+		/// </summary>
+		public const string PsuDlgDisplayNameLabel = "PsuDlgDisplayNameLabel";		
+		/// <summary>
+		/// Optional. Name shown in PowerShell Universal. Defaults to the Agent ID.
+		/// </summary>
+		public const string PsuDlgDisplayNameHint = "PsuDlgDisplayNameHint";		
+		/// <summary>
+		/// A server URL is required. Enter the PowerShell Universal endpoint, or go back and deselect the PowerShell Universal Agent feature.
+		/// </summary>
+		public const string PsuDlgServerUrlRequired = "PsuDlgServerUrlRequired";		
+		/// <summary>
+		/// The server URL must be an absolute http or https URL, for example http://localhost:5000.
+		/// </summary>
+		public const string PsuDlgServerUrlInvalid = "PsuDlgServerUrlInvalid";		
+		/// <summary>
+		/// An app token is required. Enter the token value or a secret name, or go back and deselect the PowerShell Universal Agent feature.
+		/// </summary>
+		public const string PsuDlgAppTokenRequired = "PsuDlgAppTokenRequired";		
+		/// <summary>
+		/// Could not reach the PowerShell Universal server ({0}).Do you want to continue anyway?
+		/// </summary>
+		public const string PsuDlgServerUnreachable = "PsuDlgServerUnreachable";		
 	}
 }

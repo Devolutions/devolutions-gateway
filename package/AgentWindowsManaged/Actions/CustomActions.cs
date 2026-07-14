@@ -266,16 +266,20 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                JObject config = new JObject();
-
-                try
+                // Only start from an empty object when agent.json is genuinely absent. If the file
+                // exists but can't be read or parsed (permission, sharing, corruption), let the
+                // exception reach the outer handler and fail the action instead of silently
+                // overwriting it — a write of a feature-only object here would drop every other
+                // agent setting (tunnel certs, PSU config, etc.).
+                JObject config;
+                if (File.Exists(path))
                 {
                     using StreamReader reader = new StreamReader(path);
                     config = JObject.Parse(reader.ReadToEnd());
                 }
-                catch (Exception)
+                else
                 {
-                    // ignored. Previous config is either invalid or non-existent.
+                    config = new JObject();
                 }
 
                 if (config[feature] is not JObject featureConfig)
@@ -286,7 +290,6 @@ namespace DevolutionsAgent.Actions
 
                 featureConfig["Enabled"] = enable;
 
-                using StreamWriter writer = new StreamWriter(path);
                 // WARNING: Always pass an explicit JsonConverter[] to JToken/JObject.ToString(Formatting, ...).
                 // Newtonsoft.Json keeps the same AssemblyVersion (13.0.0.0) across every 13.x patch release, so the
                 // CLR loads whatever 13.x copy is in the GAC in preference to the one bundled in the SFXCA payload,
@@ -295,7 +298,9 @@ namespace DevolutionsAgent.Actions
                 // the GAC (common: RDM, PowerShell 7, Dell Command, etc.), which rolls back the whole install. The
                 // two-argument ToString(Formatting, params JsonConverter[]) overload exists in every 13.x, so forcing
                 // it keeps us safe no matter which 13.x wins assembly resolution. See Newtonsoft.Json issue #3084.
-                writer.Write(config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+                // Write atomically so a failure mid-write can't truncate agent.json and leave the
+                // ConfigurePsuAgent rollback unable to re-parse it.
+                WriteFileAtomic(path, config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
 
                 return ActionResult.Success;
             }
@@ -316,7 +321,7 @@ namespace DevolutionsAgent.Actions
             [
                 (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
-                (Features.PSU_EVENT_HUB_FEATURE.Id, Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.PSU_FEATURE.Id, Features.PSU_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
             ];
 
@@ -831,7 +836,7 @@ namespace DevolutionsAgent.Actions
             [
                 Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
-                Features.PSU_EVENT_HUB_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.PSU_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
             ];
 
@@ -1201,12 +1206,389 @@ namespace DevolutionsAgent.Actions
             return ActionResult.Success;
         }
 
+        /// <summary>
+        /// Validate that a PSU server URL is an absolute http/https URL. The agent deserializes this
+        /// value as a <c>url::Url</c> and connects to it as a gRPC endpoint, so malformed or non-http(s)
+        /// input must be rejected before it reaches agent.json; otherwise the first service start after
+        /// installation fails.
+        /// </summary>
+        public static bool IsValidPsuServerUrl(string value)
+        {
+            return Uri.TryCreate(value, UriKind.Absolute, out Uri uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        }
+
+        /// <summary>
+        /// Best-effort connectivity probe against a PSU server URL, used for early diagnostics before
+        /// the configuration is written. Opens a TCP connection to the URL's host and port (a plain
+        /// HTTP request would be misleading against an HTTP/2-only gRPC endpoint) and returns whether
+        /// it succeeded within <paramref name="timeoutMs"/>. Never throws.
+        /// </summary>
+        public static bool TryReachPsuServer(string value, int timeoutMs, out string error)
+        {
+            error = null;
+
+            if (!Uri.TryCreate(value, UriKind.Absolute, out Uri uri))
+            {
+                error = "the URL is not a valid absolute URL";
+                return false;
+            }
+
+            int port = uri.Port >= 0 ? uri.Port : (uri.Scheme == Uri.UriSchemeHttps ? 443 : 80);
+
+            try
+            {
+                using System.Net.Sockets.TcpClient client = new();
+                Task connectTask = client.ConnectAsync(uri.Host, port);
+                if (!connectTask.Wait(timeoutMs))
+                {
+                    error = $"connection to {uri.Host}:{port} timed out after {timeoutMs} ms";
+                    return false;
+                }
+
+                // Wait already observed completion; surface any connection exception.
+                connectTask.GetAwaiter().GetResult();
+                return true;
+            }
+            catch (Exception e)
+            {
+                Exception inner = (e as AggregateException)?.GetBaseException() ?? e;
+                error = $"could not reach {uri.Host}:{port} ({inner.Message})";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Whether agent.json already holds a complete <c>PsuAgent</c> section (both a non-empty
+        /// <c>ServerUrl</c> and <c>AppToken</c>). Used to preserve an existing configuration on a
+        /// silent upgrade that re-runs <see cref="ConfigurePsuAgent"/> without passing PSU
+        /// properties. Best-effort: any read/parse failure is treated as "not complete".
+        /// </summary>
+        private static bool PsuConfigIsComplete(string configPath)
+        {
+            try
+            {
+                if (!File.Exists(configPath))
+                {
+                    return false;
+                }
+
+                if (JObject.Parse(File.ReadAllText(configPath))["PsuAgent"] is not JObject psu)
+                {
+                    return false;
+                }
+
+                return !string.IsNullOrWhiteSpace((string)psu["ServerUrl"])
+                    && !string.IsNullOrWhiteSpace((string)psu["AppToken"]);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Persist the PowerShell Universal agent configuration collected in <c>PsuDialog</c> into
+        /// agent.json's <c>PsuAgent</c> section. The generic <see cref="ConfigureFeatures"/> action
+        /// toggles <c>PsuAgent.Enabled</c>; this action fills the remaining required/optional fields
+        /// so the agent can start. The app token is written verbatim, or as a <c>$secret:&lt;name&gt;</c>
+        /// reference when the operator chose "Secret name", so it is resolved from SecretManagement at runtime.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult ConfigurePsuAgent(Session session)
+        {
+            // Both the URL and the app token are Base64-encoded into CustomActionData (see
+            // EncodePropertyData) because an arbitrary value can contain the ';' or '=' delimiters
+            // (a URL may embed them in a path or query parameter); decode them here.
+            string serverUrl = WixProperties.Decode(session, AgentProperties.psuServerUrl)?.Trim() ?? string.Empty;
+            string appToken = WixProperties.Decode(session, AgentProperties.psuAppToken)?.Trim() ?? string.Empty;
+            bool isSecretReference = string.Equals(
+                session.Property(AgentProperties.psuAppTokenIsSecretReference.Id)?.Trim(),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            string agentId = session.Property(AgentProperties.psuAgentId.Id)?.Trim() ?? string.Empty;
+            string displayName = session.Property(AgentProperties.psuDisplayName.Id)?.Trim() ?? string.Empty;
+
+            ActionResult Fail(string msg)
+            {
+                session.Log(msg);
+                using Record record = new(0) { FormatString = msg };
+                session.Message(InstallMessage.Error, record);
+                return ActionResult.Failure;
+            }
+
+            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+
+            // A silent major upgrade migrates this feature and re-runs this action, but the agent
+            // self-updater invokes `msiexec /quiet` without any PSU properties. On that path we do
+            // not receive the current token, so we must neither rewrite (which would wipe the config)
+            // nor fail (which would roll back every future upgrade). When no PSU properties are
+            // supplied and agent.json already holds a complete configuration, preserve it as-is. The
+            // required-field checks below still apply when the feature is newly selected.
+            if (serverUrl.Length == 0 && appToken.Length == 0 && PsuConfigIsComplete(configPath))
+            {
+                session.Log("No PowerShell Universal properties supplied; preserving the existing configuration in agent.json");
+                return ActionResult.Success;
+            }
+
+            // Both are required for a config the agent can start with. The dialog enforces this in
+            // the UI; for a silent install the operator must pass P.PSUSERVERURL and P.PSUAPPTOKEN.
+            if (serverUrl.Length == 0)
+            {
+                return Fail("A PowerShell Universal server URL is required (P.PSUSERVERURL), or deselect the PowerShell Universal Agent feature.");
+            }
+
+            if (appToken.Length == 0)
+            {
+                return Fail("A PowerShell Universal app token is required (P.PSUAPPTOKEN), or deselect the PowerShell Universal Agent feature.");
+            }
+
+            // Reject a malformed URL here (both the UI and silent-install paths land in this action)
+            // so we never write a value the agent can't parse as a url::Url at service start.
+            if (!IsValidPsuServerUrl(serverUrl))
+            {
+                return Fail("The PowerShell Universal server URL (P.PSUSERVERURL) must be an absolute http or https URL, for example http://localhost:5000.");
+            }
+
+            try
+            {
+                string installId = session.Get(AgentProperties.installId).ToString();
+                string markerPath = Path.Combine(Path.GetTempPath(), $"{installId}-psu-rollback.json");
+
+                // Snapshot the pre-existing PsuAgent section BEFORE we patch it so rollback can restore it.
+                // Best-effort: on any failure the snapshot stays null and rollback removes the section
+                // (the safe direction is no false restore). originalStateCaptured distinguishes
+                // "snapshot succeeded and found nothing" from "snapshot threw".
+                JToken originalPsu = null;
+                bool originalStateCaptured = false;
+                try
+                {
+                    if (File.Exists(configPath))
+                    {
+                        JObject preRoot = JObject.Parse(File.ReadAllText(configPath));
+                        if (preRoot["PsuAgent"] is JObject prePsu)
+                        {
+                            originalPsu = prePsu.DeepClone();
+                        }
+                    }
+
+                    originalStateCaptured = true;
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to snapshot pre-existing PSU config (rollback will not restore): {e}");
+                }
+
+                // Only start from an empty object when agent.json is genuinely absent. If the file
+                // exists but can't be read or parsed (permission, sharing, corruption), let the
+                // exception reach the outer failure handler instead of silently overwriting it — an
+                // atomic write of a PSU-only object here would drop tunnel certs and every other setting.
+                JObject config;
+                if (File.Exists(configPath))
+                {
+                    config = JObject.Parse(File.ReadAllText(configPath));
+                }
+                else
+                {
+                    config = new JObject();
+                }
+
+                // Record the rollback marker BEFORE writing so an MSI rollback triggered by a later
+                // action can restore the original PsuAgent section. The marker is keyed by installId and
+                // scheduled for deletion at reboot; the rollback CA deletes it eagerly.
+                try
+                {
+                    JObject marker = new()
+                    {
+                        ["OriginalPsu"] = originalPsu,
+                        ["OriginalStateCaptured"] = originalStateCaptured,
+                    };
+
+                    WriteFileAtomic(markerPath, marker.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+                    WinAPI.MoveFileEx(markerPath, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                }
+                catch (Exception e)
+                {
+                    return Fail($"Failed to record the PowerShell Universal rollback marker: {e.Message}");
+                }
+
+                // Merge into the existing PSU section so the Enabled flag written by ConfigureFeatures
+                // (and any unmanaged fields) are preserved.
+                if (config["PsuAgent"] is not JObject psu)
+                {
+                    psu = new JObject();
+                    config["PsuAgent"] = psu;
+                }
+
+                // ConfFile uses serde rename_all = "PascalCase", so fields are keyed in PascalCase.
+                psu["ServerUrl"] = serverUrl;
+                psu["AppToken"] = isSecretReference ? $"$secret:{appToken}" : appToken;
+
+                if (agentId.Length != 0)
+                {
+                    psu["AgentId"] = agentId;
+                }
+                else
+                {
+                    psu.Remove("AgentId");
+                }
+
+                if (displayName.Length != 0)
+                {
+                    psu["DisplayName"] = displayName;
+                }
+                else
+                {
+                    psu.Remove("DisplayName");
+                }
+
+                // Two-argument ToString(Formatting, JsonConverter[]) — see the detailed Newtonsoft
+                // GAC-version note in ToggleAgentFeature. Written atomically so a mid-write failure
+                // can't truncate agent.json (rollback re-parses it to restore the original section).
+                WriteFileAtomic(configPath, config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+
+                session.Log("Wrote PowerShell Universal agent configuration to agent.json");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                return Fail($"Failed to configure the PowerShell Universal agent: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Undo a <see cref="ConfigurePsuAgent"/> write if a later install action triggers an MSI
+        /// rollback. Marker-driven: it only restores/removes the <c>PsuAgent</c> section when
+        /// ConfigurePsuAgent recorded a per-install marker, so it never touches a pre-existing
+        /// section left by an unrelated run.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult RollbackConfigurePsuAgent(Session session)
+        {
+            string installId = session.Get(AgentProperties.installId).ToString();
+            string markerPath = Path.Combine(Path.GetTempPath(), $"{installId}-psu-rollback.json");
+
+            if (!File.Exists(markerPath))
+            {
+                session.Log($"no PSU rollback marker at {markerPath}; nothing to roll back");
+                return ActionResult.Success;
+            }
+
+            JObject marker;
+            try
+            {
+                marker = JObject.Parse(File.ReadAllText(markerPath));
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to parse PSU rollback marker at {markerPath}: {e}");
+                return ActionResult.Success;
+            }
+
+            bool originalStateCaptured = marker["OriginalStateCaptured"]?.Value<bool>() ?? false;
+            JToken originalPsu = marker["OriginalPsu"];
+
+            // Only touch agent.json when the snapshot is trustworthy. If the snapshot threw during the
+            // forward action we don't know the prior state, so we leave the file untouched.
+            if (originalStateCaptured)
+            {
+                try
+                {
+                    string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+                    if (File.Exists(configPath))
+                    {
+                        JObject config = JObject.Parse(File.ReadAllText(configPath));
+
+                        if (originalPsu != null && originalPsu.Type == JTokenType.Object)
+                        {
+                            config["PsuAgent"] = originalPsu;
+                        }
+                        else
+                        {
+                            // There was no PSU section before this install wrote one: remove it.
+                            config.Remove("PsuAgent");
+                        }
+
+                        WriteFileAtomic(configPath, config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+                        session.Log("Restored the pre-install PSU section in agent.json");
+                    }
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to restore PsuAgent section during rollback: {e}");
+                }
+            }
+
+            try
+            {
+                File.Delete(markerPath);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to delete PSU rollback marker at {markerPath}: {e}");
+            }
+
+            // Best effort, always return success.
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Delete the PSU rollback marker once the transaction commits successfully. The marker holds
+        /// the pre-install <c>PsuAgent</c> section, which can include a plaintext <c>AppToken</c>, so it
+        /// must not linger in the temp directory after a successful install (it is otherwise only
+        /// removed at the next reboot, which may never happen). <see cref="RollbackConfigurePsuAgent"/>
+        /// deletes it on failure; this commit action deletes it on success.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult CommitConfigurePsuAgent(Session session)
+        {
+            string installId = session.Get(AgentProperties.installId).ToString();
+            string markerPath = Path.Combine(Path.GetTempPath(), $"{installId}-psu-rollback.json");
+
+            try
+            {
+                if (File.Exists(markerPath))
+                {
+                    File.Delete(markerPath);
+                    session.Log($"deleted PSU rollback marker at {markerPath}");
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to delete PSU rollback marker at {markerPath}: {e}");
+            }
+
+            // Best effort, always return success.
+            return ActionResult.Success;
+        }
+
         [CustomAction]
         public static ActionResult SetInstallId(Session session)
         {
             session.Set(AgentProperties.installId, Guid.NewGuid());
             return ActionResult.Success;
         }
+
+        [CustomAction]
+        public static ActionResult EncodePropertyData(Session session)
+        {
+            // Base64-encode arbitrary/secret string properties into their "*_ENCODED" companion so
+            // a value containing ';' or '=' (the CustomActionData delimiters) survives the trip to
+            // the deferred action intact. Mirrors the gateway installer's EncodePropertyData.
+            foreach (IWixProperty property in AgentProperties.Properties.Where(p => p.Encode))
+            {
+                if (property is not WixProperty<string> stringProperty)
+                {
+                    continue;
+                }
+
+                session.Log($"encoding property {property.Id}");
+                WixProperties.Encode(session, stringProperty);
+            }
+
+            return ActionResult.Success;
+        }
+
 
         [CustomAction]
         public static ActionResult SetProgramDataDirectoryPermissions(Session session)
