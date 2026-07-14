@@ -138,7 +138,7 @@ impl Task for TunnelTask {
                     return Ok(());
                 }
                 Ok(ConnectionOutcome::CertRenewed) => {
-                    // Renewal is a completion, not a failure.
+                    // Renewal is a successful outcome, not a failure, we release the backpressure (backoff.reset()).
                     info!("Certificate renewed; reconnecting with new cert immediately");
                     backoff.reset();
                     continue;
@@ -345,6 +345,7 @@ async fn connect_to_gateway(
 ) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
+
     // -- Build rustls ClientConfig --
 
     let certs: Vec<rustls_pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut std::io::BufReader::new(
