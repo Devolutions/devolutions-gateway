@@ -142,7 +142,7 @@ where
     {
         Some(ironrdp_connector::credssp::KerberosConfig {
             kdc_proxy_url: kdc_url.clone(),
-            hostname: Some(gateway_hostname.clone()),
+            hostname: gateway_hostname.clone(),
         })
     } else {
         None
