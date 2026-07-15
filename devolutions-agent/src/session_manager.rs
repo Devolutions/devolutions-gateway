@@ -32,10 +32,41 @@ enum SessionKind {
     Remote,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionReadiness {
+    WaitingForLogon,
+    WaitingForUnlock,
+    WaitingForLogonOrUnlock,
+    Ready,
+}
+
+impl SessionReadiness {
+    fn is_satisfied_by(self, event: SessionReadinessEvent) -> bool {
+        matches!(
+            (self, event),
+            (Self::WaitingForLogon, SessionReadinessEvent::Logon)
+                | (
+                    Self::WaitingForUnlock,
+                    SessionReadinessEvent::Logon | SessionReadinessEvent::Unlock
+                )
+                | (
+                    Self::WaitingForLogonOrUnlock,
+                    SessionReadinessEvent::Logon | SessionReadinessEvent::Unlock
+                )
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SessionReadinessEvent {
+    Logon,
+    Unlock,
+}
+
 struct GatewaySession {
     session: Session,
     kind: SessionKind,
-    is_session_ready: bool,
+    readiness: SessionReadiness,
 }
 
 // NOTE: `ceviche::controller::Session` do not implement `Debug` for session.
@@ -44,17 +75,17 @@ impl Debug for GatewaySession {
         f.debug_struct("GatewaySession")
             .field("session", &self.session.id)
             .field("kind", &self.kind)
-            .field("is_session_ready", &self.is_session_ready)
+            .field("readiness", &self.readiness)
             .finish()
     }
 }
 
 impl GatewaySession {
-    fn new(session: Session, kind: SessionKind) -> Self {
+    fn new(session: Session, kind: SessionKind, readiness: SessionReadiness) -> Self {
         Self {
             session,
             kind,
-            is_session_ready: false,
+            readiness,
         }
     }
 
@@ -68,13 +99,16 @@ impl GatewaySession {
         &self.session
     }
 
-    #[allow(dead_code)]
-    fn is_session_ready(&self) -> bool {
-        self.is_session_ready
+    fn is_ready_to_start(&self, event: SessionReadinessEvent) -> bool {
+        self.readiness.is_satisfied_by(event)
     }
 
-    fn set_session_ready(&mut self, is_ready: bool) {
-        self.is_session_ready = is_ready;
+    fn set_session_ready(&mut self) {
+        self.readiness = SessionReadiness::Ready;
+    }
+
+    fn set_waiting_for_logon(&mut self) {
+        self.readiness = SessionReadiness::WaitingForLogon;
     }
 }
 
@@ -84,9 +118,11 @@ struct SessionManagerCtx {
 }
 
 impl SessionManagerCtx {
-    fn register_session(&mut self, session: &Session, kind: SessionKind) {
-        self.sessions
-            .insert(session.to_string(), GatewaySession::new(Session::new(session.id), kind));
+    fn register_session(&mut self, session: &Session, kind: SessionKind, readiness: SessionReadiness) {
+        self.sessions.insert(
+            session.to_string(),
+            GatewaySession::new(Session::new(session.id), kind, readiness),
+        );
     }
 
     fn unregister_session(&mut self, session: &Session) {
@@ -95,6 +131,12 @@ impl SessionManagerCtx {
 
     fn get_session_mut(&mut self, session: &Session) -> Option<&mut GatewaySession> {
         self.sessions.get_mut(&session.to_string())
+    }
+
+    fn should_start_session(&self, session: &Session, event: SessionReadinessEvent) -> bool {
+        self.sessions
+            .get(&session.to_string())
+            .is_some_and(|session| session.is_ready_to_start(event))
     }
 }
 
@@ -154,7 +196,7 @@ impl Task for SessionManager {
                         AgentServiceEvent::SessionConnect(id) => {
                             info!(%id, "Session connected");
                             let mut ctx = ctx.write().await;
-                            ctx.register_session(&id, SessionKind::Console);
+                            ctx.register_session(&id, SessionKind::Console, SessionReadiness::WaitingForLogon);
                             // We only start the session process for remote sessions (initiated
                             // via RDP), as session process with DVC handler is only needed for remote
                             // sessions.
@@ -169,10 +211,22 @@ impl Task for SessionManager {
                             // Terminate old session process if it is already running.
                             terminate_session_process(&id);
 
+                            let readiness = match session_has_logged_in_user(id.id) {
+                                Ok(true) => SessionReadiness::WaitingForUnlock,
+                                Ok(false) => SessionReadiness::WaitingForLogon,
+                                Err(error) => {
+                                    error!(
+                                        %error,
+                                        %id,
+                                        "Failed to determine whether the remote session has a logged in user"
+                                    );
+                                    SessionReadiness::WaitingForLogonOrUnlock
+                                }
+                            };
+
                             {
                                 let mut ctx = ctx.write().await;
-                                ctx.register_session(&id, SessionKind::Remote);
-                                start_session_process_if_not_running(&mut ctx, &id)?;
+                                ctx.register_session(&id, SessionKind::Remote, readiness);
                             }
                         }
                         AgentServiceEvent::SessionRemoteDisconnect(id) => {
@@ -186,15 +240,21 @@ impl Task for SessionManager {
                         AgentServiceEvent::SessionLogon(id) => {
                             info!(%id, "Session logged on");
 
-                            // Terminate old session process if it is already running.
-                            terminate_session_process(&id);
-
-
                             // NOTE: In some cases, SessionRemoteConnect is fired before
                             // an actual user is logged in, therefore we need to try start the
                             // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
-                            start_session_process_if_not_running(&mut ctx, &id)?;
+                            if ctx.should_start_session(&id, SessionReadinessEvent::Logon) {
+                                start_session_process_if_not_running(&mut ctx, &id)?;
+                            }
+                        }
+                        AgentServiceEvent::SessionUnlock(id) => {
+                            info!(%id, "Session unlocked");
+
+                            let mut ctx = ctx.write().await;
+                            if ctx.should_start_session(&id, SessionReadinessEvent::Unlock) {
+                                start_session_process_if_not_running(&mut ctx, &id)?;
+                            }
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
                             info!(%id, "Session logged off");
@@ -203,7 +263,7 @@ impl Task for SessionManager {
                                 // Console sessions could be reused for different users, therefore
                                 // we should not remove the session from the list, but mark it as
                                 // not yet ready (session will be started as soon as new user logs in).
-                                session.set_session_ready(false);
+                                session.set_waiting_for_logon();
                             }
                         }
                         _ => {
@@ -227,7 +287,7 @@ fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &S
     match ctx.get_session_mut(session) {
         Some(gw_session) => {
             if is_session_running_in_session(session)? {
-                gw_session.set_session_ready(true);
+                gw_session.set_session_ready();
                 return Ok(());
             }
 
@@ -236,7 +296,7 @@ fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &S
             match start_session_process(session) {
                 Ok(()) => {
                     info!(%session, "Session process started");
-                    gw_session.set_session_ready(true);
+                    gw_session.set_session_ready();
                 }
                 Err(error) => {
                     error!(%error, %session, "Failed to start session process");
@@ -325,4 +385,33 @@ fn session_app_path() -> Utf8PathBuf {
     current_dir.push(SESSION_BINARY);
 
     current_dir
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionReadiness, SessionReadinessEvent};
+
+    #[test]
+    fn new_user_session_waits_for_logon() {
+        assert!(SessionReadiness::WaitingForLogon.is_satisfied_by(SessionReadinessEvent::Logon));
+        assert!(!SessionReadiness::WaitingForLogon.is_satisfied_by(SessionReadinessEvent::Unlock));
+    }
+
+    #[test]
+    fn existing_user_session_waits_for_unlock() {
+        assert!(SessionReadiness::WaitingForUnlock.is_satisfied_by(SessionReadinessEvent::Unlock));
+        assert!(SessionReadiness::WaitingForUnlock.is_satisfied_by(SessionReadinessEvent::Logon));
+    }
+
+    #[test]
+    fn ready_session_ignores_later_readiness_events() {
+        assert!(!SessionReadiness::Ready.is_satisfied_by(SessionReadinessEvent::Logon));
+        assert!(!SessionReadiness::Ready.is_satisfied_by(SessionReadinessEvent::Unlock));
+    }
+
+    #[test]
+    fn unknown_session_user_state_accepts_logon_or_unlock() {
+        assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Logon));
+        assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Unlock));
+    }
 }

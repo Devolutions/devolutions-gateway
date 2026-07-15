@@ -107,7 +107,8 @@ fn agent_service_main(
                 | AgentServiceEvent::SessionRemoteConnect(_)
                 | AgentServiceEvent::SessionRemoteDisconnect(_)
                 | AgentServiceEvent::SessionLogon(_)
-                | AgentServiceEvent::SessionLogoff(_) => {
+                | AgentServiceEvent::SessionLogoff(_)
+                | AgentServiceEvent::SessionUnlock(_) => {
                     if let Some(tx) = service_event_tx.as_mut() {
                         match tx.blocking_send(control_code) {
                             Ok(()) => {}
