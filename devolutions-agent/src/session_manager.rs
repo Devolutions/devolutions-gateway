@@ -36,6 +36,7 @@ enum SessionKind {
 enum SessionReadiness {
     WaitingForLogon,
     WaitingForUnlock,
+    WaitingForLogonOrUnlock,
     Ready,
 }
 
@@ -46,6 +47,10 @@ impl SessionReadiness {
             (Self::WaitingForLogon, SessionReadinessEvent::Logon)
                 | (
                     Self::WaitingForUnlock,
+                    SessionReadinessEvent::Logon | SessionReadinessEvent::Unlock
+                )
+                | (
+                    Self::WaitingForLogonOrUnlock,
                     SessionReadinessEvent::Logon | SessionReadinessEvent::Unlock
                 )
         )
@@ -102,7 +107,7 @@ impl GatewaySession {
         self.readiness = SessionReadiness::Ready;
     }
 
-    fn wait_for_logon(&mut self) {
+    fn set_waiting_for_logon(&mut self) {
         self.readiness = SessionReadiness::WaitingForLogon;
     }
 }
@@ -206,10 +211,17 @@ impl Task for SessionManager {
                             // Terminate old session process if it is already running.
                             terminate_session_process(&id);
 
-                            let readiness = if session_has_logged_in_user(id.id)? {
-                                SessionReadiness::WaitingForUnlock
-                            } else {
-                                SessionReadiness::WaitingForLogon
+                            let readiness = match session_has_logged_in_user(id.id) {
+                                Ok(true) => SessionReadiness::WaitingForUnlock,
+                                Ok(false) => SessionReadiness::WaitingForLogon,
+                                Err(error) => {
+                                    error!(
+                                        %error,
+                                        %id,
+                                        "Failed to determine whether the remote session has a logged in user"
+                                    );
+                                    SessionReadiness::WaitingForLogonOrUnlock
+                                }
                             };
 
                             {
@@ -251,7 +263,7 @@ impl Task for SessionManager {
                                 // Console sessions could be reused for different users, therefore
                                 // we should not remove the session from the list, but mark it as
                                 // not yet ready (session will be started as soon as new user logs in).
-                                session.wait_for_logon();
+                                session.set_waiting_for_logon();
                             }
                         }
                         _ => {
@@ -395,5 +407,11 @@ mod tests {
     fn ready_session_ignores_later_readiness_events() {
         assert!(!SessionReadiness::Ready.is_satisfied_by(SessionReadinessEvent::Logon));
         assert!(!SessionReadiness::Ready.is_satisfied_by(SessionReadinessEvent::Unlock));
+    }
+
+    #[test]
+    fn unknown_session_user_state_accepts_logon_or_unlock() {
+        assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Logon));
+        assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Unlock));
     }
 }
