@@ -13,10 +13,10 @@ use tracing::{debug, info, warn};
 use win_api_wrappers::process::Process;
 use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
 use win_api_wrappers::token::Token;
-use win_api_wrappers::utils;
+use win_api_wrappers::utils::WideString;
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_ALL_ACCESS, TOKEN_QUERY};
 
-use super::{CommandExecutor, ExecutionContext, ExecutionOutput};
+use super::{CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
 
 mod process;
 mod token;
@@ -52,7 +52,11 @@ impl WindowsExecutor {
 
 #[async_trait]
 impl CommandExecutor for WindowsExecutor {
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        process_started: Option<ProcessStartedCallback>,
+    ) -> anyhow::Result<ExecutionOutput> {
         let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
         if !self.is_system && requires_elevation {
@@ -64,13 +68,14 @@ impl CommandExecutor for WindowsExecutor {
 
         let is_system = self.is_system;
         let ctx = ctx.clone();
+        let process_started = process_started.clone();
 
         // All Win32 calls are blocking — run in a blocking thread.
         tokio::task::spawn_blocking(move || {
             if is_system {
-                execute_as_system(&ctx)
+                execute_as_system(&ctx, process_started)
             } else {
-                execute_as_current_user(&ctx)
+                execute_as_current_user(&ctx, process_started)
             }
         })
         .await
@@ -86,12 +91,14 @@ impl CommandExecutor for WindowsExecutor {
 /// 3. If elevated execution is requested, obtain the linked elevated token.
 /// 4. Set the token session ID and create the process.
 /// 5. Wait for the process to exit and return the exit code.
-fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
+fn execute_as_system(
+    ctx: &ExecutionContext,
+    process_started: Option<ProcessStartedCallback>,
+) -> anyhow::Result<ExecutionOutput> {
     let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
 
     info!(
         effective_user = %ctx.effective_user,
-        command = %ctx.command.join(" "),
         requires_elevation,
         "Starting SYSTEM-mode execution"
     );
@@ -132,16 +139,9 @@ fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> 
 
     let mut execution_token = if requires_elevation {
         debug!("Attempting to get elevated token");
-        match get_elevated_token(&primary_token) {
-            Ok(elevated) => {
-                info!("Using elevated (linked) token");
-                elevated
-            }
-            Err(error) => {
-                warn!(%error, "Could not obtain elevated token, using primary");
-                primary_token
-            }
-        }
+        let elevated = get_elevated_token(&primary_token).context("failed to obtain elevated token")?;
+        info!("Using elevated (linked) token");
+        elevated
     } else {
         debug!("Using non-elevated primary token");
         primary_token
@@ -153,17 +153,12 @@ fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> 
         .set_session_id(session_id)
         .context("failed to set token session ID")?;
 
-    info!(
-        command = %ctx.command.join(" "),
-        session_id,
-        "Running execution plan"
-    );
+    info!(session_id, "Running execution plan");
 
-    let output = run_plan(&execution_token, ctx, session_id)?;
+    let output = run_plan(&execution_token, ctx, session_id, process_started)?;
 
     info!(
         effective_user = %ctx.effective_user,
-        command = %ctx.command.join(" "),
         exit_code = output.exit_code,
         "Plan completed under user token"
     );
@@ -175,10 +170,12 @@ fn execute_as_system(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> 
 ///
 /// Opens the current process token and uses the same `create_process_as_user`
 /// code path as SYSTEM mode, ensuring consistent behavior (environment, desktop, flags).
-fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
+fn execute_as_current_user(
+    ctx: &ExecutionContext,
+    process_started: Option<ProcessStartedCallback>,
+) -> anyhow::Result<ExecutionOutput> {
     info!(
         effective_user = %ctx.effective_user,
-        command = %ctx.command.join(" "),
         "Executing command as current user (dev mode)"
     );
 
@@ -188,13 +185,9 @@ fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOu
 
     let session_id = token.session_id().context("failed to query token session ID")?;
 
-    let output = run_plan(&token, ctx, session_id)?;
+    let output = run_plan(&token, ctx, session_id, process_started)?;
 
-    info!(
-        command = %ctx.command.join(" "),
-        exit_code = output.exit_code,
-        "Plan completed under current user token"
-    );
+    info!(exit_code = output.exit_code, "Plan completed under current user token");
 
     Ok(output)
 }
@@ -204,16 +197,21 @@ fn execute_as_current_user(ctx: &ExecutionContext) -> anyhow::Result<ExecutionOu
 /// command, then an optional post-operation command (failures are logged).
 ///
 /// Returns the exit code and captured output of the main command.
-fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::Result<ExecutionOutput> {
+fn run_plan(
+    token: &Token,
+    ctx: &ExecutionContext,
+    session_id: u32,
+    process_started: Option<ProcessStartedCallback>,
+) -> anyhow::Result<ExecutionOutput> {
     // 1. Kill requested processes (best-effort; a missing process is not an error).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
-            "taskkill.exe".to_owned(),
+            trusted_system32_executable("taskkill.exe"),
             "/F".to_owned(),
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false) {
+        match create_process(token, &kill_cmd, session_id, false, None) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
@@ -221,9 +219,9 @@ fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::R
 
     // 2. Pre-operation command — must succeed before the main operation runs.
     if let Some(pre) = &ctx.pre_command {
-        info!(command = %pre, "Running pre-operation command");
+        info!("Running pre-operation command");
         let command = prepare_shell_command(token, pre)?;
-        let out = create_process(token, command.args(), session_id, ctx.capture_output)
+        let out = create_process(token, command.args(), session_id, ctx.capture_output, None)
             .context("failed to run pre-operation command")?;
         if out.exit_code != 0 {
             bail!(
@@ -236,13 +234,13 @@ fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::R
 
     // 3. Main package-manager command.
     let command = prepare_main_command(token, &ctx.command)?;
-    let output = create_process(token, command.args(), session_id, ctx.capture_output)?;
+    let output = create_process(token, command.args(), session_id, ctx.capture_output, process_started)?;
 
     // 4. Post-operation command — runs after the main command; failures are logged only.
     if let Some(post) = &ctx.post_command {
-        info!(command = %post, "Running post-operation command");
+        info!("Running post-operation command");
         let command = prepare_shell_command(token, post)?;
-        match create_process(token, command.args(), session_id, false) {
+        match create_process(token, command.args(), session_id, false, None) {
             Ok(out) if out.exit_code == 0 => {}
             Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
             Err(error) => warn!(%error, "Post-operation command failed"),
@@ -253,25 +251,29 @@ fn run_plan(token: &Token, ctx: &ExecutionContext, session_id: u32) -> anyhow::R
 }
 
 fn prepare_main_command(token: &Token, command: &[String]) -> anyhow::Result<PreparedCommand> {
-    let temp_dir = user_temp_dir(token);
-    prepare_main_command_in(command, temp_dir.as_deref())
+    let user_env = win_api_wrappers::utils::environment_block(Some(token), false)
+        .context("failed to load user environment block")?;
+    prepare_main_command_in(command, None, Some(&user_env))
 }
 
-fn prepare_main_command_in(command: &[String], temp_dir: Option<&Path>) -> anyhow::Result<PreparedCommand> {
+fn prepare_main_command_in(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&std::collections::HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
     if let Some(script) = powershell_inline_script(command) {
         return prepare_powershell_script(command, script, temp_dir);
     }
 
     if executable_is(command, "winget.exe") {
-        return prepare_winget_script(command, temp_dir);
+        return prepare_winget_script(command, temp_dir, user_env);
     }
 
     Ok(PreparedCommand::raw(command))
 }
 
-fn prepare_shell_command(token: &Token, payload: &str) -> anyhow::Result<PreparedCommand> {
-    let temp_dir = user_temp_dir(token);
-    prepare_shell_command_in(payload, temp_dir.as_deref())
+fn prepare_shell_command(_token: &Token, payload: &str) -> anyhow::Result<PreparedCommand> {
+    prepare_shell_command_in(payload, None)
 }
 
 /// Build a `cmd.exe` invocation for a client-supplied shell payload using a temporary batch file.
@@ -286,9 +288,10 @@ fn prepare_shell_command_in(payload: &str, temp_dir: Option<&Path>) -> anyhow::R
             temp_script.path().display()
         )
     })?;
+    protect_temp_script(&temp_script)?;
 
     let command = vec![
-        "cmd.exe".to_owned(),
+        trusted_system32_executable("cmd.exe"),
         "/D".to_owned(),
         "/V:OFF".to_owned(),
         "/Q".to_owned(),
@@ -323,8 +326,14 @@ fn prepare_powershell_script(
             )
         })?;
     }
+    protect_temp_script(&temp_script)?;
 
     let mut prepared = command[..2].to_vec();
+    prepared[0] = if is_windows_powershell {
+        trusted_windows_powershell_executable()
+    } else {
+        trusted_powershell7_executable()
+    };
     prepared.push("-Command".to_owned());
     prepared.push(format!("& {}", quote_powershell_literal(&temp_script.path_string())));
 
@@ -335,14 +344,22 @@ fn powershell_script_with_utf8_preamble(script: &str) -> String {
     format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n{script}")
 }
 
-fn prepare_winget_script(command: &[String], temp_dir: Option<&Path>) -> anyhow::Result<PreparedCommand> {
+fn prepare_winget_script(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&std::collections::HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (executable, args) = command.split_first().context("empty WinGet command")?;
-    append_batch_argument(&mut script, executable)?;
+    let executable = user_env.map_or_else(
+        || Ok(executable.clone()),
+        |env| resolve_winget_executable(env).map(|path| path.display().to_string()),
+    )?;
+    append_batch_argument(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -356,9 +373,10 @@ fn prepare_winget_script(command: &[String], temp_dir: Option<&Path>) -> anyhow:
             temp_script.path().display()
         )
     })?;
+    protect_temp_script(&temp_script)?;
 
     let prepared = vec![
-        "cmd.exe".to_owned(),
+        trusted_system32_executable("cmd.exe"),
         "/D".to_owned(),
         "/V:OFF".to_owned(),
         "/Q".to_owned(),
@@ -385,6 +403,77 @@ fn broker_temp_script(extension: &str, temp_dir: Option<&Path>) -> anyhow::Resul
         .context("failed to create broker temporary script")
 }
 
+fn protect_temp_script(temp_script: &TmpFileGuard) -> anyhow::Result<()> {
+    // Owner keeps full control; interactive users only need read access to execute the script.
+    const SCRIPT_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;BU)";
+    set_file_dacl(temp_script.path(), SCRIPT_DACL)
+}
+
+fn set_file_dacl(path: &Path, acl: &str) -> anyhow::Result<()> {
+    use windows::Win32::Foundation::{ERROR_SUCCESS, FALSE, HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    };
+    use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR};
+
+    struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
+
+    impl Drop for OwnedSecurityDescriptor {
+        fn drop(&mut self) {
+            if self.0.0.is_null() {
+                return;
+            }
+            // SAFETY: The descriptor pointer is returned by `ConvertStringSecurityDescriptorToSecurityDescriptorW`.
+            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
+        }
+    }
+
+    let acl = WideString::from(acl);
+    let mut security_descriptor = OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
+
+    // SAFETY: `acl` is a valid null-terminated UTF-16 string and the output pointer is valid.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            acl.as_pcwstr(),
+            SDDL_REVISION_1,
+            &mut security_descriptor.0 as *mut PSECURITY_DESCRIPTOR,
+            None,
+        )
+    }
+    .context("failed to convert broker script DACL")?;
+
+    let mut dacl_present = FALSE;
+    let mut dacl_defaulted = FALSE;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+
+    // SAFETY: All output pointers are valid and `security_descriptor` owns a valid descriptor.
+    unsafe { GetSecurityDescriptorDacl(security_descriptor.0, &mut dacl_present, &mut dacl, &mut dacl_defaulted) }
+        .context("failed to read broker script DACL")?;
+
+    if dacl.is_null() {
+        bail!("broker script DACL is null");
+    }
+
+    let path = WideString::from(path);
+    // SAFETY: `path` is a valid null-terminated UTF-16 path and `dacl` remains valid for the call.
+    let result = unsafe {
+        SetNamedSecurityInfoW(
+            path.as_pcwstr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl),
+            None,
+        )
+    };
+    if result != ERROR_SUCCESS {
+        bail!("failed to set broker script DACL");
+    }
+
+    Ok(())
+}
+
 fn executable_is(command: &[String], expected_name: &str) -> bool {
     command.first().is_some_and(|executable| {
         Path::new(executable)
@@ -394,36 +483,70 @@ fn executable_is(command: &[String], expected_name: &str) -> bool {
     })
 }
 
-fn user_temp_dir(token: &Token) -> Option<PathBuf> {
-    let user_env = match utils::environment_block(Some(token), false) {
-        Ok(user_env) => user_env,
-        Err(error) => {
-            warn!(%error, "Failed to load user environment block for broker script temp path");
-            return None;
-        }
-    };
-
-    let temp_dir = user_env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("TEMP"))
-        .or_else(|| user_env.iter().find(|(key, _)| key.eq_ignore_ascii_case("TMP")))
-        .map(|(_, value)| PathBuf::from(value));
-
-    match temp_dir {
-        Some(path) if path.is_dir() => Some(path),
-        Some(path) => {
-            warn!(path = %path.display(), "User temp path is not a directory; using default temp path");
-            None
-        }
-        None => {
-            warn!("User environment does not define TEMP or TMP; using default temp path");
-            None
-        }
-    }
-}
-
 fn quote_powershell_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn trusted_system32_executable(name: &str) -> String {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+    PathBuf::from(system_root)
+        .join("System32")
+        .join(name)
+        .display()
+        .to_string()
+}
+
+fn trusted_windows_powershell_executable() -> String {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+    PathBuf::from(system_root)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe")
+        .display()
+        .to_string()
+}
+
+fn trusted_powershell7_executable() -> String {
+    let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
+    PathBuf::from(program_files)
+        .join("PowerShell")
+        .join("7")
+        .join("pwsh.exe")
+        .display()
+        .to_string()
+}
+
+fn resolve_winget_executable(env: &std::collections::HashMap<String, String>) -> anyhow::Result<PathBuf> {
+    let path_var = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| value.as_str())
+        .unwrap_or_default();
+    for dir in path_var.split(';') {
+        let candidate = PathBuf::from(dir).join("winget.exe");
+        if candidate.exists() && is_trusted_winget_path(&candidate, env) {
+            return Ok(candidate);
+        }
+    }
+    bail!("trusted winget.exe not found in target user PATH");
+}
+
+fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<String, String>) -> bool {
+    let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
+    let program_files = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("ProgramFiles"))
+        .map(|(_, value)| value)
+        .map_or(r"C:\Program Files", |value| value)
+        .to_lowercase();
+    let local_app_data = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("LOCALAPPDATA"))
+        .map(|(_, value)| value.to_lowercase());
+
+    candidate.starts_with(&format!("{program_files}\\windowsapps\\"))
+        || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
 }
 
 fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
@@ -503,7 +626,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let command = prepare_shell_command_in("echo héllo", Some(temp_dir.path())).expect("prepare shell command");
 
-        assert_eq!(command.args()[0], "cmd.exe");
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
         assert_eq!(command.args()[2], "/V:OFF");
         assert_eq!(command.args()[3], "/Q");
@@ -523,9 +646,10 @@ mod tests {
             "-Command".to_owned(),
             "Write-Output 'héllo'".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path())).expect("prepare PowerShell command");
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
 
-        assert_eq!(command.args()[0], "powershell.exe");
+        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
         assert_eq!(command.args()[2], "-Command");
         assert!(command.args()[3].starts_with("& '"));
@@ -546,9 +670,10 @@ mod tests {
             "-Command".to_owned(),
             "Write-Output 'héllo'".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path())).expect("prepare PowerShell command");
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
 
-        assert_eq!(command.args()[0], "pwsh.exe");
+        assert!(command.args()[0].ends_with(r"\PowerShell\7\pwsh.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
         assert_eq!(command.args()[2], "-Command");
         assert!(command.args()[3].starts_with("& '"));
@@ -571,9 +696,9 @@ mod tests {
             "100%".to_owned(),
             "Quoted\"Value".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path())).expect("prepare WinGet command");
+        let command = prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare WinGet command");
 
-        assert_eq!(command.args()[0], "cmd.exe");
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
         assert_eq!(command.args()[2], "/V:OFF");
         assert_eq!(command.args()[3], "/Q");

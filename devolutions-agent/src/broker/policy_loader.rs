@@ -83,3 +83,8 @@ pub fn find_default_policy() -> anyhow::Result<PathBuf> {
         dir.display()
     )
 }
+
+/// Candidate default policy path used when no default policy file exists yet.
+pub fn default_policy_candidate() -> PathBuf {
+    default_policy_dir().join(format!("{POLICY_FILE_BASE}.json"))
+}

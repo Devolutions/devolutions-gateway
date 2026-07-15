@@ -51,20 +51,14 @@ fn scopes_match(scope: Option<Scope>, allowed: &BTreeSet<Scope>) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    match scope {
-        Some(s) => allowed.contains(&s),
-        None => true, // No scope specified = don't restrict.
-    }
+    scope.is_some_and(|s| allowed.contains(&s))
 }
 
 fn architectures_match(arch: Option<Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    match arch {
-        Some(a) => allowed.contains(&a),
-        None => true, // No architecture specified = don't restrict.
-    }
+    arch.is_some_and(|a| allowed.contains(&a))
 }
 
 fn elevation_match(elev: Elevation, allowed: &BTreeSet<Elevation>) -> bool {
@@ -178,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_scope_or_architecture_in_request_does_not_restrict_matching() {
+    fn absent_scope_or_architecture_in_request_fails_when_rule_restricts_them() {
         let mut request = request();
         request.options.scope = None;
         request.package.architecture = None;
@@ -189,7 +183,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
     }
 
     #[test]

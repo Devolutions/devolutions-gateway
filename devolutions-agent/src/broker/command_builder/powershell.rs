@@ -9,16 +9,17 @@
 //!
 //! The Windows executor materializes these scripts into temporary `.ps1` files before launch.
 //!
-//! Neither builder pins a `-Repository`/source: the package source is
-//! part of the policy-matched request identity, but the executed command lets the
-//! PowerShell module resolver pick the repository. Options that don't apply to
-//! PowerShell modules (interactive, custom install location, winget's no-upgrade /
-//! uninstall-previous) are intentionally omitted.
+//! Both builders bind the policy-matched request source as the PowerShell repository.
+//! Options that don't apply to PowerShell modules (interactive, custom install
+//! location, winget's no-upgrade / uninstall-previous) are intentionally omitted.
 
+use anyhow::bail;
 use now_policy_api::{Operation, PackageRequest, Scope};
 
 /// Build a Windows PowerShell 5.x (PowerShellGet) command from a validated request.
-pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
+pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    validate_powershell_request(request)?;
+
     let mut script = String::new();
 
     let verb = match request.operation {
@@ -29,6 +30,7 @@ pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
+    append_repository(&mut script, request)?;
     append_raw(&mut script, "-Confirm:$false");
     append_raw(&mut script, "-Force");
 
@@ -43,7 +45,7 @@ pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
         }
     }
 
-    if matches!(request.operation, Operation::Install) {
+    if matches!(request.operation, Operation::Install | Operation::Update) {
         if request.options.skip_hash_check {
             append_raw(&mut script, "-SkipPublisherCheck");
         }
@@ -53,22 +55,18 @@ pub fn build_powershell5_command(request: &PackageRequest) -> Vec<String> {
         }
     }
 
-    for param in &request.options.custom_parameters {
-        if !param.is_empty() {
-            append_raw(&mut script, &param.0);
-        }
-    }
-
-    vec![
+    Ok(vec![
         "powershell.exe".to_owned(),
         "-NoProfile".to_owned(),
         "-Command".to_owned(),
         script,
-    ]
+    ])
 }
 
 /// Build a PowerShell 7.x (PSResourceGet) command from a validated request.
-pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
+pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    validate_powershell_request(request)?;
+
     let mut script = String::new();
 
     let verb = match request.operation {
@@ -79,15 +77,18 @@ pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
+    append_repository(&mut script, request)?;
     append_raw(&mut script, "-Confirm:$false");
 
     match request.operation {
-        Operation::Install => {
+        Operation::Install | Operation::Update => {
             if let Some(version) = request.package.version.as_deref() {
                 append_flag_value(&mut script, "-Version", version);
             }
+            if matches!(request.operation, Operation::Update) {
+                append_raw(&mut script, "-Force");
+            }
         }
-        Operation::Update => append_raw(&mut script, "-Force"),
         // Uninstall removes the installed resource without pinning a version.
         Operation::Uninstall => {}
     }
@@ -106,18 +107,38 @@ pub fn build_powershell7_command(request: &PackageRequest) -> Vec<String> {
         }
     }
 
-    for param in &request.options.custom_parameters {
-        if !param.is_empty() {
-            append_raw(&mut script, &param.0);
-        }
-    }
-
-    vec![
+    Ok(vec![
         "pwsh.exe".to_owned(),
         "-NoProfile".to_owned(),
         "-Command".to_owned(),
         script,
-    ]
+    ])
+}
+
+fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
+    if request.source.url.is_some() {
+        bail!("PowerShell package sources with URLs are not supported by the broker");
+    }
+    if request.source.name.trim().is_empty() {
+        bail!("PowerShell package source name is required");
+    }
+    if let Some(param) = request.options.custom_parameters.iter().find(|param| !param.is_empty()) {
+        bail!(
+            "PowerShell custom parameters are not supported by the broker: {}",
+            param.0
+        );
+    }
+
+    Ok(())
+}
+
+fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::Result<()> {
+    let repository = request.source.name.trim();
+    if repository.is_empty() {
+        bail!("PowerShell package source name is required");
+    }
+    append_flag_value(script, "-Repository", repository);
+    Ok(())
 }
 
 fn append_raw(script: &mut String, value: &str) {
@@ -133,8 +154,8 @@ fn append_flag_value(script: &mut String, flag_or_verb: &str, value: &str) {
 }
 
 fn quote_ps(value: &str) -> String {
-    let escaped = value.replace('"', "`\"");
-    format!("\"{escaped}\"")
+    let escaped = value.replace('\'', "''");
+    format!("'{escaped}'")
 }
 
 #[cfg(test)]
@@ -198,22 +219,20 @@ mod tests {
     #[test]
     fn powershell5_install_matches_package_broker_client_semantics() {
         let request = make_request(ManagerName::PowerShell);
-        let cmd = build_powershell5_command(&request);
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert_eq!(cmd[0], "powershell.exe");
         // verb, then -Name <id>, -Confirm:$false, -Force.
-        assert!(script.starts_with("Install-Module -Name \"Pester\" -Confirm:$false -Force"));
+        assert!(script.starts_with("Install-Module -Name 'Pester' -Repository 'PSGallery' -Confirm:$false -Force"));
         assert!(script.contains("-Scope CurrentUser"));
-        assert!(script.contains("-RequiredVersion \"5.6.0\""));
-        // The package broker client does not pin a repository for PowerShell operations.
-        assert!(!script.contains("-Repository"));
+        assert!(script.contains("-RequiredVersion '5.6.0'"));
     }
 
     #[test]
     fn powershell5_machine_scope_is_allusers() {
         let mut request = make_request(ManagerName::PowerShell);
         request.options.scope = Some(Scope::Machine);
-        let cmd = build_powershell5_command(&request);
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert!(script.contains("-Scope AllUsers"));
     }
@@ -223,7 +242,7 @@ mod tests {
         let mut request = make_request(ManagerName::PowerShell);
         request.options.pre_release = true;
         request.options.skip_hash_check = true;
-        let cmd = build_powershell5_command(&request);
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert!(script.contains("-AllowPrerelease"));
         assert!(script.contains("-SkipPublisherCheck"));
@@ -233,9 +252,9 @@ mod tests {
     fn powershell5_uninstall_omits_scope_and_version() {
         let mut request = make_request(ManagerName::PowerShell);
         request.operation = Operation::Uninstall;
-        let cmd = build_powershell5_command(&request);
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.starts_with("Uninstall-Module -Name \"Pester\""));
+        assert!(script.starts_with("Uninstall-Module -Name 'Pester' -Repository 'PSGallery'"));
         assert!(!script.contains("-Scope"));
         assert!(!script.contains("-RequiredVersion"));
         assert!(!script.contains("-SkipPublisherCheck"));
@@ -244,26 +263,25 @@ mod tests {
     #[test]
     fn powershell7_install_matches_package_broker_client_semantics() {
         let request = make_request(ManagerName::PowerShell7);
-        let cmd = build_powershell7_command(&request);
+        let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert_eq!(cmd[0], "pwsh.exe");
-        assert!(script.starts_with("Install-PSResource -Name \"Pester\" -Confirm:$false"));
-        assert!(script.contains("-Version \"5.6.0\""));
+        assert!(script.starts_with("Install-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"));
+        assert!(script.contains("-Version '5.6.0'"));
         assert!(script.contains("-TrustRepository"));
         assert!(script.contains("-AcceptLicense"));
         assert!(script.contains("-Scope CurrentUser"));
-        assert!(!script.contains("-Repository"));
     }
 
     #[test]
-    fn powershell7_update_uses_force_not_version() {
+    fn powershell7_update_uses_force_and_version() {
         let mut request = make_request(ManagerName::PowerShell7);
         request.operation = Operation::Update;
-        let cmd = build_powershell7_command(&request);
+        let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert!(script.contains("Update-PSResource"));
         assert!(script.contains("-Force"));
-        assert!(!script.contains("-Version"));
+        assert!(script.contains("-Version '5.6.0'"));
         assert!(script.contains("-TrustRepository"));
     }
 
@@ -271,9 +289,9 @@ mod tests {
     fn powershell7_uninstall_omits_version_and_trust_flags() {
         let mut request = make_request(ManagerName::PowerShell7);
         request.operation = Operation::Uninstall;
-        let cmd = build_powershell7_command(&request);
+        let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.starts_with("Uninstall-PSResource -Name \"Pester\" -Confirm:$false"));
+        assert!(script.starts_with("Uninstall-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"));
         // Uninstall must not pin a version (it would remove only the matching version,
         // or fail if it does not match what is installed).
         assert!(!script.contains("-Version"));
@@ -283,11 +301,19 @@ mod tests {
     }
 
     #[test]
-    fn powershell_custom_parameters_are_appended() {
+    fn powershell_custom_parameters_are_rejected() {
         let mut request = make_request(ManagerName::PowerShell7);
         request.options.custom_parameters = vec![CustomParameterString("-Reinstall".to_owned())];
-        let cmd = build_powershell7_command(&request);
+        let error = build_powershell7_command(&request).expect_err("custom parameters should fail");
+        assert!(error.to_string().contains("custom parameters"));
+    }
+
+    #[test]
+    fn powershell_literals_escape_apostrophes() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.package.id = PackageIdentifier::from("Vendor's.Module".to_owned());
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.contains("-Reinstall"));
+        assert!(script.contains("-Name 'Vendor''s.Module'"));
     }
 }

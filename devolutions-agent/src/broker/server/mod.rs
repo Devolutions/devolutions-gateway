@@ -94,7 +94,15 @@ impl PackageBrokerServer for BrokerConnection {
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
-        self.state.status(request).await
+        self.client
+            .validate_status_request(&request, self.state.skip_signature_validation)
+            .map_err(|error| {
+                warn!(error = format!("{error:#}"), "Rejected package broker status request");
+                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
+            })?;
+
+        let owner_key = request.client.owner_key();
+        self.state.status_for_client(request, owner_key).await
     }
 }
 
@@ -166,9 +174,12 @@ impl PackageBrokerServer for BrokerState {
                 capture_output: request.capture_output,
             };
 
-            let (operation_id, is_new_operation) = self.tracker.register(&request.request_id, generated_operation_id);
+            let owner_key = request.client_owner_key();
+            let (operation_id, is_new_operation) = self
+                .tracker
+                .register(&owner_key, &request, generated_operation_id)
+                .map_err(|error| error_response(ErrorCode::Conflict, format!("{error:#}")))?;
             if is_new_operation {
-                self.tracker.mark_running(&operation_id);
                 execution::spawn_execution(
                     Arc::clone(&self.executor),
                     self.tracker.clone(),
@@ -206,7 +217,22 @@ impl PackageBrokerServer for BrokerState {
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
-        let Some(operation) = self.tracker.get(&request.operation_id) else {
+        self.status_for_client(request, String::new()).await
+    }
+}
+
+impl BrokerState {
+    async fn status_for_client(
+        &self,
+        request: StatusRequest,
+        owner_key: String,
+    ) -> Result<StatusResponse, ErrorResponse> {
+        let operation = if owner_key.is_empty() {
+            self.tracker.get(&request.operation_id)
+        } else {
+            self.tracker.get_for_owner(&request.operation_id, &owner_key)
+        };
+        let Some(operation) = operation else {
             return Err(error_response(ErrorCode::NotFound, "operation not found"));
         };
 
@@ -227,9 +253,7 @@ impl PackageBrokerServer for BrokerState {
                 .map(|stdout| Base64Utf8Data(base64::engine::general_purpose::STANDARD.encode(stdout))),
         })
     }
-}
 
-impl BrokerState {
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
         let received_at = Utc::now();
         let policy = {
@@ -284,7 +308,7 @@ impl BrokerState {
         };
 
         let command = if effective_decision == Decision::Allow {
-            build_command(request)
+            build_command(request).map_err(|error| error_response(ErrorCode::ValidationFailed, format!("{error:#}")))?
         } else {
             Vec::new()
         };
@@ -301,5 +325,29 @@ impl BrokerState {
             would_execute: effective_decision == Decision::Allow,
             command,
         })
+    }
+}
+
+trait ClientOwnerKey {
+    fn owner_key(&self) -> String;
+}
+
+impl ClientOwnerKey for now_policy_api::ClientContext {
+    fn owner_key(&self) -> String {
+        format!(
+            "{}|{}",
+            self.effective_user.to_lowercase(),
+            self.client_executable_path.to_lowercase()
+        )
+    }
+}
+
+trait PackageRequestClientOwner {
+    fn client_owner_key(&self) -> String;
+}
+
+impl PackageRequestClientOwner for PackageRequest {
+    fn client_owner_key(&self) -> String {
+        self.client.owner_key()
     }
 }

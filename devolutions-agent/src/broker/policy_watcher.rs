@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use now_policy::PolicyDocument;
-use tokio::sync::{Notify, watch};
+use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::broker::policy_loader;
@@ -56,7 +57,7 @@ impl PolicyWatcher {
     /// This spawns a background task that watches the policy file's parent directory
     /// and reloads the policy when the file is modified, created, or removed.
     /// The task runs until the shutdown notify is triggered.
-    pub async fn watch(self, shutdown: Arc<Notify>) {
+    pub async fn watch(self, shutdown: CancellationToken) {
         let path = self.path.clone();
         let state_tx = self.state_tx;
         let dir = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
@@ -66,6 +67,7 @@ impl PolicyWatcher {
 
         // Set up file watcher in a blocking context.
         let watch_path = dir.clone();
+        let setup_state_tx = state_tx.clone();
         let _watcher_handle = tokio::task::spawn_blocking(move || {
             let rt_tx = fs_tx;
             let mut watcher: RecommendedWatcher =
@@ -84,12 +86,18 @@ impl PolicyWatcher {
                     Ok(watcher) => watcher,
                     Err(error) => {
                         error!(%error, "Failed to create policy file watcher");
+                        let _ = setup_state_tx.send(PolicyState::Unavailable {
+                            reason: format!("failed to create policy file watcher: {error}"),
+                        });
                         return;
                     }
                 };
 
             if let Err(error) = watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
                 error!(%error, path = %watch_path.display(), "Failed to watch policy directory");
+                let _ = setup_state_tx.send(PolicyState::Unavailable {
+                    reason: format!("failed to watch policy directory {}: {error}", watch_path.display()),
+                });
                 return;
             }
 
@@ -101,7 +109,7 @@ impl PolicyWatcher {
 
         loop {
             tokio::select! {
-                _ = shutdown.notified() => {
+                _ = shutdown.cancelled() => {
                     info!("Policy watcher shutting down");
                     let _ = watcher_stop_tx.send(());
                     break;

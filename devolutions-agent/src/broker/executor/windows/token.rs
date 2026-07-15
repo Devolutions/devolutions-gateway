@@ -34,11 +34,12 @@ pub(super) fn duplicate_as_primary(token: &Token) -> anyhow::Result<Token> {
 ///
 /// `effective_user` can be `DOMAIN\user` or just `user`.
 pub(super) fn find_user_session(effective_user: &str) -> anyhow::Result<u32> {
-    let target_username = effective_user
-        .rsplit('\\')
-        .next()
-        .unwrap_or(effective_user)
-        .to_lowercase();
+    let (target_domain, target_username) = effective_user
+        .rsplit_once('\\')
+        .map_or((None, effective_user), |(domain, username)| {
+            (Some(domain.to_lowercase()), username)
+        });
+    let target_username = target_username.to_lowercase();
 
     let sessions = wts::get_sessions().context("failed to enumerate WTS sessions")?;
 
@@ -46,10 +47,20 @@ pub(super) fn find_user_session(effective_user: &str) -> anyhow::Result<u32> {
         if session.session_id == 0 {
             continue;
         }
+        if session.state != wts::WTSConnectState::Active {
+            continue;
+        }
 
         if let Ok(session_user) = wts::get_session_user_name(session.session_id)
             && session_user.to_lowercase() == target_username
         {
+            if let Some(target_domain) = &target_domain {
+                let session_domain = wts::get_session_domain_name(session.session_id)
+                    .with_context(|| format!("failed to query domain for session {}", session.session_id))?;
+                if !session_domain.eq_ignore_ascii_case(target_domain) {
+                    continue;
+                }
+            }
             return Ok(session.session_id);
         }
     }

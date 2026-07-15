@@ -3,6 +3,7 @@
 //! Handles running commands under the specified user identity.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, Scope};
 use tracing::info;
 
@@ -40,6 +41,8 @@ pub struct ExecutionContext {
     pub capture_output: bool,
 }
 
+pub type ProcessStartedCallback = std::sync::Arc<dyn Fn(DateTime<Utc>) + Send + Sync>;
+
 /// Trait for command execution strategies.
 #[async_trait]
 pub trait CommandExecutor: Send + Sync {
@@ -47,7 +50,11 @@ pub trait CommandExecutor: Send + Sync {
     ///
     /// Returns the main command's exit code and captured output on success.
     /// The method blocks (async) until the spawned process exits or a fatal error occurs during launch.
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput>;
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        process_started: Option<ProcessStartedCallback>,
+    ) -> anyhow::Result<ExecutionOutput>;
 }
 
 /// Dry-run executor that only logs commands without running them.
@@ -55,13 +62,17 @@ pub struct DryRunExecutor;
 
 #[async_trait]
 impl CommandExecutor for DryRunExecutor {
-    async fn execute(&self, ctx: &ExecutionContext) -> anyhow::Result<ExecutionOutput> {
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        _process_started: Option<ProcessStartedCallback>,
+    ) -> anyhow::Result<ExecutionOutput> {
         info!(
             effective_user = %ctx.effective_user,
             kill_processes = ?ctx.kill_processes,
-            pre_command = ?ctx.pre_command,
-            command = %ctx.command.join(" "),
-            post_command = ?ctx.post_command,
+            has_pre_command = ctx.pre_command.is_some(),
+            command_len = ctx.command.len(),
+            has_post_command = ctx.post_command.is_some(),
             elevation = %ctx.elevation,
             "Dry-run: would execute plan"
         );

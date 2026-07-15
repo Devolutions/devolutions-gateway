@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::broker::executor::{self, CommandExecutor};
@@ -57,7 +57,15 @@ impl Task for BrokerTask {
 
         let policy_path = match &self.config.policy_path {
             Some(path) => std::path::PathBuf::from(path),
-            None => policy_loader::find_default_policy().context("failed to find default broker policy")?,
+            None => policy_loader::find_default_policy().unwrap_or_else(|error| {
+                let candidate = policy_loader::default_policy_candidate();
+                warn!(
+                    %error,
+                    path = %candidate.display(),
+                    "Default broker policy is unavailable; broker will pause until this file is provided"
+                );
+                candidate
+            }),
         };
 
         // Create policy watcher with initial load attempt.
@@ -98,22 +106,23 @@ impl Task for BrokerTask {
             skip_signature_validation: self.config.skip_signature_validation,
         });
 
-        // Bridge the agent's ShutdownSignal to the Notify used by subsystems.
-        let shutdown_notify = Arc::new(Notify::new());
+        // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.
+        let shutdown = CancellationToken::new();
+        state.tracker.clone().spawn_eviction_task(shutdown.clone());
 
         // Spawn policy watcher task.
-        let watcher_shutdown = Arc::clone(&shutdown_notify);
+        let watcher_shutdown = shutdown.clone();
         tokio::spawn(async move {
             watcher.watch(watcher_shutdown).await;
         });
 
         // Spawn policy state relay: updates BrokerState when policy watcher reports changes.
         let relay_state = Arc::clone(&state);
-        let relay_shutdown = Arc::clone(&shutdown_notify);
+        let relay_shutdown = shutdown.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = relay_shutdown.notified() => break,
+                    _ = relay_shutdown.cancelled() => break,
                     result = state_rx.changed() => {
                         if result.is_err() {
                             // Sender dropped (watcher exited).
@@ -140,7 +149,7 @@ impl Task for BrokerTask {
         });
 
         // Spawn pipe server.
-        let server_shutdown = Arc::clone(&shutdown_notify);
+        let server_shutdown = shutdown.clone();
         let server_handle = tokio::spawn({
             let state = Arc::clone(&state);
             async move { crate::broker::pipe::run_pipe_server(state, server_shutdown).await }
@@ -149,7 +158,7 @@ impl Task for BrokerTask {
         // Wait for agent shutdown signal.
         shutdown_signal.wait().await;
         info!("package broker received shutdown signal");
-        shutdown_notify.notify_waiters();
+        shutdown.cancel();
 
         // Wait for the server task to finish.
         match server_handle.await {

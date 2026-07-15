@@ -4,17 +4,20 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
-use tracing::{debug, error, info};
+use chrono::Utc;
+use tracing::{debug, error, info, warn};
 use win_api_wrappers::process::{self, StartupInfo};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{self, CommandLine, Pipe, WideString};
+use windows::Win32::Foundation::WAIT_TIMEOUT;
 use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use crate::broker::executor::{ExecutionOutput, tail_utf8};
+use crate::broker::executor::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, ProcessStartedCallback, tail_utf8};
+use crate::broker::operation_tracker::OperationTracker;
 
 /// Create a process under the given token and wait for exit.
 ///
@@ -31,15 +34,11 @@ pub(super) fn create_process(
     command: &[String],
     session_id: u32,
     capture: bool,
+    process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
     let cmd_line = CommandLine::new(command.to_vec());
 
-    debug!(
-        command_line = %command.join(" "),
-        session_id,
-        capture,
-        "Building process creation parameters"
-    );
+    debug!(session_id, capture, "Building process creation parameters");
 
     // Resolve the executable using the user's environment PATH.
     // CreateProcessAsUserW searches the CALLING process's PATH (SYSTEM) to find the
@@ -49,13 +48,7 @@ pub(super) fn create_process(
     let user_env = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
 
     let exe_name = command.first().context("empty command")?;
-    let resolved_exe = resolve_executable(exe_name, &user_env).with_context(|| {
-        format!(
-            "could not find '{}' in user's PATH: {:?}",
-            exe_name,
-            user_env.get("Path").or_else(|| user_env.get("PATH"))
-        )
-    })?;
+    let resolved_exe = resolve_executable(exe_name, &user_env)?;
 
     info!(
         exe = %resolved_exe.display(),
@@ -116,7 +109,6 @@ pub(super) fn create_process(
         Err(error) => {
             error!(
                 error = format!("{error:#}"),
-                command_line = %command.join(" "),
                 exe = %resolved_exe.display(),
                 session_id,
                 "create_process_as_user failed"
@@ -130,6 +122,10 @@ pub(super) fn create_process(
             });
         }
     };
+    let started_at = Utc::now();
+    if let Some(process_started) = process_started {
+        process_started(started_at);
+    }
 
     // Close our copies of the child's handles so the read end observes EOF on exit.
     drop(held_output_write);
@@ -147,13 +143,47 @@ pub(super) fn create_process(
     let reader = output_read.map(|mut pipe| {
         std::thread::spawn(move || {
             let mut buffer = Vec::new();
-            let _ = pipe.read_to_end(&mut buffer);
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        buffer.extend_from_slice(&chunk[..read]);
+                        if buffer.len() > MAX_CAPTURED_OUTPUT_BYTES {
+                            let excess = buffer.len() - MAX_CAPTURED_OUTPUT_BYTES;
+                            buffer.drain(..excess);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
             buffer
         })
     });
 
-    // Wait for the process to exit (no timeout; the server enforces an overall timeout).
-    process_info.process.wait(None).context("failed to wait for process")?;
+    let timeout_ms = operation_timeout_ms();
+    if process_info
+        .process
+        .wait(Some(timeout_ms))
+        .context("failed to wait for process")?
+        == WAIT_TIMEOUT
+    {
+        warn!(
+            session_id,
+            pid = process_info.process_id,
+            timeout_ms,
+            "Process timed out; terminating"
+        );
+        process_info
+            .process
+            .terminate(1)
+            .context("failed to terminate timed-out process")?;
+        let _ = process_info.process.wait(None);
+        bail!(
+            "operation timed out after {} seconds",
+            OperationTracker::operation_timeout().as_secs()
+        );
+    }
 
     let exit_code = process_info
         .process
@@ -168,6 +198,7 @@ pub(super) fn create_process(
     Ok(ExecutionOutput {
         exit_code: exit_code as i32,
         stdout,
+        started_at: Some(started_at),
     })
 }
 
@@ -184,6 +215,10 @@ fn resolve_executable(exe_name: &str, env: &std::collections::HashMap<String, St
             return Ok(exe_path.to_owned());
         }
         bail!("executable not found at absolute path: {}", exe_path.display());
+    }
+
+    if !exe_name.eq_ignore_ascii_case("winget.exe") {
+        bail!("broker command executable must be an absolute path: {exe_name}");
     }
 
     // Get PATH from environment (case-insensitive key lookup).
@@ -208,11 +243,40 @@ fn resolve_executable(exe_name: &str, env: &std::collections::HashMap<String, St
             let mut candidate = PathBuf::from(dir);
             let file_name = format!("{}{}", exe_name, ext);
             candidate.push(&file_name);
-            if candidate.exists() {
+            if candidate.exists() && is_trusted_winget_path(&candidate, env) {
                 return Ok(candidate);
             }
         }
     }
 
-    bail!("executable '{}' not found in PATH", exe_name);
+    bail!("trusted executable '{exe_name}' not found in target user PATH");
+}
+
+fn operation_timeout_ms() -> u32 {
+    u32::try_from(OperationTracker::operation_timeout().as_millis()).unwrap_or(u32::MAX)
+}
+
+fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<String, String>) -> bool {
+    if !candidate
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("winget.exe"))
+    {
+        return false;
+    }
+
+    let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
+    let program_files = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("ProgramFiles"))
+        .map(|(_, value)| value)
+        .map_or(r"C:\Program Files", |value| value)
+        .to_lowercase();
+    let local_app_data = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("LOCALAPPDATA"))
+        .map(|(_, value)| value.to_lowercase());
+
+    candidate.starts_with(&format!("{program_files}\\windowsapps\\"))
+        || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
 }

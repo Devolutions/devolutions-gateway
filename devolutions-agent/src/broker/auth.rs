@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
-use now_policy_api::PackageRequest;
+use now_policy_api::{ClientContext, PackageRequest, StatusRequest};
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
 use win_api_wrappers::process::Process;
@@ -59,9 +59,25 @@ impl PipeClient {
         request: &PackageRequest,
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
-        self.validate_effective_user(&request.client.effective_user)?;
-        self.validate_executable_path(&request.client.client_executable_path)?;
+        self.validate_client_context(&request.client)?;
+        self.validate_signature(skip_signature_validation)
+    }
 
+    pub(crate) fn validate_status_request(
+        &self,
+        request: &StatusRequest,
+        skip_signature_validation: bool,
+    ) -> anyhow::Result<()> {
+        self.validate_client_context(&request.client)?;
+        self.validate_signature(skip_signature_validation)
+    }
+
+    fn validate_client_context(&self, client: &ClientContext) -> anyhow::Result<()> {
+        self.validate_effective_user(&client.effective_user)?;
+        self.validate_executable_path(&client.client_executable_path)
+    }
+
+    fn validate_signature(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
         if skip_signature_validation {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());

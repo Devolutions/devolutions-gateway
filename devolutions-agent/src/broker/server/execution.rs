@@ -5,7 +5,7 @@ use std::sync::Arc;
 use now_policy_api::ResourceId;
 use tracing::{error, info};
 
-use crate::broker::executor::{CommandExecutor, ExecutionContext};
+use crate::broker::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback};
 use crate::broker::operation_tracker::OperationTracker;
 
 pub(super) fn spawn_execution(
@@ -18,9 +18,13 @@ pub(super) fn spawn_execution(
     let operation_id_string = operation_id.to_string();
 
     tokio::spawn(async move {
-        let timeout = OperationTracker::operation_timeout();
-        match tokio::time::timeout(timeout, executor.execute(&context)).await {
-            Ok(Ok(output)) => {
+        let started_tracker = tracker.clone();
+        let started_operation_id = operation_id_string.clone();
+        let process_started: ProcessStartedCallback = Arc::new(move |started_at| {
+            started_tracker.mark_running(&started_operation_id, started_at);
+        });
+        match executor.execute(&context, Some(process_started)).await {
+            Ok(output) => {
                 let stdout = (!output.stdout.is_empty()).then_some(output.stdout);
                 let note = if output.exit_code == 0 {
                     "process exited successfully".to_owned()
@@ -40,20 +44,11 @@ pub(super) fn spawn_execution(
                     exit_code = output.exit_code,
                     "Background execution completed"
                 );
-                tracker.mark_completed(&operation_id_string, output.exit_code, note, stdout);
+                tracker.mark_completed(&operation_id_string, output.exit_code, note, stdout, output.started_at);
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 let note = format!("{error:#}");
                 error!(operation_id = %operation_id_string, %error, "Background execution failed");
-                tracker.mark_failed(&operation_id_string, note, None);
-            }
-            Err(_elapsed) => {
-                let note = format!("operation timed out after {} seconds", timeout.as_secs());
-                error!(
-                    operation_id = %operation_id_string,
-                    timeout_secs = timeout.as_secs(),
-                    "Background execution timed out"
-                );
                 tracker.mark_failed(&operation_id_string, note, None);
             }
         }

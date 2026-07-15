@@ -1,5 +1,7 @@
 //! Output capture and exit-code helpers.
 
+use chrono::{DateTime, Utc};
+
 /// Maximum amount of captured process output retained (the tail is kept).
 pub const MAX_CAPTURED_OUTPUT_BYTES: usize = 10 * 1024;
 
@@ -9,6 +11,7 @@ pub const MAX_CAPTURED_OUTPUT_BYTES: usize = 10 * 1024;
 pub struct ExecutionOutput {
     pub exit_code: i32,
     pub stdout: String,
+    pub started_at: Option<DateTime<Utc>>,
 }
 
 /// Keep the last [`MAX_CAPTURED_OUTPUT_BYTES`] of `bytes`, decoded lossily as UTF-8.

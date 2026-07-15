@@ -12,9 +12,9 @@ use now_policy_api::{ManagerName, PackageRequest};
 /// package manager builder.
 ///
 /// Returns the command as a list of arguments (first element is the executable).
-pub fn build_command(request: &PackageRequest) -> Vec<String> {
+pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     match request.manager {
-        ManagerName::Winget => winget::build_winget_command(request),
+        ManagerName::Winget => Ok(winget::build_winget_command(request)),
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
     }

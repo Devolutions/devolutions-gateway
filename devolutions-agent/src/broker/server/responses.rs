@@ -36,7 +36,7 @@ pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
             supports_custom_parameters: true,
             supports_custom_install_location: true,
             supports_capture_output: true,
-            supports_details: true,
+            supports_details: false,
             max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
         },
         ManagerCapability {

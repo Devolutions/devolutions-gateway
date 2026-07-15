@@ -9,7 +9,7 @@ mod windows_pipe {
 
     use anyhow::Context as _;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-    use tokio::sync::Notify;
+    use tokio_util::sync::CancellationToken;
     use tracing::{error, info, warn};
     use win_api_wrappers::identity::sid::Sid;
     use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
@@ -26,13 +26,15 @@ mod windows_pipe {
     pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
 
     /// Start the named pipe server and accept connections until shutdown.
-    pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: Arc<Notify>) -> anyhow::Result<()> {
+    pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
         let pipe_name = state.pipe_name.clone();
         info!(%pipe_name, "Starting named pipe server");
 
+        let mut first_instance = true;
         loop {
             // Create a new pipe instance for each connection.
-            let server = create_pipe_instance(&pipe_name)?;
+            let server = create_pipe_instance(&pipe_name, first_instance)?;
+            first_instance = false;
 
             tokio::select! {
                 result = server.connect() => {
@@ -57,7 +59,7 @@ mod windows_pipe {
                         }
                     }
                 }
-                _ = shutdown.notified() => {
+                _ = shutdown.cancelled() => {
                     info!("Pipe server shutting down");
                     return Ok(());
                 }
@@ -65,7 +67,7 @@ mod windows_pipe {
         }
     }
 
-    fn create_pipe_instance(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
+    fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result<NamedPipeServer> {
         let security_attributes =
             build_pipe_security_attributes().context("failed to build pipe security attributes")?;
 
@@ -77,7 +79,7 @@ mod windows_pipe {
         // copies the descriptor at creation, so the pointer is not retained afterwards.
         let server = unsafe {
             ServerOptions::new()
-                .first_pipe_instance(false)
+                .first_pipe_instance(first_instance)
                 .create_with_security_attributes_raw(pipe_name, security_attributes.as_mut_ptr().cast())
         }?;
 
@@ -143,7 +145,7 @@ pub const DEFAULT_PIPE_NAME: &str = "not-supported-on-this-platform";
 #[cfg(not(windows))]
 pub async fn run_pipe_server(
     _state: std::sync::Arc<crate::broker::server::BrokerState>,
-    _shutdown: std::sync::Arc<tokio::sync::Notify>,
+    _shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     anyhow::bail!("named pipe transport is only supported on Windows")
 }
