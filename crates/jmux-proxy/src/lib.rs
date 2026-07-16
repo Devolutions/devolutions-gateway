@@ -20,9 +20,8 @@ use std::time::SystemTime;
 use anyhow::Context as _;
 use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
@@ -31,6 +30,13 @@ use tracing::{Instrument as _, Span};
 use self::codec::JmuxCodec;
 use self::event::TrafficCallback;
 use self::id_allocator::IdAllocator;
+
+trait AsyncStream: AsyncRead + AsyncWrite + std::fmt::Debug {}
+
+impl<T: AsyncRead + AsyncWrite + std::fmt::Debug> AsyncStream for T {}
+
+type ErasedStream = Box<dyn AsyncStream + Send + Sync + Unpin>;
+type StreamInterceptor = Arc<dyn Fn(DestinationUrl, DuplexStream, TcpStream) + Send + Sync>;
 
 #[rustfmt::skip]
 pub use jmux_proto::DestinationUrl;
@@ -83,6 +89,7 @@ pub struct JmuxProxy {
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     traffic_callback: Option<TrafficCallback>,
+    stream_interceptor: Option<StreamInterceptor>,
 }
 
 impl JmuxProxy {
@@ -97,6 +104,7 @@ impl JmuxProxy {
             jmux_reader,
             jmux_writer,
             traffic_callback: None,
+            stream_interceptor: None,
         }
     }
 
@@ -172,6 +180,15 @@ impl JmuxProxy {
         self
     }
 
+    #[must_use]
+    pub fn with_outgoing_stream_interceptor<C>(mut self, interceptor: C) -> Self
+    where
+        C: Fn(DestinationUrl, DuplexStream, TcpStream) + Send + Sync + 'static,
+    {
+        self.stream_interceptor = Some(Arc::new(interceptor));
+        self
+    }
+
     pub async fn run(self) -> anyhow::Result<()> {
         let span = Span::current();
         run_proxy_impl(self, span.clone()).instrument(span).await
@@ -185,6 +202,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_reader,
         jmux_writer,
         traffic_callback,
+        stream_interceptor,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -205,6 +223,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         msg_to_send_tx,
         api_request_rx,
         traffic_callback,
+        stream_interceptor,
         parent_span: span,
     }
     .spawn();
@@ -352,7 +371,7 @@ enum InternalMessage {
         // Boxing reduces enum size from 224 bytes to ~16 bytes
         // (clippy::large_enum_variant)
         channel: Box<JmuxChannelCtx>,
-        stream: TcpStream,
+        stream: ErasedStream,
     },
     AbnormalTermination {
         id: LocalChannelId,
@@ -423,6 +442,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
     traffic_callback: Option<TrafficCallback>,
+    stream_interceptor: Option<StreamInterceptor>,
     parent_span: Span,
 }
 
@@ -444,6 +464,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         msg_to_send_tx,
         mut api_request_rx,
         traffic_callback,
+        stream_interceptor,
         parent_span,
     } = task;
 
@@ -497,7 +518,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             error!(%error, "Couldn't send leftover bytes");
                         }
 
-                        let (reader, writer) = stream.into_split();
+                        let stream: ErasedStream = Box::new(stream);
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -622,7 +644,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!("Channel accepted");
                         });
 
-                        let (reader, writer) = stream.into_split();
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -756,6 +778,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             traffic_callback: traffic_callback.clone(),
+                            stream_interceptor: stream_interceptor.clone(),
                         }
                         .spawn()
                         .detach();
@@ -954,7 +977,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 // ---------------------- //
 
 struct DataReaderTask {
-    reader: OwnedReadHalf,
+    reader: ReadHalf<ErasedStream>,
     local_id: LocalChannelId,
     distant_id: DistantChannelId,
     window_size_updated: Arc<Notify>,
@@ -1083,7 +1106,7 @@ impl DataReaderTask {
 // ---------------------- //
 
 struct DataWriterTask {
-    writer: OwnedWriteHalf,
+    writer: WriteHalf<ErasedStream>,
     data_rx: DataReceiver,
     /// Tracks bytes written into the stream.
     bytes_tx: Arc<AtomicU64>,
@@ -1119,6 +1142,8 @@ impl DataWriterTask {
 
                     bytes_tx.fetch_add(data.len() as u64, Ordering::SeqCst);
                 }
+
+                let _ = writer.shutdown().await;
             }
             .instrument(span),
         );
@@ -1135,6 +1160,7 @@ struct StreamResolverTask {
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
     traffic_callback: Option<TrafficCallback>,
+    stream_interceptor: Option<StreamInterceptor>,
 }
 
 impl StreamResolverTask {
@@ -1160,6 +1186,7 @@ impl StreamResolverTask {
             internal_msg_tx,
             msg_to_send_tx,
             traffic_callback,
+            stream_interceptor,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -1195,6 +1222,14 @@ impl StreamResolverTask {
                             // Update channel with resolved target IP and connect time.
                             channel.target_ip = Some(socket_addr.ip());
                             channel.connect_at = SystemTime::now();
+
+                            let stream: ErasedStream = if let Some(interceptor) = &stream_interceptor {
+                                let (client_stream, jmux_stream) = tokio::io::duplex(64 * 1024);
+                                interceptor(destination_url.clone(), client_stream, stream);
+                                Box::new(jmux_stream)
+                            } else {
+                                Box::new(stream)
+                            };
 
                             internal_msg_tx
                                 .send(InternalMessage::StreamResolved {

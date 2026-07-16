@@ -41,6 +41,7 @@ pub mod tls;
 pub mod token;
 pub mod traffic_audit;
 pub mod utils;
+pub mod winrm_proxy;
 pub mod ws;
 
 use std::sync::Arc;

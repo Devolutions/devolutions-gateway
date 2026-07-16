@@ -1,0 +1,428 @@
+
+  [gw]
+  cwd: 
+D:\devolutions-gateway
+  env: 
+
+        CMAKE_GENERATOR
+=
+Ninja
+        DGATEWAY_CONFIG_PATH
+=
+C:\ProgramData\Devolutions\Gateway
+        DGATEWAY_LIB_XMF_PATH
+=
+C:\cadeau-build-win-x64\lib\xmf.dll
+  run: 
+cargo run --release -p devolutions-gateway
+
+   Compiling log v0.4.33
+   Compiling num-conv v0.2.2
+   Compiling time-core v0.1.9
+   Compiling deranged v0.5.8
+   Compiling uuid v1.23.3
+   Compiling http v1.4.2
+   Compiling rustls v0.23.41
+   Compiling regex-syntax v0.8.11
+   Compiling camino v1.2.3
+   Compiling quinn v0.11.11
+   Compiling devolutions-gateway v2026.2.3 (D:\devolutions-gateway\devolutions-gateway)
+   Compiling ironrdp-rdcleanpath v0.2.2
+   Compiling time-macros v0.2.30
+   Compiling tracing v0.1.44
+   Compiling cryptoki v0.10.0
+   Compiling tracing-log v0.2.0
+   Compiling libsql-sqlite3-parser v0.13.0
+   Compiling polling v2.8.0
+   Compiling rustls v0.20.9
+   Compiling ceviche v0.7.0
+   Compiling ulid v1.2.1
+   Compiling agent-tunnel-proto v0.0.0 (D:\devolutions-gateway\crates\agent-tunnel-proto)
+   Compiling mdns-sd v0.11.5
+   Compiling traffic-audit v0.0.0 (D:\devolutions-gateway\crates\traffic-audit)
+   Compiling h2 v0.3.27
+   Compiling tower v0.4.13
+   Compiling tower v0.5.3
+   Compiling network-scanner-net v0.0.0 (D:\devolutions-gateway\crates\network-scanner-net)
+   Compiling quinn-udp v0.5.14
+   Compiling muxado v0.4.0
+   Compiling video-streamer v0.0.0 (D:\devolutions-gateway\crates\video-streamer)
+   Compiling jmux-proxy v0.0.0 (D:\devolutions-gateway\crates\jmux-proxy)
+   Compiling secure-memory v0.0.0 (D:\devolutions-gateway\crates\secure-memory)
+   Compiling time v0.3.51
+   Compiling regex-automata v0.4.14
+warning: devolutions-gateway@2026.2.3: Did not find mc.exe
+   Compiling http-body v1.0.1
+   Compiling h2 v0.4.13
+   Compiling tungstenite v0.29.0
+   Compiling headers-core v0.3.0
+   Compiling http-body-util v0.1.3
+   Compiling headers v0.4.1
+   Compiling axum-core v0.5.6
+   Compiling network-scanner v0.0.0 (D:\devolutions-gateway\crates\network-scanner)
+   Compiling async-rustls v0.3.0
+   Compiling tokio-tungstenite v0.29.0
+   Compiling tower-http v0.5.2
+   Compiling tower-http v0.6.8
+   Compiling devolutions-agent-shared v0.0.0 (D:\devolutions-gateway\crates\devolutions-agent-shared)
+   Compiling regex v1.12.4
+   Compiling transport v0.0.0 (D:\devolutions-gateway\crates\transport)
+   Compiling terminal-streamer v0.1.0 (D:\devolutions-gateway\crates\terminal-streamer)
+   Compiling bindgen v0.66.1
+   Compiling tower-http v0.4.4
+   Compiling picky-asn1 v0.10.1
+   Compiling asn1-rs v0.6.2
+   Compiling matchers v0.2.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling hyper v1.9.0
+   Compiling picky-asn1-der v0.5.6
+   Compiling tokio-rustls v0.26.4
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling picky-asn1-x509 v0.15.2
+   Compiling hyper v0.14.32
+   Compiling quinn-proto v0.11.15
+   Compiling yasna v0.5.2
+   Compiling tungstenite v0.26.2
+   Compiling job-queue v0.0.0 (D:\devolutions-gateway\crates\job-queue)
+   Compiling tracing-appender v0.2.999 (https://github.com/CBenoit/tracing.git?rev=42097daf92e683cf18da7639ddccb056721a796c#42097daf)
+   Compiling hyper-util v0.1.20
+   Compiling ngrok v0.13.1
+   Compiling tokio-tungstenite v0.26.2
+   Compiling devolutions-log v0.0.0 (D:\devolutions-gateway\crates\devolutions-log)
+   Compiling rustls-cng v0.5.3
+   Compiling der-parser v9.0.0
+   Compiling oid-registry v0.7.1
+   Compiling network-monitor v0.0.0 (D:\devolutions-gateway\crates\network-monitor)
+   Compiling picky v7.0.0-rc.20
+   Compiling picky-krb v0.12.0
+   Compiling x509-parser v0.16.0
+   Compiling libsql-ffi v0.9.30
+   Compiling hyper-rustls v0.27.9
+   Compiling hyper-timeout v0.4.1
+   Compiling axum v0.6.20
+   Compiling rcgen v0.13.2
+   Compiling reqwest v0.12.28
+   Compiling axum v0.8.9
+   Compiling kdc v0.1.0
+   Compiling tonic v0.11.0
+   Compiling winscard v0.2.5
+   Compiling agent-tunnel v0.0.0 (D:\devolutions-gateway\crates\agent-tunnel)
+   Compiling http-client-proxy v0.0.0 (D:\devolutions-gateway\crates\http-client-proxy)
+   Compiling axum-extra v0.10.3
+   Compiling sspi v0.18.7
+   Compiling tonic-web v0.11.0
+   Compiling ironrdp-connector v0.8.0
+   Compiling ironrdp-async v0.8.0
+   Compiling ironrdp-acceptor v0.8.0
+   Compiling ironrdp-tokio v0.8.0
+   Compiling libsql-rusqlite v0.9.30
+   Compiling libsql-sys v0.9.30
+   Compiling libsql_replication v0.9.30
+   Compiling libsql v0.9.30
+   Compiling job-queue-libsql v0.0.0 (D:\devolutions-gateway\crates\job-queue-libsql)
+   Compiling traffic-audit-libsql v0.0.0 (D:\devolutions-gateway\crates\traffic-audit-libsql)
+    Finished `release` profile [optimized] target(s) in 1m 32s
+     Running `D:\Dev\build\cargo-target\release\devolutions-gateway.exe`
+[2m2026-06-30T17:31:07.430895Z[0m [32m INFO[0m [2mdevolutions_gateway::service[0m[2m:[0m [3mversion[0m[2m=[0m"2026.2.3"
+[2m2026-06-30T17:31:07.430958Z[0m [33m WARN[0m [2mdevolutions_gateway::service[0m[2m:[0m **DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION** [3mconf.debug[0m[2m=[0mDebugConf { dump_tokens: false, disable_token_validation: true, override_kdc: None, log_directives: Some("video_streamer=trace"), capture_path: None, lib_xmf_path: None, ws_keep_alive_interval: 30, kerberos: Some(KerberosConfig { kerberos_server: KerberosServer { users: [], max_time_skew: 300, krbtgt_key: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ticket_decryption_key: Some([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), service_user: None }, kdc_url: Some(Url { scheme: "tcp", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("IT-HELP-DC.ad.it-help.ninja")), port: Some(88), path: "", query: None, fragment: None }) }), enable_unstable: true }
+[2m2026-06-30T17:31:07.433366Z[0m [33m WARN[0m [2mdevolutions_gateway::service[0m[2m:[0m TlsVerifyStrict option is not set, defaulting to false. This may hide latent issues.
+[2m2026-06-30T17:31:07.543494Z[0m [32m INFO[0m [2mdevolutions_gateway::service[0m[2m:[0m XMF native library loaded and installed [3mpath[0m[2m=[0mC:\cadeau-build-win-x64\lib\xmf.dll
+[2m2026-06-30T17:31:07.544965Z[0m [32m INFO[0m [2mdevolutions_gateway::service[0m[2m:[0m Reading JRL file from disk (path: C:\ProgramData\Devolutions\Gateway\jrl.json)
+[2m2026-06-30T17:31:07.572806Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m PRAGMAs query [3msql_query[0m[2m=[0m
+            -- https://www.sqlite.org/pragma.html#pragma_journal_mode
+            -- Use a write-ahead log instead of a rollback journal to implement transactions.
+            PRAGMA journal_mode = WAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_synchronous
+            -- TLDR: journal_mode WAL + synchronous NORMAL is a good combination.
+            -- WAL mode is safe from corruption with synchronous=NORMAL
+            -- The synchronous=NORMAL setting is a good choice for most applications running in WAL mode.
+            PRAGMA synchronous = NORMAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_busy_timeout
+            -- Prevents SQLITE_BUSY errors by giving a timeout to wait for a locked resource before
+            -- returning an error, useful for handling multiple concurrent accesses.
+            -- 15 seconds is a good value for a backend application like a job queue.
+            PRAGMA busy_timeout = 15000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_cache_size
+            -- Reduce the number of disks reads by allowing more data to be cached in memory (3MB).
+            PRAGMA cache_size = -3000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_auto_vacuum
+            -- Reclaims disk space gradually as rows are deleted, instead of performing a full vacuum,
+            -- reducing performance impact during database operations.
+            PRAGMA auto_vacuum = INCREMENTAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_temp_store
+            -- Store temporary tables and data in memory for better performance
+            PRAGMA temp_store = MEMORY;
+        
+[2m2026-06-30T17:31:07.591077Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m PRAGMA row [3mrow[0m[2m=[0mBatchedRow { cols: [("journal_mode", Text)], row: [Text("wal")] }
+[2m2026-06-30T17:31:07.591091Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m PRAGMA row [3mrow[0m[2m=[0mBatchedRow { cols: [("timeout", Integer)], row: [Integer(15000)] }
+[2m2026-06-30T17:31:07.591096Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m Query user_version [3msql_query[0m[2m=[0mPRAGMA user_version
+[2m2026-06-30T17:31:07.591143Z[0m [34mDEBUG[0m [2mjob_queue_libsql[0m[2m:[0m Database is already up to date [3muser_version[0m[2m=[0m1
+[2m2026-06-30T17:31:07.591163Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m Reset claimed jobs [3msql_query[0m[2m=[0mUPDATE job_queue SET status = :queued_status WHERE status = :running_status [3mparams[0m[2m=[0m((":running_status", 1), (":queued_status", 0))
+[2m2026-06-30T17:31:07.591458Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m Jobs reset with success [3mchanged_count[0m[2m=[0m0
+[2m2026-06-30T17:31:07.591471Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m Clearing failed jobs [3msql_query[0m[2m=[0mDELETE FROM job_queue WHERE failed_attempts >= $1 [3mparams[0m[2m=[0m[5]
+[2m2026-06-30T17:31:07.591504Z[0m [35mTRACE[0m [2mjob_queue_libsql[0m[2m:[0m Cleared failed jobs with success [3mdeleted_count[0m[2m=[0m0
+[2m2026-06-30T17:31:07.611661Z[0m [35mTRACE[0m [2mtraffic_audit_libsql[0m[2m:[0m PRAGMAs query [3msql_query[0m[2m=[0m
+            -- https://www.sqlite.org/pragma.html#pragma_journal_mode
+            -- Use a write-ahead log instead of a rollback journal to implement transactions.
+            PRAGMA journal_mode = WAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_synchronous
+            -- TLDR: journal_mode WAL + synchronous NORMAL is a good combination.
+            -- WAL mode is safe from corruption with synchronous=NORMAL
+            -- The synchronous=NORMAL setting is a good choice for most applications running in WAL mode.
+            PRAGMA synchronous = NORMAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_busy_timeout
+            -- Prevents SQLITE_BUSY errors by giving a timeout to wait for a locked resource before
+            -- returning an error, useful for handling multiple concurrent accesses.
+            -- 15 seconds is a good value for a backend application like a job queue.
+            PRAGMA busy_timeout = 15000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_cache_size
+            -- Reduce the number of disks reads by allowing more data to be cached in memory (3MB).
+            PRAGMA cache_size = -3000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_auto_vacuum
+            -- Reclaims disk space gradually as rows are deleted, instead of performing a full vacuum,
+            -- reducing performance impact during database operations.
+            PRAGMA auto_vacuum = INCREMENTAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_temp_store
+            -- Store temporary tables and data in memory for better performance
+            PRAGMA temp_store = MEMORY;
+        
+[2m2026-06-30T17:31:07.611708Z[0m [35mTRACE[0m [2mtraffic_audit_libsql[0m[2m:[0m PRAGMA row [3mrow[0m[2m=[0mBatchedRow { cols: [("journal_mode", Text)], row: [Text("wal")] }
+[2m2026-06-30T17:31:07.611712Z[0m [35mTRACE[0m [2mtraffic_audit_libsql[0m[2m:[0m PRAGMA row [3mrow[0m[2m=[0mBatchedRow { cols: [("timeout", Integer)], row: [Integer(15000)] }
+[2m2026-06-30T17:31:07.611715Z[0m [35mTRACE[0m [2mtraffic_audit_libsql[0m[2m:[0m Query user_version [3msql_query[0m[2m=[0mPRAGMA user_version
+[2m2026-06-30T17:31:07.611740Z[0m [34mDEBUG[0m [2mtraffic_audit_libsql[0m[2m:[0m Database is already up to date [3muser_version[0m[2m=[0m1
+[2m2026-06-30T17:31:07.613083Z[0m [32m INFO[0m [2mdevolutions_gateway::listener[0m[2m:[0m Listening on http://[::]:7171
+[2m2026-06-30T17:31:07.613525Z[0m [32m INFO[0m [2mdevolutions_gateway::listener[0m[2m:[0m Listening on http://0.0.0.0:7171
+[2m2026-06-30T17:31:07.613859Z[0m [32m INFO[0m [2mdevolutions_gateway::listener[0m[2m:[0m Listening on tcp://[::]:8181
+[2m2026-06-30T17:31:07.614159Z[0m [32m INFO[0m [2mdevolutions_gateway::listener[0m[2m:[0m Listening on tcp://0.0.0.0:8181
+[2m2026-06-30T17:31:07.614383Z[0m [34mDEBUG[0m [1mcleanup_task[0m[2m:[0m [2mdevolutions_gateway::token[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614462Z[0m [34mDEBUG[0m [1msubscriber_task[0m[2m:[0m [2mdevolutions_gateway::subscriber[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614495Z[0m [34mDEBUG[0m [1mrecording_manager_task[0m[2m:[0m [2mdevolutions_gateway::recording[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614412Z[0m [34mDEBUG[0m [1mcleanup_task[0m[2m:[0m [2mdevolutions_gateway::credential[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614495Z[0m [34mDEBUG[0m [1mcleanup_task[0m[2m:[0m [2mdevolutions_gateway::credential_injection_kdc[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614508Z[0m [34mDEBUG[0m [1msubscriber_polling_task[0m[2m:[0m [2mdevolutions_gateway::subscriber[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614515Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614556Z[0m [34mDEBUG[0m [1mjob_queue_task[0m[2m:[0m [2mdevolutions_gateway::job_queue[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614618Z[0m [34mDEBUG[0m [1mjob_runner_task[0m[2m:[0m [2mdevolutions_gateway::job_queue[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614619Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Task started
+[2m2026-06-30T17:31:07.614669Z[0m [35mTRACE[0m [1mjob_runner_task[0m[2m:[0m [2mjob_queue_libsql[0m[2m:[0m Claiming jobs [3msql_query[0m[2m=[0mUPDATE job_queue
+            SET status = :running_status
+            WHERE id IN (
+                SELECT id
+                FROM job_queue
+                WHERE status = :queued_status AND failed_attempts < :max_attempts AND scheduled_for <= unixepoch()
+                ORDER BY id
+                LIMIT :number_of_jobs
+            )
+            RETURNING id, failed_attempts, name, json(def) as def [3mparams[0m[2m=[0m((":running_status", 1), (":queued_status", 0), (":max_attempts", 5), (":number_of_jobs", 16))
+[2m2026-06-30T17:31:07.614999Z[0m [35mTRACE[0m [1mjob_runner_task[0m[2m:[0m [2mjob_queue[0m[2m:[0m Fetched jobs [3mnumber_of_jobs[0m[2m=[0m0
+[2m2026-06-30T17:31:07.615015Z[0m [35mTRACE[0m [1mjob_runner_task[0m[2m:[0m [2mjob_queue_libsql[0m[2m:[0m Fetching the earliest scheduled_for date [3msql_query[0m[2m=[0mSELECT scheduled_for
+            FROM job_queue
+            WHERE status = :queued_status AND failed_attempts < :max_attempts
+            ORDER BY scheduled_for ASC
+            LIMIT 1 [3mparams[0m[2m=[0m((":queued_status", 0), (":max_attempts", 5))
+[2m2026-06-30T17:31:07.622814Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:31:07.622821Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Purging old unclaimed events [3mcutoff_time_ms[0m[2m=[0m1782754267622
+[2m2026-06-30T17:32:44.244302Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51799[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:32:44.244303Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:32:44.244567Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:32:44.244585Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51799[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:32:44.244793Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:32:44.244801Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetCount { .. }
+[2m2026-06-30T17:32:44.244957Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51799[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m666┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:32:44.247042Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::api::heartbeat[0m[2m:[0m Retrieved disk space via GetDiskFreeSpaceExW [3mrecording_path[0m[2m=[0mC:\ProgramData\Devolutions\Gateway\recordings [3mtotal_bytes[0m[2m=[0m1023142785024 [3mfree_bytes_available[0m[2m=[0m595264192512
+[2m2026-06-30T17:32:44.247249Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m2.9738ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:32:44.298925Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:32:44.298979Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:32:44.299061Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51801[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m148.7┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:32:51.255901Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:53141[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:32:51.255946Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:53141[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:32:51.256050Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:53141[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m159.9┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:34:07.819943Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55439[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:34:07.819991Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55439[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:34:07.821150Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:34:07.821299Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:34:07.821654Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:34:07.822371Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55439[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:34:07.822513Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55439[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m2.58ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:34:07.823428Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55440[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:34:07.823458Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55440[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:34:07.823494Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:34:07.823522Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55440[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m99.3┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:34:14.660436Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55446[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:34:14.660488Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55446[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:34:14.660541Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:55446[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m121.6┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:37:42.527500Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52603[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:37:42.527500Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52602[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:37:42.530554Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52603[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:37:42.530558Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52602[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:37:42.532111Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:37:42.532300Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:37:42.532862Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:37:42.532972Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52602[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m6.7432ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:37:42.538766Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:37:42.539015Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52603[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:37:42.539137Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52603[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m12.9795ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:37:49.389994Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64068[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:37:49.390038Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64068[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:37:49.392409Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64068[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m2.4009ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:38:09.097194Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:38:09.097228Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:38:09.097282Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetCount { .. }
+[2m2026-06-30T17:38:09.100903Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::api::heartbeat[0m[2m:[0m Retrieved disk space via GetDiskFreeSpaceExW [3mrecording_path[0m[2m=[0mC:\ProgramData\Devolutions\Gateway\recordings [3mtotal_bytes[0m[2m=[0m1023142785024 [3mfree_bytes_available[0m[2m=[0m613721194496
+[2m2026-06-30T17:38:09.101849Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m4.6562ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:38:09.125624Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:38:09.125661Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:38:09.125891Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m262.7┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:39:07.819841Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:39:07.819896Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:39:07.819962Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:39:07.819996Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:49871[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m178.4┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:39:07.820707Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56582[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:39:07.820724Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56582[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:39:07.820760Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:39:07.820767Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:39:07.820934Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:39:07.820960Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56582[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:39:07.820974Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56582[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m271.1┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:39:14.647141Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56595[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:39:14.647180Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56595[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:39:14.647227Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:56595[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m99.2┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:42:42.495521Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58624[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:42:42.495580Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58624[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:42:42.495647Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:42:42.495671Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:42:42.495843Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:42:42.495858Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58624[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:42:42.495879Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58624[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m378┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:42:42.496790Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:42:42.496810Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:42:42.496843Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:42:42.496862Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m79.1┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:42:49.320093Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58641[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:42:49.320128Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58641[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:42:49.320167Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58641[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m87┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:43:08.876038Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:43:08.876125Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:43:08.876962Z[0m [31mERROR[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::http[0m[2m:[0m [3merror[0m[2m=[0m404 Not Found at devolutions-gateway\src\api\tunnel.rs:120:24: agent tunnel not configured
+[2m2026-06-30T17:43:08.877142Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m1.1049ms [3mstatus[0m[2m=[0m404 Not Found
+[2m2026-06-30T17:43:09.123656Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:43:09.123691Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:43:09.123727Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetCount { .. }
+[2m2026-06-30T17:43:09.125124Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::api::heartbeat[0m[2m:[0m Retrieved disk space via GetDiskFreeSpaceExW [3mrecording_path[0m[2m=[0mC:\ProgramData\Devolutions\Gateway\recordings [3mtotal_bytes[0m[2m=[0m1023142785024 [3mfree_bytes_available[0m[2m=[0m613687029760
+[2m2026-06-30T17:43:09.125209Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m1.5623ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:43:09.136468Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:43:09.136503Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:43:09.136542Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m85.8┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:43:31.475592Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:43:31.475628Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:43:31.475651Z[0m [31mERROR[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::http[0m[2m:[0m [3merror[0m[2m=[0m404 Not Found at devolutions-gateway\src\api\tunnel.rs:120:24: agent tunnel not configured
+[2m2026-06-30T17:43:31.475664Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m86.5┬╡s [3mstatus[0m[2m=[0m404 Not Found
+[2m2026-06-30T17:43:40.801699Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:43:40.801731Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:43:40.801755Z[0m [31mERROR[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::http[0m[2m:[0m [3merror[0m[2m=[0m404 Not Found at devolutions-gateway\src\api\tunnel.rs:120:24: agent tunnel not configured
+[2m2026-06-30T17:43:40.801769Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m82.6┬╡s [3mstatus[0m[2m=[0m404 Not Found
+[2m2026-06-30T17:44:07.819352Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:44:07.819387Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:44:07.819429Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:44:07.819435Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:44:07.819574Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:44:07.819590Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:44:07.819676Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64831[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m338.4┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:44:07.821223Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52733[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:44:07.821250Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52733[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:44:07.821286Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:44:07.821307Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52733[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m92.4┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:44:08.079822Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:44:08.079860Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:44:08.079888Z[0m [31mERROR[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::http[0m[2m:[0m [3merror[0m[2m=[0m404 Not Found at devolutions-gateway\src\api\tunnel.rs:120:24: agent tunnel not configured
+[2m2026-06-30T17:44:08.079928Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:58625[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m115.6┬╡s [3mstatus[0m[2m=[0m404 Not Found
+[2m2026-06-30T17:44:14.672712Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52740[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:44:14.672744Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52740[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:44:14.672778Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:52740[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m77┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:44:26.825618Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=[::1]:55135[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:44:26.826237Z[0m [31mERROR[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=[::1]:55135[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::http[0m[2m:[0m [3merror[0m[2m=[0m401 Unauthorized at devolutions-gateway\src\middleware\auth.rs:148:32: both authorization header and token query param invalid or missing
+[2m2026-06-30T17:44:26.826269Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=[::1]:55135[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/tunnel/agents[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m665.7┬╡s [3mstatus[0m[2m=[0m401 Unauthorized
+[2m2026-06-30T17:47:42.502486Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65240[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:47:42.502486Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65239[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:47:42.505626Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65239[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:47:42.505627Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65240[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:47:42.507654Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:47:42.507949Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:47:42.508326Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65239[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m5.9272ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:47:42.508470Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:47:42.513428Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:47:42.513910Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65240[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:47:42.514051Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65240[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m11.696ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:47:51.845829Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65249[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:47:51.845866Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65249[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:47:51.845941Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65249[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m118.6┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:48:09.197049Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:48:09.197083Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:48:09.197885Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetCount { .. }
+[2m2026-06-30T17:48:09.201262Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::api::heartbeat[0m[2m:[0m Retrieved disk space via GetDiskFreeSpaceExW [3mrecording_path[0m[2m=[0mC:\ProgramData\Devolutions\Gateway\recordings [3mtotal_bytes[0m[2m=[0m1023142785024 [3mfree_bytes_available[0m[2m=[0m584118329344
+[2m2026-06-30T17:48:09.202903Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m5.8579ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:48:09.216055Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:48:09.216093Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:48:09.216657Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m611.3┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:49:07.839035Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:49:07.839068Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:49:07.839107Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:49:07.839128Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:65254[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m106.1┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:49:07.839780Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62763[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:49:07.839795Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62763[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:49:07.839847Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:49:07.839855Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:49:07.839975Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:49:07.839987Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62763[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:49:07.840004Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62763[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m227.3┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:49:14.647954Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62775[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:49:14.648005Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62775[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:49:14.648068Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:62775[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m132.1┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:51:07.632682Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:52:42.512443Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63362[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:52:42.512491Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63362[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:52:42.512553Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:52:42.512564Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:52:42.515096Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:52:42.515122Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63362[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:52:42.515151Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63362[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m2.7174ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:52:42.515831Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63364[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:52:42.515855Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63364[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:52:42.515885Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:52:42.515900Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63364[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m73.2┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:52:49.335233Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63380[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:52:49.335271Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63380[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:52:49.335309Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:63380[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m93.2┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:53:09.201994Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:53:09.202027Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:53:09.202070Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetCount { .. }
+[2m2026-06-30T17:53:09.203560Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::api::heartbeat[0m[2m:[0m Retrieved disk space via GetDiskFreeSpaceExW [3mrecording_path[0m[2m=[0mC:\ProgramData\Devolutions\Gateway\recordings [3mtotal_bytes[0m[2m=[0m1023142785024 [3mfree_bytes_available[0m[2m=[0m584502816768
+[2m2026-06-30T17:53:09.203652Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/heartbeat[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m1.6672ms [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:53:09.213745Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:53:09.213793Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:53:09.213858Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrl/info[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m123.2┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:54:07.838003Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:54:07.838043Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:54:07.838093Z[0m [34mDEBUG[0m [1mtraffic_audit[0m[2m:[0m [2mdevolutions_gateway::traffic_audit[0m[2m:[0m Received message [3mmsg[0m[2m=[0mClaim { consumer_id: "provisioner", lease_duration_ms: 300000, max_events: 500, .. }
+[2m2026-06-30T17:54:07.838103Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m Starting claim operation [3mconsumer_id[0m[2m=[0m"provisioner" [3mlease_duration_ms[0m[2m=[0m300000 [3mlimit[0m[2m=[0m500
+[2m2026-06-30T17:54:07.838231Z[0m [35mTRACE[0m [1mtraffic_audit[0m[2m:[0m [2mtraffic_audit_libsql[0m[2m:[0m No events available to claim
+[2m2026-06-30T17:54:07.838246Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::api::traffic[0m[2m:[0m traffic claim [3mmax[0m[2m=[0m500 [3mlease_ms[0m[2m=[0m300000 [3mclaimed[0m[2m=[0m0
+[2m2026-06-30T17:54:07.838263Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:51236[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=POST path=/jet/traffic/claim[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m276.3┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:54:07.839142Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64309[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:54:07.839178Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64309[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:54:07.839207Z[0m [34mDEBUG[0m [1msession_manager_task[0m[2m:[0m [2mdevolutions_gateway::session[0m[2m:[0m Received message [3mmsg[0m[2m=[0mGetRunning { .. }
+[2m2026-06-30T17:54:07.839222Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64309[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/sessions[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m85┬╡s [3mstatus[0m[2m=[0m200 OK
+[2m2026-06-30T17:54:14.672682Z[0m [34mDEBUG[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64321[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m Received request
+[2m2026-06-30T17:54:14.672717Z[0m [33m WARN[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64321[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::token::unsafe_debug[0m[2m:[0m **DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!
+[2m2026-06-30T17:54:14.672773Z[0m [32m INFO[0m [1mlistener[0m[1m{[0mport=7171[1m}[0m[2m:[0m[1mhttp[0m[1m{[0mclient=127.0.0.1:64321[1m}[0m[2m:[0m[1mrequest[0m[1m{[0mmethod=GET path=/jet/jrec/list[1m}[0m[2m:[0m [2mdevolutions_gateway::middleware::log[0m[2m:[0m [3mduration[0m[2m=[0m101.4┬╡s [3mstatus[0m[2m=[0m200 OK
+error: process didn't exit successfully: `D:\Dev\build\cargo-target\release\devolutions-gateway.exe` (exit code: 0xffffffff)
