@@ -280,14 +280,20 @@ pub enum RecordingFileType {
     TRP,
     /// asciinema cast for terminal playback
     Asciicast,
+    /// Session Recording Log NDJSON stream
+    #[serde(rename = "slog")]
+    SessionRecordingLog,
 }
 
 impl RecordingFileType {
+    pub const SLOG_CONTENT_TYPE: &'static str = "application/x-ndjson";
+
     pub const fn format_name(self) -> &'static str {
         match self {
             RecordingFileType::WebM => "WebM",
             RecordingFileType::TRP => "TRP",
             RecordingFileType::Asciicast => "asciicast",
+            RecordingFileType::SessionRecordingLog => "slog",
         }
     }
 
@@ -296,6 +302,24 @@ impl RecordingFileType {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
             RecordingFileType::Asciicast => "cast",
+            RecordingFileType::SessionRecordingLog => "slog",
+        }
+    }
+
+    pub fn from_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "webm" => Some(RecordingFileType::WebM),
+            "trp" => Some(RecordingFileType::TRP),
+            "cast" => Some(RecordingFileType::Asciicast),
+            "slog" => Some(RecordingFileType::SessionRecordingLog),
+            _ => None,
+        }
+    }
+
+    pub const fn content_type(self) -> Option<&'static str> {
+        match self {
+            RecordingFileType::SessionRecordingLog => Some(Self::SLOG_CONTENT_TYPE),
+            RecordingFileType::WebM | RecordingFileType::TRP | RecordingFileType::Asciicast => None,
         }
     }
 }
