@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use axum::extract::ws::{CloseFrame, WebSocket};
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
+use axum::http::header::{CONTENT_TYPE, HeaderValue};
 use axum::response::Response;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
@@ -511,10 +512,21 @@ where
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
-    let response = tower_http::services::ServeFile::new(path)
+    let mut response = tower_http::services::ServeFile::new(&path)
         .oneshot(request)
         .await
         .map_err(HttpError::internal().err())?;
+
+    let content_type = path
+        .extension()
+        .and_then(RecordingFileType::from_extension)
+        .and_then(RecordingFileType::content_type);
+
+    if let Some(content_type) = content_type {
+        response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+    }
 
     Ok(response)
 }
