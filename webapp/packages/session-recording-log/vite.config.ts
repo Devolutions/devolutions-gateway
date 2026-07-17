@@ -1,7 +1,7 @@
 import path from 'node:path';
-import {defineConfig} from 'vite';
+import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
-import {viteStaticCopy} from 'vite-plugin-static-copy';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const staticCopyPlugin = viteStaticCopy({
   targets: [
@@ -25,7 +25,7 @@ export default defineConfig({
       output: {
         globals: {},
       },
-    }
+    },
   },
-  plugins: [dts({tsconfigPath: './tsconfig.declaration.json'}), staticCopyPlugin],
+  plugins: [dts({ tsconfigPath: './tsconfig.declaration.json' }), staticCopyPlugin],
 });

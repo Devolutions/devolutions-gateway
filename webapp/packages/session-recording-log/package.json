@@ -13,8 +13,8 @@
   },
   "scripts": {
     "build": "tsc && vite build",
-    "check": "biome check ./src",
-    "check:write": "biome check --write ./src",
+    "check": "biome check ./src vite.config.ts",
+    "check:write": "biome check --write ./src vite.config.ts",
     "test": "vitest run"
   },
   "devDependencies": {
