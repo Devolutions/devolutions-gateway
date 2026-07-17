@@ -51,8 +51,8 @@ message RegisterAgent {
   string architecture = 6;
   string agent_version = 7;
   string protocol_version = 8;
-  repeated AgentCapability capabilities = 10;
-  repeated PowerShellRuntime powershell_runtimes = 11;
+  repeated AgentCapability capabilities = 9;
+  repeated PowerShellRuntime powershell_runtimes = 10;
 }
 
 message RegisterAccepted {
