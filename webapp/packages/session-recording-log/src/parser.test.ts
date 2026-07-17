@@ -226,6 +226,14 @@ describe('parseSessionRecordingLog', () => {
     expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
   });
 
+  it('counts blank lines toward scanned line limits', () => {
+    const text = Array.from({ length: 20 }, () => '').join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 5 });
+
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
   it('treats an empty file as complete and emits no missing-session warnings', () => {
     const result = parseSessionRecordingLog('');
 
@@ -290,6 +298,20 @@ describe('parseSessionRecordingLog', () => {
     expect(
       result.warnings.some(
         (warning) => warning.code === 'invalid-field' && warning.message === 'seq must be a safe integer',
+      ),
+    ).toBe(true);
+  });
+
+  it('reports missing sequences before the first observed sequence', () => {
+    const text = '{"timestamp":"2026-07-16T10:00:00.000Z","seq":5,"event":"session.end","description":"End"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxMissingSequenceWarnings: 3 });
+
+    expect(result.warnings.filter((warning) => warning.code === 'missing-sequence')).toHaveLength(3);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message.includes('additional missing sequences'),
       ),
     ).toBe(true);
   });

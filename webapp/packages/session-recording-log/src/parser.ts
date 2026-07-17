@@ -119,17 +119,6 @@ function createLineIterator(text: string): Iterable<{ line: string; sourceLineNu
   };
 }
 
-function getFinalLineNumber(text: string): number {
-  let lineNumber = 1;
-  for (const character of text) {
-    if (character === '\n') {
-      lineNumber += 1;
-    }
-  }
-
-  return lineNumber;
-}
-
 function normalizeNonNegativeLimit(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value) || value < 0) {
     return fallback;
@@ -420,28 +409,21 @@ export function parseSessionRecordingLog(
   const warningCollector = createWarningCollector(maxWarnings);
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
   let encounteredNonEmptyLine = false;
-  let scannedNonEmptyLines = 0;
+  let scannedLines = 0;
 
   const hasTrailingNewline = text.endsWith('\n');
-  if (!hasTrailingNewline && text.length > 0) {
-    warningCollector.add(
-      createWarning('unterminated-final-line', 'final line does not end with newline', {
-        sourceLineNumber: getFinalLineNumber(text),
-      }),
-    );
-  }
-
   for (const { line, sourceLineNumber } of createLineIterator(text)) {
+    scannedLines += 1;
+    if (scannedLines > maxScannedLines) {
+      warningCollector.add(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
+      break;
+    }
+
     if (line.trim().length === 0) {
       continue;
     }
 
     encounteredNonEmptyLine = true;
-    scannedNonEmptyLines += 1;
-    if (scannedNonEmptyLines > maxScannedLines) {
-      warningCollector.add(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
-      break;
-    }
 
     if (entries.length >= maxParsedEntries) {
       warningCollector.add(createWarning('entry-limit-exceeded', 'parsed entry limit exceeded', { sourceLineNumber }));
@@ -489,6 +471,10 @@ export function parseSessionRecordingLog(
     });
   }
 
+  if (!hasTrailingNewline && text.length > 0) {
+    warningCollector.add(createWarning('unterminated-final-line', 'final line does not end with newline'));
+  }
+
   const seenSequences = new Set<number>();
   let previousSeq = -1;
 
@@ -517,8 +503,8 @@ export function parseSessionRecordingLog(
     previousSeq = seq;
   }
 
-  if (seenSequences.size > 1) {
-    const sortedSeq = Array.from(seenSequences).sort((left, right) => left - right);
+  if (seenSequences.size > 0) {
+    const sortedSeq = [-1, ...Array.from(seenSequences).sort((left, right) => left - right)];
     let missingTotal = 0;
 
     for (let index = 1; index < sortedSeq.length; index += 1) {
