@@ -101,6 +101,14 @@ function getFinalLineNumber(text: string): number {
   return lineNumber;
 }
 
+function normalizeNonNegativeLimit(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+
+  return Math.trunc(value);
+}
+
 function exceedsMaxObjectDepth(value: unknown, maxObjectDepth: number): boolean {
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 1 }];
 
@@ -317,14 +325,20 @@ export function parseSessionRecordingLog(
 ): SessionRecordingLogParseResult {
   const warnings: SessionRecordingLogWarning[] = [];
   const entries: ParsedSessionRecordingLogEntry[] = [];
-  const maxLineLengthBytes = options?.maxLineLengthBytes ?? DEFAULT_MAX_LINE_LENGTH_BYTES;
-  const maxStringLength = options?.maxStringLength ?? DEFAULT_MAX_STRING_LENGTH;
-  const maxParameterCount = options?.maxParameterCount ?? DEFAULT_MAX_PARAMETER_COUNT;
-  const maxObjectDepth = options?.maxObjectDepth ?? DEFAULT_MAX_OBJECT_DEPTH;
-  const maxParsedEntries = options?.maxParsedEntries ?? DEFAULT_MAX_PARSED_ENTRIES;
-  const maxScannedLines = options?.maxScannedLines ?? DEFAULT_MAX_SCANNED_LINES;
-  const maxMissingSequenceWarnings = options?.maxMissingSequenceWarnings ?? DEFAULT_MAX_MISSING_SEQUENCE_WARNINGS;
-  const maxUnknownFieldCount = options?.maxUnknownFieldCount ?? DEFAULT_MAX_UNKNOWN_FIELD_COUNT;
+  const maxLineLengthBytes = normalizeNonNegativeLimit(options?.maxLineLengthBytes, DEFAULT_MAX_LINE_LENGTH_BYTES);
+  const maxStringLength = normalizeNonNegativeLimit(options?.maxStringLength, DEFAULT_MAX_STRING_LENGTH);
+  const maxParameterCount = normalizeNonNegativeLimit(options?.maxParameterCount, DEFAULT_MAX_PARAMETER_COUNT);
+  const maxObjectDepth = normalizeNonNegativeLimit(options?.maxObjectDepth, DEFAULT_MAX_OBJECT_DEPTH);
+  const maxParsedEntries = normalizeNonNegativeLimit(options?.maxParsedEntries, DEFAULT_MAX_PARSED_ENTRIES);
+  const maxScannedLines = normalizeNonNegativeLimit(options?.maxScannedLines, DEFAULT_MAX_SCANNED_LINES);
+  const maxMissingSequenceWarnings = normalizeNonNegativeLimit(
+    options?.maxMissingSequenceWarnings,
+    DEFAULT_MAX_MISSING_SEQUENCE_WARNINGS,
+  );
+  const maxUnknownFieldCount = normalizeNonNegativeLimit(
+    options?.maxUnknownFieldCount,
+    DEFAULT_MAX_UNKNOWN_FIELD_COUNT,
+  );
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
   let scannedNonEmptyLines = 0;
 
@@ -456,7 +470,7 @@ export function parseSessionRecordingLog(
       warnings.push(
         createWarning(
           'entry-limit-exceeded',
-          `missing sequence warnings truncated: ${missingTotal - emittedMissingWarnings} additional gaps`,
+          `missing sequence warnings truncated: ${missingTotal - emittedMissingWarnings} additional missing sequences`,
         ),
       );
     }

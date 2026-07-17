@@ -107,6 +107,34 @@ describe('parseSessionRecordingLog', () => {
     ).toBe(true);
   });
 
+  it('normalizes invalid numeric limit options to safe finite defaults', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":2000,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, {
+      maxLineLengthBytes: Number.NaN,
+      maxStringLength: Number.POSITIVE_INFINITY,
+      maxParameterCount: Number.NaN,
+      maxObjectDepth: Number.POSITIVE_INFINITY,
+      maxParsedEntries: Number.NaN,
+      maxScannedLines: Number.NaN,
+      maxMissingSequenceWarnings: Number.POSITIVE_INFINITY,
+      maxUnknownFieldCount: Number.NaN,
+    });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings.filter((warning) => warning.code === 'missing-sequence').length).toBeLessThanOrEqual(1000);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message.includes('additional missing sequences'),
+      ),
+    ).toBe(true);
+  });
+
   it('handles deeply nested records without crashing parse flow', () => {
     const depth = 1000;
     let nested = '1';

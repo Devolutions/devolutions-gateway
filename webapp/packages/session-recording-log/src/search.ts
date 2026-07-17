@@ -20,19 +20,22 @@ function maybeNormalize(value: string, caseSensitive: boolean): string {
   return caseSensitive ? value : value.toLowerCase();
 }
 
-function hasWarningAssociation(
-  entry: ParsedSessionRecordingLogEntry,
-  warnings: SearchSessionRecordingLogOptions['warnings'],
-): boolean {
-  if (!warnings || warnings.length === 0) {
-    return false;
+function buildWarningAssociationIndex(warnings: SearchSessionRecordingLogOptions['warnings']): {
+  lineNumbers: Set<number>;
+  sequences: Set<number>;
+} {
+  const lineNumbers = new Set<number>();
+  const sequences = new Set<number>();
+  for (const warning of warnings ?? []) {
+    if (warning.sourceLineNumber !== undefined) {
+      lineNumbers.add(warning.sourceLineNumber);
+    }
+    if (warning.seq !== undefined) {
+      sequences.add(warning.seq);
+    }
   }
 
-  return warnings.some(
-    (warning) =>
-      warning.sourceLineNumber === entry.sourceLineNumber ||
-      (warning.seq !== undefined && warning.seq === entry.entry.seq),
-  );
+  return { lineNumbers, sequences };
 }
 
 function tryMatchField(
@@ -63,6 +66,7 @@ export function searchSessionRecordingLogEntries(
   const normalizedQuery = maybeNormalize(trimmed, caseSensitive);
   const eventTypes = options?.eventTypes;
   const onlyWithWarnings = options?.onlyWithWarnings ?? false;
+  const warningAssociations = buildWarningAssociationIndex(options?.warnings);
   const hits: SessionRecordingLogSearchHit[] = [];
 
   for (const parsedEntry of entries) {
@@ -70,7 +74,11 @@ export function searchSessionRecordingLogEntries(
       continue;
     }
 
-    if (onlyWithWarnings && !hasWarningAssociation(parsedEntry, options?.warnings)) {
+    if (
+      onlyWithWarnings &&
+      !warningAssociations.lineNumbers.has(parsedEntry.sourceLineNumber) &&
+      !warningAssociations.sequences.has(parsedEntry.entry.seq)
+    ) {
       continue;
     }
 
