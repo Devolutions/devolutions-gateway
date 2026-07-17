@@ -1,8 +1,17 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { isSessionRecordingLogFileName } from './manifest';
 import type { ParsedSessionRecordingLogEntry, SessionRecordingLogEntry, SessionRecordingLogWarning } from './model';
 import { getSessionRecordingLogDisplayEntries } from './ordering';
+import { parseSessionRecordingLog } from './parser';
 import { searchSessionRecordingLogEntries } from './search';
+
+function readFixture(name: string): string {
+  const fixturePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', name);
+  return readFileSync(fixturePath, 'utf8');
+}
 
 function makeEntry(
   sourceIndex: number,
@@ -70,5 +79,23 @@ describe('helpers', () => {
     expect(searchSessionRecordingLogEntries(entries, 'do-not-match')).toHaveLength(0);
     expect(searchSessionRecordingLogEntries(entries, 'session', { eventTypes: ['session.start'] })).toHaveLength(1);
     expect(searchSessionRecordingLogEntries(entries, '', { onlyWithWarnings: true, warnings })).toHaveLength(1);
+  });
+
+  it('supports fixture-driven ordering and search usage flow', () => {
+    const parseResult = parseSessionRecordingLog(readFixture('sample-warning-linked.slog'));
+    const orderedEntries = getSessionRecordingLogDisplayEntries(parseResult);
+
+    expect(orderedEntries).toHaveLength(3);
+    expect(orderedEntries.map((entry) => entry.entry.seq)).toEqual([0, 1, 2]);
+
+    const warningOnly = searchSessionRecordingLogEntries(parseResult.entries, '', {
+      onlyWithWarnings: true,
+      warnings: parseResult.warnings,
+    });
+    const queryHits = searchSessionRecordingLogEntries(parseResult.entries, "o'connor");
+
+    expect(parseResult.warnings.some((warning) => warning.code === 'unknown-event-type')).toBe(true);
+    expect(warningOnly).toHaveLength(1);
+    expect(queryHits).toHaveLength(1);
   });
 });

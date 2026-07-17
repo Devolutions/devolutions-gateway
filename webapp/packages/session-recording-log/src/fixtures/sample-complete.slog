@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-15T16:15:35.140Z","seq":0,"actor":"Administrator","locale":"en-US","host":"IT-HELP-DC","sessionType":"ADConsole","event":"session.start","description":"Session started"}
+{"timestamp":"2026-07-15T16:15:41.054Z","seq":1,"event":"session.action","description":"Created User","object":"Help Desk Ottawa","parameters":{"New name":"Help Desk Ottawa/Hull"}}
+{"timestamp":"2026-07-15T16:16:32.759Z","seq":2,"event":"session.end","description":"Session ended"}

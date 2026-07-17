@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-15T21:17:49.777Z","seq":0,"actor":"Administrator","host":"IT-HELP-DC","sessionType":"ADConsole","event":"session.start","description":"Session started"}
+{"timestamp":"2026-07-15T21:19:14.351Z","seq":1,"event":"session.action","description":"Renamed Object","object":"Help Desk Ottawa","parameters":{"New name":"Help Desk Ottawa/Hull","Members added":"Sarah O'Connor, Bob Smith"}}

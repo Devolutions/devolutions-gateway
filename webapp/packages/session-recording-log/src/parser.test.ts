@@ -1,7 +1,31 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseSessionRecordingLog } from './parser';
 
+function readFixture(name: string): string {
+  const fixturePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', name);
+  return readFileSync(fixturePath, 'utf8');
+}
+
 describe('parseSessionRecordingLog', () => {
+  it('parses sample-complete fixture as complete with no warnings', () => {
+    const result = parseSessionRecordingLog(readFixture('sample-complete.slog'));
+
+    expect(result.completionState).toBe('complete');
+    expect(result.entries).toHaveLength(3);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('parses sample-missing-end fixture and surfaces missing-session-end warning', () => {
+    const result = parseSessionRecordingLog(readFixture('sample-missing-end.slog'));
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(true);
+  });
+
   it('parses completed AD-like slog and preserves source metadata', () => {
     const text = [
       '{"timestamp":"2026-07-15T16:15:35.140Z","seq":0,"actor":"Administrator","locale":"en-US","host":"IT-HELP-DC","sessionType":"ADConsole","event":"session.start","description":"Session started"}',

@@ -2,14 +2,85 @@
 
 Framework-agnostic models, parser, ordering, and in-file search for Session Recording Log (`.slog`) files.
 
-## Host contract
+## Features
+
+- NDJSON parser that keeps valid entries even when other lines are malformed.
+- Structured warning codes for parser behavior and host branching.
+- Source metadata (`sourceLineNumber`, `sourceIndex`, `sourceText`) preserved for each parsed entry.
+- Non-mutating display-order helper (sort by `seq`, tie-break on `sourceIndex`).
+- Bounded in-memory search over visible fields with optional event/warning-linked filtering.
+- Hardened bounds for large/malformed inputs (line size, string length, parameter count, depth, entry/scan caps).
+
+## Usage
+
+### Basic usage
+
+```ts
+import { parseSessionRecordingLog } from '@devolutions/session-recording-log';
+
+const result = parseSessionRecordingLog(slogText);
+console.log(result.completionState);
+console.log(result.entries.length);
+console.log(result.warnings.map((warning) => warning.code));
+```
+
+### Full runnable example
+
+```ts
+import {
+  getSessionRecordingLogDisplayEntries,
+  parseSessionRecordingLog,
+  searchSessionRecordingLogEntries,
+} from '@devolutions/session-recording-log';
+
+const slogText = [
+  '{"timestamp":"2026-07-15T21:17:49.777Z","seq":0,"event":"session.start","description":"Session started","actor":"Administrator","host":"IT-HELP-DC","sessionType":"ADConsole"}',
+  '{"timestamp":"2026-07-15T21:19:14.351Z","seq":1,"event":"session.action","description":"Renamed Object","object":"Help Desk Ottawa","parameters":{"Members added":"Sarah O\'Connor, Bob Smith"}}',
+  // Missing session.end on purpose.
+].join('\n');
+
+const parseResult = parseSessionRecordingLog(slogText);
+
+// Parse status + warning surfacing.
+console.log(parseResult.completionState); // 'ended-unexpectedly'
+for (const warning of parseResult.warnings) {
+  console.log(`${warning.code} line=${warning.sourceLineNumber ?? '-'} seq=${warning.seq ?? '-'}`);
+}
+
+// Non-mutating display order by seq/sourceIndex.
+const displayEntries = getSessionRecordingLogDisplayEntries(parseResult);
+console.log(displayEntries.map((entry) => `${entry.entry.seq}:${entry.entry.event}`));
+
+// Basic search/filter.
+const actionHits = searchSessionRecordingLogEntries(parseResult.entries, "o'connor", {
+  eventTypes: ['session.action'],
+});
+const warningLinked = searchSessionRecordingLogEntries(parseResult.entries, '', {
+  onlyWithWarnings: true,
+  warnings: parseResult.warnings,
+});
+
+console.log(actionHits.length); // 1
+console.log(warningLinked.length); // entries linked to parser warnings
+```
+
+## API Reference
+
+Public API:
+
+- `parseSessionRecordingLog(text, options?)`
+- `getSessionRecordingLogDisplayEntries(parseResult)`
+- `searchSessionRecordingLogEntries(entries, query, options?)`
+- `isSessionRecordingLogFileName(fileName)`
+
+Host contract:
 
 - Hosts detect `.slog` artifacts from `recording.json` file names (for example `recording-0.slog`).
 - Hosts keep original bytes for download scenarios.
 - Hosts decode UTF-8 text and pass the decoded NDJSON text to the parser.
 - This package does not reconstruct downloadable `.slog` content.
 
-## Architecture Decision Record 2 (ADR-2) canonical contract
+Architecture Decision Record 2 (ADR-2) canonical contract:
 
 - `parseSessionRecordingLog` returns:
   - `entries: ParsedSessionRecordingLogEntry[]` in original file order.
@@ -42,19 +113,7 @@ Schema-limit options:
 - `maxMissingSequenceWarnings`
 - `maxUnknownFieldCount`
 
-## Review-driven hardening updates (2026-07-17)
-
-- Added bounded missing-sequence emission to prevent unbounded gap loops on sparse large `seq` ranges.
-- Replaced recursive depth traversal with iterative depth checks to prevent stack-overflow failure on deeply nested JSON.
-- Added malformed-heavy input bounding with `maxScannedLines`, and finite default `maxParsedEntries`.
-- Fixed empty-log lifecycle classification (`completionState: 'complete'` when no valid entries).
-- Added top-level unknown field cap (`maxUnknownFieldCount`) with `entry-limit-exceeded` warning when truncated.
-- Split unknown future events into explicit `unknown-event-type` warning code.
-- Clarified alias intent: `SessionRecordingLogRecord` is retained for AD historical naming compatibility.
-
-## Ratified v1 defaults (review decision)
-
-Ratified as v1 canonical defaults for cross-host behavior:
+Ratified v1 defaults (review decision):
 
 - `maxLineLengthBytes`: `262144` (256 KiB)
 - `maxStringLength`: `4096`
@@ -67,26 +126,49 @@ Ratified as v1 canonical defaults for cross-host behavior:
 - search default limit: `100`
 - search max limit: `1000`
 
-Callout: these values were elevated from implementation defaults to ratified policy as a direct follow-up to review-driven hardening.
+## Project Structure
 
-## Search behavior
+```txt
+session-recording-log/
+  src/
+    fixtures/                  # sample .slog fixtures used by package tests
+    parser.ts
+    ordering.ts
+    search.ts
+    manifest.ts
+    model.ts
+    index.ts
+    parser.test.ts
+    helpers.test.ts
+  README.md
+  package.json
+  package.dist.json
+  tsconfig.json
+  vite.config.ts
+```
 
-- Searches visible fields only:
-  - `description`
-  - `object`
-  - `parameters` keys and values
-  - `actor`
-  - `host`
-  - `sessionType`
-  - `timestamp`
-- Does not search `sourceText` or `unknownFields`.
-- Supports optional filters:
-  - `eventTypes` for lifecycle filtering
-  - `warnings` + `onlyWithWarnings` for warning-linked filtering
+## Dependencies
 
-## API
+- Runtime dependencies: none
+- Dev dependencies: TypeScript, Vite, Vitest, Biome, `vite-plugin-dts`, `vite-plugin-static-copy`
 
-- `parseSessionRecordingLog(text, options?)`
-- `getSessionRecordingLogDisplayEntries(parseResult)`
-- `searchSessionRecordingLogEntries(entries, query, options?)`
-- `isSessionRecordingLogFileName(fileName)`
+## For Developers
+
+From `webapp/`:
+
+```bash
+pnpm --filter @devolutions/session-recording-log check:write
+pnpm --filter @devolutions/session-recording-log check
+pnpm --filter @devolutions/session-recording-log test
+pnpm --filter @devolutions/session-recording-log build
+```
+
+## Review-driven hardening updates (2026-07-17)
+
+- Added bounded missing-sequence emission to prevent unbounded gap loops on sparse large `seq` ranges.
+- Replaced recursive depth traversal with iterative depth checks to prevent stack-overflow failure on deeply nested JSON.
+- Added malformed-heavy input bounding with `maxScannedLines`, and finite default `maxParsedEntries`.
+- Fixed empty-log lifecycle classification (`completionState: 'complete'` when no valid entries).
+- Added top-level unknown field cap (`maxUnknownFieldCount`) with `entry-limit-exceeded` warning when truncated.
+- Split unknown future events into explicit `unknown-event-type` warning code.
+- Clarified alias intent: `SessionRecordingLogRecord` is retained for AD historical naming compatibility.
