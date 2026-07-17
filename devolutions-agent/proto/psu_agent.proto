@@ -51,14 +51,12 @@ message RegisterAgent {
   string architecture = 6;
   string agent_version = 7;
   string protocol_version = 8;
-  repeated string hubs = 9;
   repeated AgentCapability capabilities = 10;
   repeated PowerShellRuntime powershell_runtimes = 11;
 }
 
 message RegisterAccepted {
   string connection_id = 1;
-  repeated string accepted_hubs = 2;
 }
 
 message AgentCapability {

@@ -293,7 +293,6 @@ impl PsuAgent {
                 architecture: std::env::consts::ARCH.to_owned(),
                 agent_version: env!("CARGO_PKG_VERSION").to_owned(),
                 protocol_version: PROTOCOL_VERSION.to_owned(),
-                hubs: self.conf.hubs.clone(),
                 capabilities: vec![
                     AgentCapability {
                         name: CAPABILITY_JOB_EXECUTION.to_owned(),
@@ -464,7 +463,6 @@ mod tests {
             agent_id: Some("agent-01".to_owned()),
             display_name: None,
             app_token: "literal-token".to_owned(),
-            hubs: Vec::new(),
             powershell: dto::PsuPowerShellConf {
                 executable_path: Some("missing-pwsh".into()),
                 ..dto::PsuPowerShellConf::default()
