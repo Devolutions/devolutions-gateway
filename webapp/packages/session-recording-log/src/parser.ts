@@ -30,7 +30,7 @@ const DEFAULT_MAX_PARSED_ENTRIES = 10_000;
 const DEFAULT_MAX_SCANNED_LINES = 20_000;
 const DEFAULT_MAX_MISSING_SEQUENCE_WARNINGS = 1_000;
 const DEFAULT_MAX_UNKNOWN_FIELD_COUNT = 100;
-const DEFAULT_MAX_WARNINGS = 50_000;
+const DEFAULT_MAX_WARNINGS = 10_000;
 
 function createWarning(
   code: SessionRecordingLogWarningCode,
@@ -264,6 +264,15 @@ function parseParameters(
       continue;
     }
 
+    if (Object.hasOwn(output, key)) {
+      warningCollector.add(
+        createWarning('invalid-field', `parameter ${key} collided after truncation and was discarded`, {
+          sourceLineNumber,
+        }),
+      );
+      continue;
+    }
+
     if (rawValue.length > maxStringLength) {
       warningCollector.add(
         createWarning('string-truncated', `parameter ${key} exceeded max string length and was truncated`, {
@@ -410,6 +419,7 @@ export function parseSessionRecordingLog(
   const maxWarnings = normalizeNonNegativeLimit(options?.maxWarnings, DEFAULT_MAX_WARNINGS);
   const warningCollector = createWarningCollector(maxWarnings);
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
+  let encounteredNonEmptyLine = false;
   let scannedNonEmptyLines = 0;
 
   const hasTrailingNewline = text.endsWith('\n');
@@ -426,6 +436,7 @@ export function parseSessionRecordingLog(
       continue;
     }
 
+    encounteredNonEmptyLine = true;
     scannedNonEmptyLines += 1;
     if (scannedNonEmptyLines > maxScannedLines) {
       warningCollector.add(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
@@ -559,6 +570,6 @@ export function parseSessionRecordingLog(
   return {
     entries,
     warnings: warningCollector.warnings,
-    completionState: entries.length === 0 || hasSessionEnd ? 'complete' : 'ended-unexpectedly',
+    completionState: !encounteredNonEmptyLine || hasSessionEnd ? 'complete' : 'ended-unexpectedly',
   };
 }

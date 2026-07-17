@@ -175,6 +175,27 @@ describe('parseSessionRecordingLog', () => {
     ).toBe(true);
   });
 
+  it('caps warning volume at the default aggregate limit', () => {
+    const invalidParameters = Array.from({ length: 200 }, (_, index) => `"p${index}":${index}`).join(',');
+    const lines = Array.from(
+      { length: 60 },
+      (_, index) =>
+        `{"timestamp":"2026-07-16T10:00:${(index % 60).toString().padStart(2, '0')}.000Z","seq":${index},"event":"session.action","description":"Action","parameters":{${invalidParameters}}}`,
+    );
+    const text = `${lines.join('\n')}\n`;
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.warnings.length).toBeLessThanOrEqual(10001);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' &&
+          warning.message === 'warning limit exceeded; additional warnings were truncated',
+      ),
+    ).toBe(true);
+  });
+
   it('handles deeply nested records without crashing parse flow', () => {
     const depth = 1000;
     let nested = '1';
@@ -211,6 +232,13 @@ describe('parseSessionRecordingLog', () => {
     expect(result.completionState).toBe('complete');
     expect(result.warnings.some((warning) => warning.code === 'missing-session-start')).toBe(false);
     expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(false);
+  });
+
+  it('treats non-empty logs with no valid records as ended unexpectedly', () => {
+    const result = parseSessionRecordingLog('{not valid json}\n');
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.completionState).toBe('ended-unexpectedly');
   });
 
   it('emits unknown-event-type warning for unrecognized events', () => {
@@ -279,5 +307,26 @@ describe('parseSessionRecordingLog', () => {
     expect(startEntry).toBeDefined();
     expect(startEntry?.entry.parameters?.__proto__).toBe('kept');
     expect((startEntry?.entry.unknownFields?.__proto__ as { safe?: string } | undefined)?.safe).toBe('value');
+  });
+
+  it('warns and preserves the first value on parameter key collisions after truncation', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{"abcd1":"one","abcd2":"two"}}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxStringLength: 4 });
+    const firstEntry = result.entries[0];
+
+    expect(firstEntry).toBeDefined();
+    expect(firstEntry?.entry.parameters).toEqual({ abcd: 'one' });
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'invalid-field' &&
+          warning.message === 'parameter abcd collided after truncation and was discarded',
+      ),
+    ).toBe(true);
   });
 });
