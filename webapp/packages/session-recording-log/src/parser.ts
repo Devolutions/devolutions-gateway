@@ -30,7 +30,7 @@ const DEFAULT_MAX_PARSED_ENTRIES = 10_000;
 const DEFAULT_MAX_SCANNED_LINES = 20_000;
 const DEFAULT_MAX_MISSING_SEQUENCE_WARNINGS = 1_000;
 const DEFAULT_MAX_UNKNOWN_FIELD_COUNT = 100;
-const textEncoder = new TextEncoder();
+const DEFAULT_MAX_WARNINGS = 50_000;
 
 function createWarning(
   code: SessionRecordingLogWarningCode,
@@ -41,6 +41,35 @@ function createWarning(
     code,
     message,
     ...details,
+  };
+}
+
+interface WarningCollector {
+  warnings: SessionRecordingLogWarning[];
+  add(warning: SessionRecordingLogWarning): void;
+}
+
+function createWarningCollector(maxWarnings: number): WarningCollector {
+  const warnings: SessionRecordingLogWarning[] = [];
+  let emittedTruncationWarning = false;
+
+  return {
+    warnings,
+    add(warning) {
+      if (warnings.length < maxWarnings) {
+        warnings.push(warning);
+        return;
+      }
+
+      if (emittedTruncationWarning) {
+        return;
+      }
+
+      warnings.push(
+        createWarning('entry-limit-exceeded', 'warning limit exceeded; additional warnings were truncated'),
+      );
+      emittedTruncationWarning = true;
+    },
   };
 }
 
@@ -109,6 +138,36 @@ function normalizeNonNegativeLimit(value: number | undefined, fallback: number):
   return Math.trunc(value);
 }
 
+function exceedsMaxLineLengthBytes(value: string, maxLineLengthBytes: number): boolean {
+  let byteLength = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+
+    if (code <= 0x7f) {
+      byteLength += 1;
+    } else if (code <= 0x7ff) {
+      byteLength += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const nextCode = value.charCodeAt(index + 1);
+      if (nextCode >= 0xdc00 && nextCode <= 0xdfff) {
+        byteLength += 4;
+        index += 1;
+      } else {
+        byteLength += 3;
+      }
+    } else {
+      byteLength += 3;
+    }
+
+    if (byteLength > maxLineLengthBytes) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function exceedsMaxObjectDepth(value: unknown, maxObjectDepth: number): boolean {
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 1 }];
 
@@ -146,17 +205,17 @@ function exceedsMaxObjectDepth(value: unknown, maxObjectDepth: number): boolean 
 function normalizeString(
   value: unknown,
   field: string,
-  warnings: SessionRecordingLogWarning[],
+  warningCollector: WarningCollector,
   sourceLineNumber: number,
   maxStringLength: number,
 ): string | null {
   if (typeof value !== 'string') {
-    warnings.push(createWarning('invalid-field', `${field} must be a string`, { sourceLineNumber }));
+    warningCollector.add(createWarning('invalid-field', `${field} must be a string`, { sourceLineNumber }));
     return null;
   }
 
   if (value.length > maxStringLength) {
-    warnings.push(
+    warningCollector.add(
       createWarning('string-truncated', `${field} exceeded max string length and was truncated`, { sourceLineNumber }),
     );
     return value.slice(0, maxStringLength);
@@ -167,7 +226,7 @@ function normalizeString(
 
 function parseParameters(
   value: unknown,
-  warnings: SessionRecordingLogWarning[],
+  warningCollector: WarningCollector,
   sourceLineNumber: number,
   maxStringLength: number,
   maxParameterCount: number,
@@ -177,20 +236,22 @@ function parseParameters(
   }
 
   if (!isPlainObject(value)) {
-    warnings.push(createWarning('invalid-field', 'parameters must be an object', { sourceLineNumber }));
+    warningCollector.add(createWarning('invalid-field', 'parameters must be an object', { sourceLineNumber }));
     return undefined;
   }
 
   const entries = Object.entries(value);
   if (entries.length > maxParameterCount) {
-    warnings.push(createWarning('entry-limit-exceeded', 'parameter count exceeded max limit', { sourceLineNumber }));
+    warningCollector.add(
+      createWarning('entry-limit-exceeded', 'parameter count exceeded max limit', { sourceLineNumber }),
+    );
   }
 
   const output: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [rawKey, rawValue] of entries.slice(0, maxParameterCount)) {
     let key = rawKey;
     if (rawKey.length > maxStringLength) {
-      warnings.push(
+      warningCollector.add(
         createWarning('string-truncated', 'parameter key exceeded max string length and was truncated', {
           sourceLineNumber,
         }),
@@ -199,12 +260,12 @@ function parseParameters(
     }
 
     if (typeof rawValue !== 'string') {
-      warnings.push(createWarning('invalid-field', `parameter ${key} must be a string`, { sourceLineNumber }));
+      warningCollector.add(createWarning('invalid-field', `parameter ${key} must be a string`, { sourceLineNumber }));
       continue;
     }
 
     if (rawValue.length > maxStringLength) {
-      warnings.push(
+      warningCollector.add(
         createWarning('string-truncated', `parameter ${key} exceeded max string length and was truncated`, {
           sourceLineNumber,
         }),
@@ -221,7 +282,7 @@ function parseParameters(
 
 function parseLineRecord(
   parsed: Record<string, unknown>,
-  warnings: SessionRecordingLogWarning[],
+  warningCollector: WarningCollector,
   sourceLineNumber: number,
   options: Required<
     Pick<
@@ -230,15 +291,21 @@ function parseLineRecord(
     >
   >,
 ): SessionRecordingLogEntry | null {
-  const timestamp = normalizeString(parsed.timestamp, 'timestamp', warnings, sourceLineNumber, options.maxStringLength);
-  const description = normalizeString(
-    parsed.description,
-    'description',
-    warnings,
+  const timestamp = normalizeString(
+    parsed.timestamp,
+    'timestamp',
+    warningCollector,
     sourceLineNumber,
     options.maxStringLength,
   );
-  const event = normalizeString(parsed.event, 'event', warnings, sourceLineNumber, options.maxStringLength);
+  const description = normalizeString(
+    parsed.description,
+    'description',
+    warningCollector,
+    sourceLineNumber,
+    options.maxStringLength,
+  );
+  const event = normalizeString(parsed.event, 'event', warningCollector, sourceLineNumber, options.maxStringLength);
   const seq = parsed.seq;
 
   if (timestamp === null || description === null || event === null) {
@@ -246,20 +313,22 @@ function parseLineRecord(
   }
 
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
-    warnings.push(createWarning('invalid-field', 'seq must be a non-negative integer', { sourceLineNumber }));
+    warningCollector.add(createWarning('invalid-field', 'seq must be a non-negative integer', { sourceLineNumber }));
     return null;
   }
   if (!Number.isSafeInteger(seq)) {
-    warnings.push(createWarning('invalid-field', 'seq must be a safe integer', { sourceLineNumber }));
+    warningCollector.add(createWarning('invalid-field', 'seq must be a safe integer', { sourceLineNumber }));
     return null;
   }
 
   if (options.warnOnInvalidTimestamp && Number.isNaN(Date.parse(timestamp))) {
-    warnings.push(createWarning('invalid-field', 'timestamp is not a valid date string', { sourceLineNumber, seq }));
+    warningCollector.add(
+      createWarning('invalid-field', 'timestamp is not a valid date string', { sourceLineNumber, seq }),
+    );
   }
 
   if (!KNOWN_EVENTS.has(event as SessionRecordingLogKnownEvent)) {
-    warnings.push(
+    warningCollector.add(
       createWarning('unknown-event-type', 'event is not one of the known lifecycle events', { sourceLineNumber, seq }),
     );
   }
@@ -267,26 +336,26 @@ function parseLineRecord(
   const actor =
     parsed.actor === undefined
       ? undefined
-      : normalizeString(parsed.actor, 'actor', warnings, sourceLineNumber, options.maxStringLength);
+      : normalizeString(parsed.actor, 'actor', warningCollector, sourceLineNumber, options.maxStringLength);
   const locale =
     parsed.locale === undefined
       ? undefined
-      : normalizeString(parsed.locale, 'locale', warnings, sourceLineNumber, options.maxStringLength);
+      : normalizeString(parsed.locale, 'locale', warningCollector, sourceLineNumber, options.maxStringLength);
   const host =
     parsed.host === undefined
       ? undefined
-      : normalizeString(parsed.host, 'host', warnings, sourceLineNumber, options.maxStringLength);
+      : normalizeString(parsed.host, 'host', warningCollector, sourceLineNumber, options.maxStringLength);
   const sessionType =
     parsed.sessionType === undefined
       ? undefined
-      : normalizeString(parsed.sessionType, 'sessionType', warnings, sourceLineNumber, options.maxStringLength);
+      : normalizeString(parsed.sessionType, 'sessionType', warningCollector, sourceLineNumber, options.maxStringLength);
   const object =
     parsed.object === undefined
       ? undefined
-      : normalizeString(parsed.object, 'object', warnings, sourceLineNumber, options.maxStringLength);
+      : normalizeString(parsed.object, 'object', warningCollector, sourceLineNumber, options.maxStringLength);
   const parameters = parseParameters(
     parsed.parameters,
-    warnings,
+    warningCollector,
     sourceLineNumber,
     options.maxStringLength,
     options.maxParameterCount,
@@ -294,7 +363,7 @@ function parseLineRecord(
 
   const unknownEntries = Object.entries(parsed).filter(([key]) => !KNOWN_FIELDS.has(key));
   if (unknownEntries.length > options.maxUnknownFieldCount) {
-    warnings.push(
+    warningCollector.add(
       createWarning('entry-limit-exceeded', 'unknown top-level field count exceeded max limit', { sourceLineNumber }),
     );
   }
@@ -323,7 +392,6 @@ export function parseSessionRecordingLog(
   text: string,
   options?: ParseSessionRecordingLogOptions,
 ): SessionRecordingLogParseResult {
-  const warnings: SessionRecordingLogWarning[] = [];
   const entries: ParsedSessionRecordingLogEntry[] = [];
   const maxLineLengthBytes = normalizeNonNegativeLimit(options?.maxLineLengthBytes, DEFAULT_MAX_LINE_LENGTH_BYTES);
   const maxStringLength = normalizeNonNegativeLimit(options?.maxStringLength, DEFAULT_MAX_STRING_LENGTH);
@@ -339,12 +407,14 @@ export function parseSessionRecordingLog(
     options?.maxUnknownFieldCount,
     DEFAULT_MAX_UNKNOWN_FIELD_COUNT,
   );
+  const maxWarnings = normalizeNonNegativeLimit(options?.maxWarnings, DEFAULT_MAX_WARNINGS);
+  const warningCollector = createWarningCollector(maxWarnings);
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
   let scannedNonEmptyLines = 0;
 
   const hasTrailingNewline = text.endsWith('\n');
   if (!hasTrailingNewline && text.length > 0) {
-    warnings.push(
+    warningCollector.add(
       createWarning('unterminated-final-line', 'final line does not end with newline', {
         sourceLineNumber: getFinalLineNumber(text),
       }),
@@ -358,17 +428,17 @@ export function parseSessionRecordingLog(
 
     scannedNonEmptyLines += 1;
     if (scannedNonEmptyLines > maxScannedLines) {
-      warnings.push(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
+      warningCollector.add(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
       break;
     }
 
     if (entries.length >= maxParsedEntries) {
-      warnings.push(createWarning('entry-limit-exceeded', 'parsed entry limit exceeded', { sourceLineNumber }));
+      warningCollector.add(createWarning('entry-limit-exceeded', 'parsed entry limit exceeded', { sourceLineNumber }));
       break;
     }
 
-    if (textEncoder.encode(line).length > maxLineLengthBytes) {
-      warnings.push(createWarning('entry-limit-exceeded', 'line exceeds max byte size', { sourceLineNumber }));
+    if (exceedsMaxLineLengthBytes(line, maxLineLengthBytes)) {
+      warningCollector.add(createWarning('entry-limit-exceeded', 'line exceeds max byte size', { sourceLineNumber }));
       continue;
     }
 
@@ -376,21 +446,21 @@ export function parseSessionRecordingLog(
     try {
       parsed = JSON.parse(line);
     } catch {
-      warnings.push(createWarning('malformed-line', 'line is not valid JSON', { sourceLineNumber }));
+      warningCollector.add(createWarning('malformed-line', 'line is not valid JSON', { sourceLineNumber }));
       continue;
     }
 
     if (!isPlainObject(parsed)) {
-      warnings.push(createWarning('malformed-line', 'line JSON must be an object', { sourceLineNumber }));
+      warningCollector.add(createWarning('malformed-line', 'line JSON must be an object', { sourceLineNumber }));
       continue;
     }
 
     if (exceedsMaxObjectDepth(parsed, maxObjectDepth)) {
-      warnings.push(createWarning('invalid-field', 'line object exceeds max depth', { sourceLineNumber }));
+      warningCollector.add(createWarning('invalid-field', 'line object exceeds max depth', { sourceLineNumber }));
       continue;
     }
 
-    const record = parseLineRecord(parsed, warnings, sourceLineNumber, {
+    const record = parseLineRecord(parsed, warningCollector, sourceLineNumber, {
       maxStringLength,
       maxParameterCount,
       maxUnknownFieldCount,
@@ -415,7 +485,7 @@ export function parseSessionRecordingLog(
     const seq = parsedEntry.entry.seq;
 
     if (seenSequences.has(seq)) {
-      warnings.push(
+      warningCollector.add(
         createWarning('duplicate-sequence', 'sequence number is duplicated', {
           sourceLineNumber: parsedEntry.sourceLineNumber,
           seq,
@@ -426,7 +496,7 @@ export function parseSessionRecordingLog(
     }
 
     if (seq < previousSeq) {
-      warnings.push(
+      warningCollector.add(
         createWarning('sequence-order-mismatch', 'file order does not match sequence order', {
           sourceLineNumber: parsedEntry.sourceLineNumber,
           seq,
@@ -453,7 +523,7 @@ export function parseSessionRecordingLog(
         const start = sortedSeq[index - 1] + 1;
         const end = sortedSeq[index];
         for (let seq = start; seq < end; seq += 1) {
-          warnings.push(createWarning('missing-sequence', 'sequence number is missing', { seq }));
+          warningCollector.add(createWarning('missing-sequence', 'sequence number is missing', { seq }));
           emittedMissingWarnings += 1;
           if (emittedMissingWarnings >= maxMissingSequenceWarnings) {
             break;
@@ -467,7 +537,7 @@ export function parseSessionRecordingLog(
     }
 
     if (missingTotal > emittedMissingWarnings) {
-      warnings.push(
+      warningCollector.add(
         createWarning(
           'entry-limit-exceeded',
           `missing sequence warnings truncated: ${missingTotal - emittedMissingWarnings} additional missing sequences`,
@@ -480,15 +550,15 @@ export function parseSessionRecordingLog(
   const hasSessionEnd = entries.some((parsedEntry) => parsedEntry.entry.event === 'session.end');
 
   if (entries.length > 0 && !hasSessionStart) {
-    warnings.push(createWarning('missing-session-start', 'session.start is missing'));
+    warningCollector.add(createWarning('missing-session-start', 'session.start is missing'));
   }
   if (entries.length > 0 && !hasSessionEnd) {
-    warnings.push(createWarning('missing-session-end', 'session.end is missing'));
+    warningCollector.add(createWarning('missing-session-end', 'session.end is missing'));
   }
 
   return {
     entries,
-    warnings,
+    warnings: warningCollector.warnings,
     completionState: entries.length === 0 || hasSessionEnd ? 'complete' : 'ended-unexpectedly',
   };
 }

@@ -98,4 +98,19 @@ describe('helpers', () => {
     expect(warningOnly).toHaveLength(1);
     expect(queryHits).toHaveLength(1);
   });
+
+  it('treats sourceLineNumber as authoritative for warning-linked filtering', () => {
+    const entries = [makeEntry(0, 1, 'Original sequence'), makeEntry(1, 1, 'Duplicate sequence')];
+    const warnings: SessionRecordingLogWarning[] = [
+      { code: 'duplicate-sequence', sourceLineNumber: 2, seq: 1, message: 'duplicate sequence number' },
+    ];
+
+    const warningOnly = searchSessionRecordingLogEntries(entries, '', {
+      onlyWithWarnings: true,
+      warnings,
+    });
+
+    expect(warningOnly).toHaveLength(1);
+    expect(warningOnly[0]?.sourceLineNumber).toBe(2);
+  });
 });

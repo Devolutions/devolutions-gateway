@@ -29,6 +29,7 @@ function buildWarningAssociationIndex(warnings: SearchSessionRecordingLogOptions
   for (const warning of warnings ?? []) {
     if (warning.sourceLineNumber !== undefined) {
       lineNumbers.add(warning.sourceLineNumber);
+      continue;
     }
     if (warning.seq !== undefined) {
       sequences.add(warning.seq);
@@ -70,7 +71,7 @@ export function searchSessionRecordingLogEntries(
   const hits: SessionRecordingLogSearchHit[] = [];
 
   for (const parsedEntry of entries) {
-    if (eventTypes && eventTypes.length > 0 && !eventTypes.includes(parsedEntry.entry.event as never)) {
+    if (eventTypes && eventTypes.length > 0 && !eventTypes.includes(parsedEntry.entry.event)) {
       continue;
     }
 

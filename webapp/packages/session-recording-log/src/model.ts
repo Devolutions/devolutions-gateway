@@ -59,12 +59,13 @@ export interface ParseSessionRecordingLogOptions {
   maxScannedLines?: number;
   maxMissingSequenceWarnings?: number;
   maxUnknownFieldCount?: number;
+  maxWarnings?: number;
 }
 
 export interface SearchSessionRecordingLogOptions {
   limit?: number;
   caseSensitive?: boolean;
-  eventTypes?: SessionRecordingLogKnownEvent[];
+  eventTypes?: string[];
   warnings?: SessionRecordingLogWarning[];
   onlyWithWarnings?: boolean;
 }

@@ -159,6 +159,22 @@ describe('parseSessionRecordingLog', () => {
     ).toBe(true);
   });
 
+  it('caps total warning volume and emits one truncation warning', () => {
+    const invalidParameters = Array.from({ length: 40 }, (_, index) => `"p${index}":${index}`).join(',');
+    const text = `{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{${invalidParameters}}}\n`;
+
+    const result = parseSessionRecordingLog(text, { maxWarnings: 5 });
+
+    expect(result.warnings.length).toBeLessThanOrEqual(6);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' &&
+          warning.message === 'warning limit exceeded; additional warnings were truncated',
+      ),
+    ).toBe(true);
+  });
+
   it('handles deeply nested records without crashing parse flow', () => {
     const depth = 1000;
     let nested = '1';
