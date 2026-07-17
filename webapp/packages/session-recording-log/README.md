@@ -9,7 +9,7 @@ Framework-agnostic models, parser, ordering, and in-file search for Session Reco
 - Hosts decode UTF-8 text and pass the decoded NDJSON text to the parser.
 - This package does not reconstruct downloadable `.slog` content.
 
-## ADR-2 canonical contract
+## Architecture Decision Record 2 (ADR-2) canonical contract
 
 - `parseSessionRecordingLog` returns:
   - `entries: ParsedSessionRecordingLogEntry[]` in original file order.
@@ -29,7 +29,7 @@ Framework-agnostic models, parser, ordering, and in-file search for Session Reco
   - `string-truncated`
 - Additive warning:
   - `unterminated-final-line` (informational; valid final line without newline is not semantically invalid).
-  - Intended for ADR addendum documentation rather than replacement of canonical malformed handling.
+  - Intended for Architecture Decision Record (ADR) addendum documentation rather than replacement of canonical malformed handling.
 
 Schema-limit options:
 
