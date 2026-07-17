@@ -47,6 +47,10 @@ The workspace is organized into three main categories:
 - Web component for real-time session streaming
 - Used by recording-player for live shadowing
 
+**@devolutions/session-recording-log** - Session recording log parser/model package
+- Framework-agnostic parser, models, ordering, and in-file search for `.slog` NDJSON
+- Intended for host reuse (DVLS, Gateway UI sandbox, legacy recording-player)
+
 #### Tools (`tools/`)
 
 **recording-player-tester** - Testing utility
