@@ -288,7 +288,7 @@ function parseLineRecord(
       'maxStringLength' | 'maxParameterCount' | 'warnOnInvalidTimestamp' | 'maxUnknownFieldCount'
     >
   >,
-): SessionRecordingLogEntry | null {
+): { entry: SessionRecordingLogEntry; originalEvent: string } | null {
   const timestamp = normalizeString(
     parsed.timestamp,
     'timestamp',
@@ -303,10 +303,20 @@ function parseLineRecord(
     sourceLineNumber,
     options.maxStringLength,
   );
-  const event = normalizeString(parsed.event, 'event', warningCollector, sourceLineNumber, options.maxStringLength);
   const seq = parsed.seq;
+  const rawEvent = parsed.event;
 
-  if (timestamp === null || description === null || event === null) {
+  if (typeof rawEvent !== 'string') {
+    warningCollector.add(createWarning('invalid-field', 'event must be a string', { sourceLineNumber }));
+    return null;
+  }
+
+  if (rawEvent.length > options.maxStringLength) {
+    warningCollector.add(createWarning('invalid-field', 'event exceeded max string length', { sourceLineNumber }));
+    return null;
+  }
+
+  if (timestamp === null || description === null) {
     return null;
   }
 
@@ -325,7 +335,7 @@ function parseLineRecord(
     );
   }
 
-  if (!KNOWN_EVENTS.has(event as SessionRecordingLogKnownEvent)) {
+  if (!KNOWN_EVENTS.has(rawEvent as SessionRecordingLogKnownEvent)) {
     warningCollector.add(
       createWarning('unknown-event-type', 'event is not one of the known lifecycle events', { sourceLineNumber, seq }),
     );
@@ -372,17 +382,20 @@ function parseLineRecord(
   }
 
   return {
-    timestamp,
-    seq,
-    event,
-    description,
-    ...(actor === null || actor === undefined ? {} : { actor }),
-    ...(locale === null || locale === undefined ? {} : { locale }),
-    ...(host === null || host === undefined ? {} : { host }),
-    ...(sessionType === null || sessionType === undefined ? {} : { sessionType }),
-    ...(object === null || object === undefined ? {} : { object }),
-    ...(parameters ? { parameters } : {}),
-    ...(Object.keys(unknownFields).length === 0 ? {} : { unknownFields }),
+    entry: {
+      timestamp,
+      seq,
+      event: rawEvent,
+      description,
+      ...(actor === null || actor === undefined ? {} : { actor }),
+      ...(locale === null || locale === undefined ? {} : { locale }),
+      ...(host === null || host === undefined ? {} : { host }),
+      ...(sessionType === null || sessionType === undefined ? {} : { sessionType }),
+      ...(object === null || object === undefined ? {} : { object }),
+      ...(parameters ? { parameters } : {}),
+      ...(Object.keys(unknownFields).length === 0 ? {} : { unknownFields }),
+    },
+    originalEvent: rawEvent,
   };
 }
 
@@ -409,21 +422,28 @@ export function parseSessionRecordingLog(
   const warningCollector = createWarningCollector(maxWarnings);
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
   let encounteredNonEmptyLine = false;
+  let truncatedByScannedLineLimit = false;
+  let hasSessionStart = false;
+  let hasSessionEnd = false;
   let scannedLines = 0;
 
   const hasTrailingNewline = text.endsWith('\n');
   for (const { line, sourceLineNumber } of createLineIterator(text)) {
+    const isNonEmptyLine = line.trim().length > 0;
+    if (isNonEmptyLine) {
+      encounteredNonEmptyLine = true;
+    }
+
     scannedLines += 1;
     if (scannedLines > maxScannedLines) {
+      truncatedByScannedLineLimit = true;
       warningCollector.add(createWarning('entry-limit-exceeded', 'scanned line limit exceeded', { sourceLineNumber }));
       break;
     }
 
-    if (line.trim().length === 0) {
+    if (!isNonEmptyLine) {
       continue;
     }
-
-    encounteredNonEmptyLine = true;
 
     if (entries.length >= maxParsedEntries) {
       warningCollector.add(createWarning('entry-limit-exceeded', 'parsed entry limit exceeded', { sourceLineNumber }));
@@ -463,8 +483,14 @@ export function parseSessionRecordingLog(
       continue;
     }
 
+    if (record.originalEvent === 'session.start') {
+      hasSessionStart = true;
+    } else if (record.originalEvent === 'session.end') {
+      hasSessionEnd = true;
+    }
+
     entries.push({
-      entry: record,
+      entry: record.entry,
       sourceLineNumber,
       sourceIndex: entries.length,
       sourceText: line,
@@ -543,9 +569,6 @@ export function parseSessionRecordingLog(
     }
   }
 
-  const hasSessionStart = entries.some((parsedEntry) => parsedEntry.entry.event === 'session.start');
-  const hasSessionEnd = entries.some((parsedEntry) => parsedEntry.entry.event === 'session.end');
-
   if (entries.length > 0 && !hasSessionStart) {
     warningCollector.add(createWarning('missing-session-start', 'session.start is missing'));
   }
@@ -556,6 +579,7 @@ export function parseSessionRecordingLog(
   return {
     entries,
     warnings: warningCollector.warnings,
-    completionState: !encounteredNonEmptyLine || hasSessionEnd ? 'complete' : 'ended-unexpectedly',
+    completionState:
+      hasSessionEnd || (!encounteredNonEmptyLine && !truncatedByScannedLineLimit) ? 'complete' : 'ended-unexpectedly',
   };
 }

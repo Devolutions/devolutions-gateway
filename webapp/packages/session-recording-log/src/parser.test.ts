@@ -234,6 +234,24 @@ describe('parseSessionRecordingLog', () => {
     expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
   });
 
+  it('marks truncated non-empty input as ended unexpectedly when scan limit is zero', () => {
+    const text = '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 0 });
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
+  it('marks truncated input as ended unexpectedly when blank prefix consumes scan limit', () => {
+    const text = '\n{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 0 });
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
   it('treats an empty file as complete and emits no missing-session warnings', () => {
     const result = parseSessionRecordingLog('');
 
@@ -316,6 +334,21 @@ describe('parseSessionRecordingLog', () => {
     ).toBe(true);
   });
 
+  it('rejects overlong events without deriving completion from truncated text', () => {
+    const text =
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.end.extra","description":"End-like"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxStringLength: 11 });
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(
+      result.warnings.some(
+        (warning) => warning.code === 'invalid-field' && warning.message === 'event exceeded max string length',
+      ),
+    ).toBe(true);
+  });
+
   it('preserves __proto__ keys in parameters and unknown fields as data', () => {
     const text = [
       '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{"__proto__":"kept"},"__proto__":{"safe":"value"}}',
@@ -333,8 +366,8 @@ describe('parseSessionRecordingLog', () => {
 
   it('warns and preserves the first value on parameter key collisions after truncation', () => {
     const text = [
-      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{"abcd1":"one","abcd2":"two"}}',
-      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"evt1","description":"Start","parameters":{"abcd1":"one","abcd2":"two"}}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"evt2","description":"End"}',
       '',
     ].join('\n');
 
