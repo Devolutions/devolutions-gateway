@@ -52,6 +52,7 @@ export type SessionRecordingLogCompletionState = SessionRecordingLogParseResult[
 export interface ParseSessionRecordingLogOptions {
   warnOnInvalidTimestamp?: boolean;
   maxLineLengthBytes?: number;
+  maxRetainedSourceTextBytes?: number;
   maxStringLength?: number;
   maxParameterCount?: number;
   maxObjectDepth?: number;

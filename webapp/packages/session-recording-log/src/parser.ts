@@ -23,6 +23,7 @@ const KNOWN_FIELDS = new Set([
 ]);
 
 const DEFAULT_MAX_LINE_LENGTH_BYTES = 256 * 1024;
+const DEFAULT_MAX_RETAINED_SOURCE_TEXT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STRING_LENGTH = 4096;
 const DEFAULT_MAX_PARAMETER_COUNT = 200;
 const DEFAULT_MAX_OBJECT_DEPTH = 8;
@@ -127,7 +128,7 @@ function normalizeNonNegativeLimit(value: number | undefined, fallback: number):
   return Math.trunc(value);
 }
 
-function exceedsMaxLineLengthBytes(value: string, maxLineLengthBytes: number): boolean {
+function getUtf8ByteLength(value: string, maxBytes?: number): number {
   let byteLength = 0;
 
   for (let index = 0; index < value.length; index += 1) {
@@ -148,13 +149,12 @@ function exceedsMaxLineLengthBytes(value: string, maxLineLengthBytes: number): b
     } else {
       byteLength += 3;
     }
-
-    if (byteLength > maxLineLengthBytes) {
-      return true;
+    if (maxBytes !== undefined && byteLength > maxBytes) {
+      return byteLength;
     }
   }
 
-  return false;
+  return byteLength;
 }
 
 function exceedsMaxObjectDepth(value: unknown, maxObjectDepth: number): boolean {
@@ -405,6 +405,10 @@ export function parseSessionRecordingLog(
 ): SessionRecordingLogParseResult {
   const entries: ParsedSessionRecordingLogEntry[] = [];
   const maxLineLengthBytes = normalizeNonNegativeLimit(options?.maxLineLengthBytes, DEFAULT_MAX_LINE_LENGTH_BYTES);
+  const maxRetainedSourceTextBytes = normalizeNonNegativeLimit(
+    options?.maxRetainedSourceTextBytes,
+    DEFAULT_MAX_RETAINED_SOURCE_TEXT_BYTES,
+  );
   const maxStringLength = normalizeNonNegativeLimit(options?.maxStringLength, DEFAULT_MAX_STRING_LENGTH);
   const maxParameterCount = normalizeNonNegativeLimit(options?.maxParameterCount, DEFAULT_MAX_PARAMETER_COUNT);
   const maxObjectDepth = normalizeNonNegativeLimit(options?.maxObjectDepth, DEFAULT_MAX_OBJECT_DEPTH);
@@ -425,6 +429,7 @@ export function parseSessionRecordingLog(
   let truncatedByScannedLineLimit = false;
   let hasSessionStart = false;
   let hasSessionEnd = false;
+  let retainedSourceTextBytes = 0;
   let scannedLines = 0;
 
   const hasTrailingNewline = text.endsWith('\n');
@@ -450,7 +455,8 @@ export function parseSessionRecordingLog(
       break;
     }
 
-    if (exceedsMaxLineLengthBytes(line, maxLineLengthBytes)) {
+    const lineByteLength = getUtf8ByteLength(line, maxLineLengthBytes);
+    if (lineByteLength > maxLineLengthBytes) {
       warningCollector.add(createWarning('entry-limit-exceeded', 'line exceeds max byte size', { sourceLineNumber }));
       continue;
     }
@@ -482,6 +488,14 @@ export function parseSessionRecordingLog(
     if (!record) {
       continue;
     }
+
+    if (retainedSourceTextBytes + lineByteLength > maxRetainedSourceTextBytes) {
+      warningCollector.add(
+        createWarning('entry-limit-exceeded', 'retained source text byte budget exceeded', { sourceLineNumber }),
+      );
+      break;
+    }
+    retainedSourceTextBytes += lineByteLength;
 
     if (record.originalEvent === 'session.start') {
       hasSessionStart = true;

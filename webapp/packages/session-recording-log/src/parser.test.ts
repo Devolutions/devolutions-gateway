@@ -175,6 +175,39 @@ describe('parseSessionRecordingLog', () => {
     ).toBe(true);
   });
 
+  it('caps retained source text bytes across parsed entries', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.action","description":"Action"}',
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":2,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxRetainedSourceTextBytes: 120 });
+
+    expect(result.entries).toHaveLength(1);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message === 'retained source text byte budget exceeded',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not mark session complete when source-text budget drops session.end entry', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxRetainedSourceTextBytes: 100 });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(true);
+  });
+
   it('caps warning volume at the default aggregate limit', () => {
     const invalidParameters = Array.from({ length: 200 }, (_, index) => `"p${index}":${index}`).join(',');
     const lines = Array.from(

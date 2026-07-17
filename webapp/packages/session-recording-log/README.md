@@ -105,6 +105,7 @@ Architecture Decision Record 2 (ADR-2) canonical contract:
 Schema-limit options:
 
 - `maxLineLengthBytes`
+- `maxRetainedSourceTextBytes`
 - `maxStringLength`
 - `maxParameterCount`
 - `maxObjectDepth`
@@ -117,6 +118,7 @@ Schema-limit options:
 Ratified v1 defaults (review decision):
 
 - `maxLineLengthBytes`: `262144` (256 KiB)
+- `maxRetainedSourceTextBytes`: `8388608` (8 MiB)
 - `maxStringLength`: `4096`
 - `maxParameterCount`: `200`
 - `maxObjectDepth`: `8`
