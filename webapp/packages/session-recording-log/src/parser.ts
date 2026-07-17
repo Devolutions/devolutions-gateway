@@ -48,6 +48,59 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function createLineIterator(text: string): Iterable<{ line: string; sourceLineNumber: number }> {
+  return {
+    [Symbol.iterator](): Iterator<{ line: string; sourceLineNumber: number }> {
+      let offset = 0;
+      let sourceLineNumber = 1;
+      let finished = false;
+
+      return {
+        next(): IteratorResult<{ line: string; sourceLineNumber: number }> {
+          if (finished) {
+            return { done: true, value: undefined };
+          }
+
+          if (offset >= text.length) {
+            finished = true;
+            return { done: true, value: undefined };
+          }
+
+          const nextNewLine = text.indexOf('\n', offset);
+          if (nextNewLine === -1) {
+            const line = text.slice(offset).replace(/\r$/, '');
+            finished = true;
+            return {
+              done: false,
+              value: { line, sourceLineNumber },
+            };
+          }
+
+          const line = text.slice(offset, nextNewLine).replace(/\r$/, '');
+          const currentLineNumber = sourceLineNumber;
+          sourceLineNumber += 1;
+          offset = nextNewLine + 1;
+          return {
+            done: false,
+            value: { line, sourceLineNumber: currentLineNumber },
+          };
+        },
+      };
+    },
+  };
+}
+
+function getFinalLineNumber(text: string): number {
+  let lineNumber = 1;
+  for (const character of text) {
+    if (character === '\n') {
+      lineNumber += 1;
+    }
+  }
+
+  return lineNumber;
+}
+
 function exceedsMaxObjectDepth(value: unknown, maxObjectDepth: number): boolean {
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 1 }];
 
@@ -125,7 +178,7 @@ function parseParameters(
     warnings.push(createWarning('entry-limit-exceeded', 'parameter count exceeded max limit', { sourceLineNumber }));
   }
 
-  const output: Record<string, string> = {};
+  const output: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [rawKey, rawValue] of entries.slice(0, maxParameterCount)) {
     let key = rawKey;
     if (rawKey.length > maxStringLength) {
@@ -188,6 +241,10 @@ function parseLineRecord(
     warnings.push(createWarning('invalid-field', 'seq must be a non-negative integer', { sourceLineNumber }));
     return null;
   }
+  if (!Number.isSafeInteger(seq)) {
+    warnings.push(createWarning('invalid-field', 'seq must be a safe integer', { sourceLineNumber }));
+    return null;
+  }
 
   if (options.warnOnInvalidTimestamp && Number.isNaN(Date.parse(timestamp))) {
     warnings.push(createWarning('invalid-field', 'timestamp is not a valid date string', { sourceLineNumber, seq }));
@@ -234,7 +291,7 @@ function parseLineRecord(
     );
   }
 
-  const unknownFields: Record<string, unknown> = {};
+  const unknownFields: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of unknownEntries.slice(0, options.maxUnknownFieldCount)) {
     unknownFields[key] = value;
   }
@@ -271,22 +328,16 @@ export function parseSessionRecordingLog(
   const warnOnInvalidTimestamp = options?.warnOnInvalidTimestamp ?? true;
   let scannedNonEmptyLines = 0;
 
-  const lines = text.split(/\r?\n/);
   const hasTrailingNewline = text.endsWith('\n');
   if (!hasTrailingNewline && text.length > 0) {
     warnings.push(
       createWarning('unterminated-final-line', 'final line does not end with newline', {
-        sourceLineNumber: lines.length,
+        sourceLineNumber: getFinalLineNumber(text),
       }),
     );
   }
 
-  for (const [lineIndex, line] of lines.entries()) {
-    const sourceLineNumber = lineIndex + 1;
-    if (hasTrailingNewline && lineIndex === lines.length - 1 && line.length === 0) {
-      continue;
-    }
-
+  for (const { line, sourceLineNumber } of createLineIterator(text)) {
     if (line.trim().length === 0) {
       continue;
     }

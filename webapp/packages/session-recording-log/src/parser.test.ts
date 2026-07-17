@@ -179,4 +179,37 @@ describe('parseSessionRecordingLog', () => {
       ),
     ).toBe(true);
   });
+
+  it('rejects unsafe sequence integers', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":9007199254740993,"event":"session.action","description":"Unsafe seq"}',
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.entries).toHaveLength(2);
+    expect(
+      result.warnings.some(
+        (warning) => warning.code === 'invalid-field' && warning.message === 'seq must be a safe integer',
+      ),
+    ).toBe(true);
+  });
+
+  it('preserves __proto__ keys in parameters and unknown fields as data', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{"__proto__":"kept"},"__proto__":{"safe":"value"}}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+    const startEntry = result.entries.find((entry) => entry.entry.event === 'session.start');
+
+    expect(startEntry).toBeDefined();
+    expect(startEntry?.entry.parameters?.__proto__).toBe('kept');
+    expect((startEntry?.entry.unknownFields?.__proto__ as { safe?: string } | undefined)?.safe).toBe('value');
+  });
 });
