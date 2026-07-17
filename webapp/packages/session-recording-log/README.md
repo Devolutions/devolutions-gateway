@@ -112,6 +112,7 @@ Schema-limit options:
 - `maxScannedLines`
 - `maxMissingSequenceWarnings`
 - `maxUnknownFieldCount`
+- `maxWarnings`
 
 Ratified v1 defaults (review decision):
 
@@ -123,6 +124,7 @@ Ratified v1 defaults (review decision):
 - `maxScannedLines`: `20000`
 - `maxMissingSequenceWarnings`: `1000`
 - `maxUnknownFieldCount`: `100`
+- `maxWarnings`: `10000`
 - search default limit: `100`
 - search max limit: `1000`
 
@@ -168,7 +170,7 @@ pnpm --filter @devolutions/session-recording-log build
 - Added bounded missing-sequence emission to prevent unbounded gap loops on sparse large `seq` ranges.
 - Replaced recursive depth traversal with iterative depth checks to prevent stack-overflow failure on deeply nested JSON.
 - Added malformed-heavy input bounding with `maxScannedLines`, and finite default `maxParsedEntries`.
-- Fixed empty-log lifecycle classification (`completionState: 'complete'` when no valid entries).
+- Fixed lifecycle classification so only empty/whitespace-only input is `complete`; non-empty input without `session.end` remains `ended-unexpectedly`.
 - Added top-level unknown field cap (`maxUnknownFieldCount`) with `entry-limit-exceeded` warning when truncated.
 - Split unknown future events into explicit `unknown-event-type` warning code.
 - Clarified alias intent: `SessionRecordingLogRecord` is retained for AD historical naming compatibility.
