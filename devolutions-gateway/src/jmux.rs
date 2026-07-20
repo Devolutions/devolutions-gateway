@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
@@ -8,14 +9,23 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
 use transport::{ErasedRead, ErasedWrite};
 
+use crate::config::Conf;
+use crate::credential::{ArcCredentialEntry, CredentialStoreHandle};
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{JmuxTokenClaims, RecordingPolicy};
+use crate::token::{ApplicationProtocol, JmuxTokenClaims, Protocol, RecordingPolicy};
 use crate::traffic_audit::TrafficAuditHandle;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "JMUX coordinates independent transport, session, credential, and audit components"
+)]
 pub async fn handle(
     stream: impl AsyncRead + AsyncWrite + Send + 'static,
     claims: JmuxTokenClaims,
+    conf: Arc<Conf>,
+    client_addr: SocketAddr,
+    credential_store: CredentialStoreHandle,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
@@ -34,11 +44,18 @@ pub async fn handle(
     let config = claims_to_jmux_config(&claims);
     debug!(?config, "JMUX config");
 
+    let credential_entry = match claims.jet_ap {
+        ApplicationProtocol::Known(Protocol::Rdp) => {
+            credential_store.get(claims.jti).filter(|entry| entry.mapping.is_some())
+        }
+        _ => None,
+    };
+
     let session_id = claims.jet_aid;
 
     let info = SessionInfo::builder()
         .id(session_id)
-        .application_protocol(claims.jet_ap)
+        .application_protocol(claims.jet_ap.clone())
         .details(ConnectionModeDetails::Fwd {
             destination_host: main_destination_host,
         })
@@ -48,7 +65,8 @@ pub async fn handle(
 
     let notify_kill = Arc::new(Notify::new());
 
-    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill), None).await?;
+    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info.clone(), Arc::clone(&notify_kill), None)
+        .await?;
 
     let traffic_event_callback = move |event: jmux_proxy::TrafficEvent| {
         let traffic_audit_handle = traffic_audit_handle.clone();
@@ -105,10 +123,22 @@ pub async fn handle(
         });
     };
 
-    let proxy_fut = JmuxProxy::new(reader, writer)
+    let proxy = JmuxProxy::new(reader, writer)
         .with_config(config)
         .with_outgoing_traffic_event_callback(traffic_event_callback)
-        .run();
+        .with_optional_credential_injection(CredentialInjectionContext {
+            application_protocol: claims.jet_ap,
+            credential_entry,
+            conf,
+            client_addr,
+            sessions: sessions.clone(),
+            subscriber_tx: subscriber_tx.clone(),
+            session_info: info,
+            notify_kill: Arc::clone(&notify_kill),
+        });
+
+    let proxy_fut = proxy.run();
+
     let proxy_handle = ChildTask::spawn(proxy_fut);
     let join_fut = proxy_handle.join();
     tokio::pin!(join_fut);
@@ -127,6 +157,87 @@ pub async fn handle(
     crate::session::remove_session_in_progress(&sessions, &subscriber_tx, session_id).await?;
 
     res
+}
+
+struct CredentialInjectionContext {
+    application_protocol: ApplicationProtocol,
+    credential_entry: Option<ArcCredentialEntry>,
+    conf: Arc<Conf>,
+    client_addr: SocketAddr,
+    sessions: SessionMessageSender,
+    subscriber_tx: SubscriberSender,
+    session_info: SessionInfo,
+    notify_kill: Arc<Notify>,
+}
+
+trait JmuxProxyCredentialInjectionExt {
+    fn with_optional_credential_injection(self, context: CredentialInjectionContext) -> Self;
+}
+
+impl JmuxProxyCredentialInjectionExt for JmuxProxy {
+    fn with_optional_credential_injection(self, context: CredentialInjectionContext) -> Self {
+        let CredentialInjectionContext {
+            application_protocol,
+            credential_entry,
+            conf,
+            client_addr,
+            sessions,
+            subscriber_tx,
+            session_info,
+            notify_kill,
+        } = context;
+
+        let Some(credential_entry) = credential_entry else {
+            return self;
+        };
+
+        match application_protocol {
+            ApplicationProtocol::Known(Protocol::Rdp) => {
+                self.with_outgoing_stream_interceptor(move |destination, client_stream, target_stream| {
+                    let server_addr = match target_stream.peer_addr() {
+                        Ok(server_addr) => server_addr,
+                        Err(error) => {
+                            warn!(?error, %destination, "Failed to resolve RDP target address");
+                            return;
+                        }
+                    };
+
+                    let conf = Arc::clone(&conf);
+                    let credential_entry = Arc::clone(&credential_entry);
+                    let sessions = sessions.clone();
+                    let subscriber_tx = subscriber_tx.clone();
+                    let session_info = session_info.clone();
+                    let notify_kill = Arc::clone(&notify_kill);
+                    let server_dns_name = destination.host().to_owned();
+
+                    tokio::spawn(async move {
+                        let result = crate::rdp_proxy::RdpProxy::builder()
+                            .conf(conf)
+                            .session_info(session_info)
+                            .client_stream(client_stream)
+                            .client_addr(client_addr)
+                            .server_stream(target_stream)
+                            .server_addr(server_addr)
+                            .credential_entry(credential_entry)
+                            .client_stream_leftover_bytes(bytes::BytesMut::new())
+                            .sessions(sessions)
+                            .subscriber_tx(subscriber_tx)
+                            .server_dns_name(server_dns_name)
+                            .disconnect_interest(None)
+                            .registered_session_notify_kill(Some(notify_kill))
+                            .build()
+                            .run()
+                            .await;
+
+                        if let Err(error) = result {
+                            warn!(?error, %destination, "RDP credential proxy failed");
+                        }
+                    });
+                })
+            }
+            _ => self,
+        }
+    }
 }
 
 #[doc(hidden)] // Used in tests.

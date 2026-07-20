@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
@@ -8,6 +9,8 @@ use devolutions_gateway_task::ShutdownSignal;
 use tracing::Instrument as _;
 
 use crate::DgwState;
+use crate::config::Conf;
+use crate::credential::CredentialStoreHandle;
 use crate::extract::JmuxToken;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -22,12 +25,16 @@ pub async fn handler(
         shutdown_signal,
         conf_handle,
         traffic_audit_handle,
+        credential_store,
         ..
     }): State<DgwState>,
     JmuxToken(claims): JmuxToken,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
+    let conf = conf_handle.get_conf();
+    let keep_alive_interval = Duration::from_secs(conf.debug.ws_keep_alive_interval);
+
     let response = ws.on_upgrade(move |ws| {
         handle_socket(
             ws,
@@ -36,8 +43,10 @@ pub async fn handler(
             subscriber_tx,
             traffic_audit_handle,
             claims,
+            credential_store,
+            conf,
             source_addr,
-            Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
+            keep_alive_interval,
         )
     });
 
@@ -55,6 +64,8 @@ async fn handle_socket(
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
     claims: JmuxTokenClaims,
+    credential_store: CredentialStoreHandle,
+    conf: Arc<Conf>,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
@@ -64,9 +75,18 @@ async fn handle_socket(
         keep_alive_interval,
     );
 
-    let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx, traffic_audit_handle)
-        .instrument(info_span!("jmux", client = %source_addr))
-        .await;
+    let result = crate::jmux::handle(
+        stream,
+        claims,
+        conf,
+        source_addr,
+        credential_store,
+        sessions,
+        subscriber_tx,
+        traffic_audit_handle,
+    )
+    .instrument(info_span!("jmux", client = %source_addr))
+    .await;
 
     if let Err(error) = result {
         close_handle.server_error("JMUX failure".to_owned()).await;

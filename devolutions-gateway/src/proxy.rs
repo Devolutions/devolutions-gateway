@@ -26,6 +26,8 @@ pub struct Proxy<A, B> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     disconnect_interest: Option<DisconnectInterest>,
+    #[builder(default)]
+    registered_session_notify_kill: Option<Arc<Notify>>,
     #[builder(default = None)]
     buffer_size: Option<usize>,
 }
@@ -81,6 +83,7 @@ where
                 subscriber_tx: self.subscriber_tx,
                 buffer_size: self.buffer_size,
                 disconnect_interest: self.disconnect_interest,
+                registered_session_notify_kill: self.registered_session_notify_kill,
             }
             .forward()
             .await
@@ -94,16 +97,21 @@ where
         let mut transport_b = self.transport_b;
 
         let session_id = self.session_info.id;
-        let notify_kill = Arc::new(Notify::new());
+        let manages_session = self.registered_session_notify_kill.is_none();
+        let notify_kill = self
+            .registered_session_notify_kill
+            .unwrap_or_else(|| Arc::new(Notify::new()));
 
-        crate::session::add_session_in_progress(
-            &self.sessions,
-            &self.subscriber_tx,
-            self.session_info,
-            Arc::clone(&notify_kill),
-            self.disconnect_interest,
-        )
-        .await?;
+        if manages_session {
+            crate::session::add_session_in_progress(
+                &self.sessions,
+                &self.subscriber_tx,
+                self.session_info,
+                Arc::clone(&notify_kill),
+                self.disconnect_interest,
+            )
+            .await?;
+        }
 
         let kill_notified = notify_kill.notified();
 
@@ -127,7 +135,9 @@ where
         // Ensure we close the transports cleanly at the end (ignore errors at this point)
         let _ = tokio::join!(transport_a.shutdown(), transport_b.shutdown());
 
-        crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
+        if manages_session {
+            crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
+        }
 
         match res {
             Ok(()) => {

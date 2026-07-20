@@ -9,6 +9,7 @@ use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_pdu::{mcs, nego, x224};
 use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::sync::Notify;
 use typed_builder::TypedBuilder;
 
 use crate::api::kdc_proxy::send_krb_message;
@@ -33,6 +34,8 @@ pub struct RdpProxy<C, S> {
     subscriber_tx: SubscriberSender,
     server_dns_name: String,
     disconnect_interest: Option<DisconnectInterest>,
+    #[builder(default)]
+    registered_session_notify_kill: Option<Arc<Notify>>,
 }
 
 impl<A, B> RdpProxy<A, B>
@@ -64,6 +67,7 @@ where
         subscriber_tx,
         server_dns_name,
         disconnect_interest,
+        registered_session_notify_kill,
     } = proxy;
 
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
@@ -228,6 +232,7 @@ where
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
         .disconnect_interest(disconnect_interest)
+        .registered_session_notify_kill(registered_session_notify_kill)
         .build()
         .select_dissector_and_forward()
         .await
