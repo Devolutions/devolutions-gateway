@@ -11,6 +11,7 @@ use transport::{ErasedRead, ErasedWrite};
 
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
+use crate::proxy::SessionLifecycle;
 use crate::rdp_credential_injection::RdpCredentialInjection;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
@@ -136,8 +137,9 @@ pub async fn handle(
             .credential_entry(credential_entry)
             .sessions(sessions.clone())
             .subscriber_tx(subscriber_tx.clone())
-            .disconnect_interest(None)
-            .session_notify_kill(Some(Arc::clone(&notify_kill)))
+            .session_lifecycle(SessionLifecycle::AlreadyRegistered {
+                notify_kill: Arc::clone(&notify_kill),
+            })
             .build();
 
         proxy.with_outgoing_stream_handler(credential_injection)

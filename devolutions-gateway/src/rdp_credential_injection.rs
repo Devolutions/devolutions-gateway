@@ -11,14 +11,13 @@ use jmux_proxy::{DestinationUrl, OutgoingStreamFuture, OutgoingStreamHandler};
 use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::net::TcpStream;
-use tokio::sync::Notify;
 use typed_builder::TypedBuilder;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
-use crate::proxy::Proxy;
-use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
+use crate::proxy::{Proxy, SessionLifecycle};
+use crate::session::{SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 
@@ -30,9 +29,18 @@ pub struct RdpCredentialInjection {
     credential_entry: ArcCredentialEntry,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    disconnect_interest: Option<DisconnectInterest>,
-    #[builder(default)]
-    session_notify_kill: Option<Arc<Notify>>,
+    session_lifecycle: SessionLifecycle,
+}
+
+pub(crate) struct PreparedCredsspMitm<C: Send, S: Send> {
+    pub(crate) client_stream: ironrdp_tokio::MovableTokioFramed<C>,
+    pub(crate) target_stream: ironrdp_tokio::MovableTokioFramed<S>,
+    pub(crate) client_security_protocol: nego::SecurityProtocol,
+    pub(crate) target_security_protocol: nego::SecurityProtocol,
+    pub(crate) gateway_public_key: Vec<u8>,
+    pub(crate) target_public_key: Vec<u8>,
+    pub(crate) target_name: String,
+    pub(crate) target_addr: SocketAddr,
 }
 
 impl OutgoingStreamHandler for RdpCredentialInjection {
@@ -61,7 +69,7 @@ impl OutgoingStreamHandler for RdpCredentialInjection {
 }
 
 impl RdpCredentialInjection {
-    #[instrument("rdp_credential_injection", skip_all, fields(session_id = self.session_info.id.to_string(), target = server_addr.to_string()))]
+    #[instrument("rdp_credential_injection", skip_all, fields(session_id = %self.session_info.id, target = %server_addr))]
     pub async fn run<C, S>(
         self,
         client_stream: C,
@@ -74,21 +82,14 @@ impl RdpCredentialInjection {
         C: AsyncRead + AsyncWrite + Unpin + Send,
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
-        let Self {
-            conf,
-            session_info,
-            client_addr,
-            credential_entry,
-            sessions,
-            subscriber_tx,
-            disconnect_interest,
-            session_notify_kill,
-        } = self;
+        let tls_conf = self.conf.credssp_tls.get().context("CredSSP TLS configuration")?;
+        let gateway_hostname = self.conf.hostname.clone();
 
-        let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
-        let gateway_hostname = conf.hostname.clone();
-
-        let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
+        let credential_mapping = self
+            .credential_entry
+            .mapping
+            .as_ref()
+            .context("no credential mapping")?;
 
         // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
 
@@ -126,10 +127,51 @@ impl RdpCredentialInjection {
         let gateway_public_key = crate::tls::extract_public_key(gateway_cert_chain.first().context("no leaf")?)
             .context("extract Gateway public key")?;
 
-        // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
+        let client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
+        let server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-        let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
-        let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
+        self.credssp_mitm_and_forward(PreparedCredsspMitm {
+            client_stream: client_framed,
+            target_stream: server_framed,
+            client_security_protocol: handshake_result.client_security_protocol,
+            target_security_protocol: handshake_result.server_security_protocol,
+            gateway_public_key,
+            target_public_key: server_public_key,
+            target_name: server_dns_name,
+            target_addr: server_addr,
+        })
+        .await
+    }
+
+    pub(crate) async fn credssp_mitm_and_forward<C, S>(self, prepared: PreparedCredsspMitm<C, S>) -> anyhow::Result<()>
+    where
+        C: AsyncRead + AsyncWrite + Unpin + Send,
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        let Self {
+            conf,
+            session_info,
+            client_addr,
+            credential_entry,
+            sessions,
+            subscriber_tx,
+            session_lifecycle,
+        } = self;
+        let PreparedCredsspMitm {
+            mut client_stream,
+            mut target_stream,
+            client_security_protocol,
+            target_security_protocol,
+            gateway_public_key,
+            target_public_key,
+            target_name,
+            target_addr,
+        } = prepared;
+
+        let gateway_hostname = conf.hostname.clone();
+        let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
+
+        // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
 
         let krb_server_config = if conf.debug.enable_unstable
             && let Some(crate::config::dto::KerberosConfig {
@@ -176,10 +218,10 @@ impl RdpCredentialInjection {
         };
 
         let client_credssp_fut = perform_credssp_with_client(
-            &mut client_framed,
+            &mut client_stream,
             client_addr.ip(),
             gateway_public_key,
-            handshake_result.client_security_protocol,
+            client_security_protocol,
             &credential_mapping.proxy,
             krb_server_config,
         );
@@ -199,10 +241,10 @@ impl RdpCredentialInjection {
         };
 
         let server_credssp_fut = perform_credssp_with_server(
-            &mut server_framed,
-            server_dns_name,
-            server_public_key,
-            handshake_result.server_security_protocol,
+            &mut target_stream,
+            target_name,
+            target_public_key,
+            target_security_protocol,
             &credential_mapping.target,
             krb_client_config,
         );
@@ -213,15 +255,10 @@ impl RdpCredentialInjection {
 
         // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
-        intercept_connect_confirm(
-            &mut client_framed,
-            &mut server_framed,
-            handshake_result.server_security_protocol,
-        )
-        .await?;
+        intercept_connect_confirm(&mut client_stream, &mut target_stream, target_security_protocol).await?;
 
-        let (mut client_stream, client_leftover) = client_framed.into_inner();
-        let (mut server_stream, server_leftover) = server_framed.into_inner();
+        let (mut client_stream, client_leftover) = client_stream.into_inner();
+        let (mut server_stream, server_leftover) = target_stream.into_inner();
 
         // -- At this point, proceed to the usual two-way forwarding -- //
 
@@ -242,12 +279,11 @@ impl RdpCredentialInjection {
             .session_info(session_info)
             .address_a(client_addr)
             .transport_a(client_stream)
-            .address_b(server_addr)
+            .address_b(target_addr)
             .transport_b(server_stream)
             .sessions(sessions)
             .subscriber_tx(subscriber_tx)
-            .disconnect_interest(disconnect_interest)
-            .registered_session_notify_kill(session_notify_kill)
+            .session_lifecycle(session_lifecycle)
             .build()
             .select_dissector_and_forward()
             .await

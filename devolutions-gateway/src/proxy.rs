@@ -15,6 +15,16 @@ use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
 
+#[derive(Clone)]
+pub(crate) enum SessionLifecycle {
+    Managed {
+        disconnect_interest: Option<DisconnectInterest>,
+    },
+    AlreadyRegistered {
+        notify_kill: Arc<Notify>,
+    },
+}
+
 #[derive(TypedBuilder)]
 pub struct Proxy<A, B> {
     conf: Arc<Conf>,
@@ -25,9 +35,7 @@ pub struct Proxy<A, B> {
     address_b: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    disconnect_interest: Option<DisconnectInterest>,
-    #[builder(default)]
-    registered_session_notify_kill: Option<Arc<Notify>>,
+    session_lifecycle: SessionLifecycle,
     #[builder(default = None)]
     buffer_size: Option<usize>,
 }
@@ -82,8 +90,7 @@ where
                 sessions: self.sessions,
                 subscriber_tx: self.subscriber_tx,
                 buffer_size: self.buffer_size,
-                disconnect_interest: self.disconnect_interest,
-                registered_session_notify_kill: self.registered_session_notify_kill,
+                session_lifecycle: self.session_lifecycle,
             }
             .forward()
             .await
@@ -97,10 +104,10 @@ where
         let mut transport_b = self.transport_b;
 
         let session_id = self.session_info.id;
-        let manages_session = self.registered_session_notify_kill.is_none();
-        let notify_kill = self
-            .registered_session_notify_kill
-            .unwrap_or_else(|| Arc::new(Notify::new()));
+        let (manages_session, notify_kill, disconnect_interest) = match self.session_lifecycle {
+            SessionLifecycle::Managed { disconnect_interest } => (true, Arc::new(Notify::new()), disconnect_interest),
+            SessionLifecycle::AlreadyRegistered { notify_kill } => (false, notify_kill, None),
+        };
 
         if manages_session {
             crate::session::add_session_in_progress(
@@ -108,7 +115,7 @@ where
                 &self.subscriber_tx,
                 self.session_info,
                 Arc::clone(&notify_kill),
-                self.disconnect_interest,
+                disconnect_interest,
             )
             .await?;
         }

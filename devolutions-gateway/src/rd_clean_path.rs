@@ -3,10 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use ironrdp_connector::sspi;
 use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
-use secrecy::ExposeSecret as _;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -14,7 +12,8 @@ use tracing::field;
 
 use crate::config::Conf;
 use crate::credential::{CredentialEntry, CredentialStoreHandle};
-use crate::proxy::Proxy;
+use crate::proxy::{Proxy, SessionLifecycle};
+use crate::rdp_credential_injection::{PreparedCredsspMitm, RdpCredentialInjection};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
@@ -292,8 +291,6 @@ async fn handle_with_credential_injection(
 
     let gateway_hostname = conf.hostname.clone();
 
-    let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
-
     let x224_req = cleanpath_pdu
         .x224_connection_pdu
         .as_ref()
@@ -380,120 +377,9 @@ async fn handle_with_credential_injection(
     send_clean_path_response(&mut client_stream, &rd_clean_path_rsp).await?;
     debug!("RDCleanPath response sent, now performing CredSSP MITM");
 
-    // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
+    let client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
+    let server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
-
-    let krb_server_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server:
-                crate::config::dto::KerberosServer {
-                    max_time_skew,
-                    ticket_decryption_key,
-                    service_user,
-                    ..
-                },
-            kdc_url: _,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        let user = service_user.as_ref().map(|user| {
-            let crate::config::dto::DomainUser {
-                fqdn,
-                password,
-                salt: _,
-            } = user;
-
-            // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
-                fqdn,
-                "",
-                password.expose_secret(),
-            ))
-        });
-
-        Some(sspi::KerberosServerConfig {
-            kerberos_config: sspi::KerberosConfig {
-                // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
-                kdc_url: None,
-                client_computer_name: Some(client_addr.to_string()),
-            },
-            server_properties: sspi::kerberos::ServerProperties::new(
-                &["TERMSRV", &gateway_hostname],
-                user,
-                std::time::Duration::from_secs(*max_time_skew),
-                ticket_decryption_key.clone(),
-            )?,
-        })
-    } else {
-        None
-    };
-
-    let client_credssp_fut = crate::rdp_credential_injection::perform_credssp_with_client(
-        &mut client_framed,
-        client_addr.ip(),
-        gateway_public_key,
-        client_security_protocol,
-        &credential_mapping.proxy,
-        krb_server_config,
-    );
-
-    let krb_client_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server: _,
-            kdc_url,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: kdc_url.clone(),
-            hostname: Some(gateway_hostname.clone()),
-        })
-    } else {
-        None
-    };
-
-    let server_credssp_fut = crate::rdp_credential_injection::perform_credssp_with_server(
-        &mut server_framed,
-        destination.host().to_owned(),
-        server_public_key,
-        server_security_protocol,
-        &credential_mapping.target,
-        krb_client_config,
-    );
-
-    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_credssp_res.context("CredSSP with client")?;
-    server_credssp_res.context("CredSSP with server")?;
-
-    debug!("CredSSP MITM completed successfully");
-
-    // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
-
-    crate::rdp_credential_injection::intercept_connect_confirm(
-        &mut client_framed,
-        &mut server_framed,
-        server_security_protocol,
-    )
-    .await?;
-
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
-
-    // -- At this point, proceed to the usual two-way forwarding -- //
-
-    info!("RDP-TLS forwarding (credential injection)");
-
-    client_stream
-        .write_all(&server_leftover)
-        .await
-        .context("write server leftover to client")?;
-
-    server_stream
-        .write_all(&client_leftover)
-        .await
-        .context("write client leftover to server")?;
-
-    // Build SessionInfo for forwarding
     let info = SessionInfo::builder()
         .id(claims.jet_aid)
         .application_protocol(claims.jet_ap)
@@ -505,23 +391,28 @@ async fn handle_with_credential_injection(
         .filtering_policy(claims.jet_flt)
         .build();
 
-    let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
-
-    // Plain forwarding for now
-    Proxy::builder()
+    RdpCredentialInjection::builder()
         .conf(conf)
         .session_info(info)
-        .address_a(client_addr)
-        .transport_a(client_stream)
-        .address_b(server_addr)
-        .transport_b(server_stream)
+        .client_addr(client_addr)
+        .credential_entry(credential_entry)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .disconnect_interest(disconnect_interest)
+        .session_lifecycle(SessionLifecycle::Managed {
+            disconnect_interest: DisconnectInterest::from_reconnection_policy(claims.jet_reuse),
+        })
         .build()
-        .select_dissector_and_forward()
+        .credssp_mitm_and_forward(PreparedCredsspMitm {
+            client_stream: client_framed,
+            target_stream: server_framed,
+            client_security_protocol,
+            target_security_protocol: server_security_protocol,
+            gateway_public_key,
+            target_public_key: server_public_key,
+            target_name: destination.host().to_owned(),
+            target_addr: server_addr,
+        })
         .await
-        .context("proxy failed")
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -645,7 +536,9 @@ pub async fn handle(
         .transport_b(server_stream)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+        .session_lifecycle(SessionLifecycle::Managed {
+            disconnect_interest: DisconnectInterest::from_reconnection_policy(claims.jet_reuse),
+        })
         .build()
         .select_dissector_and_forward()
         .await

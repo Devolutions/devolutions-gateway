@@ -6,11 +6,7 @@ use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf, ReadHalf, WriteHal
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
-/// The stream a JMUX channel forwards its payload over.
-///
-/// `Direct` is the common path: a concrete TCP socket split cheaply into owned halves. `Handled`
-/// exists only when an [`crate::OutgoingStreamHandler`] took the channel over — it is the JMUX side
-/// of the in-memory pipe shared with that handler.
+/// Preserves the TCP fast path while supporting handler-backed duplex streams.
 pub(crate) enum ChannelStream {
     Direct(TcpStream),
     Handled(DuplexStream),

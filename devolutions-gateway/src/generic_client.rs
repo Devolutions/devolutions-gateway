@@ -8,7 +8,7 @@ use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
-use crate::proxy::Proxy;
+use crate::proxy::{Proxy, SessionLifecycle};
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
@@ -149,7 +149,7 @@ where
                                 .sessions(sessions)
                                 .subscriber_tx(subscriber_tx)
                                 .credential_entry(entry)
-                                .disconnect_interest(disconnect_interest)
+                                .session_lifecycle(SessionLifecycle::Managed { disconnect_interest })
                                 .build()
                                 .run(
                                     client_stream,
@@ -180,7 +180,7 @@ where
                     .transport_b(server_stream)
                     .sessions(sessions)
                     .subscriber_tx(subscriber_tx)
-                    .disconnect_interest(disconnect_interest)
+                    .session_lifecycle(SessionLifecycle::Managed { disconnect_interest })
                     .build()
                     .select_dissector_and_forward()
                     .await

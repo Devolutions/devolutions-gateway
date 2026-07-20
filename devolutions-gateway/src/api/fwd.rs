@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::config::Conf;
 use crate::extract::{AssociationToken, BridgeToken};
 use crate::http::HttpError;
-use crate::proxy::Proxy;
+use crate::proxy::{Proxy, SessionLifecycle};
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
@@ -273,7 +273,9 @@ where
                 .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
                 .buffer_size(buffer_size)
-                .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+                .session_lifecycle(SessionLifecycle::Managed {
+                    disconnect_interest: DisconnectInterest::from_reconnection_policy(claims.jet_reuse),
+                })
                 .build()
                 .select_dissector_and_forward()
                 .await
@@ -303,7 +305,9 @@ where
                 .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
                 .buffer_size(buffer_size)
-                .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+                .session_lifecycle(SessionLifecycle::Managed {
+                    disconnect_interest: DisconnectInterest::from_reconnection_policy(claims.jet_reuse),
+                })
                 .build()
                 .select_dissector_and_forward()
                 .await
@@ -490,7 +494,9 @@ async fn fwd_http(
                     .transport_b(server_stream)
                     .sessions(sessions)
                     .subscriber_tx(subscriber_tx)
-                    .disconnect_interest(None)
+                    .session_lifecycle(SessionLifecycle::Managed {
+                        disconnect_interest: None,
+                    })
                     .build()
                     .select_dissector_and_forward()
                     .instrument(span.clone())

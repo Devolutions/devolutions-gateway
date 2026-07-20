@@ -38,17 +38,7 @@ use self::id_allocator::IdAllocator;
 type StreamHandler = Arc<dyn OutgoingStreamHandler>;
 pub type OutgoingStreamFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 
-/// Hands a single resolved outgoing channel off to the caller instead of forwarding it internally.
-///
-/// This is a generic, protocol-agnostic extension point: JMUX does not know or care what the
-/// handler does. When one is registered, each resolved channel is bridged through an in-memory
-/// pipe. The handler gets one end (`channel_stream`, carrying the raw JMUX channel payload) plus
-/// the freshly connected `target_stream`, and owns everything between them — plain relaying,
-/// inspection, or a full man-in-the-middle that terminates some protocol on each side. JMUX keeps
-/// pumping the other end of the pipe as if it were a normal target socket.
-///
-/// Channels with no handler registered are forwarded directly over the concrete [`TcpStream`] and
-/// pay none of the pipe's cost.
+/// Handles a resolved stream pair for the lifetime of the returned future.
 pub trait OutgoingStreamHandler: Send + Sync + 'static {
     fn handle(
         &self,
