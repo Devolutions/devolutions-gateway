@@ -524,7 +524,7 @@ dependencies = [
  "sha1 0.10.7",
  "sync_wrapper 1.0.2",
  "tokio 1.52.3",
- "tokio-tungstenite 0.29.0",
+ "tokio-tungstenite",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
@@ -1515,7 +1515,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.118",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1770,7 +1770,7 @@ dependencies = [
  "tokio 1.52.3",
  "tokio-rustls",
  "tokio-test",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "tower 0.5.3",
  "tower-http 0.5.2",
  "tracing",
@@ -2228,7 +2228,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2534,7 +2534,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
+ "windows-link 0.1.3",
  "windows-result 0.4.1",
 ]
 
@@ -3041,7 +3041,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite 0.2.17",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio 1.52.3",
  "tower-service",
@@ -3569,7 +3569,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3663,7 +3663,7 @@ dependencies = [
  "sysinfo",
  "tinyjson",
  "tokio 1.52.3",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -4642,7 +4642,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5795,7 +5795,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls 0.23.42",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio 1.52.3",
  "tracing",
@@ -5835,9 +5835,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6334,7 +6334,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6434,7 +6434,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6962,7 +6962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7234,7 +7234,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7261,7 +7261,7 @@ dependencies = [
  "portpicker",
  "proptest",
  "tokio 1.52.3",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "transport",
 ]
 
@@ -7291,7 +7291,7 @@ dependencies = [
  "test-utils",
  "tokio 1.52.3",
  "tokio-rustls",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "tokio-util",
  "typed-builder",
 ]
@@ -7581,9 +7581,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.26.2"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
@@ -7594,18 +7594,6 @@ dependencies = [
  "tokio 1.52.3",
  "tokio-native-tls",
  "tokio-rustls",
- "tungstenite 0.26.2",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
-dependencies = [
- "futures-util",
- "log",
- "tokio 1.52.3",
  "tungstenite 0.29.0",
 ]
 
@@ -8137,10 +8125,7 @@ dependencies = [
  "http 1.4.2",
  "httparse",
  "log",
- "native-tls",
  "rand 0.9.5",
- "rustls 0.23.42",
- "rustls-pki-types",
  "sha1 0.10.7",
  "thiserror 2.0.18",
  "utf-8",
@@ -8157,7 +8142,10 @@ dependencies = [
  "http 1.4.2",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.9.5",
+ "rustls 0.23.42",
+ "rustls-pki-types",
  "sha1 0.10.7",
  "thiserror 2.0.18",
 ]
@@ -8403,7 +8391,7 @@ dependencies = [
  "num_cpus",
  "thiserror 2.0.18",
  "tokio 1.52.3",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -8699,7 +8687,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
