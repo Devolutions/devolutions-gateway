@@ -10,7 +10,8 @@ use tokio::sync::Notify;
 use transport::{ErasedRead, ErasedWrite};
 
 use crate::config::Conf;
-use crate::credential::{ArcCredentialEntry, CredentialStoreHandle};
+use crate::credential::CredentialStoreHandle;
+use crate::rdp_credential_injection::RdpCredentialInjection;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, JmuxTokenClaims, Protocol, RecordingPolicy};
@@ -125,17 +126,24 @@ pub async fn handle(
 
     let proxy = JmuxProxy::new(reader, writer)
         .with_config(config)
-        .with_outgoing_traffic_event_callback(traffic_event_callback)
-        .with_optional_credential_injection(CredentialInjectionContext {
-            application_protocol: claims.jet_ap,
-            credential_entry,
-            conf,
-            client_addr,
-            sessions: sessions.clone(),
-            subscriber_tx: subscriber_tx.clone(),
-            session_info: info,
-            notify_kill: Arc::clone(&notify_kill),
-        });
+        .with_outgoing_traffic_event_callback(traffic_event_callback);
+
+    let proxy = if let Some(credential_entry) = credential_entry {
+        let credential_injection = RdpCredentialInjection::builder()
+            .conf(conf)
+            .session_info(info)
+            .client_addr(client_addr)
+            .credential_entry(credential_entry)
+            .sessions(sessions.clone())
+            .subscriber_tx(subscriber_tx.clone())
+            .disconnect_interest(None)
+            .session_notify_kill(Some(Arc::clone(&notify_kill)))
+            .build();
+
+        proxy.with_outgoing_stream_handler(credential_injection)
+    } else {
+        proxy
+    };
 
     let proxy_fut = proxy.run();
 
@@ -157,87 +165,6 @@ pub async fn handle(
     crate::session::remove_session_in_progress(&sessions, &subscriber_tx, session_id).await?;
 
     res
-}
-
-struct CredentialInjectionContext {
-    application_protocol: ApplicationProtocol,
-    credential_entry: Option<ArcCredentialEntry>,
-    conf: Arc<Conf>,
-    client_addr: SocketAddr,
-    sessions: SessionMessageSender,
-    subscriber_tx: SubscriberSender,
-    session_info: SessionInfo,
-    notify_kill: Arc<Notify>,
-}
-
-trait JmuxProxyCredentialInjectionExt {
-    fn with_optional_credential_injection(self, context: CredentialInjectionContext) -> Self;
-}
-
-impl JmuxProxyCredentialInjectionExt for JmuxProxy {
-    fn with_optional_credential_injection(self, context: CredentialInjectionContext) -> Self {
-        let CredentialInjectionContext {
-            application_protocol,
-            credential_entry,
-            conf,
-            client_addr,
-            sessions,
-            subscriber_tx,
-            session_info,
-            notify_kill,
-        } = context;
-
-        let Some(credential_entry) = credential_entry else {
-            return self;
-        };
-
-        match application_protocol {
-            ApplicationProtocol::Known(Protocol::Rdp) => {
-                self.with_outgoing_stream_interceptor(move |destination, client_stream, target_stream| {
-                    let server_addr = match target_stream.peer_addr() {
-                        Ok(server_addr) => server_addr,
-                        Err(error) => {
-                            warn!(?error, %destination, "Failed to resolve RDP target address");
-                            return;
-                        }
-                    };
-
-                    let conf = Arc::clone(&conf);
-                    let credential_entry = Arc::clone(&credential_entry);
-                    let sessions = sessions.clone();
-                    let subscriber_tx = subscriber_tx.clone();
-                    let session_info = session_info.clone();
-                    let notify_kill = Arc::clone(&notify_kill);
-                    let server_dns_name = destination.host().to_owned();
-
-                    tokio::spawn(async move {
-                        let result = crate::rdp_proxy::RdpProxy::builder()
-                            .conf(conf)
-                            .session_info(session_info)
-                            .client_stream(client_stream)
-                            .client_addr(client_addr)
-                            .server_stream(target_stream)
-                            .server_addr(server_addr)
-                            .credential_entry(credential_entry)
-                            .client_stream_leftover_bytes(bytes::BytesMut::new())
-                            .sessions(sessions)
-                            .subscriber_tx(subscriber_tx)
-                            .server_dns_name(server_dns_name)
-                            .disconnect_interest(None)
-                            .registered_session_notify_kill(Some(notify_kill))
-                            .build()
-                            .run()
-                            .await;
-
-                        if let Err(error) = result {
-                            warn!(?error, %destination, "RDP credential proxy failed");
-                        }
-                    });
-                })
-            }
-            _ => self,
-        }
-    }
 }
 
 #[doc(hidden)] // Used in tests.

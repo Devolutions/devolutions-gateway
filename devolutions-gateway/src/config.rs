@@ -1808,7 +1808,7 @@ pub mod dto {
             match self {
                 VerbosityProfile::Default => "info",
                 VerbosityProfile::Debug => {
-                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace,job_queue=trace,job_queue_libsql=trace,traffic_audit=trace,traffic_audit_libsql=trace,devolutions_gateway::rdp_proxy=trace"
+                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace,job_queue=trace,job_queue_libsql=trace,traffic_audit=trace,traffic_audit_libsql=trace,devolutions_gateway::rdp_credential_injection=trace"
                 }
                 VerbosityProfile::Tls => {
                     "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"

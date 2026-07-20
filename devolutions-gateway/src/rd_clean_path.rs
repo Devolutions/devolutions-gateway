@@ -429,7 +429,7 @@ async fn handle_with_credential_injection(
         None
     };
 
-    let client_credssp_fut = crate::rdp_proxy::perform_credssp_with_client(
+    let client_credssp_fut = crate::rdp_credential_injection::perform_credssp_with_client(
         &mut client_framed,
         client_addr.ip(),
         gateway_public_key,
@@ -452,7 +452,7 @@ async fn handle_with_credential_injection(
         None
     };
 
-    let server_credssp_fut = crate::rdp_proxy::perform_credssp_with_server(
+    let server_credssp_fut = crate::rdp_credential_injection::perform_credssp_with_server(
         &mut server_framed,
         destination.host().to_owned(),
         server_public_key,
@@ -469,8 +469,12 @@ async fn handle_with_credential_injection(
 
     // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
-    crate::rdp_proxy::intercept_connect_confirm(&mut client_framed, &mut server_framed, server_security_protocol)
-        .await?;
+    crate::rdp_credential_injection::intercept_connect_confirm(
+        &mut client_framed,
+        &mut server_framed,
+        server_security_protocol,
+    )
+    .await?;
 
     let (mut client_stream, client_leftover) = client_framed.into_inner();
     let (mut server_stream, server_leftover) = server_framed.into_inner();
@@ -541,7 +545,6 @@ pub async fn handle(
         .await
         .context("couldn't read cleanpath PDU")?;
 
-    // Early credential detection: check if we should use RdpProxy instead.
     let token = cleanpath_pdu
         .proxy_auth
         .as_deref()
@@ -556,7 +559,7 @@ pub async fn handle(
         .filter(|entry| entry.mapping.is_some())
     {
         anyhow::ensure!(token == entry.token, "token mismatch");
-        debug!("Switching to RdpProxy for credential injection (WebSocket)");
+        debug!("Switching to RDP credential injection (WebSocket)");
 
         return handle_with_credential_injection(
             client_stream,

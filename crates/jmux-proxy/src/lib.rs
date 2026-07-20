@@ -5,6 +5,7 @@
 #[macro_use]
 extern crate tracing;
 
+mod channel_stream;
 mod codec;
 mod config;
 mod event;
@@ -12,7 +13,9 @@ mod id_allocator;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -20,23 +23,40 @@ use std::time::SystemTime;
 use anyhow::Context as _;
 use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
+use self::channel_stream::{ChannelReader, ChannelStream, ChannelWriter};
 use self::codec::JmuxCodec;
 use self::event::TrafficCallback;
 use self::id_allocator::IdAllocator;
 
-trait AsyncStream: AsyncRead + AsyncWrite + std::fmt::Debug {}
+type StreamHandler = Arc<dyn OutgoingStreamHandler>;
+pub type OutgoingStreamFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 
-impl<T: AsyncRead + AsyncWrite + std::fmt::Debug> AsyncStream for T {}
-
-type ErasedStream = Box<dyn AsyncStream + Send + Sync + Unpin>;
-type StreamInterceptor = Arc<dyn Fn(DestinationUrl, DuplexStream, TcpStream) + Send + Sync>;
+/// Hands a single resolved outgoing channel off to the caller instead of forwarding it internally.
+///
+/// This is a generic, protocol-agnostic extension point: JMUX does not know or care what the
+/// handler does. When one is registered, each resolved channel is bridged through an in-memory
+/// pipe. The handler gets one end (`channel_stream`, carrying the raw JMUX channel payload) plus
+/// the freshly connected `target_stream`, and owns everything between them — plain relaying,
+/// inspection, or a full man-in-the-middle that terminates some protocol on each side. JMUX keeps
+/// pumping the other end of the pipe as if it were a normal target socket.
+///
+/// Channels with no handler registered are forwarded directly over the concrete [`TcpStream`] and
+/// pay none of the pipe's cost.
+pub trait OutgoingStreamHandler: Send + Sync + 'static {
+    fn handle(
+        &self,
+        destination: DestinationUrl,
+        channel_stream: DuplexStream,
+        target_stream: TcpStream,
+    ) -> OutgoingStreamFuture;
+}
 
 #[rustfmt::skip]
 pub use jmux_proto::DestinationUrl;
@@ -89,7 +109,7 @@ pub struct JmuxProxy {
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     traffic_callback: Option<TrafficCallback>,
-    stream_interceptor: Option<StreamInterceptor>,
+    stream_handler: Option<StreamHandler>,
 }
 
 impl JmuxProxy {
@@ -104,7 +124,7 @@ impl JmuxProxy {
             jmux_reader,
             jmux_writer,
             traffic_callback: None,
-            stream_interceptor: None,
+            stream_handler: None,
         }
     }
 
@@ -181,11 +201,11 @@ impl JmuxProxy {
     }
 
     #[must_use]
-    pub fn with_outgoing_stream_interceptor<C>(mut self, interceptor: C) -> Self
+    pub fn with_outgoing_stream_handler<H>(mut self, handler: H) -> Self
     where
-        C: Fn(DestinationUrl, DuplexStream, TcpStream) + Send + Sync + 'static,
+        H: OutgoingStreamHandler,
     {
-        self.stream_interceptor = Some(Arc::new(interceptor));
+        self.stream_handler = Some(Arc::new(handler));
         self
     }
 
@@ -202,7 +222,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_reader,
         jmux_writer,
         traffic_callback,
-        stream_interceptor,
+        stream_handler,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -223,7 +243,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         msg_to_send_tx,
         api_request_rx,
         traffic_callback,
-        stream_interceptor,
+        stream_handler,
         parent_span: span,
     }
     .spawn();
@@ -284,6 +304,7 @@ struct JmuxChannelCtx {
     bytes_rx: Arc<AtomicU64>,
     /// Whether the callback was called and the event emitted.
     audit_emitted: Arc<AtomicBool>,
+    stream_handler_task: Option<ChildTask<()>>,
 }
 
 struct JmuxCtx {
@@ -362,7 +383,6 @@ type DataReceiver = mpsc::Receiver<Bytes>;
 type DataSender = mpsc::Sender<Bytes>;
 type InternalMessageSender = mpsc::Sender<InternalMessage>;
 
-#[derive(Debug)]
 enum InternalMessage {
     Eof {
         id: LocalChannelId,
@@ -371,7 +391,8 @@ enum InternalMessage {
         // Boxing reduces enum size from 224 bytes to ~16 bytes
         // (clippy::large_enum_variant)
         channel: Box<JmuxChannelCtx>,
-        stream: ErasedStream,
+        stream: ChannelStream,
+        stream_handler: Option<OutgoingStreamFuture>,
     },
     AbnormalTermination {
         id: LocalChannelId,
@@ -442,7 +463,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
     traffic_callback: Option<TrafficCallback>,
-    stream_interceptor: Option<StreamInterceptor>,
+    stream_handler: Option<StreamHandler>,
     parent_span: Span,
 }
 
@@ -464,7 +485,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         msg_to_send_tx,
         mut api_request_rx,
         traffic_callback,
-        stream_interceptor,
+        stream_handler,
         parent_span,
     } = task;
 
@@ -518,8 +539,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             error!(%error, "Couldn't send leftover bytes");
                         }
 
-                        let stream: ErasedStream = Box::new(stream);
-                        let (reader, writer) = tokio::io::split(stream);
+                        let (reader, writer) = ChannelStream::Direct(stream).into_split();
 
                         DataWriterTask {
                             writer,
@@ -614,7 +634,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         });
                     }
                     InternalMessage::StreamResolved {
-                        channel, stream
+                        channel, stream, stream_handler
                     } => {
                         let channel = *channel; // Unbox
                         let local_id = channel.local_id;
@@ -644,7 +664,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!("Channel accepted");
                         });
 
-                        let (reader, writer) = tokio::io::split(stream);
+                        let (reader, writer) = stream.into_split();
 
                         DataWriterTask {
                             writer,
@@ -667,8 +687,28 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                             bytes_rx,
                         }
-                        .spawn(channel_span)
+                        .spawn(channel_span.clone())
                         .detach();
+
+                        if let Some(stream_handler) = stream_handler {
+                            let internal_msg_tx = internal_msg_tx.clone();
+                            let stream_handler_task = ChildTask(tokio::spawn(
+                                async move {
+                                    if let Err(error) = stream_handler.await {
+                                        warn!(?error, channel.id = %local_id, "Outgoing stream handler failed");
+                                        let _ = internal_msg_tx
+                                            .send(InternalMessage::AbnormalTermination { id: local_id })
+                                            .await;
+                                    }
+                                }
+                                .instrument(channel_span),
+                            ));
+
+                            let channel = jmux_ctx
+                                .get_channel_mut(local_id)
+                                .expect("stream handler channel is registered");
+                            channel.stream_handler_task = Some(stream_handler_task);
+                        }
                     }
                 }
             }
@@ -770,6 +810,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             bytes_tx: Arc::new(AtomicU64::new(0)),
                             bytes_rx: Arc::new(AtomicU64::new(0)),
                             audit_emitted: Arc::new(AtomicBool::new(false)),
+                            stream_handler_task: None,
                         };
 
                         StreamResolverTask {
@@ -778,7 +819,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             traffic_callback: traffic_callback.clone(),
-                            stream_interceptor: stream_interceptor.clone(),
+                            stream_handler: stream_handler.clone(),
                         }
                         .spawn()
                         .detach();
@@ -827,6 +868,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             bytes_tx: Arc::new(AtomicU64::new(0)),
                             bytes_rx: Arc::new(AtomicU64::new(0)),
                             audit_emitted: Arc::new(AtomicBool::new(false)),
+                            stream_handler_task: None,
                         })?;
                     }
                     Message::WindowAdjust(msg) => {
@@ -977,7 +1019,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 // ---------------------- //
 
 struct DataReaderTask {
-    reader: ReadHalf<ErasedStream>,
+    reader: ChannelReader,
     local_id: LocalChannelId,
     distant_id: DistantChannelId,
     window_size_updated: Arc<Notify>,
@@ -1106,7 +1148,7 @@ impl DataReaderTask {
 // ---------------------- //
 
 struct DataWriterTask {
-    writer: WriteHalf<ErasedStream>,
+    writer: ChannelWriter,
     data_rx: DataReceiver,
     /// Tracks bytes written into the stream.
     bytes_tx: Arc<AtomicU64>,
@@ -1160,7 +1202,7 @@ struct StreamResolverTask {
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
     traffic_callback: Option<TrafficCallback>,
-    stream_interceptor: Option<StreamInterceptor>,
+    stream_handler: Option<StreamHandler>,
 }
 
 impl StreamResolverTask {
@@ -1186,7 +1228,7 @@ impl StreamResolverTask {
             internal_msg_tx,
             msg_to_send_tx,
             traffic_callback,
-            stream_interceptor,
+            stream_handler,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -1223,21 +1265,24 @@ impl StreamResolverTask {
                             channel.target_ip = Some(socket_addr.ip());
                             channel.connect_at = SystemTime::now();
 
-                            let stream: ErasedStream = if let Some(interceptor) = &stream_interceptor {
-                                let (client_stream, jmux_stream) = tokio::io::duplex(64 * 1024);
-                                interceptor(destination_url.clone(), client_stream, stream);
-                                Box::new(jmux_stream)
+                            let (stream, stream_handler) = if let Some(handler) = &stream_handler {
+                                let (channel_stream, jmux_side) = tokio::io::duplex(64 * 1024);
+                                let stream_handler = handler.handle(destination_url.clone(), channel_stream, stream);
+                                (ChannelStream::Handled(jmux_side), Some(stream_handler))
                             } else {
-                                Box::new(stream)
+                                (ChannelStream::Direct(stream), None)
                             };
 
                             internal_msg_tx
                                 .send(InternalMessage::StreamResolved {
                                     channel: Box::new(channel),
                                     stream,
+                                    stream_handler,
                                 })
                                 .await
-                                .context("couldn't send back resolved stream through internal mpsc channel")?;
+                                .map_err(|_| {
+                                    anyhow::anyhow!("couldn't send back resolved stream through internal mpsc channel")
+                                })?;
 
                             return Ok(());
                         }
@@ -1290,6 +1335,7 @@ impl StreamResolverTask {
 /// Aborts the running task when dropped.
 /// Also see https://github.com/tokio-rs/tokio/issues/1830 for some background.
 #[must_use]
+#[derive(Debug)]
 struct ChildTask<T>(JoinHandle<T>);
 
 impl<T> ChildTask<T> {

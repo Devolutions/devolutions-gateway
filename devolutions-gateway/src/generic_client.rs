@@ -141,23 +141,23 @@ where
                     if let Some(entry) = credential_store.get(token_id) {
                         anyhow::ensure!(token == entry.token, "token mismatch");
 
-                        // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
                         if entry.mapping.is_some() {
-                            return crate::rdp_proxy::RdpProxy::builder()
+                            return crate::rdp_credential_injection::RdpCredentialInjection::builder()
                                 .conf(conf)
                                 .session_info(info)
                                 .client_addr(client_addr)
-                                .client_stream(client_stream)
-                                .server_addr(server_addr)
-                                .server_stream(server_stream)
                                 .sessions(sessions)
                                 .subscriber_tx(subscriber_tx)
                                 .credential_entry(entry)
-                                .client_stream_leftover_bytes(leftover_bytes)
-                                .server_dns_name(selected_target.host().to_owned())
                                 .disconnect_interest(disconnect_interest)
                                 .build()
-                                .run()
+                                .run(
+                                    client_stream,
+                                    leftover_bytes,
+                                    server_stream,
+                                    server_addr,
+                                    selected_target.host().to_owned(),
+                                )
                                 .await
                                 .context("encountered a failure during RDP proxying (credential injection)");
                         }

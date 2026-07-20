@@ -7,8 +7,10 @@ use ironrdp_connector::credssp::CredsspProcessGenerator as CredsspClientProcessG
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_pdu::{mcs, nego, x224};
+use jmux_proxy::{DestinationUrl, OutgoingStreamFuture, OutgoingStreamHandler};
 use secrecy::ExposeSecret as _;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream};
+use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use typed_builder::TypedBuilder;
 
@@ -20,225 +22,239 @@ use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 
-#[derive(TypedBuilder)]
-pub struct RdpProxy<C, S> {
+#[derive(Clone, TypedBuilder)]
+pub struct RdpCredentialInjection {
     conf: Arc<Conf>,
     session_info: SessionInfo,
-    client_stream: C,
     client_addr: SocketAddr,
-    server_stream: S,
-    server_addr: SocketAddr,
     credential_entry: ArcCredentialEntry,
-    client_stream_leftover_bytes: bytes::BytesMut,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    server_dns_name: String,
     disconnect_interest: Option<DisconnectInterest>,
     #[builder(default)]
-    registered_session_notify_kill: Option<Arc<Notify>>,
+    session_notify_kill: Option<Arc<Notify>>,
 }
 
-impl<A, B> RdpProxy<A, B>
-where
-    A: AsyncWrite + AsyncRead + Unpin + Send,
-    B: AsyncWrite + AsyncRead + Unpin + Send,
-{
-    pub async fn run(self) -> anyhow::Result<()> {
-        handle(self).await
+impl OutgoingStreamHandler for RdpCredentialInjection {
+    fn handle(
+        &self,
+        destination: DestinationUrl,
+        client_stream: DuplexStream,
+        target_stream: TcpStream,
+    ) -> OutgoingStreamFuture {
+        let credential_injection = self.clone();
+
+        Box::pin(async move {
+            let server_addr = target_stream.peer_addr().context("resolve RDP target address")?;
+
+            credential_injection
+                .run(
+                    client_stream,
+                    bytes::BytesMut::new(),
+                    target_stream,
+                    server_addr,
+                    destination.host().to_owned(),
+                )
+                .await
+        })
     }
 }
 
-#[instrument("rdp_proxy", skip_all, fields(session_id = proxy.session_info.id.to_string(), target = proxy.server_addr.to_string()))]
-async fn handle<C, S>(proxy: RdpProxy<C, S>) -> anyhow::Result<()>
-where
-    C: AsyncRead + AsyncWrite + Unpin + Send,
-    S: AsyncRead + AsyncWrite + Unpin + Send,
-{
-    let RdpProxy {
-        conf,
-        session_info,
-        client_stream,
-        client_addr,
-        server_stream,
-        server_addr,
-        credential_entry,
-        client_stream_leftover_bytes,
-        sessions,
-        subscriber_tx,
-        server_dns_name,
-        disconnect_interest,
-        registered_session_notify_kill,
-    } = proxy;
+impl RdpCredentialInjection {
+    #[instrument("rdp_credential_injection", skip_all, fields(session_id = self.session_info.id.to_string(), target = server_addr.to_string()))]
+    pub async fn run<C, S>(
+        self,
+        client_stream: C,
+        client_stream_leftover_bytes: bytes::BytesMut,
+        server_stream: S,
+        server_addr: SocketAddr,
+        server_dns_name: String,
+    ) -> anyhow::Result<()>
+    where
+        C: AsyncRead + AsyncWrite + Unpin + Send,
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        let Self {
+            conf,
+            session_info,
+            client_addr,
+            credential_entry,
+            sessions,
+            subscriber_tx,
+            disconnect_interest,
+            session_notify_kill,
+        } = self;
 
-    let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
-    let gateway_hostname = conf.hostname.clone();
+        let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
+        let gateway_hostname = conf.hostname.clone();
 
-    let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
+        let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
 
-    // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
+        // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
 
-    let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
-        gateway_hostname.clone(),
-        tls_conf.acceptor.clone(),
-    ));
+        let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
+            gateway_hostname.clone(),
+            tls_conf.acceptor.clone(),
+        ));
 
-    // -- Dual handshake with the client and the server until the TLS security upgrade -- //
+        // -- Dual handshake with the client and the server until the TLS security upgrade -- //
 
-    let mut client_framed =
-        ironrdp_tokio::MovableTokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
-    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
+        let mut client_framed =
+            ironrdp_tokio::MovableTokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
+        let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let handshake_result =
-        dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
+        let handshake_result =
+            dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
 
-    let client_stream = client_framed.into_inner_no_leftover();
-    let server_stream = server_framed.into_inner_no_leftover();
+        let client_stream = client_framed.into_inner_no_leftover();
+        let server_stream = server_framed.into_inner_no_leftover();
 
-    // -- Perform the TLS upgrading for both the client and the server, effectively acting as a man-in-the-middle -- //
+        // -- Perform the TLS upgrading for both the client and the server, effectively acting as a man-in-the-middle -- //
 
-    let client_tls_upgrade_fut = tls_conf.acceptor.accept(client_stream);
-    let server_tls_upgrade_fut = crate::tls::dangerous_connect(server_dns_name.clone(), server_stream);
+        let client_tls_upgrade_fut = tls_conf.acceptor.accept(client_stream);
+        let server_tls_upgrade_fut = crate::tls::dangerous_connect(server_dns_name.clone(), server_stream);
 
-    let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
+        let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
 
-    let client_stream = client_stream.context("TLS upgrade with client failed")?;
-    let server_stream = server_stream.context("TLS upgrade with server failed")?;
+        let client_stream = client_stream.context("TLS upgrade with client failed")?;
+        let server_stream = server_stream.context("TLS upgrade with server failed")?;
 
-    let server_public_key =
-        crate::tls::extract_stream_peer_public_key(&server_stream).context("extract target server TLS public key")?;
+        let server_public_key = crate::tls::extract_stream_peer_public_key(&server_stream)
+            .context("extract target server TLS public key")?;
 
-    let gateway_cert_chain = gateway_cert_chain_handle.await??;
-    let gateway_public_key = crate::tls::extract_public_key(gateway_cert_chain.first().context("no leaf")?)
-        .context("extract Gateway public key")?;
+        let gateway_cert_chain = gateway_cert_chain_handle.await??;
+        let gateway_public_key = crate::tls::extract_public_key(gateway_cert_chain.first().context("no leaf")?)
+            .context("extract Gateway public key")?;
 
-    // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
+        // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
 
-    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
+        let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
+        let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let krb_server_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server:
-                crate::config::dto::KerberosServer {
-                    max_time_skew,
-                    ticket_decryption_key,
-                    service_user,
-                    ..
+        let krb_server_config = if conf.debug.enable_unstable
+            && let Some(crate::config::dto::KerberosConfig {
+                kerberos_server:
+                    crate::config::dto::KerberosServer {
+                        max_time_skew,
+                        ticket_decryption_key,
+                        service_user,
+                        ..
+                    },
+                kdc_url: _,
+            }) = conf.debug.kerberos.as_ref()
+        {
+            let user = service_user.as_ref().map(|user| {
+                let crate::config::dto::DomainUser {
+                    fqdn,
+                    password,
+                    salt: _,
+                } = user;
+
+                // The username is in the FQDN format. Thus, the domain field can be empty.
+                sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
+                    fqdn,
+                    "",
+                    password.expose_secret(),
+                ))
+            });
+
+            Some(sspi::KerberosServerConfig {
+                kerberos_config: sspi::KerberosConfig {
+                    // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
+                    kdc_url: None,
+                    client_computer_name: Some(client_addr.to_string()),
                 },
-            kdc_url: _,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        let user = service_user.as_ref().map(|user| {
-            let crate::config::dto::DomainUser {
-                fqdn,
-                password,
-                salt: _,
-            } = user;
+                server_properties: sspi::kerberos::ServerProperties::new(
+                    &["TERMSRV", &gateway_hostname],
+                    user,
+                    std::time::Duration::from_secs(*max_time_skew),
+                    ticket_decryption_key.clone(),
+                )?,
+            })
+        } else {
+            None
+        };
 
-            // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
-                fqdn,
-                "",
-                password.expose_secret(),
-            ))
-        });
+        let client_credssp_fut = perform_credssp_with_client(
+            &mut client_framed,
+            client_addr.ip(),
+            gateway_public_key,
+            handshake_result.client_security_protocol,
+            &credential_mapping.proxy,
+            krb_server_config,
+        );
 
-        Some(sspi::KerberosServerConfig {
-            kerberos_config: sspi::KerberosConfig {
-                // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
-                kdc_url: None,
-                client_computer_name: Some(client_addr.to_string()),
-            },
-            server_properties: sspi::kerberos::ServerProperties::new(
-                &["TERMSRV", &gateway_hostname],
-                user,
-                std::time::Duration::from_secs(*max_time_skew),
-                ticket_decryption_key.clone(),
-            )?,
-        })
-    } else {
-        None
-    };
+        let krb_client_config = if conf.debug.enable_unstable
+            && let Some(crate::config::dto::KerberosConfig {
+                kerberos_server: _,
+                kdc_url,
+            }) = conf.debug.kerberos.as_ref()
+        {
+            Some(ironrdp_connector::credssp::KerberosConfig {
+                kdc_proxy_url: kdc_url.clone(),
+                hostname: Some(gateway_hostname.clone()),
+            })
+        } else {
+            None
+        };
 
-    let client_credssp_fut = perform_credssp_with_client(
-        &mut client_framed,
-        client_addr.ip(),
-        gateway_public_key,
-        handshake_result.client_security_protocol,
-        &credential_mapping.proxy,
-        krb_server_config,
-    );
+        let server_credssp_fut = perform_credssp_with_server(
+            &mut server_framed,
+            server_dns_name,
+            server_public_key,
+            handshake_result.server_security_protocol,
+            &credential_mapping.target,
+            krb_client_config,
+        );
 
-    let krb_client_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server: _,
-            kdc_url,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: kdc_url.clone(),
-            hostname: Some(gateway_hostname.clone()),
-        })
-    } else {
-        None
-    };
+        let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
+        client_credssp_res.context("CredSSP with client")?;
+        server_credssp_res.context("CredSSP with server")?;
 
-    let server_credssp_fut = perform_credssp_with_server(
-        &mut server_framed,
-        server_dns_name,
-        server_public_key,
-        handshake_result.server_security_protocol,
-        &credential_mapping.target,
-        krb_client_config,
-    );
+        // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
-    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_credssp_res.context("CredSSP with client")?;
-    server_credssp_res.context("CredSSP with server")?;
+        intercept_connect_confirm(
+            &mut client_framed,
+            &mut server_framed,
+            handshake_result.server_security_protocol,
+        )
+        .await?;
 
-    // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
+        let (mut client_stream, client_leftover) = client_framed.into_inner();
+        let (mut server_stream, server_leftover) = server_framed.into_inner();
 
-    intercept_connect_confirm(
-        &mut client_framed,
-        &mut server_framed,
-        handshake_result.server_security_protocol,
-    )
-    .await?;
+        // -- At this point, proceed to the usual two-way forwarding -- //
 
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
+        info!("RDP-TLS forwarding (credential injection)");
 
-    // -- At this point, proceed to the usual two-way forwarding -- //
+        client_stream
+            .write_all(&server_leftover)
+            .await
+            .context("write server leftover to client")?;
 
-    info!("RDP-TLS forwarding (credential injection)");
+        server_stream
+            .write_all(&client_leftover)
+            .await
+            .context("write client leftover to server")?;
 
-    client_stream
-        .write_all(&server_leftover)
-        .await
-        .context("write server leftover to client")?;
+        Proxy::builder()
+            .conf(conf)
+            .session_info(session_info)
+            .address_a(client_addr)
+            .transport_a(client_stream)
+            .address_b(server_addr)
+            .transport_b(server_stream)
+            .sessions(sessions)
+            .subscriber_tx(subscriber_tx)
+            .disconnect_interest(disconnect_interest)
+            .registered_session_notify_kill(session_notify_kill)
+            .build()
+            .select_dissector_and_forward()
+            .await
+            .context("RDP-TLS traffic proxying failed")?;
 
-    server_stream
-        .write_all(&client_leftover)
-        .await
-        .context("write client leftover to server")?;
-
-    Proxy::builder()
-        .conf(conf)
-        .session_info(session_info)
-        .address_a(client_addr)
-        .transport_a(client_stream)
-        .address_b(server_addr)
-        .transport_b(server_stream)
-        .sessions(sessions)
-        .subscriber_tx(subscriber_tx)
-        .disconnect_interest(disconnect_interest)
-        .registered_session_notify_kill(registered_session_notify_kill)
-        .build()
-        .select_dissector_and_forward()
-        .await
-        .context("RDP-TLS traffic proxying failed")?;
-
-    Ok(())
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
