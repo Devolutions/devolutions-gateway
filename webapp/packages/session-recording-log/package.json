@@ -1,0 +1,28 @@
+{
+  "name": "@devolutions/session-recording-log",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc && vite build",
+    "check": "biome check ./src vite.config.ts",
+    "check:write": "biome check --write ./src vite.config.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "~5.6.2",
+    "vite": "^6.2.1",
+    "vite-plugin-dts": "^4.3.0",
+    "vite-plugin-static-copy": "^2.3.0",
+    "vitest": "^3.1.1"
+  }
+}

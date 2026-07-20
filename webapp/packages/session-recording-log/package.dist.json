@@ -1,0 +1,30 @@
+{
+  "name": "@devolutions/session-recording-log",
+  "version": "0.1.0",
+  "description": "Framework-agnostic parser and models for Devolutions Gateway Session Recording Log NDJSON files",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Devolutions/devolutions-gateway.git"
+  },
+  "keywords": [
+    "recording",
+    "session-recording",
+    "ndjson",
+    "slog",
+    "parser"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}

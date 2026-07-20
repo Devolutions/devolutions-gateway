@@ -1,0 +1,420 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { parseSessionRecordingLog } from './parser';
+
+function readFixture(name: string): string {
+  const fixturePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', name);
+  return readFileSync(fixturePath, 'utf8');
+}
+
+describe('parseSessionRecordingLog', () => {
+  it('parses sample-complete fixture as complete with no warnings', () => {
+    const result = parseSessionRecordingLog(readFixture('sample-complete.slog'));
+
+    expect(result.completionState).toBe('complete');
+    expect(result.entries).toHaveLength(3);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('parses sample-missing-end fixture and surfaces missing-session-end warning', () => {
+    const result = parseSessionRecordingLog(readFixture('sample-missing-end.slog'));
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(true);
+  });
+
+  it('parses completed AD-like slog and preserves source metadata', () => {
+    const text = [
+      '{"timestamp":"2026-07-15T16:15:35.140Z","seq":0,"actor":"Administrator","locale":"en-US","host":"IT-HELP-DC","sessionType":"ADConsole","event":"session.start","description":"Session started"}',
+      '{"timestamp":"2026-07-15T16:15:41.054Z","seq":1,"event":"session.action","description":"Created User","object":"asdasdasd"}',
+      '{"timestamp":"2026-07-15T16:16:32.759Z","seq":2,"event":"session.end","description":"Session ended"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.completionState).toBe('complete');
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries[0].sourceLineNumber).toBe(1);
+    expect(result.entries[1].sourceLineNumber).toBe(2);
+    expect(result.entries[0].entry.sessionType).toBe('ADConsole');
+  });
+
+  it('marks missing session.end as ended unexpectedly while keeping valid entries', () => {
+    const text = [
+      '{"timestamp":"2026-07-15T21:17:49.777Z","seq":0,"actor":"Administrator","host":"IT-HELP-DC","sessionType":"ADConsole","event":"session.start","description":"Session started"}',
+      '{"timestamp":"2026-07-15T21:19:14.351Z","seq":1,"event":"session.action","description":"Renamed Object","object":"Help Desk Ottawa","parameters":{"New name":"Help Desk Ottawa/Hull"}}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(true);
+  });
+
+  it('maps malformed/invalid conditions to canonical warning codes', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","producer":"custom-host"}',
+      '{not valid json}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":2,"event":"session.action","description":"Action"}',
+      '{"timestamp":"not-a-date","seq":2,"event":"session.unknown","description":"Future event"}',
+      '{"timestamp":"2026-07-16T10:00:03.000Z","seq":4,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.entries).toHaveLength(4);
+    expect(result.warnings.some((warning) => warning.code === 'malformed-line')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'invalid-field')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'duplicate-sequence')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'missing-sequence')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'unknown-event-type')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'sequence-order-mismatch')).toBe(false);
+  });
+
+  it('reports unterminated final line as additive informational warning', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+    expect(result.warnings.some((warning) => warning.code === 'unterminated-final-line')).toBe(true);
+  });
+
+  it('applies schema limits using canonical warning categories', () => {
+    const deepObject =
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","x":{"y":{"z":{"k":1}}}}';
+    const hugeLine = `{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.action","description":"${'a'.repeat(600)}"}`;
+    const tooManyParameters =
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":2,"event":"session.action","description":"Action","parameters":{"a":"1","b":"2","c":"3"}}';
+    const endLine = '{"timestamp":"2026-07-16T10:00:03.000Z","seq":3,"event":"session.end","description":"End"}';
+    const text = [deepObject, hugeLine, tooManyParameters, endLine, ''].join('\n');
+
+    const result = parseSessionRecordingLog(text, {
+      maxLineLengthBytes: 2000,
+      maxObjectDepth: 3,
+      maxParameterCount: 2,
+      maxStringLength: 64,
+    });
+
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'invalid-field')).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === 'string-truncated')).toBe(true);
+    expect(result.entries.some((entry) => entry.entry.event === 'session.end')).toBe(true);
+  });
+
+  it('caps missing sequence warnings for very large sequence gaps', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1000000000,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, {
+      maxMissingSequenceWarnings: 3,
+    });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings.filter((warning) => warning.code === 'missing-sequence')).toHaveLength(3);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message.startsWith('missing sequence warnings truncated'),
+      ),
+    ).toBe(true);
+  });
+
+  it('normalizes invalid numeric limit options to safe finite defaults', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":2000,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, {
+      maxLineLengthBytes: Number.NaN,
+      maxStringLength: Number.POSITIVE_INFINITY,
+      maxParameterCount: Number.NaN,
+      maxObjectDepth: Number.POSITIVE_INFINITY,
+      maxParsedEntries: Number.NaN,
+      maxScannedLines: Number.NaN,
+      maxMissingSequenceWarnings: Number.POSITIVE_INFINITY,
+      maxUnknownFieldCount: Number.NaN,
+    });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings.filter((warning) => warning.code === 'missing-sequence').length).toBeLessThanOrEqual(1000);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message.includes('additional missing sequences'),
+      ),
+    ).toBe(true);
+  });
+
+  it('caps total warning volume and emits one truncation warning', () => {
+    const invalidParameters = Array.from({ length: 40 }, (_, index) => `"p${index}":${index}`).join(',');
+    const text = `{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{${invalidParameters}}}\n`;
+
+    const result = parseSessionRecordingLog(text, { maxWarnings: 5 });
+
+    expect(result.warnings.length).toBeLessThanOrEqual(6);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' &&
+          warning.message === 'warning limit exceeded; additional warnings were truncated',
+      ),
+    ).toBe(true);
+  });
+
+  it('caps retained source text bytes across parsed entries', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.action","description":"Action"}',
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":2,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxRetainedSourceTextBytes: 120 });
+
+    expect(result.entries).toHaveLength(1);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message === 'retained source text byte budget exceeded',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not mark session complete when source-text budget drops session.end entry', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxRetainedSourceTextBytes: 100 });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(true);
+  });
+
+  it('caps warning volume at the default aggregate limit', () => {
+    const invalidParameters = Array.from({ length: 200 }, (_, index) => `"p${index}":${index}`).join(',');
+    const lines = Array.from(
+      { length: 60 },
+      (_, index) =>
+        `{"timestamp":"2026-07-16T10:00:${(index % 60).toString().padStart(2, '0')}.000Z","seq":${index},"event":"session.action","description":"Action","parameters":{${invalidParameters}}}`,
+    );
+    const text = `${lines.join('\n')}\n`;
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.warnings.length).toBeLessThanOrEqual(10001);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' &&
+          warning.message === 'warning limit exceeded; additional warnings were truncated',
+      ),
+    ).toBe(true);
+  });
+
+  it('handles deeply nested records without crashing parse flow', () => {
+    const depth = 1000;
+    let nested = '1';
+    for (let index = 0; index < depth; index += 1) {
+      nested = `{"k":${nested}}`;
+    }
+
+    const text = [
+      `{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","deep":${nested}}`,
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxObjectDepth: 8 });
+
+    expect(result.warnings.some((warning) => warning.code === 'invalid-field')).toBe(true);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entry.event).toBe('session.end');
+  });
+
+  it('stops scanning after configured non-empty line limit even when lines are malformed', () => {
+    const malformed = Array.from({ length: 20 }, () => '{not valid json}');
+    const text = `${malformed.join('\n')}\n`;
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 5 });
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
+  it('counts blank lines toward scanned line limits', () => {
+    const text = Array.from({ length: 20 }, () => '').join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 5 });
+
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
+  it('marks truncated non-empty input as ended unexpectedly when scan limit is zero', () => {
+    const text = '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 0 });
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
+  it('marks truncated input as ended unexpectedly when blank prefix consumes scan limit', () => {
+    const text = '\n{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxScannedLines: 0 });
+
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(result.warnings.some((warning) => warning.code === 'entry-limit-exceeded')).toBe(true);
+  });
+
+  it('treats an empty file as complete and emits no missing-session warnings', () => {
+    const result = parseSessionRecordingLog('');
+
+    expect(result.completionState).toBe('complete');
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-start')).toBe(false);
+    expect(result.warnings.some((warning) => warning.code === 'missing-session-end')).toBe(false);
+  });
+
+  it('treats non-empty logs with no valid records as ended unexpectedly', () => {
+    const result = parseSessionRecordingLog('{not valid json}\n');
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.completionState).toBe('ended-unexpectedly');
+  });
+
+  it('emits unknown-event-type warning for unrecognized events', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.future","description":"Future"}',
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":2,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.warnings.some((warning) => warning.code === 'unknown-event-type')).toBe(true);
+  });
+
+  it('caps unknown top-level field collection per record', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","a":1,"b":2,"c":3}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxUnknownFieldCount: 2 });
+    const startEntry = result.entries.find((entry) => entry.entry.event === 'session.start');
+
+    expect(startEntry).toBeDefined();
+    expect(Object.keys(startEntry?.entry.unknownFields ?? {})).toHaveLength(2);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' &&
+          warning.message === 'unknown top-level field count exceeded max limit',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects unsafe sequence integers', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start"}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":9007199254740993,"event":"session.action","description":"Unsafe seq"}',
+      '{"timestamp":"2026-07-16T10:00:02.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+
+    expect(result.entries).toHaveLength(2);
+    expect(
+      result.warnings.some(
+        (warning) => warning.code === 'invalid-field' && warning.message === 'seq must be a safe integer',
+      ),
+    ).toBe(true);
+  });
+
+  it('reports missing sequences before the first observed sequence', () => {
+    const text = '{"timestamp":"2026-07-16T10:00:00.000Z","seq":5,"event":"session.end","description":"End"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxMissingSequenceWarnings: 3 });
+
+    expect(result.warnings.filter((warning) => warning.code === 'missing-sequence')).toHaveLength(3);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'entry-limit-exceeded' && warning.message.includes('additional missing sequences'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects overlong events without deriving completion from truncated text', () => {
+    const text =
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.end.extra","description":"End-like"}\n';
+
+    const result = parseSessionRecordingLog(text, { maxStringLength: 11 });
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.completionState).toBe('ended-unexpectedly');
+    expect(
+      result.warnings.some(
+        (warning) => warning.code === 'invalid-field' && warning.message === 'event exceeded max string length',
+      ),
+    ).toBe(true);
+  });
+
+  it('preserves __proto__ keys in parameters and unknown fields as data', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"session.start","description":"Start","parameters":{"__proto__":"kept"},"__proto__":{"safe":"value"}}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"session.end","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text);
+    const startEntry = result.entries.find((entry) => entry.entry.event === 'session.start');
+
+    expect(startEntry).toBeDefined();
+    expect(startEntry?.entry.parameters?.__proto__).toBe('kept');
+    expect((startEntry?.entry.unknownFields?.__proto__ as { safe?: string } | undefined)?.safe).toBe('value');
+  });
+
+  it('warns and preserves the first value on parameter key collisions after truncation', () => {
+    const text = [
+      '{"timestamp":"2026-07-16T10:00:00.000Z","seq":0,"event":"evt1","description":"Start","parameters":{"abcd1":"one","abcd2":"two"}}',
+      '{"timestamp":"2026-07-16T10:00:01.000Z","seq":1,"event":"evt2","description":"End"}',
+      '',
+    ].join('\n');
+
+    const result = parseSessionRecordingLog(text, { maxStringLength: 4 });
+    const firstEntry = result.entries[0];
+
+    expect(firstEntry).toBeDefined();
+    expect(firstEntry?.entry.parameters).toEqual({ abcd: 'one' });
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'invalid-field' &&
+          warning.message === 'parameter abcd collided after truncation and was discarded',
+      ),
+    ).toBe(true);
+  });
+});

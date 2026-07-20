@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-15T21:17:49.777Z","seq":0,"event":"session.start","description":"Session started"}
+{"timestamp":"2026-07-15T21:19:14.351Z","seq":1,"event":"session.future","description":"Future action","parameters":{"Members added":"Sarah O'Connor, Bob Smith"}}
+{"timestamp":"2026-07-15T21:20:00.000Z","seq":2,"event":"session.end","description":"Session ended"}

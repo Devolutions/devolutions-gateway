@@ -490,6 +490,10 @@ jobs:
         run: pnpm check
         working-directory: webapp
 
+      - name: Run session-recording-log tests
+        run: pnpm --filter @devolutions/session-recording-log test
+        working-directory: webapp
+
       - name: Upload gateway-ui artifact
         uses: actions/upload-artifact@v7
         with:
