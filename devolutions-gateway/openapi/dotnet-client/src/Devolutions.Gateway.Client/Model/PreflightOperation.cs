@@ -50,21 +50,21 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="hostToResolve">The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind..</param>
         /// <param name="id">Unique ID identifying the preflight operation. (required).</param>
         /// <param name="kind">kind (required).</param>
-        /// <param name="krbKdc">Real KDC address (e.g. \&quot;tcp://dc.example.com:88\&quot;) for Kerberos-enforced credential injection.  Optional for \&quot;provision-credentials\&quot; kind; omit for NTLM targets..</param>
         /// <param name="proxyCredential">proxyCredential.</param>
         /// <param name="targetCredential">targetCredential.</param>
         /// <param name="timeToLive">Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
-        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), string krbKdc = default(string), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
+        /// <param name="krbKdc">Real KDC address (e.g. \&quot;tcp://dc.example.com:88\&quot;) for Kerberos-enforced credential injection.  Optional for \&quot;provision-credentials\&quot; kind; omit for NTLM targets..</param>
+        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string), string krbKdc = default(string))
         {
             this.Id = id;
             this.Kind = kind;
             this.HostToResolve = hostToResolve;
-            this.KrbKdc = krbKdc;
             this.ProxyCredential = proxyCredential;
             this.TargetCredential = targetCredential;
             this.TimeToLive = timeToLive;
             this.Token = token;
+            this.KrbKdc = krbKdc;
         }
 
         /// <summary>
