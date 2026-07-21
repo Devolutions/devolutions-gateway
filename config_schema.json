@@ -707,6 +707,11 @@
           "type": "string",
           "description": "Path to lib XMF files."
         },
+        "kerberos_credential_injection": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to enable proxy-based RDP credential injection against Kerberos-enforced targets."
+        },
         "enable_unstable": {
           "type": "boolean",
           "default": false,

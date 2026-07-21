@@ -436,19 +436,10 @@ async fn handle_with_credential_injection(
         &kdc_connector,
     );
 
-    let krb_client_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server: _,
-            kdc_url,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: kdc_url.clone(),
-            hostname: gateway_hostname.clone(),
-        })
-    } else {
-        None
-    };
+    let krb_client_config = crate::rdp_proxy::credential_injection_kerberos_client_config(
+        credential_injection_kdc.krb_kdc(),
+        &gateway_hostname,
+    )?;
 
     let server_credssp_fut = crate::rdp_proxy::perform_credssp_as_client(
         &mut server_framed,

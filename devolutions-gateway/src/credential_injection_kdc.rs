@@ -165,6 +165,11 @@ impl CredentialInjectionKdc {
         &self.credential_mapping.target
     }
 
+    /// Real KDC for the target-side CredSSP leg, provisioned alongside the injected credentials.
+    pub(crate) fn krb_kdc(&self) -> Option<&crate::target_addr::TargetAddr> {
+        self.credential_mapping.krb_kdc.as_ref()
+    }
+
     /// Selects the CredSSP acceptor backend Gateway should present to the RDP client.
     ///
     /// The acceptor side must mirror the target-side auth package.
@@ -630,6 +635,7 @@ mod tests {
                 username: target_username.to_owned(),
                 password: SecretString::from("pwd"),
             },
+            krb_kdc: None,
         }
     }
 
