@@ -419,8 +419,12 @@ async fn handle_with_credential_injection(
     let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let krb_server_config =
-        crate::rdp_proxy::credential_injection_kerberos_server_config(&conf, client_addr, &credential_injection_kdc)?;
+    let krb_configs = crate::rdp_proxy::credential_injection_kerberos_configs(
+        &conf,
+        client_addr,
+        &gateway_hostname,
+        &credential_injection_kdc,
+    )?;
 
     let kdc_connector =
         crate::kdc_connector::KdcConnector::new(claims.jet_aid, claims.jet_agent_id, agent_tunnel_handle.clone());
@@ -431,15 +435,10 @@ async fn handle_with_credential_injection(
         gateway_public_key,
         client_security_protocol,
         credential_injection_kdc.proxy_credential(),
-        krb_server_config,
+        krb_configs.server,
         &credential_injection_kdc,
         &kdc_connector,
     );
-
-    let krb_client_config = crate::rdp_proxy::credential_injection_kerberos_client_config(
-        credential_injection_kdc.krb_kdc(),
-        &gateway_hostname,
-    )?;
 
     let server_credssp_fut = crate::rdp_proxy::perform_credssp_as_client(
         &mut server_framed,
@@ -447,7 +446,7 @@ async fn handle_with_credential_injection(
         server_public_key,
         server_security_protocol,
         credential_injection_kdc.target_credential(),
-        krb_client_config,
+        krb_configs.client,
         &kdc_connector,
     );
 

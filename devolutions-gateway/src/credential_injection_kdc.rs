@@ -1030,4 +1030,40 @@ mod tests {
 
         assert_eq!(kdc.resolve_message_realm(&message), "example.invalid");
     }
+
+    #[test]
+    fn provisioned_krb_kdc_is_exposed_for_the_target_leg() {
+        let jti = Uuid::new_v4();
+        let store = CredentialStoreHandle::new();
+        store
+            .insert(
+                association_token(jti),
+                Some(CleartextAppCredentialMapping {
+                    proxy: CleartextAppCredential::UsernamePassword {
+                        username: "proxy@example.invalid".to_owned(),
+                        password: SecretString::from("pwd"),
+                    },
+                    target: CleartextAppCredential::UsernamePassword {
+                        username: "administrator@example.invalid".to_owned(),
+                        password: SecretString::from("pwd"),
+                    },
+                    krb_kdc: Some(
+                        crate::target_addr::TargetAddr::parse("tcp://kdc.example.invalid:88", Some(88))
+                            .expect("valid kdc addr"),
+                    ),
+                }),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+
+        let entry = store.get(jti).expect("credential entry is indexed by JTI");
+        let session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
+        let kdc = CredentialInjectionKdc::from_parts(jti, entry, "target.example".to_owned(), session)
+            .expect("valid credential-injection KDC");
+
+        assert_eq!(
+            kdc.krb_kdc().map(|addr| addr.as_str().to_owned()),
+            Some("tcp://kdc.example.invalid:88".to_owned())
+        );
+    }
 }
