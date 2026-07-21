@@ -1785,6 +1785,13 @@ components:
           description: Unique ID identifying the preflight operation.
         kind:
           $ref: '#/components/schemas/PreflightOperationKind'
+        krb_kdc:
+          type: string
+          description: |-
+            Real KDC address (e.g. "tcp://dc.example.com:88") for Kerberos-enforced credential injection.
+
+            Optional for "provision-credentials" kind; omit for NTLM targets.
+          nullable: true
         proxy_credential:
           allOf:
           - $ref: '#/components/schemas/AppCredential'
