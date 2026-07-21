@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use parking_lot::Mutex;
 use secrecy::ExposeSecret as _;
+use serde::{Deserialize as _, de};
 use uuid::Uuid;
 
 use self::crypto::MASTER_KEY;
@@ -66,6 +67,11 @@ impl AppCredential {
 pub struct AppCredentialMapping {
     pub proxy: AppCredential,
     pub target: AppCredential,
+    /// Real KDC for Kerberos-enforced injection, provisioned alongside the credentials.
+    ///
+    /// The Gateway's target-side CredSSP leg uses this to obtain a real Kerberos ticket; realm is
+    /// derived from the target credential, so only the address is stored. `None` for NTLM targets.
+    pub krb_kdc: Option<crate::target_addr::TargetAddr>,
 }
 
 /// Cleartext credential received from the API, used for deserialization only.
@@ -105,6 +111,26 @@ pub struct CleartextAppCredentialMapping {
     pub proxy: CleartextAppCredential,
     #[serde(rename = "target_credential")]
     pub target: CleartextAppCredential,
+    /// Real KDC for Kerberos-enforced injection, provisioned in the same call as the credentials.
+    /// Optional: absent for NTLM targets.
+    #[serde(default, deserialize_with = "deserialize_optional_kdc_addr")]
+    pub krb_kdc: Option<crate::target_addr::TargetAddr>,
+}
+
+fn deserialize_optional_kdc_addr<'de, D>(deserializer: D) -> Result<Option<crate::target_addr::TargetAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let krb_kdc = Option::<crate::target_addr::TargetAddr>::deserialize(deserializer)?;
+
+    if let Some(krb_kdc) = &krb_kdc {
+        match krb_kdc.scheme() {
+            "tcp" | "udp" => {}
+            unsupported => return Err(de::Error::custom(format!("unsupported KDC protocol: {unsupported}"))),
+        }
+    }
+
+    Ok(krb_kdc)
 }
 
 impl CleartextAppCredentialMapping {
@@ -112,6 +138,7 @@ impl CleartextAppCredentialMapping {
         Ok(AppCredentialMapping {
             proxy: self.proxy.encrypt()?,
             target: self.target.encrypt()?,
+            krb_kdc: self.krb_kdc,
         })
     }
 }
@@ -233,4 +260,63 @@ async fn cleanup_task(handle: CredentialStoreHandle, mut shutdown_signal: Shutdo
     }
 
     debug!("Task terminated");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CleartextAppCredentialMapping;
+
+    const CREDENTIAL_MAPPING: &str = r#"
+        {
+            "proxy_credential": {
+                "kind": "username-password",
+                "username": "proxy",
+                "password": "proxy-password"
+            },
+            "target_credential": {
+                "kind": "username-password",
+                "username": "target",
+                "password": "target-password"
+            }
+        }
+    "#;
+
+    #[test]
+    fn credential_mapping_accepts_supported_kdc_protocols() {
+        for krb_kdc in ["tcp://dc.example.com:88", "udp://dc.example.com:88"] {
+            let mapping = CREDENTIAL_MAPPING.replace(
+                "\n        }\n    ",
+                &format!(",\n            \"krb_kdc\": \"{krb_kdc}\"\n        }}\n    "),
+            );
+
+            let mapping: CleartextAppCredentialMapping =
+                serde_json::from_str(&mapping).expect("supported KDC protocol should deserialize");
+
+            assert_eq!(
+                mapping.krb_kdc.expect("KDC address should be present").as_str(),
+                krb_kdc
+            );
+        }
+    }
+
+    #[test]
+    fn credential_mapping_allows_missing_kdc() {
+        let mapping: CleartextAppCredentialMapping =
+            serde_json::from_str(CREDENTIAL_MAPPING).expect("credential mapping without KDC should deserialize");
+
+        assert!(mapping.krb_kdc.is_none());
+    }
+
+    #[test]
+    fn credential_mapping_rejects_unsupported_kdc_protocol() {
+        let mapping = CREDENTIAL_MAPPING.replace(
+            "\n        }\n    ",
+            ",\n            \"krb_kdc\": \"http://dc.example.com:88\"\n        }\n    ",
+        );
+
+        let error = serde_json::from_str::<CleartextAppCredentialMapping>(&mapping)
+            .expect_err("unsupported KDC protocol should be rejected");
+
+        assert!(error.to_string().contains("unsupported KDC protocol: http"));
+    }
 }

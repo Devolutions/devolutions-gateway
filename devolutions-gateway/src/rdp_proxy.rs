@@ -20,6 +20,7 @@ use crate::kdc_connector::KdcConnector;
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
+use crate::target_addr::TargetAddr;
 
 #[derive(TypedBuilder)]
 pub struct RdpProxy<C, S> {
@@ -134,19 +135,8 @@ where
         &kdc_connector,
     );
 
-    let krb_client_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server: _,
-            kdc_url,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: kdc_url.clone(),
-            hostname: gateway_hostname.clone(),
-        })
-    } else {
-        None
-    };
+    let krb_client_config =
+        credential_injection_kerberos_client_config(credential_injection_kdc.krb_kdc(), &gateway_hostname)?;
 
     let server_credssp_fut = perform_credssp_as_client(
         &mut server_framed,
@@ -363,12 +353,32 @@ where
     handshake_result
 }
 
+/// Builds the target-side (Gateway-as-client) Kerberos config for credential injection.
+///
+/// The KDC is the one DVLS provisioned alongside the injected credentials (from the gateway's
+/// registered KDC). No KDC means the target leg authenticates over NTLM.
+pub(crate) fn credential_injection_kerberos_client_config(
+    krb_kdc: Option<&TargetAddr>,
+    gateway_hostname: &str,
+) -> anyhow::Result<Option<ironrdp_connector::credssp::KerberosConfig>> {
+    let Some(krb_kdc) = krb_kdc else {
+        return Ok(None);
+    };
+
+    let kdc_proxy_url = url::Url::parse(krb_kdc.as_str()).context("parse provisioned krb_kdc as URL")?;
+
+    Ok(Some(ironrdp_connector::credssp::KerberosConfig {
+        kdc_proxy_url: Some(kdc_proxy_url),
+        hostname: gateway_hostname.to_owned(),
+    }))
+}
+
 pub(crate) fn credential_injection_kerberos_server_config(
     conf: &Conf,
     client_addr: SocketAddr,
     credential_injection_kdc: &CredentialInjectionKdc,
 ) -> anyhow::Result<Option<sspi::KerberosServerConfig>> {
-    if !conf.debug.enable_unstable || conf.debug.kerberos.is_none() {
+    if !conf.debug.enable_unstable || !conf.debug.kerberos_credential_injection {
         return Ok(None);
     }
 
