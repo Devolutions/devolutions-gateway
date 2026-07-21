@@ -50,15 +50,17 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="hostToResolve">The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind..</param>
         /// <param name="id">Unique ID identifying the preflight operation. (required).</param>
         /// <param name="kind">kind (required).</param>
+        /// <param name="krbKdc">Real KDC address (e.g. \&quot;tcp://dc.example.com:88\&quot;) for Kerberos-enforced credential injection.  Optional for \&quot;provision-credentials\&quot; kind; omit for NTLM targets..</param>
         /// <param name="proxyCredential">proxyCredential.</param>
         /// <param name="targetCredential">targetCredential.</param>
         /// <param name="timeToLive">Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
-        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
+        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), string krbKdc = default(string), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
             this.Id = id;
             this.Kind = kind;
             this.HostToResolve = hostToResolve;
+            this.KrbKdc = krbKdc;
             this.ProxyCredential = proxyCredential;
             this.TargetCredential = targetCredential;
             this.TimeToLive = timeToLive;
@@ -78,6 +80,13 @@ namespace Devolutions.Gateway.Client.Model
         /// <value>Unique ID identifying the preflight operation.</value>
         [DataMember(Name = "id", IsRequired = true, EmitDefaultValue = true)]
         public Guid Id { get; set; }
+
+        /// <summary>
+        /// Real KDC address (e.g. \&quot;tcp://dc.example.com:88\&quot;) for Kerberos-enforced credential injection.  Optional for \&quot;provision-credentials\&quot; kind; omit for NTLM targets.
+        /// </summary>
+        /// <value>Real KDC address (e.g. \&quot;tcp://dc.example.com:88\&quot;) for Kerberos-enforced credential injection.  Optional for \&quot;provision-credentials\&quot; kind; omit for NTLM targets.</value>
+        [DataMember(Name = "krb_kdc", EmitDefaultValue = true)]
+        public string KrbKdc { get; set; }
 
         /// <summary>
         /// Gets or Sets ProxyCredential
@@ -116,6 +125,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("  HostToResolve: ").Append(HostToResolve).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");
+            sb.Append("  KrbKdc: ").Append(KrbKdc).Append("\n");
             sb.Append("  ProxyCredential: ").Append(ProxyCredential).Append("\n");
             sb.Append("  TargetCredential: ").Append(TargetCredential).Append("\n");
             sb.Append("  TimeToLive: ").Append(TimeToLive).Append("\n");
