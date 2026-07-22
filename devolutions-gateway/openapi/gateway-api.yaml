@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2026.1.2
+  version: 2026.2.3
 paths:
   /jet/config:
     patch:
@@ -1785,6 +1785,13 @@ components:
           description: Unique ID identifying the preflight operation.
         kind:
           $ref: '#/components/schemas/PreflightOperationKind'
+        krb_kdc:
+          type: string
+          description: |-
+            Real KDC address (e.g. "tcp://dc.example.com:88") for Kerberos-enforced credential injection.
+
+            Optional for "provision-credentials" kind; omit for NTLM targets.
+          nullable: true
         proxy_credential:
           allOf:
           - $ref: '#/components/schemas/AppCredential'

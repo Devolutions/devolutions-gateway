@@ -382,6 +382,10 @@ struct PreflightOperation {
     ///
     /// Required for "provision-credentials" kind.
     target_credential: Option<AppCredential>,
+    /// Real KDC address (e.g. "tcp://dc.example.com:88") for Kerberos-enforced credential injection.
+    ///
+    /// Optional for "provision-credentials" kind; omit for NTLM targets.
+    krb_kdc: Option<String>,
     /// The hostname to perform DNS resolution on.
     ///
     /// Required for "resolve-host" kind.

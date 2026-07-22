@@ -21,6 +21,10 @@ export interface PreflightOperation {
      */
     id: string;
     kind: PreflightOperationKind;
+    /**
+     * Real KDC address (e.g. \"tcp://dc.example.com:88\") for Kerberos-enforced credential injection.  Optional for \"provision-credentials\" kind; omit for NTLM targets.
+     */
+    krb_kdc?: string | null;
     proxy_credential?: AppCredential | null;
     target_credential?: AppCredential | null;
     /**
