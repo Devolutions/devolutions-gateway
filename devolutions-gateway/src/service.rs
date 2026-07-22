@@ -267,7 +267,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .await
             .context("failed to initialize traffic audit manager")?;
 
-    let credentials = devolutions_gateway::credential_injection_kdc::CredentialService::new();
+    let credentials = devolutions_gateway::credential_injection_kdc::CredentialService::new(conf.hostname.clone());
 
     let filesystem_monitor_config_cache = devolutions_gateway::api::monitoring::FilesystemConfigCache::new(
         config::get_data_dir().join("monitors_cache.json"),

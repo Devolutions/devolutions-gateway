@@ -55,12 +55,6 @@ pub(crate) enum CredentialInjectionKdcResolveError {
     ExpiredCredential { jti: Uuid },
     #[error("credential-injection state is not available for {jti}")]
     NonInjectionCredential { jti: Uuid },
-    #[error("association token for {jti} is not valid for credential injection")]
-    InvalidAssociationToken {
-        jti: Uuid,
-        #[source]
-        source: anyhow::Error,
-    },
     #[error("credential-injection KDC config could not be initialized for {jti}")]
     BuildKdcConfig {
         jti: Uuid,
@@ -446,19 +440,15 @@ fn random_32_bytes() -> Vec<u8> {
 /// through this service, so callers see one handle instead of coordinating a store and a registry.
 #[derive(Debug, Clone)]
 pub struct CredentialService {
+    hostname: String,
     credentials: CredentialStoreHandle,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<CredentialInjectionKdcSession>>>>,
 }
 
-impl Default for CredentialService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CredentialService {
-    pub fn new() -> Self {
+    pub fn new(hostname: String) -> Self {
         Self {
+            hostname,
             credentials: CredentialStoreHandle::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -526,16 +516,6 @@ impl CredentialService {
             CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
         })?;
 
-        let target_hostname = crate::token::extract_credential_injection_target_hostname(&credential_entry.token)
-            .map_err(|source| {
-                warn!(
-                    %jti,
-                    error = format!("{source:#}"),
-                    "KDC token references invalid credential-injection association token"
-                );
-                CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
-            })?;
-
         let proxy_username = app_credential_username(&mapping.proxy).to_owned();
         // Atomic get-or-insert: holds the lock long enough to guarantee a single Arc<Session>
         // wins for this JTI even under concurrent `kdc_for` calls. The derivation is fast (a few
@@ -548,7 +528,7 @@ impl CredentialService {
             Arc::clone(session)
         };
 
-        CredentialInjectionKdc::from_parts(jti, credential_entry, target_hostname, session)
+        CredentialInjectionKdc::from_parts(jti, credential_entry, self.hostname.clone(), session)
             .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })
     }
 
@@ -703,7 +683,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_expired_credential_entry() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         // Negative TTL: entry is born already expired. `CredentialStoreHandle::get` does not
@@ -728,7 +708,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_returns_same_session_under_concurrent_calls() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         service
@@ -755,7 +735,7 @@ mod tests {
 
     #[test]
     fn service_insert_drops_stale_session_even_without_credential_replacement() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         // Simulate the race called out by Codex: a previous provisioning's session is still
@@ -784,7 +764,7 @@ mod tests {
 
     #[test]
     fn service_insert_replacement_drops_cached_kerberos_material() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         service
@@ -820,7 +800,7 @@ mod tests {
 
     #[test]
     fn service_sweep_orphans_drops_sessions_with_no_credential_entry() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         service
@@ -839,6 +819,7 @@ mod tests {
         // drive `credential::cleanup_task` to expire the entry, but it sleeps for 15 minutes
         // between ticks. Swapping the inner store is the deterministic equivalent.
         let orphaned_service = CredentialService {
+            hostname: "dgateway.localhost.com".to_owned(),
             credentials: CredentialStoreHandle::new(),
             sessions: Arc::clone(&service.sessions),
         };
@@ -903,7 +884,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_unknown_jti() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
 
         assert!(
             matches!(
@@ -916,7 +897,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_non_injection_entry() {
-        let service = CredentialService::new();
+        let service = CredentialService::new("dgateway.localhost.com".to_owned());
         let jti = Uuid::new_v4();
 
         service
@@ -930,24 +911,6 @@ mod tests {
             ),
             "KDC tokens with jet_cred_id must require provision-credentials state"
         );
-    }
-
-    #[test]
-    fn service_kdc_for_lazily_extracts_target_hostname_from_entry_token() {
-        let service = CredentialService::new();
-        let jti = Uuid::new_v4();
-
-        service
-            .insert(
-                association_token(jti),
-                Some(cleartext_mapping_with_target_username("target")),
-                time::Duration::minutes(5),
-            )
-            .expect("credential entry inserts");
-
-        let kdc = service.kdc_for(jti).expect("credential-injection KDC resolves");
-
-        assert_eq!(kdc.target_hostname, "target.example");
     }
 
     #[test]
