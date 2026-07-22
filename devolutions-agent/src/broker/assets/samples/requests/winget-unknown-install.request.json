@@ -1,0 +1,31 @@
+{
+  "RequestKind": "PackageRequest",
+  "RequestVersion": "1.0",
+  "RequestId": "req-winget-unknown-install",
+  "CreatedAt": "2026-05-05T12:05:00Z",
+  "Operation": "Install",
+  "Manager": "Winget",
+  "Source": {
+    "Name": "winget",
+    "Url": "https://cdn.winget.microsoft.com/cache"
+  },
+  "Package": {
+    "Id": "Example.UnapprovedTool",
+    "Architecture": "X64"
+  },
+  "Options": {
+    "Scope": "User",
+    "Interactive": false,
+    "SkipHashCheck": false,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
+  },
+  "Client": {
+    "RequestedElevation": "Standard",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0",
+    "Transport": "HttpNamedPipe",
+    "ClientExecutablePath": "C:\\Program Files\\Devolutions\\NOW\\now-client.exe"
+  }
+}

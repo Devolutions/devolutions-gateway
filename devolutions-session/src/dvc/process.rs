@@ -46,6 +46,12 @@ impl From<windows::core::Error> for ExecError {
     }
 }
 
+impl From<std::io::Error> for ExecError {
+    fn from(error: std::io::Error) -> Self {
+        ExecError::Other(error.into())
+    }
+}
+
 impl<T: Send + Sync + 'static> From<tokio::sync::mpsc::error::SendError<T>> for ExecError {
     fn from(error: tokio::sync::mpsc::error::SendError<T>) -> Self {
         ExecError::Other(error.into())

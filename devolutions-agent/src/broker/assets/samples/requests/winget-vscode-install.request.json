@@ -1,0 +1,32 @@
+{
+  "RequestKind": "PackageRequest",
+  "RequestVersion": "1.0",
+  "RequestId": "req-winget-vscode-install",
+  "CreatedAt": "2026-05-05T12:00:00Z",
+  "Operation": "Install",
+  "Manager": "Winget",
+  "Source": {
+    "Name": "winget",
+    "Url": "https://cdn.winget.microsoft.com/cache"
+  },
+  "Package": {
+    "Id": "Microsoft.VisualStudioCode",
+    "Architecture": "X64"
+  },
+  "Options": {
+    "Scope": "Machine",
+    "Interactive": false,
+    "SkipHashCheck": false,
+    "PreRelease": false,
+    "CustomParameters": [],
+    "KillBeforeOperation": []
+  },
+  "Client": {
+    "RequestedElevation": "Elevated",
+    "EffectiveUser": "CONTOSO\\alice",
+    "ClientVersion": "3.2.0",
+    "Transport": "HttpNamedPipe",
+    "ClientExecutablePath": "C:\\Program Files\\Devolutions\\NOW\\now-client.exe"
+  },
+  "IncludeCommandPreview": true
+}

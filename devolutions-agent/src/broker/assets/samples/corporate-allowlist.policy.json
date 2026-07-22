@@ -1,0 +1,134 @@
+{
+  "$schema": "https://devolutions.net/schemas/now-policy.schema.1.0.json",
+  "PolicyVersion": "1.0.0",
+  "PolicyType": "PackageBrokerPolicy",
+  "Metadata": {
+    "Id": "contoso.desktop.standard-allowlist",
+    "Publisher": "Contoso IT",
+    "Revision": 4,
+    "PublishedAt": "2026-05-05T00:00:00Z",
+    "Description": "Fail-closed policy for standard workstation package installs."
+  },
+  "Enforcement": {
+    "DefaultDecision": "Deny",
+    "RulePrecedence": "PriorityThenDeny"
+  },
+  "Rules": [
+    {
+      "Id": "deny.integrity-bypass",
+      "Enabled": true,
+      "Priority": 10,
+      "Decision": "Deny",
+      "Reason": "Integrity and publisher checks cannot be bypassed by brokered requests.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "SkipHashCheck": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.custom-parameters",
+      "Enabled": true,
+      "Priority": 20,
+      "Decision": "Deny",
+      "Reason": "Custom package-manager parameters are not allowed in the workstation allow list.",
+      "Match": {
+        "HasCustomParameters": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "deny.prepost-commands",
+      "Enabled": true,
+      "Priority": 30,
+      "Decision": "Deny",
+      "Reason": "Pre and post operation commands are not allowed in the workstation allow list.",
+      "Match": {
+        "HasPrePostCommands": [
+          true
+        ]
+      }
+    },
+    {
+      "Id": "allow.winget.vscode",
+      "Enabled": true,
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "Visual Studio Code is approved for managed workstations.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.VisualStudioCode"
+        ],
+        "Scopes": [
+          "User",
+          "Machine"
+        ],
+        "Architectures": [
+          "X64",
+          "Arm64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    },
+    {
+      "Id": "allow.winget.powertoys",
+      "Enabled": true,
+      "Priority": 100,
+      "Decision": "Allow",
+      "Reason": "PowerToys is approved for developer workstations.",
+      "Match": {
+        "Operations": [
+          "Install",
+          "Update"
+        ],
+        "Managers": [
+          "Winget"
+        ],
+        "Sources": [
+          "winget"
+        ],
+        "PackageIdentifiers": [
+          "Microsoft.PowerToys"
+        ],
+        "Scopes": [
+          "User",
+          "Machine"
+        ],
+        "Architectures": [
+          "X64",
+          "Arm64"
+        ]
+      },
+      "Constraints": {
+        "AllowInteractive": false,
+        "AllowSkipHashCheck": false,
+        "AllowPreRelease": false,
+        "AllowCustomParameters": false,
+        "AllowPrePostCommands": false,
+        "AllowKillBeforeOperation": false
+      }
+    }
+  ]
+}

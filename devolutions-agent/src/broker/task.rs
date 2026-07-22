@@ -1,0 +1,170 @@
+//! Package broker entry point
+
+use std::sync::{Arc, RwLock};
+
+use anyhow::Context as _;
+use async_trait::async_trait;
+use devolutions_gateway_task::{ShutdownSignal, Task};
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
+
+use crate::broker::executor::{self, CommandExecutor};
+use crate::broker::pipe::DEFAULT_PIPE_NAME;
+use crate::broker::policy_loader;
+use crate::broker::policy_watcher::{PolicyState, PolicyWatcher};
+use crate::broker::server::BrokerState;
+
+/// Configuration for the broker task.
+#[derive(Debug, Clone)]
+pub struct BrokerTaskConfig {
+    /// Named pipe name to listen on.
+    pub pipe_name: String,
+    /// Path to the policy file. If `None`, uses the default location.
+    /// Supports `.json`, `.yaml`, and `.yml` extensions.
+    pub policy_path: Option<String>,
+    /// Skip Authenticode signature validation for the broker client executable.
+    pub skip_signature_validation: bool,
+}
+
+impl Default for BrokerTaskConfig {
+    fn default() -> Self {
+        Self {
+            pipe_name: DEFAULT_PIPE_NAME.to_owned(),
+            policy_path: None,
+            skip_signature_validation: false,
+        }
+    }
+}
+
+pub struct BrokerTask {
+    config: BrokerTaskConfig,
+}
+
+impl BrokerTask {
+    pub fn new(config: BrokerTaskConfig) -> Self {
+        Self { config }
+    }
+}
+
+#[async_trait]
+impl Task for BrokerTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "package-broker";
+
+    async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
+        // Resolve policy file path.
+
+        let policy_path = match &self.config.policy_path {
+            Some(path) => std::path::PathBuf::from(path),
+            None => policy_loader::find_default_policy().unwrap_or_else(|error| {
+                let candidate = policy_loader::default_policy_candidate();
+                warn!(
+                    %error,
+                    path = %candidate.display(),
+                    "Default broker policy is unavailable; broker will pause until this file is provided"
+                );
+                candidate
+            }),
+        };
+
+        // Create policy watcher with initial load attempt.
+        let (watcher, mut state_rx) = PolicyWatcher::new(policy_path.clone());
+
+        // Log initial state.
+        match &*state_rx.borrow() {
+            PolicyState::Active(policy) => {
+                info!(
+                    policy_id = %policy.metadata.id,
+                    policy_revision = %policy.metadata.revision,
+                    path = %policy_path.display(),
+                    "Loaded package broker policy"
+                );
+            }
+            PolicyState::Unavailable { reason } => {
+                warn!(
+                    %reason,
+                    path = %policy_path.display(),
+                    "Policy unavailable at startup; broker will pause until a valid policy is provided"
+                );
+            }
+        }
+
+        let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
+
+        // Initialize BrokerState with current policy (or None if unavailable).
+        let initial_policy = match &*state_rx.borrow() {
+            PolicyState::Active(policy) => Some(Arc::clone(policy)),
+            PolicyState::Unavailable { .. } => None,
+        };
+
+        let state = Arc::new(BrokerState {
+            policy: RwLock::new(initial_policy),
+            executor,
+            pipe_name: self.config.pipe_name.clone(),
+            tracker: crate::broker::operation_tracker::OperationTracker::new(),
+            skip_signature_validation: self.config.skip_signature_validation,
+        });
+
+        // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.
+        let shutdown = CancellationToken::new();
+        state.tracker.clone().spawn_eviction_task(shutdown.clone());
+
+        // Spawn policy watcher task.
+        let watcher_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            watcher.watch(watcher_shutdown).await;
+        });
+
+        // Spawn policy state relay: updates BrokerState when policy watcher reports changes.
+        let relay_state = Arc::clone(&state);
+        let relay_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = relay_shutdown.cancelled() => break,
+                    result = state_rx.changed() => {
+                        if result.is_err() {
+                            // Sender dropped (watcher exited).
+                            break;
+                        }
+                        let new_policy = match &*state_rx.borrow_and_update() {
+                            PolicyState::Active(policy) => {
+                                info!(
+                                    policy_id = %policy.metadata.id,
+                                    revision = policy.metadata.revision,
+                                    "Policy hot-reloaded; broker resumed"
+                                );
+                                Some(Arc::clone(policy))
+                            }
+                            PolicyState::Unavailable { reason } => {
+                                warn!(%reason, "Policy became unavailable; broker paused");
+                                None
+                            }
+                        };
+                        *relay_state.policy.write().expect("policy lock poisoned") = new_policy;
+                    }
+                }
+            }
+        });
+
+        // Spawn pipe server.
+        let server_shutdown = shutdown.clone();
+        let server_handle = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { crate::broker::pipe::run_pipe_server(state, server_shutdown).await }
+        });
+
+        // Wait for agent shutdown signal.
+        shutdown_signal.wait().await;
+        info!("package broker received shutdown signal");
+        shutdown.cancel();
+
+        // Wait for the server task to finish.
+        match server_handle.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(error).context("broker pipe server error"),
+            Err(error) => Err(error).context("broker server task panicked"),
+        }
+    }
+}

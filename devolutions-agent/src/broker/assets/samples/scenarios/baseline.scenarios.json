@@ -1,0 +1,38 @@
+{
+  "ScenarioSet": "baseline",
+  "Description": "Broad end-to-end scenarios for the gateway-owned package broker policy flow.",
+  "Scenarios": [
+    {
+      "Id": "baseline.winget.vscode.allow",
+      "Policy": "corporate-allowlist.policy.json",
+      "Request": "requests/winget-vscode-install.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "allow.winget.vscode",
+      "Tags": ["baseline", "winget", "allowlist"]
+    },
+    {
+      "Id": "baseline.winget.unknown.default-deny",
+      "Policy": "corporate-allowlist.policy.json",
+      "Request": "requests/winget-unknown-install.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["baseline", "winget", "default-deny"]
+    },
+    {
+      "Id": "baseline.winget.skiphash.deny",
+      "Policy": "corporate-allowlist.policy.json",
+      "Request": "requests/winget-vscode-skiphash.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.integrity-bypass",
+      "Tags": ["baseline", "winget", "risky-options"]
+    },
+    {
+      "Id": "baseline.default-allow.normal-install",
+      "Policy": "deny-risky-options.policy.json",
+      "Request": "requests/winget-vscode-install.request.json",
+      "ExpectedDecision": "Allow",
+      "ExpectedRuleId": "<default>",
+      "Tags": ["baseline", "winget", "default-allow"]
+    }
+  ]
+}

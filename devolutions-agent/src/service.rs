@@ -2,6 +2,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
+#[cfg(windows)]
+use devolutions_agent::broker::pipe::DEFAULT_PIPE_NAME;
+#[cfg(windows)]
+use devolutions_agent::broker::task::{BrokerTask, BrokerTaskConfig};
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::log::AgentLog;
 use devolutions_agent::psu_agent::PsuAgentTask;
@@ -213,6 +217,19 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
 
         if conf.pedm.enabled {
             tasks.register(PedmTask::new())
+        }
+
+        if conf.package_broker.enabled {
+            let broker_config = BrokerTaskConfig {
+                pipe_name: conf
+                    .package_broker
+                    .pipe_name
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned()),
+                policy_path: conf.package_broker.policy_path.clone(),
+                skip_signature_validation: conf.debug.skip_broker_signature_validation,
+            };
+            tasks.register(BrokerTask::new(broker_config));
         }
 
         if conf.session.enabled {

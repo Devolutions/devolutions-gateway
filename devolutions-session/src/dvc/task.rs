@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
+use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
 use devolutions_gateway_task::Task;
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use now_proto_pdu::{
@@ -37,7 +38,6 @@ use windows::core::PCWSTR;
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
-use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
@@ -663,7 +663,7 @@ impl MessageProcessor {
         // - RAW_ENCODING: pass through raw bytes without transcoding.
         // - UNICODE_CONSOLE: inject `@chcp 65001`, write file as BOM-less UTF-8, IO passthrough.
         let (file_encoding, io_encoding) = if batch_msg.is_unicode_console() {
-            script = format!("@chcp 65001 > nul\r\n{}", script);
+            script = format!("{BATCH_UTF8_PREAMBLE}\r\n{script}");
             (DataEncoding::Raw, DataEncoding::Raw)
         } else if batch_msg.is_raw_encoding() {
             (DataEncoding::from_oem_codepage(), DataEncoding::Raw)
@@ -672,7 +672,7 @@ impl MessageProcessor {
         };
 
         let tmp_file = TmpFileGuard::new("bat")?;
-        tmp_file.write_content_encoded(&script, file_encoding)?;
+        tmp_file.write_bytes(&file_encoding.encode_str(&script))?;
 
         let parameters = format!("/Q /C \"{}\"", tmp_file.path_string());
 
@@ -723,10 +723,7 @@ impl MessageProcessor {
             let mut script = winps_msg.command().to_owned();
             if winps_msg.is_unicode_console() {
                 // Inject UTF-8 encoding setup for Windows PowerShell.
-                script = format!(
-                    "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\r\n{}",
-                    script
-                );
+                script = format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n{script}");
             }
             let tmp_file = TmpFileGuard::new("ps1")?;
             tmp_file.write_content_utf8_bom(&script)?;
@@ -786,13 +783,10 @@ impl MessageProcessor {
             let mut script = pwsh_msg.command().to_owned();
             if pwsh_msg.is_unicode_console() {
                 // Inject UTF-8 encoding setup for PowerShell 7+.
-                script = format!(
-                    "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\r\n{}",
-                    script
-                );
+                script = format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n{script}");
             }
             let tmp_file = TmpFileGuard::new("ps1")?;
-            tmp_file.write_content_encoded(&script, DataEncoding::Raw)?;
+            tmp_file.write_content(&script)?;
             params.push("-Command".to_owned());
             params.push(format!("\"{}\"", tmp_file.path_string()));
             Some(tmp_file)

@@ -22,3 +22,6 @@ devolutions-gateway/openapi/dotnet-client/docs/** linguist-generated merge=binar
 devolutions-gateway/openapi/dotnet-subscriber/src/** linguist-generated merge=binary
 devolutions-gateway/openapi/ts-angular-client/api/** linguist-generated merge=binary
 devolutions-gateway/openapi/ts-angular-client/model/** linguist-generated merge=binary
+
+# Sample assets produce huge LoC counts; exclude them from language statistics.
+devolutions-agent/src/broker/assets/** linguist-generated
