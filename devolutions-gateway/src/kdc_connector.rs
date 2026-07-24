@@ -146,12 +146,18 @@ impl KdcConnector {
             .map(equal_jitter)
             .take(KDC_MAX_RETRIES);
 
+        // Count transient failures so the log carries the attempt number. `RetryIf` evaluates
+        // the condition on every failure, including the last one whose retry is never scheduled
+        // (the backoff iterator is exhausted); the count reflects attempts made, not retries left.
+        let mut attempt = 0;
+
         RetryIf::start(
             backoff,
             || self.send_direct(kdc_addr, message),
             |error: &DirectSendError| match error {
                 DirectSendError::Transient(error) => {
-                    warn!(%kdc_addr, %error, "Transient error while forwarding message to KDC server, retrying");
+                    attempt += 1;
+                    debug!(%kdc_addr, %error, attempt, "Transient error while forwarding message to KDC server");
                     true
                 }
                 DirectSendError::Permanent(_) => false,
@@ -405,16 +411,11 @@ mod tests {
     //! The four cases that need a real handle (pin-with-missing-agent, no-match-falls-back,
     //! tunnel success, UDP-via-agent guard) are observable today only via integration tests
     //! that stand up an actual agent-tunnel listener — left as a follow-up.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use uuid::Uuid;
 
     use super::*;
-
-    fn unreachable_kdc_addr() -> TargetAddr {
-        // Loopback + a port that is not listening produces ConnectionRefused on every supported
-        // platform, which `unable_to_reach_kdc_server_err` maps to a bad-gateway `HttpError`.
-        // Avoids a real network round-trip while still exercising the direct-connect branch.
-        TargetAddr::parse("tcp://127.0.0.1:1", Some(88)).expect("static target addr is valid")
-    }
 
     fn udp_kdc_addr() -> TargetAddr {
         TargetAddr::parse("udp://127.0.0.1:88", Some(88)).expect("static target addr is valid")
@@ -428,27 +429,13 @@ mod tests {
     #[tokio::test]
     async fn explicit_pin_without_tunnel_handle_errors() {
         let connector = KdcConnector::new(Uuid::new_v4(), Some(Uuid::new_v4()), None);
-        let result = connector.send(&unreachable_kdc_addr(), b"\x00\x00\x00\x00").await;
+        // Routing rejects the pin before any dial, so this address is never actually connected to.
+        let never_dialed = TargetAddr::parse("tcp://127.0.0.1:88", Some(88)).expect("static target addr is valid");
+        let result = connector.send(&never_dialed, b"\x00\x00\x00\x00").await;
         let err = result.expect_err("explicit pin must reject when no tunnel handle is configured");
         assert!(
             format!("{err}").contains("requires agent tunnel routing"),
             "error message should explain the pin/tunnel mismatch, got: {err}",
-        );
-    }
-
-    /// No tunnel handle, no pin → falls through to direct connect.
-    ///
-    /// We point at an unreachable loopback port; the only thing the test asserts is that
-    /// we *got* to the direct-connect path (any error from there shape-matches the
-    /// "unable to reach KDC server" wrapping).
-    #[tokio::test]
-    async fn no_pin_no_tunnel_handle_attempts_direct() {
-        let connector = KdcConnector::new(Uuid::new_v4(), None, None);
-        let result = connector.send(&unreachable_kdc_addr(), b"\x00\x00\x00\x00").await;
-        let err = result.expect_err("loopback:1 should be unreachable");
-        assert!(
-            format!("{err}").contains("unable to reach KDC server"),
-            "should have reached the direct-connect branch, got: {err}",
         );
     }
 
@@ -507,5 +494,139 @@ mod tests {
                 .err(),
         );
         assert!(matches!(permanent, DirectSendError::Permanent(_)));
+    }
+
+    /// A configurable fake KDC: for each accepted connection it drains the request and then
+    /// behaves according to the next entry of `behaviors` (falling back to `Drop` once the
+    /// iterator is exhausted). Returns the bound address and a shared counter of how many
+    /// connections were accepted, so tests can assert the exact number of attempts the retry
+    /// loop made.
+    enum FakeKdcBehavior {
+        /// Accept then close without replying — surfaces as `UnexpectedEof` (transient).
+        Drop,
+        /// Reply with a valid 4-byte-framed KDC message (`payload`).
+        Reply,
+        /// Reply with an oversized length prefix — surfaces as `InvalidData` (permanent).
+        ReplyTooLarge,
+    }
+
+    /// The framed reply bytes a `Reply` behavior sends and a successful `send` returns.
+    const FAKE_KDC_REPLY: &[u8] = &[0, 0, 0, 4, b'd', b'a', b't', b'a'];
+
+    async fn spawn_fake_kdc(behaviors: Vec<FakeKdcBehavior>) -> (SocketAddr, Arc<AtomicUsize>) {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind fake KDC");
+        let addr = listener.local_addr().expect("fake KDC local addr");
+
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted_in_task = Arc::clone(&accepted);
+
+        tokio::spawn(async move {
+            let mut behaviors = behaviors.into_iter();
+
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                accepted_in_task.fetch_add(1, Ordering::SeqCst);
+
+                // Drain whatever the client wrote before acting on it.
+                let mut discard = [0u8; 64];
+                let _ = stream.read(&mut discard).await;
+
+                match behaviors.next().unwrap_or(FakeKdcBehavior::Drop) {
+                    FakeKdcBehavior::Drop => drop(stream),
+                    FakeKdcBehavior::Reply => {
+                        let _ = stream.write_all(FAKE_KDC_REPLY).await;
+                        let _ = stream.flush().await;
+                    }
+                    FakeKdcBehavior::ReplyTooLarge => {
+                        let _ = stream.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).await;
+                        let _ = stream.flush().await;
+                        drop(stream);
+                    }
+                }
+            }
+        });
+
+        (addr, accepted)
+    }
+
+    async fn send_to_fake_kdc(addr: SocketAddr) -> (Result<Vec<u8>, HttpError>, KdcConnector) {
+        let target = TargetAddr::parse(&format!("tcp://{addr}"), Some(88)).expect("valid target addr");
+        let connector = KdcConnector::new(Uuid::new_v4(), None, None);
+        let result = connector.send(&target, b"\x00\x00\x00\x04test").await;
+        (result, connector)
+    }
+
+    /// A transient failure that later clears is retried and the eventual success is returned.
+    ///
+    /// `start_paused` keeps the backoff sleeps from costing real wall-clock time; the fake KDC
+    /// drops the first two connections (transient `UnexpectedEof`) and replies on the third.
+    #[tokio::test(start_paused = true)]
+    async fn transient_failure_is_retried_then_recovers() {
+        let (addr, accepted) = spawn_fake_kdc(vec![
+            FakeKdcBehavior::Drop,
+            FakeKdcBehavior::Drop,
+            FakeKdcBehavior::Reply,
+        ])
+        .await;
+
+        let (result, _connector) = send_to_fake_kdc(addr).await;
+
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(error) => panic!("the send should recover once the KDC stops dropping: {error}"),
+        };
+        assert_eq!(
+            reply, FAKE_KDC_REPLY,
+            "the successful reply bytes should be returned verbatim"
+        );
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            3,
+            "two transient drops plus one success is exactly three attempts",
+        );
+    }
+
+    /// A KDC that always drops is retried exactly `KDC_MAX_RETRIES` times (for
+    /// `KDC_MAX_RETRIES + 1` attempts total) before the error is surfaced.
+    #[tokio::test(start_paused = true)]
+    async fn transient_failure_is_retried_until_exhausted() {
+        let (addr, accepted) = spawn_fake_kdc(Vec::new()).await;
+
+        let (result, _connector) = send_to_fake_kdc(addr).await;
+
+        let err = result.expect_err("a KDC that never replies must surface an error");
+        assert!(
+            format!("{err}").contains("unable to read KDC reply message"),
+            "should surface the reply-read failure, got: {err}",
+        );
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            KDC_MAX_RETRIES + 1,
+            "the send should be attempted KDC_MAX_RETRIES + 1 times",
+        );
+    }
+
+    /// A permanent failure stops immediately, with no retry.
+    ///
+    /// The fake KDC replies with an oversized length prefix, which `read_kdc_reply_message`
+    /// rejects as `InvalidData` — classified permanent, so the loop must not attempt again.
+    #[tokio::test(start_paused = true)]
+    async fn permanent_failure_is_not_retried() {
+        let (addr, accepted) = spawn_fake_kdc(vec![FakeKdcBehavior::ReplyTooLarge]).await;
+
+        let (result, _connector) = send_to_fake_kdc(addr).await;
+
+        result.expect_err("an oversized reply length is a permanent failure");
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            1,
+            "a permanent failure must not be retried",
+        );
     }
 }
