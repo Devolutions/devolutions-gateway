@@ -2,6 +2,84 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.2.4 (2026-07-24)
+
+### Features
+
+- _agent_: add PSU agent functionality ([#1840](https://github.com/Devolutions/devolutions-gateway/issues/1840)) ([182abc28c4](https://github.com/Devolutions/devolutions-gateway/commit/182abc28c4c3e9f6fcc942b393f4c246fa148d44)) ([#1848](https://github.com/Devolutions/devolutions-gateway/issues/1848)) ([a9a2bb508e](https://github.com/Devolutions/devolutions-gateway/commit/a9a2bb508e79d0c45447ed98ca20067fcf883faa)) ([#1851](https://github.com/Devolutions/devolutions-gateway/issues/1851)) ([e962198fad](https://github.com/Devolutions/devolutions-gateway/commit/e962198fad781ecda6c1e09a598a268f82fb6de6))
+
+  Adding ability to Devolutions Agent to connect to PSU over gRPC and
+  start child processes to run PSRP requests from PSU.
+
+- _webapp_: align standalone UI with DVLS theme ([#1845](https://github.com/Devolutions/devolutions-gateway/issues/1845)) ([db5866b8a8](https://github.com/Devolutions/devolutions-gateway/commit/db5866b8a841a3704d509fa2f2ef5b4b91a98f4d))
+
+  Aligns the standalone Gateway webapp styling with the DVLS theme, adding
+  light and dark theme support and refreshing the main UI surfaces users
+  interact with.
+
+  This updates the sidebar, login page, session backgrounds, dropdowns,
+  reconnect form layout, and toast spacing so the standalone Gateway
+  webapp feels consistent with the DVLS experience.
+
+- _webapp_: add Active Directory web client ([#1849](https://github.com/Devolutions/devolutions-gateway/issues/1849)) ([264932d8ce](https://github.com/Devolutions/devolutions-gateway/commit/264932d8ce778fad04986ee1e5f3d7972114200d))
+
+  Adds Active Directory support to the standalone Gateway web client,
+  allowing users to open LDAP and LDAPS sessions from the Gateway UI.
+
+  The new experience includes an Active Directory connection form, session
+  tab handling, LDAP-backed data operations, and theme-aligned Active
+  Directory UI integration using the published Active Directory web
+  component package.
+
+- _dgw_: add Session Recording Log artifacts ([#1857](https://github.com/Devolutions/devolutions-gateway/issues/1857)) ([e84baaa94b](https://github.com/Devolutions/devolutions-gateway/commit/e84baaa94b418af976f5742ef0201455161652a2)) ([DGW-403](https://devolutions.atlassian.net/browse/DGW-403))
+
+  Adds server-side support for Session Recording Log recording artifacts.
+
+  Gateway can now accept JREC recording pushes with `fileType=slog`,
+  persist the raw UTF-8 NDJSON stream as `.slog`, and serve `.slog`
+  downloads with the `application/x-ndjson` content type. This establishes
+  the Gateway storage contract needed by AD Session Recording Log
+  producers and future viewers.
+
+- _agent_: implement package broker ([#1847](https://github.com/Devolutions/devolutions-gateway/issues/1847)) ([66c8377d40](https://github.com/Devolutions/devolutions-gateway/commit/66c8377d4038236424d32224eb88e6cf6c275e96))
+
+  Introduces a package broker in Devolutions Agent that enables
+  policy-driven software installation and management. It supports winget
+  and PowerShell package managers, JSON and YAML policy definitions with
+  evaluation and schema generation, elevated and non-elevated execution
+  with user impersonation, and pipe-based authentication that validates
+  the effective user and calling executable signature.
+
+### Bug Fixes
+
+- _dgw_: write boot.stacktrace file when running as a service ([#1838](https://github.com/Devolutions/devolutions-gateway/issues/1838)) ([48a8512bf6](https://github.com/Devolutions/devolutions-gateway/commit/48a8512bf656352a6c57958606480daa0f070629)) ([DGW-401](https://devolutions.atlassian.net/browse/DGW-401))
+
+- _session_: scope RDM jump host discovery to the current Windows session ([#1839](https://github.com/Devolutions/devolutions-gateway/issues/1839)) ([3c9fbf65c0](https://github.com/Devolutions/devolutions-gateway/commit/3c9fbf65c0492d1fd02a488b893dc67c6957fe5b))
+
+  Fixes RDM (Remote Desktop Manager) “jump host” discovery to only consider RDM instances running in the current Windows session, preventing cross-session collisions when the same user has multiple concurrent sessions.
+
+- _agent-installer_: fail the install if the agent tunnel can't reach the gateway ([#1837](https://github.com/Devolutions/devolutions-gateway/issues/1837)) ([559f4c2ba3](https://github.com/Devolutions/devolutions-gateway/commit/559f4c2ba30b87afd093ab7136dff8167f231887))
+
+- _agent_: recover DVC initialization after session readiness ([#1852](https://github.com/Devolutions/devolutions-gateway/issues/1852)) ([b897c59b7c](https://github.com/Devolutions/devolutions-gateway/commit/b897c59b7cbd3f1ea4bd3fa9fae7204c99f1f79f))
+
+  Improves Devolutions Agent reliability for RDP connections that use
+  multi-step authentication or reconnect an existing session. The session
+  host now waits for the appropriate Windows logon or unlock event before
+  starting, and transient virtual-channel initialization failures recover
+  automatically instead of ending the session immediately.
+
+- _dgw_: retry transient KDC connection drops ([#1863](https://github.com/Devolutions/devolutions-gateway/issues/1863)) ([de6c29e684](https://github.com/Devolutions/devolutions-gateway/commit/de6c29e68477c5629a3710775848f8c9cc9f80b1)) ([DGW-423](https://devolutions.atlassian.net/browse/DGW-423))
+
+  The KDC proxy path sometimes sees a connection accepted and then dropped
+  before a reply is returned (suspected DC-side load: connection
+  throttling or port exhaustion), surfacing to clients as a 502 Bad
+  Gateway. Direct KDC exchanges are now retried up to 3 times on such
+  transient failures, spaced with equal-jitter exponential backoff (~1.5s
+  / 3s / 6s) so a loaded KDC gets breathing room and concurrent retries do
+  not synchronize into a storm. Permanent failures are still surfaced
+  immediately, and the KDC target host is now shown at info level for
+  easier diagnosis.
+
 ## 2026.2.3 (2026-06-24)
 
 ### Bug Fixes

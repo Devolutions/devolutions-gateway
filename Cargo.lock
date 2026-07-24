@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-agent"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "agent-tunnel-proto",
  "anyhow",
@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-agent-updater"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "anyhow",
  "win-api-wrappers",
@@ -1738,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "agent-tunnel",
  "anyhow",
@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "aide",
  "anyhow",
@@ -1962,7 +1962,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-shell-ext"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "devolutions-pedm-shared",
  "embed-resource",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-session"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
