@@ -172,10 +172,9 @@ impl KdcConnector {
         let protocol = kdc_addr.scheme();
 
         if protocol == "tcp" {
-            let mut connection = TcpStream::connect(kdc_addr.as_addr()).await.map_err(|e| {
-                error!(%kdc_addr, "failed to connect to KDC server");
-                classify_io(e, unable_to_reach_kdc_server_err)
-            })?;
+            let mut connection = TcpStream::connect(kdc_addr.as_addr())
+                .await
+                .map_err(|e| classify_io(e, unable_to_reach_kdc_server_err))?;
 
             trace!("Connected! Forwarding KDC message...");
 
@@ -504,7 +503,7 @@ mod tests {
     enum FakeKdcBehavior {
         /// Accept then close without replying — surfaces as `UnexpectedEof` (transient).
         Drop,
-        /// Reply with a valid 4-byte-framed KDC message (`payload`).
+        /// Reply with a valid 4-byte-framed KDC message (`FAKE_KDC_REPLY`).
         Reply,
         /// Reply with an oversized length prefix — surfaces as `InvalidData` (permanent).
         ReplyTooLarge,
