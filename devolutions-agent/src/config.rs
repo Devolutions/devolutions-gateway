@@ -112,7 +112,6 @@ pub struct PsuConf {
     pub agent_id: Option<String>,
     pub display_name: Option<String>,
     pub app_token: String,
-    pub hubs: Vec<String>,
     pub powershell: dto::PsuPowerShellConf,
 }
 
@@ -139,7 +138,6 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
             agent_id: conf.agent_id,
             display_name: conf.display_name,
             app_token,
-            hubs: conf.hubs,
             powershell: conf.powershell,
         }))
     }
@@ -607,10 +605,6 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub app_token: Option<String>,
 
-        /// Hubs/queues advertised during registration.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub hubs: Vec<String>,
-
         /// PowerShell child process configuration.
         #[serde(
             default,
@@ -966,7 +960,6 @@ mod tests {
                 "AgentId": "agent-01",
                 "DisplayName": "Agent 01",
                 "AppToken": "app-token",
-                "Hubs": ["default"],
                 "PowerShell": {
                     "VersionSelector": "7.5"
                 }
