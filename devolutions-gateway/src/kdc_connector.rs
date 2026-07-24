@@ -146,7 +146,7 @@ impl KdcConnector {
             .map(equal_jitter)
             .take(KDC_MAX_RETRIES);
 
-        RetryIf::spawn(
+        RetryIf::start(
             backoff,
             || self.send_direct(kdc_addr, message),
             |error: &DirectSendError| match error {
