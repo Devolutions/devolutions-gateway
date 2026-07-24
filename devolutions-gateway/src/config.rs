@@ -1907,9 +1907,9 @@ pub mod dto {
         /// Enable proxy-based RDP credential injection against Kerberos-enforced targets
         ///
         /// Turns on the in-process KDC acceptor the Gateway presents to the client when injecting
-        /// credentials for accounts that can't fall back to NTLM (e.g. AD Protected Users). The real
-        /// KDC used for the target leg comes from the provisioned credentials, not from here. Off by
-        /// default; still requires `enable_unstable`.
+        /// credentials for accounts that can't fall back to NTLM (e.g. AD Protected Users).
+        /// Target-side KDC routing is not configured here. Off by default; still requires
+        /// `enable_unstable`.
         #[serde(default)]
         pub kerberos_credential_injection: bool,
 

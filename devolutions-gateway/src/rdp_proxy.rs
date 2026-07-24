@@ -374,8 +374,7 @@ fn injection_uses_kerberos(
 }
 
 /// Build the Kerberos config for both CredSSP legs from the single [`injection_uses_kerberos`]
-/// decision. When Kerberos is chosen the DVLS-provisioned KDC is required; everything else is NTLM
-/// on both legs.
+/// decision. Everything else is NTLM on both legs.
 pub(crate) fn credential_injection_kerberos_configs(
     conf: &Conf,
     client_addr: SocketAddr,
@@ -389,30 +388,18 @@ pub(crate) fn credential_injection_kerberos_configs(
         conf.debug.kerberos_credential_injection,
         protocol,
     ) {
-        // A KDC only makes sense for Kerberos. If DVLS provisioned one anyway (feature off, or a
-        // domainless target that can't get a ticket), ignore it instead of failing an otherwise-fine
-        // NTLM session — but say so, since it signals a provisioning mismatch.
-        if credential_injection_kdc.krb_kdc().is_some() {
-            warn!(
-                jti = %credential_injection_kdc.jti(),
-                "Ignoring provisioned krb_kdc: credential injection is using NTLM (feature disabled or domainless target)"
-            );
-        }
         return Ok(CredentialInjectionKerberosConfigs {
             server: None,
             client: None,
         });
     }
 
-    let krb_kdc = credential_injection_kdc
-        .krb_kdc()
-        .context("Kerberos credential injection requires a provisioned KDC (krb_kdc), but none was provisioned")?;
-    let kdc_proxy_url = url::Url::parse(krb_kdc.as_str()).context("parse provisioned krb_kdc as URL")?;
-
     Ok(CredentialInjectionKerberosConfigs {
         server: Some(credential_injection_kdc.server_kerberos_config(client_addr)?),
         client: Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: Some(kdc_proxy_url),
+            // TODO: Provision the target KDC through connection options after the store is generalized.
+            // See https://github.com/Devolutions/devolutions-gateway/pull/1862#pullrequestreview-4774565673.
+            kdc_proxy_url: None,
             hostname: gateway_hostname.to_owned(),
         }),
     })
