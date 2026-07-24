@@ -70,6 +70,7 @@ thiserror = "2"
 typed-builder = "0.21"
 backoff = "0.4"
 bitflags = "2.9"
+rand = "0.10"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
@@ -105,6 +106,7 @@ tower-http = { version = "0.5", features = ["cors", "fs"] }
 tungstenite = "0.26" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] } # Should use the same version of tungstenite as `axum`
 http-body-util = "0.1"
+tokio-retry = "0.3"
 
 # OpenAPI generator
 utoipa = { version = "4.2", default-features = false, features = ["uuid", "time"], optional = true }
