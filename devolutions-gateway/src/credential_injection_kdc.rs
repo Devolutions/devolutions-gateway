@@ -26,6 +26,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
+use crate::config::ConfHandle;
 use crate::credential::{AppCredential, AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle};
 
 // The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
@@ -436,17 +437,30 @@ fn random_32_bytes() -> Vec<u8> {
 ///
 /// All credential reads/writes — provision-credentials, RDP mode detection, KDC dispatch — go
 /// through this service, so callers see one handle instead of coordinating a store and a registry.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CredentialService {
-    hostname: String,
+    // The `ConfHandle` is needed to resolve the hostname for the KDC config, which is used to
+    // build the SPN for the CredSSP acceptor. The hostname cannot not be a plain `String`, because
+    // the config can be reloaded at runtime.
+    conf_handle: ConfHandle,
     credentials: CredentialStoreHandle,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<CredentialInjectionKdcSession>>>>,
 }
 
+impl fmt::Debug for CredentialService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CredentialService")
+            .field("conf_handle", &"<ConfHandle>")
+            .field("credentials", &self.credentials)
+            .field("sessions", &self.sessions)
+            .finish()
+    }
+}
+
 impl CredentialService {
-    pub fn new(hostname: String) -> Self {
+    pub fn new(conf_handle: ConfHandle) -> Self {
         Self {
-            hostname,
+            conf_handle,
             credentials: CredentialStoreHandle::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -526,7 +540,9 @@ impl CredentialService {
             Arc::clone(session)
         };
 
-        CredentialInjectionKdc::from_parts(jti, credential_entry, self.hostname.clone(), session)
+        let hostname = self.conf_handle.get_conf().hostname.clone();
+
+        CredentialInjectionKdc::from_parts(jti, credential_entry, hostname, session)
             .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })
     }
 
@@ -596,7 +612,23 @@ mod tests {
     use secrecy::SecretString;
 
     use super::*;
+    use crate::config::ConfHandle;
     use crate::credential::{CleartextAppCredential, CleartextAppCredentialMapping};
+
+    const TEST_CONFIG: &str = r#"{
+        "Hostname": "dgateway.localhost.com",
+        "ProvisionerPublicKeyData": {
+            "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        },
+        "Listeners": [
+            { "InternalUrl": "http://*:7171", "ExternalUrl": "https://*:7171" }
+        ],
+        "__debug__": { "disable_token_validation": true }
+    }"#;
+
+    fn mock_conf_handle() -> ConfHandle {
+        ConfHandle::mock(TEST_CONFIG).expect("test config is valid")
+    }
 
     fn cleartext_mapping_with_target_username(target_username: &str) -> CleartextAppCredentialMapping {
         CleartextAppCredentialMapping {
@@ -681,7 +713,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_expired_credential_entry() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         // Negative TTL: entry is born already expired. `CredentialStoreHandle::get` does not
@@ -706,7 +738,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_returns_same_session_under_concurrent_calls() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         service
@@ -733,7 +765,7 @@ mod tests {
 
     #[test]
     fn service_insert_drops_stale_session_even_without_credential_replacement() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         // Simulate the race called out by Codex: a previous provisioning's session is still
@@ -762,7 +794,7 @@ mod tests {
 
     #[test]
     fn service_insert_replacement_drops_cached_kerberos_material() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         service
@@ -798,7 +830,7 @@ mod tests {
 
     #[test]
     fn service_sweep_orphans_drops_sessions_with_no_credential_entry() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         service
@@ -817,7 +849,7 @@ mod tests {
         // drive `credential::cleanup_task` to expire the entry, but it sleeps for 15 minutes
         // between ticks. Swapping the inner store is the deterministic equivalent.
         let orphaned_service = CredentialService {
-            hostname: "dgateway.localhost.com".to_owned(),
+            conf_handle: mock_conf_handle(),
             credentials: CredentialStoreHandle::new(),
             sessions: Arc::clone(&service.sessions),
         };
@@ -882,7 +914,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_unknown_jti() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
 
         assert!(
             matches!(
@@ -895,7 +927,7 @@ mod tests {
 
     #[test]
     fn service_kdc_for_rejects_non_injection_entry() {
-        let service = CredentialService::new("dgateway.localhost.com".to_owned());
+        let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
         service
