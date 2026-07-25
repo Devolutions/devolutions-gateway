@@ -116,6 +116,15 @@ async fn process_messages(
 ) -> anyhow::Result<()> {
     let (io_notification_tx, mut task_rx) = mpsc::channel(100);
 
+    // Detect pwsh (PowerShell 7+) availability once on DVC start, so that the
+    // corresponding capability flag is only advertised when it is actually installed.
+    let pwsh_executable = find_pwsh_executable();
+
+    match &pwsh_executable {
+        Some(path) => info!(path, "Found pwsh executable"),
+        None => warn!("pwsh executable was not found; pwsh execution capability is disabled"),
+    }
+
     // Wait for channel negotiation message and send downgraded capabilities back.
     let client_caps = select! {
         message = read_rx.recv() => {
@@ -146,14 +155,19 @@ async fn process_messages(
         return Ok(());
     }
 
-    let server_caps = default_server_caps();
+    let server_caps = default_server_caps(pwsh_executable.is_some());
     let heartbeat_interval = client_caps.heartbeat_interval().unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
     let downgraded_caps = client_caps.downgrade(&server_caps);
 
     // Send server capabilities back to the client.
     dvc_tx.send(server_caps.into()).await?;
 
-    let mut processor = MessageProcessor::new(downgraded_caps, dvc_tx.clone(), io_notification_tx.clone());
+    let mut processor = MessageProcessor::new(
+        downgraded_caps,
+        dvc_tx.clone(),
+        io_notification_tx.clone(),
+        pwsh_executable.clone(),
+    );
 
     info!("DVC negotiation completed");
 
@@ -173,7 +187,7 @@ async fn process_messages(
 
                                 // Re-negotiate capabilities with the client and initialize new
                                 // message processor.
-                                let server_caps = default_server_caps();
+                                let server_caps = default_server_caps(pwsh_executable.is_some());
                                 let downgraded_caps = client_caps.downgrade(&server_caps);
 
                                 // Old exec sessions will be abandoned (IO loops will terminate
@@ -181,7 +195,8 @@ async fn process_messages(
                                 processor = MessageProcessor::new(
                                     downgraded_caps,
                                     dvc_tx.clone(),
-                                    io_notification_tx.clone()
+                                    io_notification_tx.clone(),
+                                    pwsh_executable.clone(),
                                 );
 
                                 dvc_tx.send(server_caps.into()).await?;
@@ -267,7 +282,18 @@ async fn process_messages(
     }
 }
 
-fn default_server_caps() -> NowChannelCapsetMsg {
+fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
+    let mut exec_flags = NowExecCapsetFlags::STYLE_RUN
+        | NowExecCapsetFlags::STYLE_PROCESS
+        | NowExecCapsetFlags::STYLE_BATCH
+        | NowExecCapsetFlags::STYLE_WINPS
+        | NowExecCapsetFlags::IO_REDIRECTION
+        | NowExecCapsetFlags::UNICODE_CONSOLE;
+
+    if pwsh_available {
+        exec_flags |= NowExecCapsetFlags::STYLE_PWSH;
+    }
+
     NowChannelCapsetMsg::default()
         .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
         .with_session_capset(
@@ -277,15 +303,19 @@ fn default_server_caps() -> NowChannelCapsetMsg {
                 | NowSessionCapsetFlags::SET_KBD_LAYOUT
                 | NowSessionCapsetFlags::WINDOW_RECORDING,
         )
-        .with_exec_capset(
-            NowExecCapsetFlags::STYLE_RUN
-                | NowExecCapsetFlags::STYLE_PROCESS
-                | NowExecCapsetFlags::STYLE_BATCH
-                | NowExecCapsetFlags::STYLE_PWSH
-                | NowExecCapsetFlags::STYLE_WINPS
-                | NowExecCapsetFlags::IO_REDIRECTION
-                | NowExecCapsetFlags::UNICODE_CONSOLE,
-        )
+        .with_exec_capset(exec_flags)
+}
+
+/// Resolves the pwsh (PowerShell 7+) executable by searching directories listed in the `PATH`
+/// environment variable.
+fn find_pwsh_executable() -> Option<String> {
+    let path_var = std::env::var_os("PATH")?;
+
+    std::env::split_paths(&path_var)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.join("pwsh.exe"))
+        .find(|candidate| candidate.is_file())
+        .and_then(|path| path.into_os_string().into_string().ok())
 }
 
 enum ProcessMessageAction {
@@ -301,6 +331,8 @@ struct MessageProcessor {
     capabilities: NowChannelCapsetMsg,
     sessions: HashMap<u32, WinApiProcess>,
     rdm_handler: RdmMessageProcessor,
+    /// Resolved pwsh executable path; `None` when pwsh is not installed.
+    pwsh_executable: Option<String>,
     /// Shutdown signal sender for window monitoring task.
     window_monitor_shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     /// Handle for the window monitor task.
@@ -312,6 +344,7 @@ impl MessageProcessor {
         capabilities: NowChannelCapsetMsg,
         dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
         io_notification_tx: Sender<ServerChannelEvent>,
+        pwsh_executable: Option<String>,
     ) -> Self {
         let rdm_handler = RdmMessageProcessor::new(dvc_tx.clone());
         Self {
@@ -320,6 +353,7 @@ impl MessageProcessor {
             capabilities,
             sessions: HashMap::new(),
             rdm_handler,
+            pwsh_executable,
             window_monitor_shutdown_tx: None,
             window_monitor_handle: None,
         }
@@ -761,6 +795,12 @@ impl MessageProcessor {
     }
 
     async fn process_exec_pwsh(&mut self, pwsh_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
+        let Some(pwsh_executable) = self.pwsh_executable.clone() else {
+            return Err(ExecError::NowStatus(NowStatusError::new_proto(
+                NowProtoError::NotImplemented,
+            )));
+        };
+
         self.ensure_session_id_free(pwsh_msg.session_id()).await?;
 
         let mut params = Vec::new();
@@ -793,7 +833,7 @@ impl MessageProcessor {
         };
 
         let params_str = params.join(" ");
-        let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
+        let mut run_process = WinApiProcessBuilder::new(&pwsh_executable)
             .with_command_line(&params_str)
             .with_encoding(io_encoding)
             .with_env("NO_COLOR", "1");
