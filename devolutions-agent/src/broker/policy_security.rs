@@ -93,13 +93,27 @@ pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
         bail!("failed to read policy file security information: error {}", ret.0);
     }
 
+    // SAFETY: On success, `owner` and `dacl` point into `descriptor` (or are null), which
+    // outlives this call.
+    unsafe { verify_owner_and_dacl(owner, dacl) }
+}
+
+/// Verify that `owner` is trusted and that `dacl` grants write access to trusted SIDs only.
+///
+/// See [`verify_policy_file_security`] for the exact rules.
+///
+/// # Safety
+///
+/// - `owner` must be null or point to a valid SID.
+/// - `dacl` must be null or point to a valid, initialized ACL.
+unsafe fn verify_owner_and_dacl(owner: PSID, dacl: *const ACL) -> anyhow::Result<()> {
     if owner.0.is_null() {
         bail!("policy file has no owner information");
     }
 
-    // SAFETY: `owner` points into the security descriptor, which outlives this call.
+    // SAFETY: Per function contract, `owner` points to a valid SID.
     if !unsafe { is_trusted_sid(owner) } {
-        // SAFETY: `owner` points to a valid SID inside the security descriptor.
+        // SAFETY: Per function contract, `owner` points to a valid SID.
         let owner_string = unsafe { sid_to_string(owner) };
         bail!("policy file owner {owner_string} is not SYSTEM or built-in Administrators");
     }
@@ -108,7 +122,7 @@ pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
         bail!("policy file has a NULL DACL granting full control to everyone");
     }
 
-    // SAFETY: `dacl` is a valid, non-null pointer into the security descriptor.
+    // SAFETY: Per function contract, `dacl` is a valid, non-null pointer to an initialized ACL.
     let ace_count = u32::from(unsafe { (*dacl).AceCount });
 
     for idx in 0..ace_count {
@@ -195,11 +209,156 @@ mod tests {
         Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
     };
     use win_api_wrappers::str::U16CString;
-    use windows::Win32::Foundation::GENERIC_READ;
-    use windows::Win32::Security::Authorization::GRANT_ACCESS;
-    use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, GRANT_ACCESS, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, NO_INHERITANCE, WinWorldSid,
+    };
 
     use super::*;
+
+    /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
+    struct SddlDescriptor {
+        _descriptor: OwnedSecurityDescriptor,
+        owner: PSID,
+        dacl: *const ACL,
+    }
+
+    impl SddlDescriptor {
+        fn parse(sddl: &str) -> Self {
+            let wide = U16CString::from_str(sddl).unwrap();
+            let mut descriptor = OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
+
+            // SAFETY: `wide` is a valid null-terminated UTF-16 string, and `descriptor.0` is a
+            // live out variable.
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    windows::core::PCWSTR(wide.as_ptr()),
+                    SDDL_REVISION_1,
+                    &mut descriptor.0,
+                    None,
+                )
+            }
+            .unwrap();
+
+            let mut owner = PSID::default();
+            let mut owner_defaulted = windows::core::BOOL(0);
+
+            // SAFETY: `descriptor.0` is a valid security descriptor; out pointers are live.
+            unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut owner_defaulted) }.unwrap();
+
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut dacl_present = windows::core::BOOL(0);
+            let mut dacl_defaulted = windows::core::BOOL(0);
+
+            // SAFETY: `descriptor.0` is a valid security descriptor; out pointers are live.
+            unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut dacl_present, &mut dacl, &mut dacl_defaulted) }
+                .unwrap();
+
+            if !dacl_present.as_bool() {
+                dacl = std::ptr::null_mut();
+            }
+
+            Self {
+                _descriptor: descriptor,
+                owner,
+                dacl,
+            }
+        }
+
+        fn verify(&self) -> anyhow::Result<()> {
+            // SAFETY: `owner` and `dacl` point into the owned security descriptor, which outlives
+            // this call.
+            unsafe { verify_owner_and_dacl(self.owner, self.dacl) }
+        }
+    }
+
+    #[test]
+    fn system_owner_with_admin_only_write_dacl_is_accepted() {
+        // Owner: SYSTEM; SYSTEM and Administrators full control, Users read-only.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)");
+        sd.verify().expect("SYSTEM/Administrators-only DACL must be accepted");
+    }
+
+    #[test]
+    fn administrators_owner_is_accepted() {
+        let sd = SddlDescriptor::parse("O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)");
+        sd.verify().expect("Administrators owner must be accepted");
+    }
+
+    #[test]
+    fn untrusted_owner_is_rejected() {
+        // Owner: Everyone, even though the DACL itself is strict.
+        let sd = SddlDescriptor::parse("O:WDD:(A;;FA;;;SY)(A;;FA;;;BA)");
+        let error = sd.verify().unwrap_err();
+        assert!(error.to_string().contains("owner"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn everyone_write_ace_is_rejected() {
+        // Trusted owner, but the DACL grants Everyone generic write.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;GW;;;WD)");
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn users_file_write_ace_is_rejected() {
+        // Trusted owner, but BUILTIN\Users can write file data (0x2 = FILE_WRITE_DATA).
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;0x2;;;BU)");
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn users_delete_ace_is_rejected() {
+        // DELETE allows replacing the policy file, so it counts as write access (0x10000 = DELETE).
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;0x10000;;;BU)");
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn users_read_only_ace_is_accepted() {
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FR;;;BU)");
+        sd.verify().expect("read-only access for Users must be accepted");
+    }
+
+    #[test]
+    fn deny_ace_for_untrusted_sid_is_ignored() {
+        // A deny ACE never grants access, so it must not trigger a rejection.
+        let sd = SddlDescriptor::parse("O:SYD:(D;;FA;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)");
+        sd.verify().expect("deny ACEs must be ignored");
+    }
+
+    #[test]
+    fn missing_dacl_is_rejected() {
+        // Owner only, no DACL: everyone gets full control.
+        let sd = SddlDescriptor::parse("O:SY");
+        let error = sd.verify().unwrap_err();
+        assert!(error.to_string().contains("NULL DACL"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn callback_allow_ace_is_rejected() {
+        // Conditional (callback) allow ACE for a trusted SID: unsupported type, fail closed.
+        let sd = SddlDescriptor::parse(r#"O:SYD:(XA;;FA;;;SY;(1==1))"#);
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("unsupported ACE type"),
+            "unexpected error: {error}"
+        );
+    }
 
     fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
         ExplicitAccess {
@@ -241,8 +400,8 @@ mod tests {
         let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).unwrap();
 
         // Setting the owner to Administrators requires an elevated token; skip otherwise.
+        // The equivalent owner/DACL combinations are covered by the SDDL-based tests above.
         if set_security(temp.path(), Some(&admins), &[]).is_err() {
-            // Cannot set file owner: the test is not running elevated; nothing to verify.
             return;
         }
 
@@ -254,7 +413,7 @@ mod tests {
             &[
                 grant(GENERIC_ALL.0, system),
                 grant(GENERIC_ALL.0, admins),
-                grant(GENERIC_READ.0, users),
+                grant(windows::Win32::Foundation::GENERIC_READ.0, users),
             ],
         )
         .unwrap();
