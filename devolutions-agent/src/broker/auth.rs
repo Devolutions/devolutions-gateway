@@ -8,6 +8,7 @@ use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
 use win_api_wrappers::process::Process;
 use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 
 use crate::code_signing::validate_devolutions_authenticode_signature;
@@ -114,27 +115,24 @@ impl PipeClient {
             bail!("request client executable path is not absolute");
         }
 
-        let actual_path = canonicalize_for_comparison(&self.executable_path).with_context(|| {
+        let actual_id = file_id(&self.executable_path).with_context(|| {
             format!(
-                "failed to canonicalize pipe client executable path '{}'",
+                "failed to query pipe client executable '{}' file identity",
                 self.executable_path.display()
             )
         })?;
-        let requested_path = canonicalize_for_comparison(requested_path).with_context(|| {
-            format!(
-                "failed to canonicalize request client executable path '{}'",
-                requested_executable_path
-            )
+        let requested_id = file_id(requested_path).with_context(|| {
+            format!("failed to query request client executable '{requested_executable_path}' file identity")
         })?;
 
-        if same_windows_path(&actual_path, &requested_path) {
+        if same_file(&actual_id, &requested_id) {
             return Ok(());
         }
 
         bail!(
             "pipe client executable '{}' does not match request client executable '{}'",
-            actual_path.display(),
-            requested_path.display()
+            self.executable_path.display(),
+            requested_executable_path
         )
     }
 }
@@ -163,14 +161,42 @@ fn same_user(expected: &str, actual: &ClientUser) -> bool {
     expected_domain.eq_ignore_ascii_case(&actual.domain) && expected_name.eq_ignore_ascii_case(&actual.name)
 }
 
-fn canonicalize_for_comparison(path: &Path) -> anyhow::Result<PathBuf> {
-    Ok(std::fs::canonicalize(path)?)
+/// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
+fn file_id(path: &Path) -> anyhow::Result<FILE_ID_INFO> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo,
+        GetFileInformationByHandleEx,
+    };
+
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES.0)
+        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+        .open(path)?;
+
+    let mut info = FILE_ID_INFO::default();
+
+    let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
+
+    // SAFETY: `file` is an open file handle, and the output pointer points to a
+    // properly sized FILE_ID_INFO valid for the duration of the call.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileIdInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    }?;
+
+    Ok(info)
 }
 
-fn same_windows_path(left: &Path, right: &Path) -> bool {
-    left.as_os_str()
-        .to_string_lossy()
-        .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+fn same_file(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
+    left.VolumeSerialNumber == right.VolumeSerialNumber && left.FileId.Identifier == right.FileId.Identifier
 }
 
 #[cfg(test)]
@@ -197,5 +223,31 @@ mod tests {
     #[test]
     fn same_user_rejects_wrong_domain() {
         assert!(!same_user("FABRIKAM\\alice", &client_user()));
+    }
+
+    #[test]
+    fn file_id_matches_same_file_through_different_paths() {
+        let exe = std::env::current_exe().expect("current exe");
+        let direct = file_id(&exe).expect("file id via direct path");
+
+        // Build an equivalent path with different casing and a redundant `.` component.
+        let mut alternate = exe.parent().expect("exe parent").join(".");
+        alternate.push(exe.file_name().expect("exe file name").to_ascii_uppercase());
+        let alternate = file_id(&alternate).expect("file id via alternate path");
+
+        assert!(same_file(&direct, &alternate));
+    }
+
+    #[test]
+    fn file_id_differs_for_distinct_files() {
+        let exe = std::env::current_exe().expect("current exe");
+        let exe_id = file_id(&exe).expect("exe file id");
+
+        let temp = std::env::temp_dir().join(format!("dgw-agent-file-id-test-{}", std::process::id()));
+        std::fs::write(&temp, b"file identity test").expect("write temp file");
+        let temp_id = file_id(&temp).expect("temp file id");
+        std::fs::remove_file(&temp).expect("remove temp file");
+
+        assert!(!same_file(&exe_id, &temp_id));
     }
 }
