@@ -10,6 +10,7 @@ pub mod executor;
 pub mod operation_tracker;
 pub mod pipe;
 pub mod policy_loader;
+mod policy_security;
 pub mod policy_watcher;
 pub mod server;
 pub mod task;
