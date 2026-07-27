@@ -86,11 +86,10 @@ impl CommandExecutor for WindowsExecutor {
 /// Execute a command in the context of the target user's session (SYSTEM mode).
 ///
 /// Steps:
-/// 1. Find the user's active session via WTS enumeration.
-/// 2. Get the session token.
-/// 3. If elevated execution is requested, obtain the linked elevated token.
-/// 4. Set the token session ID and create the process.
-/// 5. Wait for the process to exit and return the exit code.
+/// 1. Find the user's active session (and its token) by matching the session token SID.
+/// 2. If elevated execution is requested, obtain the linked elevated token.
+/// 3. Set the token session ID and create the process.
+/// 4. Wait for the process to exit and return the exit code.
 fn execute_as_system(
     ctx: &ExecutionContext,
     process_started: Option<ProcessStartedCallback>,
@@ -123,16 +122,15 @@ fn execute_as_system(
 
     debug!("All privileges enabled, finding user session");
 
-    let session_id = find_user_session(&ctx.effective_user).context("failed to find active session for user")?;
+    let (session_id, user_token) =
+        find_user_session(&ctx.user_sid).context("failed to find active session for user")?;
 
     info!(
         effective_user = %ctx.effective_user,
+        user_sid = %ctx.user_sid,
         session_id,
         "Found user session"
     );
-
-    debug!(session_id, "Calling Token::for_session");
-    let user_token = Token::for_session(session_id).context("failed to obtain user token for session")?;
 
     debug!("Duplicating user token as primary");
     let primary_token = token::duplicate_as_primary(&user_token).context("failed to duplicate token as primary")?;

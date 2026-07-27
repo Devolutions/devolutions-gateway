@@ -1,6 +1,7 @@
 //! Token and session helpers for Windows execution.
 
 use anyhow::{Context as _, bail};
+use tracing::debug;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::token::{Token, TokenElevationType};
@@ -30,17 +31,15 @@ pub(super) fn duplicate_as_primary(token: &Token) -> anyhow::Result<Token> {
     token.duplicate(TOKEN_ALL_ACCESS, None, SecurityImpersonation, TokenPrimary)
 }
 
-/// Enumerate WTS sessions to find one belonging to `effective_user`.
+/// Enumerate WTS sessions to find the active one whose user token belongs to `user_sid`.
 ///
-/// `effective_user` can be `DOMAIN\user` or just `user`.
-pub(super) fn find_user_session(effective_user: &str) -> anyhow::Result<u32> {
-    let (target_domain, target_username) = effective_user
-        .rsplit_once('\\')
-        .map_or((None, effective_user), |(domain, username)| {
-            (Some(domain.to_lowercase()), username)
-        });
-    let target_username = target_username.to_lowercase();
-
+/// Matching is performed on the session token user SID rather than on the
+/// `DOMAIN\username` display strings, so distinct accounts sharing the same
+/// name (e.g. `MACHINE\alice` vs `DOMAIN\alice`) cannot be confused.
+///
+/// Returns the session ID together with the session user token.
+/// The caller must have the SeTcb privilege enabled (required by `WTSQueryUserToken`).
+pub(super) fn find_user_session(user_sid: &Sid) -> anyhow::Result<(u32, Token)> {
     let sessions = wts::get_sessions().context("failed to enumerate WTS sessions")?;
 
     for session in &sessions {
@@ -51,21 +50,27 @@ pub(super) fn find_user_session(effective_user: &str) -> anyhow::Result<u32> {
             continue;
         }
 
-        if let Ok(session_user) = wts::get_session_user_name(session.session_id)
-            && session_user.to_lowercase() == target_username
-        {
-            if let Some(target_domain) = &target_domain {
-                let session_domain = wts::get_session_domain_name(session.session_id)
-                    .with_context(|| format!("failed to query domain for session {}", session.session_id))?;
-                if !session_domain.eq_ignore_ascii_case(target_domain) {
-                    continue;
-                }
+        // Sessions without a logged-in user (or otherwise unqueryable) are skipped.
+        let token = match Token::for_session(session.session_id) {
+            Ok(token) => token,
+            Err(error) => {
+                debug!(session_id = session.session_id, %error, "Skipping session: failed to query user token");
+                continue;
             }
-            return Ok(session.session_id);
+        };
+
+        match token.sid_and_attributes() {
+            Ok(sid_and_attributes) if sid_and_attributes.sid == *user_sid => {
+                return Ok((session.session_id, token));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                debug!(session_id = session.session_id, %error, "Skipping session: failed to query token user SID");
+            }
         }
     }
 
-    anyhow::bail!("no active session found for user '{effective_user}'")
+    bail!("no active session found for user SID '{user_sid}'")
 }
 
 /// Attempt to obtain an elevated (linked) token from a filtered/limited token.
