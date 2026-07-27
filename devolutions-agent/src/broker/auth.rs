@@ -195,7 +195,7 @@ fn same_windows_path(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::Security::WinLocalSystemSid;
+    use windows::Win32::Security::{WinLocalSystemSid, WinWorldSid};
 
     use super::*;
 
@@ -203,27 +203,46 @@ mod tests {
         Sid::from_well_known(WinLocalSystemSid, None).expect("well-known SYSTEM SID")
     }
 
+    /// Host-localized (domain, name) for the LocalSystem account.
+    fn system_account_names() -> (String, String) {
+        let account = system_sid().lookup_account(None).expect("SYSTEM account lookup");
+        (account.domain_name.to_string_lossy(), account.name.to_string_lossy())
+    }
+
+    /// Host-localized unqualified name for the Everyone (World) group.
+    fn everyone_account_name() -> String {
+        Sid::from_well_known(WinWorldSid, None)
+            .expect("well-known Everyone SID")
+            .lookup_account(None)
+            .expect("Everyone account lookup")
+            .name
+            .to_string_lossy()
+    }
+
     fn system_client() -> PipeClient {
+        let (domain, name) = system_account_names();
         PipeClient {
             process_id: 0,
             executable_path: PathBuf::new(),
             user: ClientUser {
                 sid: system_sid(),
-                domain: "NT AUTHORITY".to_owned(),
-                name: "SYSTEM".to_owned(),
+                domain,
+                name,
             },
         }
     }
 
     #[test]
     fn resolve_account_sid_resolves_qualified_name() {
-        let sid = resolve_account_sid("NT AUTHORITY\\SYSTEM").expect("SYSTEM account should resolve");
+        let (domain, name) = system_account_names();
+        let sid = resolve_account_sid(&format!("{domain}\\{name}")).expect("SYSTEM account should resolve");
         assert_eq!(sid, system_sid());
     }
 
     #[test]
     fn resolve_account_sid_resolves_unqualified_name() {
-        let sid = resolve_account_sid("SYSTEM").expect("SYSTEM account should resolve");
+        let (_, name) = system_account_names();
+        let sid = resolve_account_sid(&name).expect("SYSTEM account should resolve");
         assert_eq!(sid, system_sid());
     }
 
@@ -234,12 +253,21 @@ mod tests {
 
     #[test]
     fn validate_effective_user_accepts_matching_sid() {
-        assert!(system_client().validate_effective_user("NT AUTHORITY\\SYSTEM").is_ok());
+        let (domain, name) = system_account_names();
+        assert!(
+            system_client()
+                .validate_effective_user(&format!("{domain}\\{name}"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn validate_effective_user_rejects_different_account() {
-        // "Everyone" resolves to a different SID than the SYSTEM caller.
-        assert!(system_client().validate_effective_user("Everyone").is_err());
+        // The Everyone group resolves to a different SID than the SYSTEM caller.
+        assert!(
+            system_client()
+                .validate_effective_user(&everyone_account_name())
+                .is_err()
+        );
     }
 }
