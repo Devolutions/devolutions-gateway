@@ -8,6 +8,12 @@ description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
+[features]
+# Development-only feature allowing the SkipBrokerSignatureValidation debug option to take effect.
+# Must never be enabled for shipped builds: without it, broker client signature validation is
+# unconditionally enforced regardless of the configuration file contents.
+dev-skip-broker-signature = []
+
 [lints]
 workspace = true
 

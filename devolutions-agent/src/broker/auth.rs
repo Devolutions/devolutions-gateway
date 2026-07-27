@@ -79,9 +79,7 @@ impl PipeClient {
     }
 
     fn validate_signature(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
-        // Only honored in debug builds: release (shipped) builds always validate the signature,
-        // no matter what the configuration says.
-        if cfg!(debug_assertions) && skip_signature_validation {
+        if signature_validation_skipped(skip_signature_validation) {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());
         }
@@ -137,6 +135,16 @@ impl PipeClient {
             requested_executable_path
         )
     }
+}
+
+/// Returns whether broker client signature validation is skipped.
+///
+/// The bypass is compile-time gated behind the development-only `dev-skip-broker-signature`
+/// cargo feature, which must never be enabled for shipped builds. Without the feature, this
+/// always returns `false` and signature validation is unconditionally enforced, no matter
+/// what the configuration says.
+fn signature_validation_skipped(skip_signature_validation: bool) -> bool {
+    cfg!(feature = "dev-skip-broker-signature") && skip_signature_validation
 }
 
 fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<u32> {
@@ -251,5 +259,40 @@ mod tests {
         std::fs::remove_file(&temp).expect("remove temp file");
 
         assert!(!same_file(&exe_id, &temp_id));
+    }
+
+    #[cfg(not(feature = "dev-skip-broker-signature"))]
+    mod shipping_build {
+        use super::*;
+
+        #[test]
+        fn signature_validation_is_never_skipped() {
+            assert!(!signature_validation_skipped(true));
+            assert!(!signature_validation_skipped(false));
+        }
+
+        #[test]
+        fn validate_signature_is_attempted_even_when_skip_is_requested() {
+            // The test binary is not Devolutions-signed, so validation must be attempted and fail
+            // even though the configuration requests skipping it.
+            let client = PipeClient {
+                process_id: std::process::id(),
+                executable_path: std::env::current_exe().expect("current test executable path"),
+                user: client_user(),
+            };
+
+            assert!(client.validate_signature(true).is_err());
+        }
+    }
+
+    #[cfg(feature = "dev-skip-broker-signature")]
+    mod dev_build {
+        use super::*;
+
+        #[test]
+        fn signature_validation_is_skipped_only_when_requested() {
+            assert!(signature_validation_skipped(true));
+            assert!(!signature_validation_skipped(false));
+        }
     }
 }
