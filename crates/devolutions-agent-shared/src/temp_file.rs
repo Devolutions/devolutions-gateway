@@ -33,6 +33,32 @@ impl TmpFileGuard {
         Ok(Self { path })
     }
 
+    /// Creates the temporary file using a caller-provided creation function.
+    ///
+    /// The `make` function receives the candidate path and must create the file at that path
+    /// with create-new semantics, failing with `io::ErrorKind::AlreadyExists` if the file
+    /// already exists so that a new random name can be retried.
+    ///
+    /// This allows creating the file atomically with non-default properties, such as a specific
+    /// Windows security descriptor applied at creation time.
+    pub fn with_prefix_in_using<F>(prefix: &str, extension: &str, temp_dir: Option<&Path>, make: F) -> io::Result<Self>
+    where
+        F: FnMut(&Path) -> io::Result<fs::File>,
+    {
+        let suffix = format!(".{extension}");
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(prefix).suffix(&suffix);
+
+        let tempfile = match temp_dir {
+            Some(temp_dir) => builder.make_in(temp_dir, make),
+            None => builder.make(make),
+        }?;
+
+        let (_file, path) = tempfile.keep().map_err(|error| error.error)?;
+
+        Ok(Self { path })
+    }
+
     pub fn write_content(&self, content: &str) -> io::Result<()> {
         self.write_bytes(content.as_bytes())
     }
