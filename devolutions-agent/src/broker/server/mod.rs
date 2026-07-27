@@ -14,6 +14,7 @@ use now_policy_api::{
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
+use win_api_wrappers::identity::sid::Sid;
 
 use crate::broker::auth::PipeClient;
 use crate::broker::command_builder::build_command;
@@ -90,7 +91,7 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.execute(request).await
+        self.state.execute(request, self.client.user_sid()).await
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -106,8 +107,7 @@ impl PackageBrokerServer for BrokerConnection {
     }
 }
 
-#[async_trait]
-impl PackageBrokerServer for BrokerState {
+impl BrokerState {
     async fn health(&self) -> HealthResponse {
         let policy_guard = self.policy.read().expect("policy lock poisoned");
         let (status, policy_id) = match policy_guard.as_ref() {
@@ -153,7 +153,7 @@ impl PackageBrokerServer for BrokerState {
         })
     }
 
-    async fn execute(&self, request: PackageRequest) -> Result<ExecutionResponse, ErrorResponse> {
+    async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
             let generated_operation_id = new_operation_id()?;
@@ -169,6 +169,7 @@ impl PackageBrokerServer for BrokerState {
                 command: evaluated.command.clone(),
                 post_command: request.options.post_operation_command.clone(),
                 effective_user: request.client.effective_user.clone(),
+                user_sid: user_sid.clone(),
                 elevation: request.client.requested_elevation,
                 scope: request.options.scope,
                 capture_output: request.capture_output,
@@ -216,12 +217,6 @@ impl PackageBrokerServer for BrokerState {
         })
     }
 
-    async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
-        self.status_for_client(request, String::new()).await
-    }
-}
-
-impl BrokerState {
     async fn status_for_client(
         &self,
         request: StatusRequest,

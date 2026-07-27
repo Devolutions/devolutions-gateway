@@ -97,6 +97,7 @@ notify-debouncer-mini = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
+widestring = "1.2"
 win-api-wrappers = { path = "../crates/win-api-wrappers" }
 
 [target.'cfg(windows)'.dependencies.windows]

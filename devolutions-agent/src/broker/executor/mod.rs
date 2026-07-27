@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, Scope};
 use tracing::info;
+use win_api_wrappers::identity::sid::Sid;
 
 mod output;
 
@@ -31,8 +32,13 @@ pub struct ExecutionContext {
     pub command: Vec<String>,
     /// Optional shell command to run after the main command (`cmd.exe /S /C`).
     pub post_command: Option<String>,
-    /// Windows identity of the target user (e.g., `DOMAIN\username`).
+    /// Windows identity of the target user (e.g., `DOMAIN\username`), used for display and logging.
     pub effective_user: String,
+    /// Security identifier of the target user, captured from the authenticated pipe client.
+    ///
+    /// Session selection uses this SID so distinct accounts sharing the same name
+    /// (e.g. `MACHINE\alice` vs `DOMAIN\alice`) cannot be confused with one another.
+    pub user_sid: Sid,
     /// Requested elevation level.
     pub elevation: Elevation,
     /// Installation scope (machine scope requires elevation).
@@ -69,6 +75,7 @@ impl CommandExecutor for DryRunExecutor {
     ) -> anyhow::Result<ExecutionOutput> {
         info!(
             effective_user = %ctx.effective_user,
+            user_sid = %ctx.user_sid,
             kill_processes = ?ctx.kill_processes,
             has_pre_command = ctx.pre_command.is_some(),
             command_len = ctx.command.len(),

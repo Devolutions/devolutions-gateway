@@ -6,6 +6,9 @@ use anyhow::{Context as _, bail};
 use now_policy_api::{ClientContext, PackageRequest, StatusRequest};
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
+use widestring::U16CString;
+use win_api_wrappers::identity::account::lookup_account_by_name;
+use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use windows::Win32::Security::TOKEN_QUERY;
 use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
@@ -22,6 +25,8 @@ pub(crate) struct PipeClient {
 
 #[derive(Clone, Debug)]
 struct ClientUser {
+    /// Security identifier of the pipe client process token user, captured at connect.
+    sid: Sid,
     domain: String,
     name: String,
 }
@@ -44,6 +49,7 @@ impl PipeClient {
             .lookup_account(None)
             .with_context(|| format!("failed to resolve pipe client process {process_id} user"))?;
         let user = ClientUser {
+            sid,
             domain: account.domain_name.to_string_lossy(),
             name: account.name.to_string_lossy(),
         };
@@ -53,6 +59,11 @@ impl PipeClient {
             executable_path,
             user,
         })
+    }
+
+    /// Security identifier of the authenticated pipe client user, captured at connect.
+    pub(crate) fn user_sid(&self) -> &Sid {
+        &self.user.sid
     }
 
     pub(crate) fn validate_request(
@@ -96,16 +107,26 @@ impl PipeClient {
         Ok(())
     }
 
+    /// Validate that the request's `effective_user` denotes the authenticated pipe client user.
+    ///
+    /// The name is resolved to a SID and compared against the SID captured at connect,
+    /// so distinct accounts sharing the same name (e.g. `MACHINE\alice` vs `DOMAIN\alice`)
+    /// cannot be confused with one another.
     fn validate_effective_user(&self, effective_user: &str) -> anyhow::Result<()> {
-        if same_user(effective_user, &self.user) {
+        let requested_sid = resolve_account_sid(effective_user)
+            .with_context(|| format!("failed to resolve request effective_user '{effective_user}'"))?;
+
+        if requested_sid == self.user.sid {
             return Ok(());
         }
 
         bail!(
-            "pipe client user '{}\\{}' does not match request effective_user '{}'",
+            "pipe client user '{}\\{}' ({}) does not match request effective_user '{}' ({})",
             self.user.domain,
             self.user.name,
-            effective_user
+            self.user.sid,
+            effective_user,
+            requested_sid
         )
     }
 
@@ -153,12 +174,11 @@ fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<
     Ok(process_id)
 }
 
-fn same_user(expected: &str, actual: &ClientUser) -> bool {
-    let Some((expected_domain, expected_name)) = expected.rsplit_once('\\') else {
-        return expected.eq_ignore_ascii_case(&actual.name);
-    };
-
-    expected_domain.eq_ignore_ascii_case(&actual.domain) && expected_name.eq_ignore_ascii_case(&actual.name)
+/// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
+fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
+    let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
+    let account = lookup_account_by_name(&account_name).context("failed to look up account by name")?;
+    Ok(account.sid.clone())
 }
 
 /// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
@@ -201,28 +221,80 @@ fn same_file(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::Security::{WinLocalSystemSid, WinWorldSid};
+
     use super::*;
 
-    fn client_user() -> ClientUser {
-        ClientUser {
-            domain: "CONTOSO".to_owned(),
-            name: "alice".to_owned(),
+    fn system_sid() -> Sid {
+        Sid::from_well_known(WinLocalSystemSid, None).expect("well-known SYSTEM SID")
+    }
+
+    /// Host-localized (domain, name) for the LocalSystem account.
+    fn system_account_names() -> (String, String) {
+        let account = system_sid().lookup_account(None).expect("SYSTEM account lookup");
+        (account.domain_name.to_string_lossy(), account.name.to_string_lossy())
+    }
+
+    /// Host-localized unqualified name for the Everyone (World) group.
+    fn everyone_account_name() -> String {
+        Sid::from_well_known(WinWorldSid, None)
+            .expect("well-known Everyone SID")
+            .lookup_account(None)
+            .expect("Everyone account lookup")
+            .name
+            .to_string_lossy()
+    }
+
+    fn system_client() -> PipeClient {
+        let (domain, name) = system_account_names();
+        PipeClient {
+            process_id: 0,
+            executable_path: PathBuf::new(),
+            user: ClientUser {
+                sid: system_sid(),
+                domain,
+                name,
+            },
         }
     }
 
     #[test]
-    fn same_user_matches_domain_qualified_user() {
-        assert!(same_user("contoso\\ALICE", &client_user()));
+    fn resolve_account_sid_resolves_qualified_name() {
+        let (domain, name) = system_account_names();
+        let sid = resolve_account_sid(&format!("{domain}\\{name}")).expect("SYSTEM account should resolve");
+        assert_eq!(sid, system_sid());
     }
 
     #[test]
-    fn same_user_matches_unqualified_user() {
-        assert!(same_user("ALICE", &client_user()));
+    fn resolve_account_sid_resolves_unqualified_name() {
+        let (_, name) = system_account_names();
+        let sid = resolve_account_sid(&name).expect("SYSTEM account should resolve");
+        assert_eq!(sid, system_sid());
     }
 
     #[test]
-    fn same_user_rejects_wrong_domain() {
-        assert!(!same_user("FABRIKAM\\alice", &client_user()));
+    fn resolve_account_sid_rejects_unknown_account() {
+        assert!(resolve_account_sid("no-such-domain\\no-such-user-a2f6").is_err());
+    }
+
+    #[test]
+    fn validate_effective_user_accepts_matching_sid() {
+        let (domain, name) = system_account_names();
+        assert!(
+            system_client()
+                .validate_effective_user(&format!("{domain}\\{name}"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_effective_user_rejects_different_account() {
+        // The Everyone group resolves to a different SID than the SYSTEM caller.
+        assert!(
+            system_client()
+                .validate_effective_user(&everyone_account_name())
+                .is_err()
+        );
     }
 
     #[test]
