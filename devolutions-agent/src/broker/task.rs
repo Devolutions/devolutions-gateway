@@ -24,6 +24,8 @@ pub struct BrokerTaskConfig {
     pub policy_path: Option<String>,
     /// Skip Authenticode signature validation for the broker client executable.
     pub skip_signature_validation: bool,
+    /// Skip policy file owner/DACL validation.
+    pub skip_policy_acl_validation: bool,
 }
 
 impl Default for BrokerTaskConfig {
@@ -32,6 +34,7 @@ impl Default for BrokerTaskConfig {
             pipe_name: DEFAULT_PIPE_NAME.to_owned(),
             policy_path: None,
             skip_signature_validation: false,
+            skip_policy_acl_validation: false,
         }
     }
 }
@@ -69,7 +72,7 @@ impl Task for BrokerTask {
         };
 
         // Create policy watcher with initial load attempt.
-        let (watcher, mut state_rx) = PolicyWatcher::new(policy_path.clone());
+        let (watcher, mut state_rx) = PolicyWatcher::new(policy_path.clone(), self.config.skip_policy_acl_validation);
 
         // Log initial state.
         match &*state_rx.borrow() {
