@@ -288,7 +288,6 @@ fn prepare_shell_command_in(payload: &str, temp_dir: Option<&Path>) -> anyhow::R
             temp_script.path().display()
         )
     })?;
-    protect_temp_script(&temp_script)?;
 
     let command = vec![
         trusted_system32_executable("cmd.exe"),
@@ -326,7 +325,6 @@ fn prepare_powershell_script(
             )
         })?;
     }
-    protect_temp_script(&temp_script)?;
 
     let mut prepared = command[..2].to_vec();
     prepared[0] = if is_windows_powershell {
@@ -373,7 +371,6 @@ fn prepare_winget_script(
             temp_script.path().display()
         )
     })?;
-    protect_temp_script(&temp_script)?;
 
     let prepared = vec![
         trusted_system32_executable("cmd.exe"),
@@ -398,80 +395,108 @@ fn powershell_inline_script(command: &[String]) -> Option<&str> {
     }
 }
 
+// Owner keeps full control; interactive users only need read access to execute the script.
+// The DACL is protected (`P`) so permissive entries are never inherited from the parent directory.
+const SCRIPT_DACL: &str = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;BU)";
+
+/// Creates the broker temporary script atomically with [`SCRIPT_DACL`].
+///
+/// The security descriptor is supplied at creation time (`SECURITY_ATTRIBUTES`), so the file
+/// never exists with permissions inherited from the parent directory.
 fn broker_temp_script(extension: &str, temp_dir: Option<&Path>) -> anyhow::Result<TmpFileGuard> {
-    TmpFileGuard::with_prefix_in("devolutions-broker-", extension, temp_dir)
-        .context("failed to create broker temporary script")
+    let security_descriptor =
+        OwnedSecurityDescriptor::from_sddl(SCRIPT_DACL).context("failed to build broker script security descriptor")?;
+
+    TmpFileGuard::with_prefix_in_using("devolutions-broker-", extension, temp_dir, |path| {
+        create_file_with_security_descriptor(path, &security_descriptor)
+    })
+    .context("failed to create broker temporary script")
 }
 
-fn protect_temp_script(temp_script: &TmpFileGuard) -> anyhow::Result<()> {
-    // Owner keeps full control; interactive users only need read access to execute the script.
-    const SCRIPT_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;BU)";
-    set_file_dacl(temp_script.path(), SCRIPT_DACL)
-}
+/// A self-relative security descriptor allocated with `LocalAlloc`, freed on drop.
+struct OwnedSecurityDescriptor(windows::Win32::Security::PSECURITY_DESCRIPTOR);
 
-fn set_file_dacl(path: &Path, acl: &str) -> anyhow::Result<()> {
-    use windows::Win32::Foundation::{ERROR_SUCCESS, FALSE, HLOCAL, LocalFree};
-    use windows::Win32::Security::Authorization::{
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
-    };
-    use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR};
+impl OwnedSecurityDescriptor {
+    fn from_sddl(sddl: &str) -> anyhow::Result<Self> {
+        use windows::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+        };
+        use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 
-    struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
+        let sddl = WideString::from(sddl);
+        let mut descriptor = Self(PSECURITY_DESCRIPTOR::default());
 
-    impl Drop for OwnedSecurityDescriptor {
-        fn drop(&mut self) {
-            if self.0.0.is_null() {
-                return;
-            }
-            // SAFETY: The descriptor pointer is returned by `ConvertStringSecurityDescriptorToSecurityDescriptorW`.
-            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
+        // SAFETY: `sddl` is a valid null-terminated UTF-16 string and the output pointer is valid.
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_pcwstr(),
+                SDDL_REVISION_1,
+                &mut descriptor.0 as *mut PSECURITY_DESCRIPTOR,
+                None,
+            )
         }
+        .context("failed to convert SDDL string to security descriptor")?;
+
+        Ok(descriptor)
     }
+}
 
-    let acl = WideString::from(acl);
-    let mut security_descriptor = OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
+impl Drop for OwnedSecurityDescriptor {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{HLOCAL, LocalFree};
 
-    // SAFETY: `acl` is a valid null-terminated UTF-16 string and the output pointer is valid.
-    unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            acl.as_pcwstr(),
-            SDDL_REVISION_1,
-            &mut security_descriptor.0 as *mut PSECURITY_DESCRIPTOR,
-            None,
-        )
+        if self.0.0.is_null() {
+            return;
+        }
+        // SAFETY: The descriptor pointer is returned by `ConvertStringSecurityDescriptorToSecurityDescriptorW`,
+        // which allocates it with `LocalAlloc`.
+        unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
     }
-    .context("failed to convert broker script DACL")?;
+}
 
-    let mut dacl_present = FALSE;
-    let mut dacl_defaulted = FALSE;
-    let mut dacl: *mut ACL = std::ptr::null_mut();
+/// Creates a new file at `path` with the provided security descriptor applied atomically.
+///
+/// Fails with `io::ErrorKind::AlreadyExists` if the file already exists (`CREATE_NEW`), which
+/// lets the caller retry with a different random name.
+fn create_file_with_security_descriptor(
+    path: &Path,
+    descriptor: &OwnedSecurityDescriptor,
+) -> std::io::Result<std::fs::File> {
+    use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
 
-    // SAFETY: All output pointers are valid and `security_descriptor` owns a valid descriptor.
-    unsafe { GetSecurityDescriptorDacl(security_descriptor.0, &mut dacl_present, &mut dacl, &mut dacl_defaulted) }
-        .context("failed to read broker script DACL")?;
+    use windows::Win32::Foundation::FALSE;
+    use windows::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows::Win32::Storage::FileSystem::{
+        CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_NONE,
+    };
 
-    if dacl.is_null() {
-        bail!("broker script DACL is null");
-    }
+    let security_attributes = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).expect("SECURITY_ATTRIBUTES size fits in u32"),
+        lpSecurityDescriptor: descriptor.0.0,
+        bInheritHandle: FALSE,
+    };
 
     let path = WideString::from(path);
-    // SAFETY: `path` is a valid null-terminated UTF-16 path and `dacl` remains valid for the call.
-    let result = unsafe {
-        SetNamedSecurityInfoW(
+
+    // SAFETY: `path` is a valid null-terminated UTF-16 path and `security_attributes` points to
+    // a valid structure that outlives the call; the kernel copies the descriptor at creation.
+    let handle = unsafe {
+        CreateFileW(
             path.as_pcwstr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(dacl),
+            FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0,
+            FILE_SHARE_NONE,
+            Some(&security_attributes as *const SECURITY_ATTRIBUTES),
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
             None,
         )
-    };
-    if result != ERROR_SUCCESS {
-        bail!("failed to set broker script DACL");
     }
+    .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
 
-    Ok(())
+    // SAFETY: `CreateFileW` succeeded and returned a valid file handle that we now own.
+    let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+
+    Ok(std::fs::File::from(handle))
 }
 
 fn executable_is(command: &[String], expected_name: &str) -> bool {
@@ -711,5 +736,120 @@ mod tests {
                 .contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"")
         );
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn temp_script_is_created_with_target_dacl() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let temp_script = super::broker_temp_script("bat", Some(temp_dir.path())).expect("create temp script");
+
+        let dacl = read_file_dacl_sddl(temp_script.path());
+        assert_eq!(dacl, super::SCRIPT_DACL);
+    }
+
+    /// Verifies that a non-admin user token can read the broker temporary script from the
+    /// broker's temporary directory in real SYSTEM mode.
+    ///
+    /// Requires running as SYSTEM with at least one active interactive user session:
+    ///
+    /// ```text
+    /// psexec -s cargo test -p devolutions-agent temp_script_is_readable_by_user_token_in_system_mode -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "requires running as SYSTEM with an active interactive user session"]
+    fn temp_script_is_readable_by_user_token_in_system_mode() {
+        use win_api_wrappers::process::Process;
+        use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
+        use win_api_wrappers::token::Token;
+        use win_api_wrappers::wts;
+        use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
+
+        assert!(
+            super::token::detect_running_as_system(),
+            "this test must run under the SYSTEM account"
+        );
+
+        // Create and populate the script exactly as the broker does in SYSTEM mode
+        // (default temporary directory).
+        let temp_script = super::broker_temp_script("ps1", None).expect("create temp script");
+        temp_script
+            .write_content("Write-Output 'hello'")
+            .expect("write temp script");
+
+        // Find an active interactive user session.
+        let sessions = wts::get_sessions().expect("enumerate WTS sessions");
+        let session_id = sessions
+            .iter()
+            .find(|session| session.session_id != 0 && session.state == wts::WTSConnectState::Active)
+            .map(|session| session.session_id)
+            .expect("no active interactive user session found");
+
+        // Grab the session's (non-elevated) user token and impersonate it while reading.
+        let mut process_token = Process::current_process()
+            .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)
+            .expect("open process token");
+        let _priv_tcb = ScopedPrivileges::enter(&mut process_token, &[privilege::SE_TCB_NAME]).expect("enable SeTcb");
+
+        let user_token = Token::for_session(session_id).expect("query user token for session");
+        let _impersonation = user_token.impersonate().expect("impersonate user token");
+
+        let content =
+            std::fs::read_to_string(temp_script.path()).expect("user token failed to read broker temp script");
+        assert_eq!(content, "Write-Output 'hello'");
+    }
+
+    /// Reads back the DACL of `path` as an SDDL string (`D:...`).
+    fn read_file_dacl_sddl(path: &std::path::Path) -> String {
+        use win_api_wrappers::utils::WideString;
+        use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
+        use windows::Win32::Security::Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW, SDDL_REVISION_1,
+            SE_FILE_OBJECT,
+        };
+        use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+        use windows::core::PWSTR;
+
+        let path = WideString::from(path);
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+
+        // SAFETY: `path` is a valid null-terminated UTF-16 path and the output pointer is valid.
+        let result = unsafe {
+            GetNamedSecurityInfoW(
+                path.as_pcwstr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                None,
+                None,
+                &mut descriptor as *mut PSECURITY_DESCRIPTOR,
+            )
+        };
+        assert_eq!(result, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+
+        let mut sddl = PWSTR::null();
+
+        // SAFETY: `descriptor` is a valid security descriptor returned by `GetNamedSecurityInfoW`
+        // and the output pointer is valid.
+        unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut sddl,
+                None,
+            )
+        }
+        .expect("convert security descriptor to SDDL");
+
+        // SAFETY: `sddl` is a valid null-terminated UTF-16 string allocated by the call above.
+        let sddl_string = unsafe { sddl.to_string() }.expect("SDDL is valid UTF-16");
+
+        // SAFETY: `sddl` is a `LocalAlloc` allocation owned by us.
+        unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
+        // SAFETY: `descriptor` is a `LocalAlloc` allocation owned by us.
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+
+        sddl_string
     }
 }
