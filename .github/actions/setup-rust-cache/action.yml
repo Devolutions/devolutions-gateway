@@ -15,7 +15,7 @@ runs:
     # This only caches cargo registry and git dependencies, which are
     # independent of the build profile, so it's safe for production builds.
     - name: Setup Rust cache
-      uses: Swatinem/rust-cache@v2.8.2
+      uses: Swatinem/rust-cache@v2.9.1
       with:
         cache-targets: false
 
