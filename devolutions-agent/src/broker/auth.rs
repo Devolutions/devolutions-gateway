@@ -79,7 +79,9 @@ impl PipeClient {
     }
 
     fn validate_signature(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
-        if skip_signature_validation {
+        // Only honored in debug builds: release (shipped) builds always validate the signature,
+        // no matter what the configuration says.
+        if cfg!(debug_assertions) && skip_signature_validation {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());
         }
