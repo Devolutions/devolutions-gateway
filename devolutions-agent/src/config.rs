@@ -845,6 +845,8 @@ pub mod dto {
         /// Skip package broker client executable signature validation
         ///
         /// Useful for testing with unsigned or test-signed broker clients.
+        /// Only honored in builds with the development-only `dev-skip-broker-signature`
+        /// cargo feature; shipped builds always validate signatures and ignore this option.
         #[serde(default)]
         pub skip_broker_signature_validation: bool,
     }

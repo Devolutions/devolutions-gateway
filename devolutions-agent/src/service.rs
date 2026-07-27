@@ -220,6 +220,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
         }
 
         if conf.package_broker.enabled {
+            if !cfg!(feature = "dev-skip-broker-signature") && conf.debug.skip_broker_signature_validation {
+                error!(
+                    "SkipBrokerSignatureValidation is set but ignored: broker client signature validation cannot be disabled in this build"
+                );
+            }
+
             let broker_config = BrokerTaskConfig {
                 pipe_name: conf
                     .package_broker
@@ -227,7 +233,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                     .clone()
                     .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned()),
                 policy_path: conf.package_broker.policy_path.clone(),
-                skip_signature_validation: conf.debug.skip_broker_signature_validation,
+                // The bypass only takes effect in builds with the development-only
+                // `dev-skip-broker-signature` cargo feature, never in shipped builds.
+                skip_signature_validation: cfg!(feature = "dev-skip-broker-signature")
+                    && conf.debug.skip_broker_signature_validation,
             };
             tasks.register(BrokerTask::new(broker_config));
         }
