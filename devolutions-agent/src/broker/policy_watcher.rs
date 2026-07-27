@@ -32,29 +32,22 @@ pub enum PolicyState {
 /// When a valid file becomes available again, transitions back to `Active`.
 pub struct PolicyWatcher {
     path: PathBuf,
-    skip_security_check: bool,
     state_tx: watch::Sender<PolicyState>,
 }
 
 impl PolicyWatcher {
     /// Create a new watcher for the given policy file path.
     ///
-    /// When `skip_security_check` is set, the policy file owner/DACL validation is skipped.
-    ///
     /// Returns the watcher and a receiver for policy state changes.
-    pub fn new(path: PathBuf, skip_security_check: bool) -> (Self, watch::Receiver<PolicyState>) {
-        let initial_state = match policy_loader::load_policy(&path, skip_security_check) {
+    pub fn new(path: PathBuf) -> (Self, watch::Receiver<PolicyState>) {
+        let initial_state = match policy_loader::load_policy(&path) {
             Ok(policy) => PolicyState::Active(Arc::new(policy)),
             Err(e) => PolicyState::Unavailable { reason: e.to_string() },
         };
 
         let (state_tx, state_rx) = watch::channel(initial_state);
 
-        let watcher = Self {
-            path,
-            skip_security_check,
-            state_tx,
-        };
+        let watcher = Self { path, state_tx };
 
         (watcher, state_rx)
     }
@@ -66,7 +59,6 @@ impl PolicyWatcher {
     /// The task runs until the shutdown notify is triggered.
     pub async fn watch(self, shutdown: CancellationToken) {
         let path = self.path.clone();
-        let skip_security_check = self.skip_security_check;
         let state_tx = self.state_tx;
         let dir = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
 
@@ -128,7 +120,7 @@ impl PolicyWatcher {
                     while fs_rx.try_recv().is_ok() {}
 
                     // Attempt reload.
-                    match policy_loader::load_policy(&path, skip_security_check) {
+                    match policy_loader::load_policy(&path) {
                         Ok(policy) => {
                             info!(
                                 policy_id = %policy.metadata.id,

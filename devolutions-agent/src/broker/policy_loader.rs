@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use now_policy::PolicyDocument;
 use now_policy::schema::{parse_policy_json, parse_policy_yaml};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::broker::policy_security;
 
@@ -38,23 +38,16 @@ const POLICY_EXTENSIONS: &[&str] = &["json", "yaml", "yml"];
 /// Deserialization performs all validation (structure, types, length constraints, patterns).
 ///
 /// Before trusting the policy, the file's owner and DACL are verified to restrict write
-/// access to SYSTEM/Administrators, unless `skip_security_check` is set.
+/// access to SYSTEM/Administrators.
 /// This function fails when the check does not pass, so the broker pauses (fail-closed).
-pub fn load_policy(path: &Path, skip_security_check: bool) -> anyhow::Result<PolicyDocument> {
+pub fn load_policy(path: &Path) -> anyhow::Result<PolicyDocument> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| anyhow::anyhow!("failed to open policy file at {}: {e}", path.display()))?;
 
     // Verify security on the open handle (not the path), and read from the same handle,
     // so the verified security descriptor belongs to the very same file being parsed.
-    if skip_security_check {
-        warn!(
-            path = %path.display(),
-            "Policy file security validation is disabled; do not use this in production"
-        );
-    } else {
-        policy_security::verify_policy_file_security(&file)
-            .map_err(|e| anyhow::anyhow!("policy file at {} failed security validation: {e}", path.display()))?;
-    }
+    policy_security::verify_policy_file_security(&file)
+        .map_err(|e| anyhow::anyhow!("policy file at {} failed security validation: {e}", path.display()))?;
 
     let mut content = String::new();
     file.read_to_string(&mut content)

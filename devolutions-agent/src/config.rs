@@ -847,12 +847,6 @@ pub mod dto {
         /// Useful for testing with unsigned or test-signed broker clients.
         #[serde(default)]
         pub skip_broker_signature_validation: bool,
-
-        /// Skip package broker policy file owner/DACL validation
-        ///
-        /// Useful for testing with policy files not owned by SYSTEM/Administrators.
-        #[serde(default)]
-        pub skip_broker_policy_acl_validation: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -868,7 +862,6 @@ pub mod dto {
                 skip_updater_hash_validation: false,
                 skip_msi_signature_validation: false,
                 skip_broker_signature_validation: false,
-                skip_broker_policy_acl_validation: false,
             }
         }
     }

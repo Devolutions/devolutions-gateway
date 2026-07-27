@@ -228,7 +228,6 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                     .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned()),
                 policy_path: conf.package_broker.policy_path.clone(),
                 skip_signature_validation: conf.debug.skip_broker_signature_validation,
-                skip_policy_acl_validation: conf.debug.skip_broker_policy_acl_validation,
             };
             tasks.register(BrokerTask::new(broker_config));
         }
