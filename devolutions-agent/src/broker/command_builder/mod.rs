@@ -3,6 +3,7 @@
 //! Constructs the commands the broker would execute from validated request fields.
 //! The broker never executes client-supplied commands directly.
 
+pub mod chocolatey;
 pub mod powershell;
 pub mod winget;
 
@@ -17,6 +18,8 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::Winget => Ok(winget::build_winget_command(request)),
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
+        ManagerName::Chocolatey => chocolatey::build_chocolatey_command(request),
+        unsupported => anyhow::bail!("package manager is not supported by the broker: {unsupported}"),
     }
 }
 

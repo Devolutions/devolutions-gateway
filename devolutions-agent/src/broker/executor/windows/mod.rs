@@ -3,6 +3,7 @@
 //! Uses a unified `CreateProcessAsUserW` code path for both SYSTEM (service) and
 //! current-user (development) modes.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
@@ -257,7 +258,7 @@ fn prepare_main_command(token: &Token, command: &[String]) -> anyhow::Result<Pre
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&std::collections::HashMap<String, String>>,
+    user_env: Option<&HashMap<String, String>>,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some(script) = powershell_inline_script(command) {
         return prepare_powershell_script(command, script, temp_dir);
@@ -265,6 +266,10 @@ fn prepare_main_command_in(
 
     if executable_is(command, "winget.exe") {
         return prepare_winget_script(command, temp_dir, user_env);
+    }
+
+    if executable_is(command, "choco.exe") {
+        return prepare_chocolatey_script(command, temp_dir, user_env);
     }
 
     Ok(PreparedCommand::raw(command))
@@ -343,7 +348,7 @@ fn powershell_script_with_utf8_preamble(script: &str) -> String {
 fn prepare_winget_script(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&std::collections::HashMap<String, String>>,
+    user_env: Option<&HashMap<String, String>>,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
@@ -356,6 +361,55 @@ fn prepare_winget_script(
         |env| resolve_winget_executable(env).map(|path| path.display().to_string()),
     )?;
     append_batch_argument(&mut script, &executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
+}
+
+fn prepare_chocolatey_script(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    prepare_chocolatey_script_in(command, temp_dir, user_env)
+}
+
+fn prepare_chocolatey_script_in(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+
+    let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
+    let (executable, install_root) = resolve_trusted_chocolatey_executable(user_env)?;
+    append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
+    script.push_str("\r\n");
+    append_batch_argument(&mut script, &executable.display().to_string())?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -540,7 +594,61 @@ fn trusted_powershell7_executable() -> String {
         .to_string()
 }
 
-fn resolve_winget_executable(env: &std::collections::HashMap<String, String>) -> anyhow::Result<PathBuf> {
+fn program_data_dir(user_env: Option<&HashMap<String, String>>) -> PathBuf {
+    user_env
+        .and_then(|env| env_value_ignore_case(env, "ProgramData"))
+        .filter(|value| !value.trim().is_empty())
+        .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from)
+}
+
+fn default_chocolatey_install_dir(user_env: Option<&HashMap<String, String>>) -> PathBuf {
+    program_data_dir(user_env).join("chocolatey")
+}
+
+fn resolve_trusted_chocolatey_executable(
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let install_root = user_env
+        .and_then(|env| env_value_ignore_case(env, "ChocolateyInstall"))
+        .filter(|value| !value.trim().is_empty())
+        .map_or_else(|| default_chocolatey_install_dir(user_env), PathBuf::from);
+    let executable = install_root.join("bin").join("choco.exe");
+    if !executable.is_file() {
+        bail!(
+            "Chocolatey executable was not found at {}; set ChocolateyInstall to the Chocolatey installation root",
+            executable.display()
+        );
+    }
+
+    if !is_trusted_chocolatey_install_dir(&install_root, user_env) {
+        bail!(
+            "ChocolateyInstall points to {}; only the trusted system Chocolatey folder at {} is supported by the broker",
+            install_root.display(),
+            default_chocolatey_install_dir(user_env).display()
+        );
+    }
+
+    Ok((executable, install_root))
+}
+
+fn is_trusted_chocolatey_install_dir(install_root: &Path, user_env: Option<&HashMap<String, String>>) -> bool {
+    paths_eq_ignore_ascii_case(install_root, &default_chocolatey_install_dir(user_env))
+}
+
+fn paths_eq_ignore_ascii_case(lhs: &Path, rhs: &Path) -> bool {
+    lhs.as_os_str()
+        .to_string_lossy()
+        .trim_end_matches(['\\', '/'])
+        .eq_ignore_ascii_case(rhs.as_os_str().to_string_lossy().trim_end_matches(['\\', '/']))
+}
+
+fn env_value_ignore_case<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    env.iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.as_str())
+}
+
+fn resolve_winget_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
     let path_var = env
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
@@ -555,7 +663,7 @@ fn resolve_winget_executable(env: &std::collections::HashMap<String, String>) ->
     bail!("trusted winget.exe not found in target user PATH");
 }
 
-fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<String, String>) -> bool {
+fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bool {
     let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
     let program_files = env
         .iter()
@@ -574,7 +682,7 @@ fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<Stri
 
 fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
     if value.contains(['\0', '\r', '\n']) {
-        bail!("winget command arguments cannot contain control line separators");
+        bail!("package manager command arguments cannot contain control line separators");
     }
 
     script.push('"');
@@ -615,6 +723,20 @@ fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyhow::Result<()> {
+    if value.contains(['\0', '\r', '\n', '"']) {
+        bail!("batch environment values cannot contain control line separators or quotes");
+    }
+
+    script.push_str("set \"");
+    script.push_str(name);
+    script.push('=');
+    script.push_str(&value.replace('%', "%%"));
+    script.push('"');
+
+    Ok(())
+}
+
 struct PreparedCommand {
     command: Vec<String>,
     _script: Option<TmpFileGuard>,
@@ -642,7 +764,12 @@ impl PreparedCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_main_command_in, prepare_shell_command_in};
+    use std::collections::HashMap;
+
+    use super::{
+        POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_chocolatey_script_in, prepare_main_command_in,
+        prepare_shell_command_in,
+    };
 
     #[test]
     fn shell_command_uses_utf8_temp_batch_file() {
@@ -849,5 +976,87 @@ mod tests {
         unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
 
         sddl_string
+    }
+
+    #[test]
+    fn chocolatey_command_uses_chocolateyinstall_path_and_batch_wrapper() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let install_root = program_data.path().join("chocolatey");
+        let choco_bin = install_root.join("bin");
+        std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
+        std::fs::write(choco_bin.join("choco.exe"), "").expect("create fake choco");
+        let env = HashMap::from([
+            ("ChocolateyInstall".to_owned(), install_root.display().to_string()),
+            ("ProgramData".to_owned(), program_data.path().display().to_string()),
+        ]);
+
+        let command = vec![
+            "choco.exe".to_owned(),
+            "install".to_owned(),
+            "Vendor.Package&Name".to_owned(),
+            "100%".to_owned(),
+            "Quoted\"Value".to_owned(),
+        ];
+        let command = prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env))
+            .expect("prepare Chocolatey command");
+
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(command.args()[1], "/D");
+        assert_eq!(command.args()[2], "/V:OFF");
+        assert_eq!(command.args()[3], "/Q");
+        assert_eq!(command.args()[4], "/C");
+
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
+        assert!(script.contains(&format!("set \"ChocolateyInstall={}\"", install_root.display())));
+        assert!(script.contains(&format!(
+            "\"{}\" \"install\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"",
+            choco_bin.join("choco.exe").display()
+        )));
+        assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn chocolatey_command_rejects_missing_chocolateyinstall_executable() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let install_root = program_data.path().join("chocolatey");
+        let env = HashMap::from([
+            ("ChocolateyInstall".to_owned(), install_root.display().to_string()),
+            ("ProgramData".to_owned(), program_data.path().display().to_string()),
+        ]);
+        let command = vec!["choco.exe".to_owned(), "install".to_owned(), "git".to_owned()];
+
+        let error = match prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env)) {
+            Ok(_) => panic!("missing trusted choco should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("Chocolatey executable was not found"));
+    }
+
+    #[test]
+    fn chocolatey_command_rejects_non_system_chocolateyinstall_path() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let install_root = tempfile::tempdir().expect("create fake ChocolateyInstall");
+        let choco_bin = install_root.path().join("bin");
+        std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
+        std::fs::write(choco_bin.join("choco.exe"), "").expect("create fake choco");
+        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let env = HashMap::from([
+            (
+                "ChocolateyInstall".to_owned(),
+                install_root.path().display().to_string(),
+            ),
+            ("ProgramData".to_owned(), program_data.path().display().to_string()),
+        ]);
+        let command = vec!["choco.exe".to_owned(), "install".to_owned(), "git".to_owned()];
+
+        let error = match prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env)) {
+            Ok(_) => panic!("non-system ChocolateyInstall should fail"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("trusted system Chocolatey folder"));
     }
 }
