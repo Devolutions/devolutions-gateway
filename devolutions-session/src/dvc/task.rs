@@ -23,6 +23,7 @@ use win_api_wrappers::security::privilege::ScopedPrivileges;
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
+use windows::Win32::Storage::FileSystem::SearchPathW;
 use windows::Win32::System::Shutdown::{
     EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, ExitWindowsEx, InitiateSystemShutdownW, LockWorkStation,
     SHUTDOWN_REASON,
@@ -306,16 +307,41 @@ fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
         .with_exec_capset(exec_flags)
 }
 
-/// Resolves the pwsh (PowerShell 7+) executable by searching directories listed in the `PATH`
-/// environment variable.
+/// Resolves the pwsh (PowerShell 7+) executable via `SearchPathW` with a null search path,
+/// which follows the same search order as `CreateProcessW` (application directory, current
+/// directory, system directories and the `PATH` environment variable).
 fn find_pwsh_executable() -> Option<String> {
-    let path_var = std::env::var_os("PATH")?;
+    let file_name = WideString::from("pwsh.exe");
 
-    std::env::split_paths(&path_var)
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .map(|dir| dir.join("pwsh.exe"))
-        .find(|candidate| candidate.is_file())
-        .and_then(|path| path.into_os_string().into_string().ok())
+    // SAFETY: FFI call with no outstanding preconditions; a null search path selects the
+    // default `CreateProcessW`-like search order.
+    let required_len = unsafe { SearchPathW(PCWSTR::null(), file_name.as_pcwstr(), PCWSTR::null(), None, None) };
+
+    if required_len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; usize::try_from(required_len).ok()?];
+
+    // SAFETY: FFI call; the buffer is valid for writes of `required_len` UTF-16 code units.
+    let len = unsafe {
+        SearchPathW(
+            PCWSTR::null(),
+            file_name.as_pcwstr(),
+            PCWSTR::null(),
+            Some(buffer.as_mut_slice()),
+            None,
+        )
+    };
+
+    let len = usize::try_from(len).ok()?;
+
+    // On success, the returned length excludes the terminating null and must fit the buffer.
+    if len == 0 || len >= buffer.len() {
+        return None;
+    }
+
+    String::from_utf16(&buffer[..len]).ok()
 }
 
 enum ProcessMessageAction {
