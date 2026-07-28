@@ -532,10 +532,10 @@ fn prepare_cargo_script(
         || Ok(executable.clone()),
         |env| resolve_cargo_executable(env).map(|path| path.display().to_string()),
     )?;
-    append_batch_argument(&mut script, &executable)?;
+    append_cargo_batch_argument(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
-        append_batch_argument(&mut script, arg)?;
+        append_cargo_batch_argument(&mut script, arg)?;
     }
     script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
 
@@ -904,9 +904,6 @@ fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()>
     if value.contains(['\0', '\r', '\n']) {
         bail!("package manager command arguments cannot contain control line separators");
     }
-    if value.contains('"') {
-        bail!("broker command arguments cannot contain double quotes");
-    }
 
     script.push('"');
 
@@ -944,6 +941,14 @@ fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()>
     script.push('"');
 
     Ok(())
+}
+
+fn append_cargo_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
+    if value.contains('"') {
+        bail!("broker command arguments cannot contain double quotes");
+    }
+
+    append_batch_argument(script, value)
 }
 
 fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyhow::Result<()> {
