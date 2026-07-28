@@ -3,6 +3,7 @@
 //! Constructs the commands the broker would execute from validated request fields.
 //! The broker never executes client-supplied commands directly.
 
+pub mod bun;
 pub mod cargo;
 pub mod chocolatey;
 pub mod dotnet;
@@ -22,6 +23,7 @@ use now_policy_api::{ManagerName, PackageRequest};
 /// Returns the command as a list of arguments (first element is the executable).
 pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     match request.manager {
+        ManagerName::Bun => bun::build_bun_command(request),
         ManagerName::Cargo => cargo::build_cargo_command(request),
         ManagerName::Dotnet => dotnet::build_dotnet_command(request),
         ManagerName::Npm => npm::build_npm_command(request),
