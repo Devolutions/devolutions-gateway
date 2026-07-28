@@ -400,13 +400,23 @@ fn prepare_chocolatey_script_in(
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
 ) -> anyhow::Result<PreparedCommand> {
+    let default_install_root = default_chocolatey_install_dir()?;
+    prepare_chocolatey_script_in_with_default_install_root(command, temp_dir, user_env, &default_install_root)
+}
+
+fn prepare_chocolatey_script_in_with_default_install_root(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+    default_install_root: &Path,
+) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
-    let (executable, install_root) = resolve_trusted_chocolatey_executable(user_env)?;
+    let (executable, install_root) = resolve_trusted_chocolatey_executable(user_env, default_install_root)?;
     append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
     script.push_str("\r\n");
     append_batch_argument(&mut script, &executable.display().to_string())?;
@@ -414,7 +424,12 @@ fn prepare_chocolatey_script_in(
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
     }
-    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+    script.push_str("\r\nset \"CHOCO_EXIT_CODE=%ERRORLEVEL%\"");
+    script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"1605\" exit /b 0");
+    script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"1614\" exit /b 0");
+    script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"1641\" exit /b 0");
+    script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"3010\" exit /b 0");
+    script.push_str("\r\nexit /b %CHOCO_EXIT_CODE%\r\n");
 
     let temp_script = broker_temp_script("bat", temp_dir)?;
     temp_script.write_content(&script).with_context(|| {
@@ -594,24 +609,35 @@ fn trusted_powershell7_executable() -> String {
         .to_string()
 }
 
-fn program_data_dir(user_env: Option<&HashMap<String, String>>) -> PathBuf {
-    user_env
-        .and_then(|env| env_value_ignore_case(env, "ProgramData"))
-        .filter(|value| !value.trim().is_empty())
-        .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from)
+fn system_program_data_dir() -> anyhow::Result<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+
+    // SAFETY: The known-folder ID is valid and no token handle is supplied.
+    let raw_path = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, KF_FLAG_DEFAULT, None) }
+        .context("failed to resolve system ProgramData folder")?;
+
+    // SAFETY: `SHGetKnownFolderPath` returns a valid null-terminated UTF-16 string on success.
+    let path = unsafe { raw_path.to_string() }.context("system ProgramData folder is not valid UTF-16")?;
+
+    // SAFETY: The returned string is allocated by the shell with `CoTaskMemAlloc`.
+    unsafe { CoTaskMemFree(Some(raw_path.as_ptr().cast())) };
+
+    Ok(PathBuf::from(path))
 }
 
-fn default_chocolatey_install_dir(user_env: Option<&HashMap<String, String>>) -> PathBuf {
-    program_data_dir(user_env).join("chocolatey")
+fn default_chocolatey_install_dir() -> anyhow::Result<PathBuf> {
+    Ok(system_program_data_dir()?.join("chocolatey"))
 }
 
 fn resolve_trusted_chocolatey_executable(
     user_env: Option<&HashMap<String, String>>,
+    default_install_root: &Path,
 ) -> anyhow::Result<(PathBuf, PathBuf)> {
     let install_root = user_env
         .and_then(|env| env_value_ignore_case(env, "ChocolateyInstall"))
         .filter(|value| !value.trim().is_empty())
-        .map_or_else(|| default_chocolatey_install_dir(user_env), PathBuf::from);
+        .map_or_else(|| default_install_root.to_owned(), PathBuf::from);
     let executable = install_root.join("bin").join("choco.exe");
     if !executable.is_file() {
         bail!(
@@ -620,19 +646,19 @@ fn resolve_trusted_chocolatey_executable(
         );
     }
 
-    if !is_trusted_chocolatey_install_dir(&install_root, user_env) {
+    if !is_trusted_chocolatey_install_dir(&install_root, default_install_root) {
         bail!(
             "ChocolateyInstall points to {}; only the trusted system Chocolatey folder at {} is supported by the broker",
             install_root.display(),
-            default_chocolatey_install_dir(user_env).display()
+            default_install_root.display()
         );
     }
 
     Ok((executable, install_root))
 }
 
-fn is_trusted_chocolatey_install_dir(install_root: &Path, user_env: Option<&HashMap<String, String>>) -> bool {
-    paths_eq_ignore_ascii_case(install_root, &default_chocolatey_install_dir(user_env))
+fn is_trusted_chocolatey_install_dir(install_root: &Path, default_install_root: &Path) -> bool {
+    paths_eq_ignore_ascii_case(install_root, default_install_root)
 }
 
 fn paths_eq_ignore_ascii_case(lhs: &Path, rhs: &Path) -> bool {
@@ -767,8 +793,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_chocolatey_script_in, prepare_main_command_in,
-        prepare_shell_command_in,
+        POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_chocolatey_script_in_with_default_install_root,
+        prepare_main_command_in, prepare_shell_command_in,
     };
 
     #[test]
@@ -981,14 +1007,18 @@ mod tests {
     #[test]
     fn chocolatey_command_uses_chocolateyinstall_path_and_batch_wrapper() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let program_data = tempfile::tempdir().expect("create fake ProgramData");
-        let install_root = program_data.path().join("chocolatey");
+        let trusted_program_data = tempfile::tempdir().expect("create fake trusted ProgramData");
+        let install_root = trusted_program_data.path().join("chocolatey");
         let choco_bin = install_root.join("bin");
         std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
         std::fs::write(choco_bin.join("choco.exe"), "").expect("create fake choco");
+        let untrusted_program_data = tempfile::tempdir().expect("create fake untrusted ProgramData");
         let env = HashMap::from([
             ("ChocolateyInstall".to_owned(), install_root.display().to_string()),
-            ("ProgramData".to_owned(), program_data.path().display().to_string()),
+            (
+                "ProgramData".to_owned(),
+                untrusted_program_data.path().display().to_string(),
+            ),
         ]);
 
         let command = vec![
@@ -998,8 +1028,13 @@ mod tests {
             "100%".to_owned(),
             "Quoted\"Value".to_owned(),
         ];
-        let command = prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env))
-            .expect("prepare Chocolatey command");
+        let command = prepare_chocolatey_script_in_with_default_install_root(
+            &command,
+            Some(temp_dir.path()),
+            Some(&env),
+            &install_root,
+        )
+        .expect("prepare Chocolatey command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1014,7 +1049,8 @@ mod tests {
             "\"{}\" \"install\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"",
             choco_bin.join("choco.exe").display()
         )));
-        assert!(script.contains("exit /b %ERRORLEVEL%"));
+        assert!(script.contains("if \"%CHOCO_EXIT_CODE%\"==\"3010\" exit /b 0"));
+        assert!(script.contains("exit /b %CHOCO_EXIT_CODE%"));
     }
 
     #[test]
@@ -1028,7 +1064,12 @@ mod tests {
         ]);
         let command = vec!["choco.exe".to_owned(), "install".to_owned(), "git".to_owned()];
 
-        let error = match prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env)) {
+        let error = match prepare_chocolatey_script_in_with_default_install_root(
+            &command,
+            Some(temp_dir.path()),
+            Some(&env),
+            &install_root,
+        ) {
             Ok(_) => panic!("missing trusted choco should fail"),
             Err(error) => error,
         };
@@ -1043,17 +1084,23 @@ mod tests {
         let choco_bin = install_root.path().join("bin");
         std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
         std::fs::write(choco_bin.join("choco.exe"), "").expect("create fake choco");
-        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let trusted_program_data = tempfile::tempdir().expect("create fake trusted ProgramData");
+        let trusted_install_root = trusted_program_data.path().join("chocolatey");
         let env = HashMap::from([
             (
                 "ChocolateyInstall".to_owned(),
                 install_root.path().display().to_string(),
             ),
-            ("ProgramData".to_owned(), program_data.path().display().to_string()),
+            ("ProgramData".to_owned(), install_root.path().display().to_string()),
         ]);
         let command = vec!["choco.exe".to_owned(), "install".to_owned(), "git".to_owned()];
 
-        let error = match prepare_chocolatey_script_in(&command, Some(temp_dir.path()), Some(&env)) {
+        let error = match prepare_chocolatey_script_in_with_default_install_root(
+            &command,
+            Some(temp_dir.path()),
+            Some(&env),
+            &trusted_install_root,
+        ) {
             Ok(_) => panic!("non-system ChocolateyInstall should fail"),
             Err(error) => error,
         };

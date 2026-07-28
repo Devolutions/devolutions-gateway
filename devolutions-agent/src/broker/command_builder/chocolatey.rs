@@ -39,7 +39,6 @@ pub fn build_chocolatey_command(request: &PackageRequest) -> anyhow::Result<Vec<
 
         if request.options.skip_hash_check {
             command.push("--ignore-checksums".to_owned());
-            command.push("--force".to_owned());
         }
 
         if let Some(version) = request.package.version.as_deref() {
@@ -52,6 +51,10 @@ pub fn build_chocolatey_command(request: &PackageRequest) -> anyhow::Result<Vec<
 }
 
 fn validate_chocolatey_request(request: &PackageRequest) -> anyhow::Result<()> {
+    if request.source.url.is_some() {
+        bail!("Chocolatey package sources with URLs are not supported by the broker");
+    }
+
     if request.package.channel.is_some() {
         bail!("Chocolatey package channels are not supported by the broker");
     }
@@ -111,9 +114,9 @@ fn validate_chocolatey_request(request: &PackageRequest) -> anyhow::Result<()> {
 }
 
 fn chocolatey_source(request: &PackageRequest) -> anyhow::Result<&str> {
-    let source = request.source.url.as_deref().unwrap_or(&request.source.name).trim();
+    let source = request.source.name.trim();
     if source.is_empty() {
-        bail!("Chocolatey package source is required");
+        bail!("Chocolatey package source name is required");
     }
     Ok(source)
 }
@@ -191,10 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn update_supports_x86_prerelease_skip_hash_and_source_url() {
+    fn update_supports_x86_prerelease_and_skip_hash() {
         let mut request = make_request();
         request.operation = Operation::Update;
-        request.source.url = Some("https://community.chocolatey.org/api/v2/".to_owned());
         request.package.architecture = Some(Architecture::X86);
         request.options.pre_release = true;
         request.options.skip_hash_check = true;
@@ -204,11 +206,11 @@ mod tests {
 
         assert_eq!(cmd[1], "upgrade");
         assert!(cmd.contains(&"--notsilent".to_owned()));
-        assert!(cmd.contains(&"https://community.chocolatey.org/api/v2/".to_owned()));
+        assert!(cmd.contains(&"community".to_owned()));
         assert!(cmd.contains(&"--forcex86".to_owned()));
         assert!(cmd.contains(&"--prerelease".to_owned()));
         assert!(cmd.contains(&"--ignore-checksums".to_owned()));
-        assert!(cmd.contains(&"--force".to_owned()));
+        assert!(!cmd.contains(&"--force".to_owned()));
     }
 
     #[test]
@@ -241,6 +243,16 @@ mod tests {
         let error = build_chocolatey_command(&request).expect_err("custom parameter should fail");
 
         assert!(error.to_string().contains("custom parameters"));
+    }
+
+    #[test]
+    fn source_urls_are_rejected() {
+        let mut request = make_request();
+        request.source.url = Some("https://community.chocolatey.org/api/v2/".to_owned());
+
+        let error = build_chocolatey_command(&request).expect_err("source URL should fail");
+
+        assert!(error.to_string().contains("sources with URLs"));
     }
 
     #[test]
