@@ -8,7 +8,7 @@
 //! and a `npm.cmd` shim.
 
 use anyhow::bail;
-use now_policy_api::{Elevation, Operation, PackageRequest, Scope};
+use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
 /// Build an npm command from a validated request.
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
@@ -20,16 +20,13 @@ pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>
         Operation::Install | Operation::Update => {
             append_raw(&mut script, "install");
             append_value(&mut script, &install_spec(request)?);
+            append_raw(&mut script, "--global");
         }
         Operation::Uninstall => {
             append_raw(&mut script, "uninstall");
             append_value(&mut script, &local_package_name(&request.package.id.0));
+            append_raw(&mut script, "--global");
         }
-    }
-
-    if request.options.pre_release {
-        append_raw(&mut script, "--include");
-        append_raw(&mut script, "dev");
     }
 
     Ok(vec![
@@ -53,8 +50,14 @@ fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
     if !request.source.name.eq_ignore_ascii_case("npm") {
         bail!("npm package source must be 'npm'");
     }
-    if request.package.architecture.is_some() {
-        bail!("npm package architecture selection is not supported by the broker");
+    match request.package.architecture {
+        Some(Architecture::X86 | Architecture::X64 | Architecture::Arm64) => {
+            bail!("npm package architecture selection is not supported by the broker");
+        }
+        Some(Architecture::Neutral) | None => {}
+    }
+    if request.options.pre_release {
+        bail!("npm prerelease selection is not supported by the broker");
     }
     if request.package.channel.is_some() {
         bail!("npm package channels are not supported by the broker");
@@ -215,7 +218,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3'");
+        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3' --global");
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@2.0.0'");
+        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@2.0.0' --global");
     }
 
     #[test]
@@ -236,7 +239,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool'");
+        assert_eq!(script_of(&cmd), "npm install 'contoso-tool' --global");
     }
 
     #[test]
@@ -250,7 +253,7 @@ mod tests {
 
         assert_eq!(
             script_of(&cmd),
-            "npm install 'babel-core-legacy@npm:@babel/core@7.28.0'"
+            "npm install 'babel-core-legacy@npm:@babel/core@7.28.0' --global"
         );
     }
 
@@ -262,17 +265,37 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm uninstall 'eslint-v9'");
+        assert_eq!(script_of(&cmd), "npm uninstall 'eslint-v9' --global");
     }
 
     #[test]
-    fn pre_release_matches_unigetui_include_dev_flag() {
+    fn neutral_architecture_is_accepted() {
         let mut request = make_request();
-        request.options.pre_release = true;
+        request.package.architecture = Some(Architecture::Neutral);
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3' --include dev");
+        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3' --global");
+    }
+
+    #[test]
+    fn concrete_architecture_is_rejected() {
+        let mut request = make_request();
+        request.package.architecture = Some(Architecture::X64);
+
+        let error = build_npm_command(&request).expect_err("concrete architecture should fail");
+
+        assert!(error.to_string().contains("architecture"));
+    }
+
+    #[test]
+    fn pre_release_is_rejected() {
+        let mut request = make_request();
+        request.options.pre_release = true;
+
+        let error = build_npm_command(&request).expect_err("prerelease should fail");
+
+        assert!(error.to_string().contains("prerelease"));
     }
 
     #[test]
