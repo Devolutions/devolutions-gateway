@@ -1,5 +1,6 @@
 use std::net::{IpAddr, SocketAddr};
 
+use agent_tunnel_proto::DomainAdvertisement;
 use anyhow::{Context as _, bail};
 use ipnetwork::Ipv4Network;
 use tokio::net::TcpStream;
@@ -31,15 +32,18 @@ impl Target {
     }
 }
 
-/// Resolve a target to candidate socket addresses within the advertised subnets.
+/// Resolve a target to candidate socket addresses the agent is willing to reach.
 ///
-/// Only IPv4 subnets are supported right now, matching the wire protocol. IPv6 targets
-/// never match.
+/// A hostname matching an advertised domain is allowed on its own: the Gateway routes
+/// hostnames on the domain advertisement alone, so advertising domains and no subnets has
+/// to work. Anything else has to land in an advertised subnet, and only IPv4 subnets
+/// travel on the wire, so an IPv6 address only ever gets through on a domain match.
 pub(crate) async fn resolve_target(
     target: &Target,
     advertise_subnets: &[Ipv4Network],
+    advertise_domains: &[DomainAdvertisement],
 ) -> anyhow::Result<Vec<SocketAddr>> {
-    fn matches(advertise_subnets: &[Ipv4Network], ip: IpAddr) -> bool {
+    fn in_subnets(advertise_subnets: &[Ipv4Network], ip: IpAddr) -> bool {
         match ip {
             IpAddr::V4(ipv4) => advertise_subnets.iter().any(|subnet| subnet.contains(ipv4)),
             IpAddr::V6(_) => false,
@@ -48,24 +52,30 @@ pub(crate) async fn resolve_target(
 
     match target {
         Target::Ip(ip, port) => {
-            if !matches(advertise_subnets, *ip) {
+            if !in_subnets(advertise_subnets, *ip) {
                 bail!("target {ip}:{port} is not in advertised subnets");
             }
             Ok(vec![SocketAddr::new(*ip, *port)])
         }
         Target::Domain(host, port) => {
             let lookup = format!("{host}:{port}");
-            let resolved: Vec<SocketAddr> = tokio::net::lookup_host(&lookup)
+            let resolved = tokio::net::lookup_host(&lookup)
                 .await
-                .with_context(|| format!("resolve target {lookup}"))?
-                .filter(|addr| matches(advertise_subnets, addr.ip()))
-                .collect();
+                .with_context(|| format!("resolve target {lookup}"))?;
 
-            if resolved.is_empty() {
-                bail!("target {lookup} did not resolve to any address in advertised subnets");
+            let allowed: Vec<SocketAddr> = if advertise_domains.iter().any(|adv| adv.domain.matches_hostname(host)) {
+                resolved.collect()
+            } else {
+                resolved
+                    .filter(|addr| in_subnets(advertise_subnets, addr.ip()))
+                    .collect()
+            };
+
+            if allowed.is_empty() {
+                bail!("target {lookup} resolved to no address this agent advertises");
             }
 
-            Ok(resolved)
+            Ok(allowed)
         }
     }
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_tunnel_proto::{
-    ConnectResponse, ControlMessage, ControlStream, FramedRecv, SessionStream, current_time_millis,
+    ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, FramedRecv, SessionStream, current_time_millis,
 };
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
@@ -217,10 +217,10 @@ async fn run_single_connection(
     }
 
     // Build domain advertisement list: explicit config + auto-detection.
-    let mut advertise_domains: Vec<agent_tunnel_proto::DomainAdvertisement> = tunnel_conf
+    let mut advertise_domains: Vec<DomainAdvertisement> = tunnel_conf
         .advertise_domains
         .iter()
-        .map(|d| agent_tunnel_proto::DomainAdvertisement {
+        .map(|d| DomainAdvertisement {
             domain: agent_tunnel_proto::DomainName::new(d),
             auto_detected: false,
         })
@@ -233,7 +233,7 @@ async fn run_single_connection(
                 .any(|d| d.domain.as_str().eq_ignore_ascii_case(&detected))
             {
                 info!(domain = %detected, "Auto-detected DNS domain");
-                advertise_domains.push(agent_tunnel_proto::DomainAdvertisement {
+                advertise_domains.push(DomainAdvertisement {
                     domain: agent_tunnel_proto::DomainName::new(detected),
                     auto_detected: true,
                 });
@@ -325,7 +325,8 @@ async fn run_single_connection(
             result = connection.accept_bi() => {
                 let (send, recv) = result.context("accept incoming bidi stream")?;
                 let subnets = advertise_subnets.clone();
-                task_handles.spawn(run_session_proxy(subnets, send, recv));
+                let domains = advertise_domains.clone();
+                task_handles.spawn(run_session_proxy(subnets, domains, send, recv));
             }
 
             // Reap completed session tasks.
@@ -667,7 +668,12 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 // Session proxy
 // ---------------------------------------------------------------------------
 
-async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::SendStream, recv: quinn::RecvStream) {
+async fn run_session_proxy(
+    advertise_subnets: Vec<Ipv4Network>,
+    advertise_domains: Vec<DomainAdvertisement>,
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+) {
     let _: anyhow::Result<()> = async {
         let mut session: SessionStream<_, _> = (send, recv).into();
 
@@ -698,7 +704,7 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
         }
 
         let target = Target::parse(connect_msg.target()).context("parse connect target")?;
-        let candidates = resolve_target(&target, &advertise_subnets).await?;
+        let candidates = resolve_target(&target, &advertise_subnets, &advertise_domains).await?;
         let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
         info!(target = %selected_target, "TCP connection established");
 
