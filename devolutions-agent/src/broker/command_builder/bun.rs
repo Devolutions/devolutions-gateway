@@ -106,6 +106,10 @@ fn validate_bun_request(request: &PackageRequest) -> anyhow::Result<()> {
         bail!("Bun no-upgrade operations are not supported by the broker");
     }
 
+    if let Some(version) = request.package.version.as_deref() {
+        validate_bun_package_version(version)?;
+    }
+
     Ok(())
 }
 
@@ -118,6 +122,18 @@ fn package_spec(package_id: &str, version: Option<&str>) -> String {
 
 fn is_default_bun_source_url(url: &str) -> bool {
     url.trim_end_matches('/').eq_ignore_ascii_case(BUN_SOURCE_URL)
+}
+
+fn validate_bun_package_version(version: &str) -> anyhow::Result<()> {
+    if version.is_empty() {
+        bail!("Bun package version must not be empty");
+    }
+
+    if semver::Version::parse(version).is_err() {
+        bail!("Bun package version must be a valid semantic version: {version}");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -201,6 +217,27 @@ mod tests {
     }
 
     #[test]
+    fn bun_install_accepts_scoped_package_identifiers() {
+        let mut request = make_request();
+        request.package.id = PackageIdentifier::from("@scope/package".to_owned());
+        request.package.version = None;
+
+        let command = build_bun_command(&request).expect("build command");
+
+        assert_eq!(command, ["bun", "add", "@scope/package", "--global"]);
+    }
+
+    #[test]
+    fn bun_accepts_semver_prerelease_and_build_versions() {
+        let mut request = make_request();
+        request.package.version = Some(VersionString("1.2.3-beta.1+build.5".to_owned()));
+
+        let command = build_bun_command(&request).expect("build command");
+
+        assert_eq!(command, ["bun", "add", "typescript@1.2.3-beta.1+build.5", "--global"]);
+    }
+
+    #[test]
     fn bun_accepts_default_source_url() {
         let mut request = make_request();
         request.source.url = Some("https://www.npmjs.com/".to_owned());
@@ -278,5 +315,26 @@ mod tests {
         let error = build_bun_command(&request).expect_err("skip hash check should fail");
 
         assert!(error.to_string().contains("hash-check bypass"));
+    }
+
+    #[test]
+    fn bun_rejects_non_version_package_selectors() {
+        for version in [
+            "npm:unapproved-package",
+            "https://registry.npmjs.org/typescript/-/typescript-5.7.3.tgz",
+            "git+https://github.com/microsoft/TypeScript.git",
+            "file:../typescript",
+            "^5.7.3",
+        ] {
+            let mut request = make_request();
+            request.package.version = Some(VersionString(version.to_owned()));
+
+            let error = build_bun_command(&request).expect_err("non-version selector should fail");
+
+            assert!(
+                error.to_string().contains("valid semantic version"),
+                "unexpected error for {version}: {error}"
+            );
+        }
     }
 }
