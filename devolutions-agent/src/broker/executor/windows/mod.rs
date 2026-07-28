@@ -203,6 +203,11 @@ fn run_plan(
     session_id: u32,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
+    let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    if requires_elevation && command_is_bun(&ctx.command) {
+        bail!("elevated Bun package operations are not supported by the broker");
+    }
+
     // 1. Kill requested processes (best-effort; a missing process is not an error).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
@@ -283,6 +288,10 @@ fn prepare_main_command_in(
 
     if is_pip_python_command(command) {
         return prepare_pip_command(command, temp_dir, user_env);
+    }
+
+    if command_is_bun(command) {
+        return prepare_bun_command(command, temp_dir, user_env);
     }
 
     Ok(PreparedCommand::raw(command))
@@ -588,6 +597,68 @@ fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
     }
 }
 
+fn prepare_bun_command(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    let (executable, args) = command.split_first().context("empty Bun command")?;
+    let executable = user_env.map_or_else(
+        || Ok(PathBuf::from(executable)),
+        |env| resolve_bun_executable(executable, env),
+    )?;
+
+    if executable
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("cmd"))
+    {
+        return prepare_bun_cmd_script(&executable.display().to_string(), args, temp_dir);
+    }
+
+    let mut prepared = Vec::with_capacity(command.len());
+    prepared.push(executable.display().to_string());
+    prepared.extend_from_slice(args);
+
+    Ok(PreparedCommand::raw(&prepared))
+}
+
+fn prepare_bun_cmd_script(
+    executable: &str,
+    args: &[String],
+    temp_dir: Option<&Path>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\ncall ");
+    append_batch_argument(&mut script, executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
+}
+
 // Owner keeps full control; interactive users only need read access to execute the script.
 // The DACL is protected (`P`) so permissive entries are never inherited from the parent directory.
 const SCRIPT_DACL: &str = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;BU)";
@@ -706,6 +777,10 @@ fn is_pip_python_command(command: &[String]) -> bool {
         && executable_is(command, "python.exe")
         && command[1] == "-m"
         && command[2].eq_ignore_ascii_case("pip")
+}
+
+fn command_is_bun(command: &[String]) -> bool {
+    executable_is(command, "bun") || executable_is(command, "bun.exe") || executable_is(command, "bun.cmd")
 }
 
 fn quote_powershell_literal(value: &str) -> String {
@@ -881,6 +956,49 @@ fn resolve_python_executable(exe_name: &str, env: &HashMap<String, String>) -> a
     }
 
     bail!("python.exe not found in target user PATH");
+}
+
+fn resolve_bun_executable(executable: &str, env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+    let executable_path = Path::new(executable);
+    if executable_path.is_absolute() {
+        if executable_path.exists() {
+            return Ok(executable_path.to_owned());
+        }
+        bail!(
+            "bun executable not found at absolute path: {}",
+            executable_path.display()
+        );
+    }
+
+    let Some(file_name) = executable_path.file_name().and_then(|name| name.to_str()) else {
+        bail!("invalid Bun executable name: {executable}");
+    };
+
+    let candidate_names: &[&str] = match file_name.to_ascii_lowercase().as_str() {
+        "bun" => &["bun.exe", "bun.cmd"],
+        "bun.exe" => &["bun.exe"],
+        "bun.cmd" => &["bun.cmd"],
+        _ => bail!("invalid Bun executable name: {executable}"),
+    };
+
+    let path_var = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| value.as_str())
+        .unwrap_or_default();
+    for dir in path_var.split(';') {
+        let dir = dir.trim();
+        if dir.is_empty() {
+            continue;
+        }
+        for candidate_name in candidate_names {
+            let candidate = PathBuf::from(dir).join(candidate_name);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+    bail!("bun executable not found in target user PATH");
 }
 
 fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bool {
@@ -1111,6 +1229,60 @@ mod tests {
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
         assert!(script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\""));
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn bun_cmd_command_uses_trusted_cmd_batch_wrapper() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let bun_path = temp_dir.path().join("bun.cmd");
+        std::fs::write(&bun_path, "@echo off\r\n").expect("write bun wrapper");
+        let mut user_env = HashMap::new();
+        user_env.insert("PATH".to_owned(), temp_dir.path().display().to_string());
+        let command = vec![
+            "bun".to_owned(),
+            "add".to_owned(),
+            "typescript@5.7.3".to_owned(),
+            "--global".to_owned(),
+        ];
+
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare Bun command");
+
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(command.args()[1], "/D");
+        assert_eq!(command.args()[2], "/V:OFF");
+        assert_eq!(command.args()[3], "/Q");
+        assert_eq!(command.args()[4], "/C");
+
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\ncall "));
+        assert!(script.contains(&format!(
+            "\"{}\" \"add\" \"typescript@5.7.3\" \"--global\"",
+            bun_path.display()
+        )));
+        assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn bun_exe_command_resolves_from_user_path_without_script_wrapper() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let bun_path = temp_dir.path().join("bun.exe");
+        std::fs::write(&bun_path, b"").expect("write bun exe placeholder");
+        let mut user_env = HashMap::new();
+        user_env.insert("PATH".to_owned(), temp_dir.path().display().to_string());
+        let command = vec![
+            "bun".to_owned(),
+            "add".to_owned(),
+            "typescript@5.7.3".to_owned(),
+            "--global".to_owned(),
+        ];
+
+        let command = prepare_main_command_in(&command, None, Some(&user_env)).expect("prepare Bun command");
+
+        assert_eq!(command.args()[0], bun_path.display().to_string());
+        assert_eq!(command.args()[1], "add");
+        assert_eq!(command.args()[2], "typescript@5.7.3");
+        assert_eq!(command.args()[3], "--global");
     }
 
     #[test]
