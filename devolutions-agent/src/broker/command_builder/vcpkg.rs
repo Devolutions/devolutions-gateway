@@ -87,6 +87,10 @@ fn package_spec(request: &PackageRequest) -> anyhow::Result<String> {
     if package_id.is_empty() {
         bail!("vcpkg package id is required");
     }
+    if package_id != request.package.id.0 {
+        bail!("vcpkg package id must not contain leading or trailing whitespace");
+    }
+    validate_port_spec(package_id)?;
 
     if let Some((port, package_triplet)) = package_id.split_once(':') {
         if port.is_empty() || package_triplet.is_empty() || package_triplet.contains(':') {
@@ -99,6 +103,57 @@ fn package_spec(request: &PackageRequest) -> anyhow::Result<String> {
     } else {
         Ok(format!("{package_id}:{triplet}"))
     }
+}
+
+fn validate_port_spec(value: &str) -> anyhow::Result<()> {
+    let (port_with_features, triplet) = value
+        .split_once(':')
+        .map_or((value, None), |(port_with_features, triplet)| {
+            (port_with_features, Some(triplet))
+        });
+
+    if let Some(triplet) = triplet
+        && !is_valid_triplet(triplet)
+    {
+        bail!("vcpkg package triplet is invalid");
+    }
+
+    let (port, features) = port_with_features
+        .split_once('[')
+        .map_or((port_with_features, None), |(port, features)| (port, Some(features)));
+
+    if !is_valid_port_name(port) {
+        bail!("vcpkg package port name is invalid");
+    }
+
+    let Some(features) = features else {
+        return Ok(());
+    };
+
+    if !features.ends_with(']') || features[..features.len() - 1].contains(['[', ']']) {
+        bail!("vcpkg package features are invalid");
+    }
+
+    let features = &features[..features.len() - 1];
+    if features.is_empty() {
+        bail!("vcpkg package features are invalid");
+    }
+
+    for feature in features.split(',') {
+        if !is_valid_port_name(feature) {
+            bail!("vcpkg package features are invalid");
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_port_name(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 fn is_valid_triplet(value: &str) -> bool {
@@ -191,6 +246,16 @@ mod tests {
     }
 
     #[test]
+    fn package_features_are_preserved() {
+        let mut request = make_request();
+        request.package.id = PackageIdentifier::from("curl[non-http,ssl]".to_owned());
+
+        let cmd = build_vcpkg_command(&request).expect("build command");
+
+        assert_eq!(cmd, ["vcpkg.exe", "install", "curl[non-http,ssl]:x64-windows"]);
+    }
+
+    #[test]
     fn package_triplet_must_match_source() {
         let mut request = make_request();
         request.package.id = PackageIdentifier::from("zlib:x86-windows".to_owned());
@@ -230,6 +295,29 @@ mod tests {
         let error = build_vcpkg_command(&request).expect_err("custom parameter should fail");
 
         assert!(error.to_string().contains("custom parameters"));
+    }
+
+    #[test]
+    fn invalid_package_specs_are_rejected() {
+        for package_id in [
+            "--vcpkg-root=C:\\checkout",
+            "zlib\" & calc & rem \"",
+            "zlib & calc",
+            "zlib[]",
+            "zlib[bad feature]",
+            "Zlib",
+            "zlib:x64-windows:extra",
+        ] {
+            let mut request = make_request();
+            request.package.id = PackageIdentifier::from(package_id.to_owned());
+
+            let error = build_vcpkg_command(&request).expect_err("invalid package spec should fail");
+
+            assert!(
+                error.to_string().contains("vcpkg package"),
+                "unexpected error for {package_id}: {error}"
+            );
+        }
     }
 
     #[test]
