@@ -277,6 +277,10 @@ fn prepare_main_command_in(
         return prepare_vcpkg_script(command, temp_dir, user_env);
     }
 
+    if is_pip_python_command(command) {
+        return prepare_pip_command(command, temp_dir, user_env);
+    }
+
     Ok(PreparedCommand::raw(command))
 }
 
@@ -509,6 +513,22 @@ fn prepare_vcpkg_script(
     Ok(PreparedCommand::with_script(prepared, temp_script))
 }
 
+fn prepare_pip_command(
+    command: &[String],
+    _temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    let (executable, args) = command.split_first().context("empty pip command")?;
+    let executable = user_env
+        .context("target user environment is required to resolve python.exe")
+        .and_then(|env| resolve_python_executable(executable, env))?;
+    let mut prepared = Vec::with_capacity(command.len());
+    prepared.push(executable.display().to_string());
+    prepared.extend_from_slice(args);
+
+    Ok(PreparedCommand::raw(&prepared))
+}
+
 fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
     if !(executable_is(command, "powershell.exe") || executable_is(command, "pwsh.exe")) {
         return None;
@@ -633,6 +653,13 @@ fn executable_is(command: &[String], expected_name: &str) -> bool {
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.eq_ignore_ascii_case(expected_name))
     })
+}
+
+fn is_pip_python_command(command: &[String]) -> bool {
+    command.len() >= 4
+        && executable_is(command, "python.exe")
+        && command[1] == "-m"
+        && command[2].eq_ignore_ascii_case("pip")
 }
 
 fn quote_powershell_literal(value: &str) -> String {
@@ -773,6 +800,30 @@ fn resolve_vcpkg_executable(env: &HashMap<String, String>) -> anyhow::Result<Pat
     }
 
     bail!("vcpkg.exe not found in target user VCPKG_ROOT or PATH");
+}
+
+fn resolve_python_executable(exe_name: &str, env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+    if !Path::new(exe_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("python.exe"))
+    {
+        bail!("pip command executable must be python.exe");
+    }
+
+    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
+    for dir in path_var.split(';') {
+        let dir = dir.trim();
+        if dir.is_empty() {
+            continue;
+        }
+        let candidate = PathBuf::from(dir).join("python.exe");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    bail!("python.exe not found in target user PATH");
 }
 
 fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bool {
@@ -1274,5 +1325,32 @@ mod tests {
         ctx.scope = Some(Scope::Machine);
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("machine-scope vcpkg should fail");
         assert!(error.to_string().contains("machine-scope"));
+    }
+
+    #[test]
+    fn pip_command_resolves_python_without_shell_wrapper() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let python_path = temp_dir.path().join("python.exe");
+        std::fs::write(&python_path, b"").expect("write python placeholder");
+        let user_env = HashMap::from([("PATH".to_owned(), temp_dir.path().display().to_string())]);
+        let command = vec![
+            "python.exe".to_owned(),
+            "-m".to_owned(),
+            "pip".to_owned(),
+            "--isolated".to_owned(),
+            "install".to_owned(),
+            "requests==2.31.0".to_owned(),
+            "--no-input".to_owned(),
+        ];
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare Pip command");
+
+        assert_eq!(command.args()[0], python_path.display().to_string());
+        assert_eq!(command.args()[1], "-m");
+        assert_eq!(command.args()[2], "pip");
+        assert_eq!(command.args()[3], "--isolated");
+        assert_eq!(command.args()[4], "install");
+        assert_eq!(command.args()[5], "requests==2.31.0");
+        assert_eq!(command.args()[6], "--no-input");
     }
 }
