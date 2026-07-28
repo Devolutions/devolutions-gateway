@@ -5,6 +5,7 @@
 
 pub mod chocolatey;
 pub mod dotnet;
+pub mod pip;
 pub mod powershell;
 pub mod scoop;
 pub mod vcpkg;
@@ -24,6 +25,7 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
         ManagerName::Chocolatey => chocolatey::build_chocolatey_command(request),
+        ManagerName::Pip => pip::build_pip_command(request),
         ManagerName::Scoop => scoop::build_scoop_command(request),
         ManagerName::Vcpkg => vcpkg::build_vcpkg_command(request),
         unsupported => bail!("package manager is not supported by the broker: {unsupported}"),
