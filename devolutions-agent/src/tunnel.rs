@@ -689,23 +689,37 @@ async fn run_session_proxy(
         );
 
         let protocol_version = connect_msg.protocol_version();
-        if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
-            warn!(
-                %protocol_version,
-                %e,
-                "Rejecting ConnectRequest: unsupported protocol version"
-            );
-            let response = ConnectResponse::error(format!("unsupported protocol version: {e}"));
-            session
-                .send_response(&response)
-                .await
-                .context("send ConnectResponse error for unsupported version")?;
-            bail!("unsupported protocol version in ConnectRequest");
-        }
 
-        let target = Target::parse(connect_msg.target()).context("parse connect target")?;
-        let candidates = resolve_target(&target, &advertise_subnets, &advertise_domains).await?;
-        let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
+        let connect_result = async {
+            agent_tunnel_proto::validate_protocol_version(protocol_version).context("unsupported protocol version")?;
+
+            let target = Target::parse(connect_msg.target()).context("parse connect target")?;
+            let candidates = resolve_target(&target, &advertise_subnets, &advertise_domains).await?;
+            connect_to_target(&candidates).await
+        }
+        .await;
+
+        // Whatever went wrong has to travel back as a ConnectResponse::Error — returning
+        // early instead drops the stream and the Gateway just sees an unexplained EOF.
+        let (tcp_stream, selected_target) = match connect_result {
+            Ok(connected) => connected,
+            Err(error) => {
+                let reason = format!("{error:#}");
+                warn!(
+                    session_id = %connect_msg.session_id(),
+                    target = %connect_msg.target(),
+                    protocol_version,
+                    error = %reason,
+                    "Rejecting ConnectRequest"
+                );
+                session
+                    .send_response(&ConnectResponse::error(reason))
+                    .await
+                    .context("send ConnectResponse error")?;
+                return Err(error);
+            }
+        };
+
         info!(target = %selected_target, "TCP connection established");
 
         session
