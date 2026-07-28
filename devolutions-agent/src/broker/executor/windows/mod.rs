@@ -59,6 +59,7 @@ impl CommandExecutor for WindowsExecutor {
         process_started: Option<ProcessStartedCallback>,
     ) -> anyhow::Result<ExecutionOutput> {
         let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+        reject_unsupported_vcpkg_elevation(ctx)?;
 
         if !self.is_system && requires_elevation {
             bail!(
@@ -272,7 +273,21 @@ fn prepare_main_command_in(
         return prepare_chocolatey_script(command, temp_dir, user_env);
     }
 
+    if executable_is(command, "vcpkg.exe") {
+        return prepare_vcpkg_script(command, temp_dir, user_env);
+    }
+
     Ok(PreparedCommand::raw(command))
+}
+
+fn reject_unsupported_vcpkg_elevation(ctx: &ExecutionContext) -> anyhow::Result<()> {
+    if executable_is(&ctx.command, "vcpkg.exe")
+        && (ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine))
+    {
+        bail!("vcpkg elevated or machine-scope operations are not supported by the broker");
+    }
+
+    Ok(())
 }
 
 fn prepare_shell_command(_token: &Token, payload: &str) -> anyhow::Result<PreparedCommand> {
@@ -431,6 +446,48 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"1641\" exit /b 0");
     script.push_str("\r\nif \"%CHOCO_EXIT_CODE%\"==\"3010\" exit /b 0");
     script.push_str("\r\nexit /b %CHOCO_EXIT_CODE%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
+}
+
+fn prepare_vcpkg_script(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+
+    let (executable, args) = command.split_first().context("empty vcpkg command")?;
+    let executable = user_env.map_or_else(
+        || Ok(executable.clone()),
+        |env| resolve_vcpkg_executable(env).map(|path| path.display().to_string()),
+    )?;
+    append_batch_argument(&mut script, &executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
 
     let temp_script = broker_temp_script("bat", temp_dir)?;
     temp_script.write_content(&script).with_context(|| {
@@ -692,6 +749,32 @@ fn resolve_winget_executable(env: &HashMap<String, String>) -> anyhow::Result<Pa
     bail!("trusted winget.exe not found in target user PATH");
 }
 
+fn resolve_vcpkg_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+    if let Some(root) = env_value_ignore_case(env, "VCPKG_ROOT")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let candidate = PathBuf::from(root).join("vcpkg.exe");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
+    for dir in path_var.split(';') {
+        let dir = dir.trim();
+        if dir.is_empty() {
+            continue;
+        }
+        let candidate = PathBuf::from(dir).join("vcpkg.exe");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    bail!("vcpkg.exe not found in target user VCPKG_ROOT or PATH");
+}
+
 fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bool {
     let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
     let program_files = env
@@ -795,10 +878,14 @@ impl PreparedCommand {
 mod tests {
     use std::collections::HashMap;
 
+    use now_policy_api::{Elevation, Scope};
+    use win_api_wrappers::identity::sid::Sid;
+
     use super::{
         POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_chocolatey_script_in_with_default_install_root,
-        prepare_main_command_in, prepare_shell_command_in,
+        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
     };
+    use crate::broker::executor::ExecutionContext;
 
     #[test]
     fn shell_command_uses_utf8_temp_batch_file() {
@@ -1130,5 +1217,62 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("trusted system Chocolatey folder"));
+    }
+
+    #[test]
+    fn vcpkg_command_uses_batch_wrapper_with_user_resolved_executable() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let vcpkg_root = temp_dir.path().join("vcpkg-root");
+        std::fs::create_dir(&vcpkg_root).expect("create vcpkg root");
+        std::fs::write(vcpkg_root.join("vcpkg.exe"), []).expect("create vcpkg exe");
+
+        let command = vec![
+            "vcpkg.exe".to_owned(),
+            "install".to_owned(),
+            "zlib:x64-windows".to_owned(),
+        ];
+        let user_env = HashMap::from([("VCPKG_ROOT".to_owned(), vcpkg_root.display().to_string())]);
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare vcpkg command");
+
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(command.args()[1], "/D");
+        assert_eq!(command.args()[2], "/V:OFF");
+        assert_eq!(command.args()[3], "/Q");
+        assert_eq!(command.args()[4], "/C");
+
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
+        assert!(script.contains("\"install\" \"zlib:x64-windows\""));
+        assert!(script.contains("vcpkg.exe"));
+        assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn vcpkg_elevated_execution_is_rejected() {
+        let mut ctx = ExecutionContext {
+            kill_processes: Vec::new(),
+            pre_command: None,
+            command: vec![
+                "vcpkg.exe".to_owned(),
+                "install".to_owned(),
+                "zlib:x64-windows".to_owned(),
+            ],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
+                .expect("well-known Everyone SID"),
+            elevation: Elevation::Elevated,
+            scope: Some(Scope::User),
+            capture_output: false,
+        };
+
+        let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("elevated vcpkg should fail");
+        assert!(error.to_string().contains("elevated"));
+
+        ctx.elevation = Elevation::Standard;
+        ctx.scope = Some(Scope::Machine);
+        let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("machine-scope vcpkg should fail");
+        assert!(error.to_string().contains("machine-scope"));
     }
 }
