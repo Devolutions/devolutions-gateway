@@ -10,7 +10,7 @@ use std::time::Duration;
 use agent_tunnel_proto::{
     ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, FramedRecv, SessionStream, current_time_millis,
 };
-use anyhow::{Context as _, bail};
+use anyhow::{Context as _, anyhow, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
@@ -668,6 +668,13 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 // Session proxy
 // ---------------------------------------------------------------------------
 
+/// How long we get to resolve the target and open the TCP connection.
+///
+/// The Gateway stops waiting for the ConnectResponse after 30s
+/// (`crates/agent-tunnel/src/listener.rs`). We have to give up before it does, otherwise a
+/// black-holed target outlives its deadline and it never hears why we failed.
+const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
+
 async fn run_session_proxy(
     advertise_subnets: Vec<Ipv4Network>,
     advertise_domains: Vec<DomainAdvertisement>,
@@ -690,14 +697,20 @@ async fn run_session_proxy(
 
         let protocol_version = connect_msg.protocol_version();
 
-        let connect_result = async {
+        let connect_result = tokio::time::timeout(CONNECT_DEADLINE, async {
             agent_tunnel_proto::validate_protocol_version(protocol_version).context("unsupported protocol version")?;
 
             let target = Target::parse(connect_msg.target()).context("parse connect target")?;
             let candidates = resolve_target(&target, &advertise_subnets, &advertise_domains).await?;
             connect_to_target(&candidates).await
-        }
-        .await;
+        })
+        .await
+        .unwrap_or_else(|_elapsed| {
+            Err(anyhow!(
+                "timed out after {}s resolving or connecting to target",
+                CONNECT_DEADLINE.as_secs()
+            ))
+        });
 
         // Whatever went wrong has to travel back as a ConnectResponse::Error — returning
         // early instead drops the stream and the Gateway just sees an unexplained EOF.
