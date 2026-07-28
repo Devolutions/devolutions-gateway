@@ -97,3 +97,61 @@ pub(crate) async fn connect_to_target(candidates: &[SocketAddr]) -> anyhow::Resu
 
     Err(error).with_context(|| format!("TCP connect failed for {candidate}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use agent_tunnel_proto::DomainName;
+
+    use super::*;
+
+    fn subnets(list: &[&str]) -> Vec<Ipv4Network> {
+        list.iter().map(|s| s.parse().expect("valid subnet")).collect()
+    }
+
+    fn domains(list: &[&str]) -> Vec<DomainAdvertisement> {
+        list.iter()
+            .map(|d| DomainAdvertisement {
+                domain: DomainName::new(*d),
+                auto_detected: false,
+            })
+            .collect()
+    }
+
+    // The Gateway routes a hostname on the domain advertisement alone, so an agent
+    // advertising domains and no subnets still has to honour the request.
+    #[tokio::test]
+    async fn domain_target_matching_advertised_domain_needs_no_subnet() {
+        let target = Target::parse("localhost:3389").expect("parse target");
+
+        let resolved = resolve_target(&target, &[], &domains(&["localhost"]))
+            .await
+            .expect("hostname matches an advertised domain");
+
+        assert!(!resolved.is_empty(), "expected at least one resolved address");
+    }
+
+    #[tokio::test]
+    async fn domain_target_falls_back_to_advertised_subnets() {
+        let target = Target::Domain("127.0.0.1".to_owned(), 3389);
+
+        let resolved = resolve_target(&target, &subnets(&["127.0.0.0/8"]), &[])
+            .await
+            .expect("resolved address is inside an advertised subnet");
+
+        assert_eq!(resolved, vec!["127.0.0.1:3389".parse().expect("parse addr")]);
+    }
+
+    #[tokio::test]
+    async fn domain_target_matching_neither_domain_nor_subnet_is_rejected() {
+        let target = Target::Domain("127.0.0.1".to_owned(), 3389);
+
+        let error = resolve_target(&target, &[], &[])
+            .await
+            .expect_err("nothing is advertised");
+
+        assert!(
+            format!("{error:#}").contains("no address this agent advertises"),
+            "unexpected error: {error:#}"
+        );
+    }
+}
