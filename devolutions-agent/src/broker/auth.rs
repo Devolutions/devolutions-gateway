@@ -255,6 +255,21 @@ mod tests {
             .to_string_lossy()
     }
 
+    fn client_user() -> ClientUser {
+        let sid = Process::current_process()
+            .token(TOKEN_QUERY)
+            .expect("open current process token")
+            .sid_and_attributes()
+            .expect("query current process token user")
+            .sid;
+        let account = sid.lookup_account(None).expect("current process account lookup");
+        ClientUser {
+            sid,
+            domain: account.domain_name.to_string_lossy(),
+            name: account.name.to_string_lossy(),
+        }
+    }
+
     fn system_client() -> PipeClient {
         let (domain, name) = system_account_names();
         PipeClient {
