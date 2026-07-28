@@ -98,6 +98,9 @@ async fn write_manifest(mut manifest: UpdateManifestV2) -> Result<(), HttpError>
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct UpdateProductInfo {
     /// Requested or installed version: `"latest"` or `"YYYY.M.D"` / `"YYYY.M.D.R"`.
+    // `VersionSpecification` serializes as one of those strings and lives in a crate without utoipa,
+    // so describe it as a string here instead of emitting a `$ref` to a schema that never gets generated.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub version: VersionSpecification,
 }
 
