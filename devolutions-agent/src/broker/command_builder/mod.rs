@@ -3,6 +3,7 @@
 //! Constructs the commands the broker would execute from validated request fields.
 //! The broker never executes client-supplied commands directly.
 
+pub mod cargo;
 pub mod chocolatey;
 pub mod dotnet;
 pub mod pip;
@@ -20,6 +21,7 @@ use now_policy_api::{ManagerName, PackageRequest};
 /// Returns the command as a list of arguments (first element is the executable).
 pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     match request.manager {
+        ManagerName::Cargo => cargo::build_cargo_command(request),
         ManagerName::Dotnet => dotnet::build_dotnet_command(request),
         ManagerName::Winget => Ok(winget::build_winget_command(request)),
         ManagerName::PowerShell => powershell::build_powershell5_command(request),

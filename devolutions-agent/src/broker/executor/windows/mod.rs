@@ -273,6 +273,10 @@ fn prepare_main_command_in(
         return prepare_chocolatey_script(command, temp_dir, user_env);
     }
 
+    if executable_is(command, "cargo.exe") {
+        return prepare_cargo_script(command, temp_dir, user_env);
+    }
+
     if executable_is(command, "vcpkg.exe") {
         return prepare_vcpkg_script(command, temp_dir, user_env);
     }
@@ -485,6 +489,48 @@ fn prepare_vcpkg_script(
     let executable = user_env.map_or_else(
         || Ok(executable.clone()),
         |env| resolve_vcpkg_executable(env).map(|path| path.display().to_string()),
+    )?;
+    append_batch_argument(&mut script, &executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
+}
+
+fn prepare_cargo_script(
+    command: &[String],
+    temp_dir: Option<&Path>,
+    user_env: Option<&HashMap<String, String>>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+
+    let (executable, args) = command.split_first().context("empty Cargo command")?;
+    let executable = user_env.map_or_else(
+        || Ok(executable.clone()),
+        |env| resolve_cargo_executable(env).map(|path| path.display().to_string()),
     )?;
     append_batch_argument(&mut script, &executable)?;
     for arg in args {
@@ -802,6 +848,17 @@ fn resolve_vcpkg_executable(env: &HashMap<String, String>) -> anyhow::Result<Pat
     bail!("vcpkg.exe not found in target user VCPKG_ROOT or PATH");
 }
 
+fn resolve_cargo_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
+    for dir in path_var.split(';') {
+        let candidate = PathBuf::from(dir).join("cargo.exe");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    bail!("cargo.exe not found in target user PATH");
+}
+
 fn resolve_python_executable(exe_name: &str, env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
     if !Path::new(exe_name)
         .file_name()
@@ -846,6 +903,9 @@ fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bo
 fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
     if value.contains(['\0', '\r', '\n']) {
         bail!("package manager command arguments cannot contain control line separators");
+    }
+    if value.contains('"') {
+        bail!("broker command arguments cannot contain double quotes");
     }
 
     script.push('"');
@@ -1268,6 +1328,70 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("trusted system Chocolatey folder"));
+    }
+
+    #[test]
+    fn cargo_command_uses_batch_wrapper_for_utf8_output() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = vec![
+            "cargo.exe".to_owned(),
+            "install".to_owned(),
+            "ripgrep".to_owned(),
+            "--version".to_owned(),
+            "15.1.0".to_owned(),
+        ];
+        let command = prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare Cargo command");
+
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(command.args()[1], "/D");
+        assert_eq!(command.args()[2], "/V:OFF");
+        assert_eq!(command.args()[3], "/Q");
+        assert_eq!(command.args()[4], "/C");
+
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
+        assert!(script.contains("\"cargo.exe\" \"install\" \"ripgrep\" \"--version\" \"15.1.0\""));
+        assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn cargo_command_resolves_executable_from_user_path() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let cargo_home = temp_dir.path().join(".cargo").join("bin");
+        std::fs::create_dir_all(&cargo_home).expect("create cargo bin dir");
+        std::fs::write(cargo_home.join("cargo.exe"), b"").expect("write cargo executable placeholder");
+
+        let mut env = HashMap::new();
+        env.insert("PATH".to_owned(), cargo_home.display().to_string());
+
+        let command = vec!["cargo.exe".to_owned(), "uninstall".to_owned(), "ripgrep".to_owned()];
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&env)).expect("prepare Cargo command");
+
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        assert!(script.contains(&format!(
+            "\"{}\" \"uninstall\" \"ripgrep\"",
+            cargo_home.join("cargo.exe").display()
+        )));
+    }
+
+    #[test]
+    fn batch_wrapper_rejects_quotes_before_writing_script() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = vec![
+            "cargo.exe".to_owned(),
+            "install".to_owned(),
+            "ripgrep".to_owned(),
+            "--root".to_owned(),
+            "C:\\Tools\\\"& whoami &\"".to_owned(),
+        ];
+
+        let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None) {
+            Ok(_) => panic!("quote should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("double quotes"));
     }
 
     #[test]
