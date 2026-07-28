@@ -6,6 +6,7 @@
 pub mod cargo;
 pub mod chocolatey;
 pub mod dotnet;
+pub mod npm;
 pub mod pip;
 pub mod powershell;
 pub mod scoop;
@@ -23,6 +24,7 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     match request.manager {
         ManagerName::Cargo => cargo::build_cargo_command(request),
         ManagerName::Dotnet => dotnet::build_dotnet_command(request),
+        ManagerName::Npm => npm::build_npm_command(request),
         ManagerName::Winget => Ok(winget::build_winget_command(request)),
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),

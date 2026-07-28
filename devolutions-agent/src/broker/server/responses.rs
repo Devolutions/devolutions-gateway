@@ -89,6 +89,17 @@ pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
             max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
         },
         ManagerCapability {
+            manager: ManagerName::Npm,
+            operations: vec![Operation::Install, Operation::Update, Operation::Uninstall],
+            scopes: vec![Scope::User],
+            architectures: vec![Architecture::Neutral],
+            supports_custom_parameters: false,
+            supports_custom_install_location: false,
+            supports_capture_output: true,
+            supports_details: false,
+            max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
+        },
+        ManagerCapability {
             manager: ManagerName::PowerShell,
             operations: vec![Operation::Install, Operation::Update, Operation::Uninstall],
             scopes: vec![Scope::User, Scope::Machine],
