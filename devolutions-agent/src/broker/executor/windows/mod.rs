@@ -907,6 +907,9 @@ fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()>
     if value.contains('"') {
         bail!("broker command arguments cannot contain double quotes");
     }
+    if value.contains('"') {
+        bail!("broker command arguments cannot contain double quotes");
+    }
 
     script.push('"');
 
@@ -1093,7 +1096,6 @@ mod tests {
             "--id".to_owned(),
             "Vendor.Package&Name".to_owned(),
             "100%".to_owned(),
-            "Quoted\"Value".to_owned(),
         ];
         let command = prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare WinGet command");
 
@@ -1105,11 +1107,27 @@ mod tests {
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
-        assert!(
-            script
-                .contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"")
-        );
+        assert!(script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\""));
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn batch_wrapper_rejects_quotes_before_writing_script() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = vec![
+            "cargo.exe".to_owned(),
+            "install".to_owned(),
+            "ripgrep".to_owned(),
+            "--root".to_owned(),
+            "C:\\Tools\\\"& whoami &\"".to_owned(),
+        ];
+
+        let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None) {
+            Ok(_) => panic!("quote should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("double quotes"));
     }
 
     #[test]
