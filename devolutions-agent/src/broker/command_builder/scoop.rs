@@ -117,13 +117,7 @@ fn validate_scoop_request(request: &PackageRequest) -> anyhow::Result<()> {
         if param.is_empty() {
             continue;
         }
-        if is_global_scope_parameter(&param.0) {
-            bail!(
-                "Scoop global scope custom parameters are not supported by the broker: {}",
-                param.0
-            );
-        }
-        validate_script_argument(&param.0)?;
+        validate_custom_parameter(&param.0)?;
     }
 
     Ok(())
@@ -149,8 +143,32 @@ fn source_is_direct_manifest(source: &str) -> bool {
 fn is_global_scope_parameter(param: &str) -> bool {
     param.split_whitespace().any(|part| {
         let part = part.to_ascii_lowercase();
-        part == "-g" || part == "--global" || part.starts_with("--global=")
+        if part == "--global" || part.starts_with("--global=") {
+            return true;
+        }
+
+        if let Some(short_options) = part.strip_prefix('-')
+            && !short_options.starts_with('-')
+        {
+            return short_options.chars().any(|option| option == 'g');
+        }
+
+        false
     })
+}
+
+fn validate_custom_parameter(value: &str) -> anyhow::Result<()> {
+    validate_script_argument(value)?;
+    if value == "--" {
+        bail!("Scoop custom parameters cannot include the option terminator");
+    }
+    if !value.starts_with('-') {
+        bail!("Scoop custom parameters must be options, not positional arguments: {value}");
+    }
+    if is_global_scope_parameter(value) {
+        bail!("Scoop global scope custom parameters are not supported by the broker: {value}");
+    }
+    Ok(())
 }
 
 fn validate_script_argument(value: &str) -> anyhow::Result<()> {
@@ -321,6 +339,36 @@ mod tests {
         let error = build_scoop_command(&request).expect_err("global parameter should fail");
 
         assert!(error.to_string().contains("global scope custom parameters"));
+    }
+
+    #[test]
+    fn clustered_global_custom_parameter_is_rejected() {
+        let mut request = make_request();
+        request.options.custom_parameters = vec![CustomParameterString("-ig".to_owned())];
+
+        let error = build_scoop_command(&request).expect_err("global parameter cluster should fail");
+
+        assert!(error.to_string().contains("global scope custom parameters"));
+    }
+
+    #[test]
+    fn positional_custom_parameter_is_rejected() {
+        let mut request = make_request();
+        request.options.custom_parameters = vec![CustomParameterString("extras/another-app".to_owned())];
+
+        let error = build_scoop_command(&request).expect_err("positional parameter should fail");
+
+        assert!(error.to_string().contains("positional arguments"));
+    }
+
+    #[test]
+    fn option_terminator_custom_parameter_is_rejected() {
+        let mut request = make_request();
+        request.options.custom_parameters = vec![CustomParameterString("--".to_owned())];
+
+        let error = build_scoop_command(&request).expect_err("option terminator should fail");
+
+        assert!(error.to_string().contains("option terminator"));
     }
 
     #[test]
