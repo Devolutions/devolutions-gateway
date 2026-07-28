@@ -268,6 +268,11 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "dev-skip-broker-signature"))]
+    fn client_user() -> ClientUser {
+        system_client().user
+    }
+
     #[test]
     fn resolve_account_sid_resolves_qualified_name() {
         let (domain, name) = system_account_names();
