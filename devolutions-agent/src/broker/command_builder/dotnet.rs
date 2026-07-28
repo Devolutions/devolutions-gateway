@@ -37,7 +37,7 @@ pub fn build_dotnet_command(request: &PackageRequest) -> anyhow::Result<Vec<Stri
         request.options.custom_install_location.as_deref(),
     );
 
-    if request.options.custom_install_location.is_none() && matches!(request.options.scope, Some(Scope::Machine)) {
+    if request.options.custom_install_location.is_none() {
         command.push("--global".to_owned());
     }
 
@@ -80,6 +80,9 @@ fn validate_dotnet_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.options.uninstall_previous {
         bail!(".NET uninstall-previous operations are not supported by the broker");
     }
+    if matches!(request.options.scope, Some(Scope::Machine)) {
+        bail!(".NET machine scope is not supported by the broker");
+    }
     if let Some(param) = request.options.custom_parameters.iter().find(|param| !param.is_empty()) {
         bail!(".NET custom parameters are not supported by the broker: {}", param.0);
     }
@@ -88,9 +91,6 @@ fn validate_dotnet_request(request: &PackageRequest) -> anyhow::Result<()> {
     }
     if matches!(request.operation, Operation::Uninstall) && request.options.pre_release {
         bail!(".NET prerelease selection is not supported for uninstall operations");
-    }
-    if request.options.custom_install_location.is_some() && matches!(request.options.scope, Some(Scope::Machine)) {
-        bail!(".NET custom tool paths cannot be combined with global scope");
     }
     if matches!(request.operation, Operation::Install | Operation::Update) {
         dotnet_source(request)?;
@@ -106,17 +106,18 @@ fn append_source(command: &mut Vec<String>, request: &PackageRequest) -> anyhow:
 }
 
 fn dotnet_source(request: &PackageRequest) -> anyhow::Result<&str> {
+    if !request.source.name.eq_ignore_ascii_case("nuget.org") {
+        bail!(".NET install and update operations only support the nuget.org source");
+    }
+
     if let Some(url) = request.source.url.as_deref()
         && !url.trim().is_empty()
+        && !url.eq_ignore_ascii_case(NUGET_ORG_V3_SOURCE)
     {
-        return Ok(url);
+        bail!(".NET nuget.org source URL must match the broker-trusted canonical URL");
     }
 
-    if request.source.name.eq_ignore_ascii_case("nuget.org") {
-        return Ok(NUGET_ORG_V3_SOURCE);
-    }
-
-    bail!(".NET install and update operations require a package source URL");
+    Ok(NUGET_ORG_V3_SOURCE)
 }
 
 fn trusted_dotnet_executable() -> String {
@@ -168,7 +169,7 @@ mod tests {
                 channel: None,
             },
             options: RequestOptions {
-                scope: Some(Scope::Machine),
+                scope: Some(Scope::User),
                 interactive: false,
                 skip_hash_check: false,
                 pre_release: false,
@@ -242,7 +243,6 @@ mod tests {
     #[test]
     fn custom_tool_path_is_supported_without_global_scope() {
         let mut request = make_request();
-        request.options.scope = Some(Scope::User);
         request.options.custom_install_location = Some(r"C:\Tools\dotnet".to_owned());
 
         let cmd = build_dotnet_command(&request).expect("build command");
@@ -313,23 +313,53 @@ mod tests {
     }
 
     #[test]
-    fn machine_scope_and_custom_tool_path_are_rejected_together() {
+    fn unspecified_scope_uses_user_global_tool_store() {
         let mut request = make_request();
-        request.options.custom_install_location = Some(r"C:\Tools\dotnet".to_owned());
+        request.options.scope = None;
 
-        let error = build_dotnet_command(&request).expect_err("scope conflict should fail");
+        let cmd = build_dotnet_command(&request).expect("build command");
 
-        assert!(error.to_string().contains("custom tool paths"));
+        assert!(cmd.contains(&"--global".to_owned()));
     }
 
     #[test]
-    fn install_requires_source_url_except_default_nuget_org() {
+    fn machine_scope_is_rejected() {
         let mut request = make_request();
-        request.source.name = "private".to_owned();
+        request.options.scope = Some(Scope::Machine);
+
+        let error = build_dotnet_command(&request).expect_err("machine scope should fail");
+
+        assert!(error.to_string().contains("machine scope"));
+    }
+
+    #[test]
+    fn install_accepts_default_nuget_org_without_url() {
+        let mut request = make_request();
         request.source.url = None;
 
-        let error = build_dotnet_command(&request).expect_err("missing source URL should fail");
+        let cmd = build_dotnet_command(&request).expect("build command");
 
-        assert!(error.to_string().contains("source URL"));
+        assert!(cmd.contains(&"https://api.nuget.org/v3/index.json".to_owned()));
+    }
+
+    #[test]
+    fn install_rejects_untrusted_source_url_for_nuget_org_name() {
+        let mut request = make_request();
+        request.source.url = Some("https://example.invalid/v3/index.json".to_owned());
+
+        let error = build_dotnet_command(&request).expect_err("untrusted source URL should fail");
+
+        assert!(error.to_string().contains("canonical URL"));
+    }
+
+    #[test]
+    fn install_rejects_non_canonical_source_names() {
+        let mut request = make_request();
+        request.source.name = "private".to_owned();
+        request.source.url = Some("https://packages.example.invalid/v3/index.json".to_owned());
+
+        let error = build_dotnet_command(&request).expect_err("private source should fail");
+
+        assert!(error.to_string().contains("nuget.org"));
     }
 }

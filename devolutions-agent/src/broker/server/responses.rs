@@ -53,7 +53,7 @@ pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
         ManagerCapability {
             manager: ManagerName::Dotnet,
             operations: vec![Operation::Install, Operation::Update, Operation::Uninstall],
-            scopes: vec![Scope::User, Scope::Machine],
+            scopes: vec![Scope::User],
             architectures: vec![
                 Architecture::X86,
                 Architecture::X64,
