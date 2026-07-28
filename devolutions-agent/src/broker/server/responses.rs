@@ -72,6 +72,17 @@ pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
             supports_details: false,
             max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
         },
+        ManagerCapability {
+            manager: ManagerName::Scoop,
+            operations: vec![Operation::Install, Operation::Update, Operation::Uninstall],
+            scopes: vec![Scope::User],
+            architectures: vec![Architecture::X86, Architecture::X64, Architecture::Arm64],
+            supports_custom_parameters: true,
+            supports_custom_install_location: false,
+            supports_capture_output: true,
+            supports_details: false,
+            max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
+        },
     ]
 }
 

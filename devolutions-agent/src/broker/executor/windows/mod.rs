@@ -260,8 +260,8 @@ fn prepare_main_command_in(
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
 ) -> anyhow::Result<PreparedCommand> {
-    if let Some(script) = powershell_inline_script(command) {
-        return prepare_powershell_script(command, script, temp_dir);
+    if let Some((script, command_arg_index)) = powershell_inline_script(command) {
+        return prepare_powershell_script(command, command_arg_index, script, temp_dir);
     }
 
     if executable_is(command, "winget.exe") {
@@ -306,6 +306,7 @@ fn prepare_shell_command_in(payload: &str, temp_dir: Option<&Path>) -> anyhow::R
 
 fn prepare_powershell_script(
     command: &[String],
+    command_arg_index: usize,
     script: &str,
     temp_dir: Option<&Path>,
 ) -> anyhow::Result<PreparedCommand> {
@@ -329,7 +330,7 @@ fn prepare_powershell_script(
         })?;
     }
 
-    let mut prepared = command[..2].to_vec();
+    let mut prepared = command[..command_arg_index].to_vec();
     prepared[0] = if is_windows_powershell {
         trusted_windows_powershell_executable()
     } else {
@@ -451,12 +452,14 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     Ok(PreparedCommand::with_script(prepared, temp_script))
 }
 
-fn powershell_inline_script(command: &[String]) -> Option<&str> {
-    if command.len() == 4
-        && (executable_is(command, "powershell.exe") || executable_is(command, "pwsh.exe"))
-        && command[2].eq_ignore_ascii_case("-Command")
-    {
-        Some(command[3].as_str())
+fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
+    if !(executable_is(command, "powershell.exe") || executable_is(command, "pwsh.exe")) {
+        return None;
+    }
+
+    let command_arg_index = command.iter().position(|arg| arg.eq_ignore_ascii_case("-Command"))?;
+    if command_arg_index + 2 == command.len() {
+        Some((command[command_arg_index + 1].as_str(), command_arg_index))
     } else {
         None
     }
@@ -835,6 +838,28 @@ mod tests {
         let script = String::from_utf8_lossy(&script);
         assert!(script.contains(POWERSHELL_UTF8_ENCODING_PREAMBLE));
         assert!(script.contains("\r\nWrite-Output 'héllo'"));
+    }
+
+    #[test]
+    fn powershell_command_preserves_host_flags_before_command() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = vec![
+            "powershell.exe".to_owned(),
+            "-NoProfile".to_owned(),
+            "-ExecutionPolicy".to_owned(),
+            "Bypass".to_owned(),
+            "-Command".to_owned(),
+            "Write-Output 'héllo'".to_owned(),
+        ];
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
+
+        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
+        assert_eq!(command.args()[1], "-NoProfile");
+        assert_eq!(command.args()[2], "-ExecutionPolicy");
+        assert_eq!(command.args()[3], "Bypass");
+        assert_eq!(command.args()[4], "-Command");
+        assert!(command.args()[5].starts_with("& '"));
     }
 
     #[test]
