@@ -5,8 +5,10 @@
 
 pub mod chocolatey;
 pub mod powershell;
+pub mod scoop;
 pub mod winget;
 
+use anyhow::bail;
 use now_policy_api::{ManagerName, PackageRequest};
 
 /// Build a command line from a validated request, dispatching to the appropriate
@@ -19,7 +21,8 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
         ManagerName::Chocolatey => chocolatey::build_chocolatey_command(request),
-        unsupported => anyhow::bail!("package manager is not supported by the broker: {unsupported}"),
+        ManagerName::Scoop => scoop::build_scoop_command(request),
+        unsupported => bail!("package manager is not supported by the broker: {unsupported}"),
     }
 }
 
