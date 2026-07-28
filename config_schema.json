@@ -65,6 +65,10 @@
       "$ref": "#/definitions/CertStoreLocation",
       "description": "Location of the System Certificate Store to use for TLS."
     },
+    "TlsVerifyStrict": {
+      "type": "boolean",
+      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the runtime default is false (compat mode); explicitly setting false is treated as an opt-out."
+    },
     "CredSspCertificateFile": {
       "type": "string",
       "description": "Path to the certificate to use for CredSSP credential injection (overrides TLS certificate)."
@@ -91,6 +95,11 @@
     "RecordingPath": {
       "type": "string",
       "description": "Path to the recordings folder."
+    },
+    "MinRecordingStorageFreeSpace": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Minimum free space (in bytes) on the recording storage volume below which the gateway returns HTTP 507 on recording push. Omit to skip this threshold check."
     },
     "Ngrok": {
       "$ref": "#/definitions/NgrokConf",
@@ -127,14 +136,24 @@
       },
       "description": "Array of plugin paths."
     },
+    "JobQueueDatabase": {
+      "type": "string",
+      "description": "(Unstable) Path to the SQLite database file for the job queue."
+    },
+    "TrafficAuditDatabase": {
+      "type": "string",
+      "description": "(Unstable) Path to the SQLite database file for the traffic audit repository."
+    },
+    "AgentTunnel": {
+      "$ref": "#/definitions/AgentTunnelConf",
+      "description": "(Unstable) QUIC-based agent tunnel configuration."
+    },
     "__debug__": {
       "$ref": "#/definitions/DebugConf",
       "description": "Debug configuration."
     }
   },
-  "required": [
-    "Listeners"
-  ],
+  "required": [],
   "additionalProperties": true,
   "definitions": {
     "ConfDataPubKeyFormat": {
@@ -335,7 +354,7 @@
         {
           "type": "object",
           "properties": {
-            "proto": {
+            "Proto": {
               "type": "string",
               "enum": [
                 "tcp"
@@ -368,7 +387,7 @@
             }
           },
           "required": [
-            "proto",
+            "Proto",
             "RemoteAddr"
           ],
           "additionalProperties": false
@@ -376,7 +395,7 @@
         {
           "type": "object",
           "properties": {
-            "proto": {
+            "Proto": {
               "type": "string",
               "enum": [
                 "http"
@@ -417,7 +436,7 @@
             }
           },
           "required": [
-            "proto",
+            "Proto",
             "Domain"
           ],
           "additionalProperties": false
@@ -517,7 +536,7 @@
           "$ref": "#/definitions/OllamaProviderConf",
           "description": "Ollama provider configuration."
         },
-        "LmStudio": {
+        "Lmstudio": {
           "$ref": "#/definitions/LmStudioProviderConf",
           "description": "LM Studio provider configuration."
         },
@@ -525,15 +544,15 @@
           "$ref": "#/definitions/AnthropicProviderConf",
           "description": "Anthropic AI provider configuration."
         },
-        "OpenAi": {
+        "Openai": {
           "$ref": "#/definitions/OpenAiProviderConf",
           "description": "OpenAI provider configuration."
         },
-        "OpenRouter": {
+        "Openrouter": {
           "$ref": "#/definitions/OpenRouterProviderConf",
           "description": "OpenRouter provider configuration."
         },
-        "AzureOpenAi": {
+        "AzureOpenai": {
           "$ref": "#/definitions/AzureOpenAiProviderConf",
           "description": "Azure OpenAI provider configuration."
         }
@@ -707,6 +726,16 @@
           "type": "string",
           "description": "Path to lib XMF files."
         },
+        "ws_keep_alive_interval": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 45,
+          "description": "WebSocket keep-alive interval in seconds (interval before a Ping is sent). Default is 45."
+        },
+        "kerberos": {
+          "$ref": "#/definitions/KerberosConfig",
+          "description": "Kerberos application server configuration, used only during RDP proxying."
+        },
         "enable_unstable": {
           "type": "boolean",
           "default": false,
@@ -718,6 +747,110 @@
     "TargetAddr": {
       "type": "string",
       "description": "Target address."
+    },
+    "AgentTunnelConf": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the agent tunnel listener is enabled."
+        },
+        "ListenPort": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 4433,
+          "description": "UDP port for the QUIC listener (default: 4433)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "KerberosConfig": {
+      "type": "object",
+      "properties": {
+        "kerberos_server": {
+          "$ref": "#/definitions/KerberosServer",
+          "description": "Kerberos server and KDC configuration."
+        },
+        "kdc_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Real KDC address for the Kerberos proxy client."
+        }
+      },
+      "required": [
+        "kerberos_server"
+      ],
+      "additionalProperties": false
+    },
+    "KerberosServer": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DomainUser"
+          },
+          "description": "User credentials inside the fake KDC."
+        },
+        "max_time_skew": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum allowed time difference (in seconds) between client and proxy clocks."
+        },
+        "krbtgt_key": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "description": "krbtgt service key bytes, used to encrypt/decrypt TGT tickets."
+        },
+        "ticket_decryption_key": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "description": "Ticket decryption key bytes, used to decrypt the TGS ticket sent by the client. Required unless using Kerberos U2U authentication."
+        },
+        "service_user": {
+          "$ref": "#/definitions/DomainUser",
+          "description": "Domain user credentials for Kerberos U2U authentication. Only needed for U2U."
+        }
+      },
+      "required": [
+        "users",
+        "max_time_skew",
+        "krbtgt_key"
+      ],
+      "additionalProperties": false
+    },
+    "DomainUser": {
+      "type": "object",
+      "properties": {
+        "fqdn": {
+          "type": "string",
+          "description": "Username in FQDN format (e.g. \"pw13@example.com\"). The domain part must match the internal KDC realm."
+        },
+        "password": {
+          "type": "string",
+          "description": "User password."
+        },
+        "salt": {
+          "type": "string",
+          "description": "Salt for generating the user's key (usually {REALM}{username}, e.g. \"EXAMPLEpw13\")."
+        }
+      },
+      "required": [
+        "fqdn",
+        "password",
+        "salt"
+      ],
+      "additionalProperties": false
     }
   }
 }
