@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::credential::{AppCredentialMapping, CleartextAppCredentialMapping};
 use crate::target_connection_options::TargetConnectionOptions;
 
-/// Error returned when inserting provisioned credentials.
+/// Error returned when inserting into the credentials half of the provisioning store.
 #[derive(Debug)]
 pub enum InsertError {
     /// The provided token is invalid (e.g., missing or malformed JTI).
@@ -34,12 +34,13 @@ impl std::error::Error for InsertError {}
 
 /// Combined, point-in-time view of everything provisioned for a session.
 ///
-/// Assembled on read from the two independent stores. Credentials are always present when this
-/// value exists; connection options are optional (never provisioned, or expired first).
+/// Assembled on read from the two independent stores. The credentials half may be token-only
+/// (`mapping` is `None`, as with `provision-token`) or carry a credential mapping
+/// (`provision-credentials`). Connection options are optional and may be absent.
 #[derive(Debug)]
 pub struct ProvisioningEntry {
     pub(crate) token: String,
-    pub(crate) mapping: AppCredentialMapping,
+    pub(crate) mapping: Option<AppCredentialMapping>,
     pub(crate) connection_options: Option<TargetConnectionOptions>,
 }
 
@@ -48,7 +49,7 @@ pub type ArcProvisioningEntry = Arc<ProvisioningEntry>;
 #[derive(Debug, Clone)]
 struct CredentialsEntry {
     token: String,
-    mapping: AppCredentialMapping,
+    mapping: Option<AppCredentialMapping>,
     expires_at: time::OffsetDateTime,
 }
 
@@ -61,9 +62,9 @@ struct ConnectionOptionsEntry {
 /// Two independent token-keyed stores that together provision a session.
 ///
 /// The credentials store is the encryption boundary: cleartext mappings are encrypted on the way
-/// in, so entries only ever hold encrypted material. The connection-options store holds plaintext
-/// routing metadata only and has no crypto dependency — keeping the two apart preserves that
-/// property.
+/// in, so entries only ever hold encrypted material. Token-only rows (`mapping = None`) match the
+/// existing `provision-token` behavior on master. The connection-options store holds plaintext
+/// routing metadata only and has no crypto dependency.
 ///
 /// Both are keyed by the association-token JTI. The halves are provisioned by separate preflight
 /// operations and may arrive, expire, or be replaced independently.
@@ -87,18 +88,22 @@ impl ProvisioningStore {
         }
     }
 
-    /// Insert or replace the credentials half. Returns whether a prior entry was replaced.
+    /// Insert or replace the credentials half (token-only or with a mapping).
+    ///
+    /// Same contract as master: `provision-token` passes `mapping = None`;
+    /// `provision-credentials` passes `Some(mapping)`.
     pub(crate) fn insert_credentials(
         &self,
         token: String,
-        mapping: CleartextAppCredentialMapping,
+        mapping: Option<CleartextAppCredentialMapping>,
         time_to_live: time::Duration,
     ) -> Result<bool, InsertError> {
         let jti = crate::token::extract_jti(&token)
             .context("failed to extract token ID")
             .map_err(InsertError::InvalidToken)?;
         let mapping = mapping
-            .encrypt()
+            .map(CleartextAppCredentialMapping::encrypt)
+            .transpose()
             .context("encrypt provisioned credentials")
             .map_err(InsertError::CredentialEncryption)?;
 
@@ -128,8 +133,8 @@ impl ProvisioningStore {
 
     /// Assemble the provisioned view for a session.
     ///
-    /// Returns `None` unless the credentials half is present and live. Folds in connection options
-    /// when that half is also present and live. Entries live until TTL, not until first use.
+    /// Returns `None` unless the credentials half (token and/or mapping) is present and live.
+    /// Folds in connection options when that half is also present and live.
     pub(crate) fn get(&self, jti: Uuid) -> Option<ArcProvisioningEntry> {
         let now = time::OffsetDateTime::now_utc();
 
@@ -247,13 +252,26 @@ mod tests {
     }
 
     #[test]
+    fn get_returns_token_only_entry() {
+        let store = ProvisioningStore::new();
+        let jti = Uuid::new_v4();
+        store
+            .insert_credentials(association_token(jti), None, time::Duration::minutes(5))
+            .expect("insert");
+        let entry = store.get(jti).expect("live entry");
+        assert!(entry.mapping.is_none());
+        assert!(entry.connection_options.is_none());
+    }
+
+    #[test]
     fn get_returns_live_credentials_without_options() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
-            .insert_credentials(association_token(jti), mapping(), time::Duration::minutes(5))
+            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("insert");
         let entry = store.get(jti).expect("live entry");
+        assert!(entry.mapping.is_some());
         assert!(entry.connection_options.is_none());
     }
 
@@ -262,7 +280,7 @@ mod tests {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
-            .insert_credentials(association_token(jti), mapping(), time::Duration::minutes(5))
+            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("insert credentials");
         assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
         let entry = store.get(jti).expect("live entry");
@@ -274,7 +292,7 @@ mod tests {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
-            .insert_credentials(association_token(jti), mapping(), time::Duration::seconds(-1))
+            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::seconds(-1))
             .expect("insert");
         assert!(store.get(jti).is_none());
     }
@@ -284,10 +302,10 @@ mod tests {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         assert!(!store
-            .insert_credentials(association_token(jti), mapping(), time::Duration::minutes(5))
+            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("insert"));
         assert!(store
-            .insert_credentials(association_token(jti), mapping(), time::Duration::minutes(5))
+            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("replace"));
 
         assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
