@@ -226,6 +226,7 @@ Class | Method | HTTP request | Description
  - [Model.SetUpdateScheduleRequest](docs/SetUpdateScheduleRequest.md)
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
+ - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
  - [Model.TrafficEventResponse](docs/TrafficEventResponse.md)
  - [Model.TransportProtocolResponse](docs/TransportProtocolResponse.md)
  - [Model.UpdateProductInfo](docs/UpdateProductInfo.md)

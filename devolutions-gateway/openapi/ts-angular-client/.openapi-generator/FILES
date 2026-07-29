@@ -71,6 +71,7 @@ model/setConfigResponse.ts
 model/setUpdateScheduleRequest.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
+model/targetConnectionOptions.ts
 model/trafficEventResponse.ts
 model/transportProtocolResponse.ts
 model/updateProductInfo.ts

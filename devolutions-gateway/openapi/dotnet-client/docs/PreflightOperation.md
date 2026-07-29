@@ -4,6 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**ConnectionOptions** | [**TargetConnectionOptions**](TargetConnectionOptions.md) |  | [optional] 
 **HostToResolve** | **string** | The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind. | [optional] 
 **Id** | **Guid** | Unique ID identifying the preflight operation. | 
 **Kind** | **PreflightOperationKind** |  | 

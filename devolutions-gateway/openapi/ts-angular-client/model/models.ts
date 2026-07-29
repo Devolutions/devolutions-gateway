@@ -50,6 +50,7 @@ export * from './setConfigResponse';
 export * from './setUpdateScheduleRequest';
 export * from './subProvisionerKey';
 export * from './subscriber';
+export * from './targetConnectionOptions';
 export * from './trafficEventResponse';
 export * from './transportProtocolResponse';
 export * from './updateProductInfo';

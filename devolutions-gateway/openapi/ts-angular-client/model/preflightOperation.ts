@@ -7,11 +7,13 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { TargetConnectionOptions } from './targetConnectionOptions';
 import { AppCredential } from './appCredential';
 import { PreflightOperationKind } from './preflightOperationKind';
 
 
 export interface PreflightOperation { 
+    connection_options?: TargetConnectionOptions | null;
     /**
      * The hostname to perform DNS resolution on.  Required for \"resolve-host\" kind.
      */

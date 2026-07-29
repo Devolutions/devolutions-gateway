@@ -1772,6 +1772,10 @@ components:
       - id
       - kind
       properties:
+        connection_options:
+          allOf:
+          - $ref: '#/components/schemas/TargetConnectionOptions'
+          nullable: true
         host_to_resolve:
           type: string
           description: |-
@@ -2105,6 +2109,16 @@ components:
         Url:
           type: string
           description: HTTP URL where notification messages are to be sent
+    TargetConnectionOptions:
+      type: object
+      properties:
+        krb_kdc:
+          type: string
+          description: |-
+            Kerberos KDC address for the target-side CredSSP connection.
+
+            Supported schemes are `tcp` and `udp`.
+          nullable: true
     TrafficEventResponse:
       type: object
       required:

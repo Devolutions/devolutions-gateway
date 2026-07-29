@@ -47,6 +47,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="PreflightOperation" /> class.
         /// </summary>
+        /// <param name="connectionOptions">connectionOptions.</param>
         /// <param name="hostToResolve">The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind..</param>
         /// <param name="id">Unique ID identifying the preflight operation. (required).</param>
         /// <param name="kind">kind (required).</param>
@@ -54,16 +55,23 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="targetCredential">targetCredential.</param>
         /// <param name="timeToLive">Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
-        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
+        public PreflightOperation(TargetConnectionOptions connectionOptions = default(TargetConnectionOptions), string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
             this.Id = id;
             this.Kind = kind;
+            this.ConnectionOptions = connectionOptions;
             this.HostToResolve = hostToResolve;
             this.ProxyCredential = proxyCredential;
             this.TargetCredential = targetCredential;
             this.TimeToLive = timeToLive;
             this.Token = token;
         }
+
+        /// <summary>
+        /// Gets or Sets ConnectionOptions
+        /// </summary>
+        [DataMember(Name = "connection_options", EmitDefaultValue = true)]
+        public TargetConnectionOptions ConnectionOptions { get; set; }
 
         /// <summary>
         /// The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind.
@@ -113,6 +121,7 @@ namespace Devolutions.Gateway.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class PreflightOperation {\n");
+            sb.Append("  ConnectionOptions: ").Append(ConnectionOptions).Append("\n");
             sb.Append("  HostToResolve: ").Append(HostToResolve).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");

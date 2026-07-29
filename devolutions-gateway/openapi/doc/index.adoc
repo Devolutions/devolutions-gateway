@@ -4297,6 +4297,13 @@ Current auto-update schedule for Devolutions Agent.
 |===
 | Field Name| Required| Nullable | Type| Description | Format
 
+| connection_options
+| 
+| X
+| <<TargetConnectionOptions>>    
+| 
+|     
+
 | host_to_resolve
 | 
 | X
@@ -4848,6 +4855,28 @@ Subscriber configuration
 | 
 |   String  
 | HTTP URL where notification messages are to be sent
+|     
+
+|===
+
+
+
+[#TargetConnectionOptions]
+=== _TargetConnectionOptions_ 
+
+
+
+
+[.fields-TargetConnectionOptions]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| krb_kdc
+| 
+| X
+|   String  
+| Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are `tcp` and `udp`.
 |     
 
 |===
