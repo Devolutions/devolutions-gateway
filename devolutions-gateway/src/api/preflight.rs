@@ -46,6 +46,7 @@ struct ProvisionCredentialsParams {
     token: String,
     #[serde(flatten)]
     mapping: crate::credential::CleartextAppCredentialMapping,
+    connection_options: Option<crate::target_connection_options::TargetConnectionOptions>,
     time_to_live: Option<u32>,
 }
 
@@ -310,17 +311,18 @@ async fn handle_operation(
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
             let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
-            let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
+            let (token, time_to_live, mapping, connection_options) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
                 let ProvisionTokenParams { token, time_to_live } =
                     from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, None)
+                (token, time_to_live, None, None)
             } else {
                 let ProvisionCredentialsParams {
                     token,
                     mapping,
+                    connection_options,
                     time_to_live,
                 } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, Some(mapping))
+                (token, time_to_live, Some(mapping), connection_options)
             };
 
             let time_to_live = time_to_live
@@ -358,7 +360,7 @@ async fn handle_operation(
             }
 
             let previous_entry = provisioning
-                .insert(token, mapping, time_to_live)
+                .insert(token, mapping, connection_options, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|error| match error {
                     InsertError::InvalidToken(error) => {

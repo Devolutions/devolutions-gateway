@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use crate::credential::{AppCredential, AppCredentialMapping};
 use crate::provisioning::{ArcProvisioningEntry, ProvisioningStore, WeakProvisioningEntry};
+use crate::target_connection_options::TargetConnectionOptions;
 
 // The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
 // never leave the process: `intercept_network_request` recognises this hostname and dispatches
@@ -40,6 +41,7 @@ const IN_PROCESS_KDC_HOST: &str = "cred.invalid";
 pub(crate) struct CredentialInjectionKdc {
     jti: Uuid,
     credential_mapping: AppCredentialMapping,
+    connection_options: Option<TargetConnectionOptions>,
     target_hostname: String,
     session: Arc<CredentialInjectionKdcSession>,
     // The KDC crate models users with plaintext passwords, so this object owns those secrets
@@ -143,6 +145,7 @@ impl CredentialInjectionKdc {
         Ok(Self {
             jti,
             credential_mapping: mapping.clone(),
+            connection_options: provisioning_entry.value.connection_options.clone(),
             target_hostname,
             session,
             kdc_config,
@@ -159,6 +162,10 @@ impl CredentialInjectionKdc {
 
     pub(crate) fn target_credential(&self) -> &AppCredential {
         &self.credential_mapping.target
+    }
+
+    pub(crate) fn krb_kdc(&self) -> Option<&crate::target_addr::TargetAddr> {
+        self.connection_options.as_ref()?.krb_kdc()
     }
 
     /// Selects the CredSSP acceptor backend Gateway should present to the RDP client.
@@ -654,6 +661,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username(target_username)),
+                None,
                 time_to_live,
             )
             .expect("credential entry inserts");
@@ -787,6 +795,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry re-inserts");
@@ -896,7 +905,7 @@ mod tests {
         let jti = Uuid::new_v4();
 
         provisioning
-            .insert(association_token(jti), None, time::Duration::minutes(5))
+            .insert(association_token(jti), None, None, time::Duration::minutes(5))
             .expect("provision-token entry inserts");
 
         assert!(
@@ -919,6 +928,42 @@ mod tests {
             .expect("credential-injection KDC resolves");
 
         assert_eq!(kdc.target_hostname, "target.example");
+    }
+
+    #[test]
+    fn provisioning_and_credential_service_share_target_options() {
+        let provisioning = ProvisioningStore::new();
+        let service = CredentialInjectionKdcService::new();
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        let krb_kdc = crate::target_addr::TargetAddr::parse("tcp://kdc.example.invalid:88", Some(88))
+            .expect("KDC address parses");
+
+        provisioning
+            .insert(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("target@example.invalid")),
+                Some(TargetConnectionOptions::new(Some(krb_kdc.clone())).expect("supported KDC scheme")),
+                time::Duration::minutes(5),
+            )
+            .expect("provisioning entry inserts");
+
+        let entry = provisioning.get(jti).expect("provisioning entry is available directly");
+        assert_eq!(
+            entry
+                .value
+                .connection_options
+                .as_ref()
+                .and_then(|options| options.krb_kdc()),
+            Some(&krb_kdc)
+        );
+
+        let kdc = service
+            .resolve_injection_kdc(&provisioning, jti, &token)
+            .expect("credential-injection lookup succeeds")
+            .expect("credential-injection KDC resolves");
+
+        assert_eq!(kdc.krb_kdc(), Some(&krb_kdc));
     }
 
     #[test]
