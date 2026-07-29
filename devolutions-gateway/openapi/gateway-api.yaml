@@ -574,9 +574,9 @@ paths:
         in: query
         description: |-
           The probes to run. Each value is either `ping`, a port number
-          (`22`), or a named service (`rdp`, `https`, ΓÇª). Validation is
+          (`22`), or a named service (`rdp`, `https`, …). Validation is
           deferred to scan-time so failures can be surfaced as a structured
-          400 ΓÇö naming the offending value ΓÇö instead of a generic serde
+          400 — naming the offending value — instead of a generic serde
           rejection at extraction time.
         required: false
         schema:
@@ -724,7 +724,7 @@ paths:
           ping-failure and TCP-probe-failure reporting. The two are now split:
           clients that want the old "both at once" semantics must send
           `enable_failure=true&report_tcp_failure=true` together. The split is
-          intentional ΓÇö TCP-probe failures are typically high-volume noise that
+          intentional — TCP-probe failures are typically high-volume noise that
           callers were filtering client-side anyway, so the two streams are
           independently gated.
         required: false
