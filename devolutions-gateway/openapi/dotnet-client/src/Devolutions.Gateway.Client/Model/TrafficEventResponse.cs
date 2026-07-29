@@ -64,7 +64,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="targetHost">Original target host string before DNS resolution (required).</param>
         /// <param name="targetIp">Concrete target IP address after resolution (required).</param>
         /// <param name="targetPort">Target port number for the connection (required).</param>
-        public TrafficEventResponse(long activeDurationMs = default, long bytesRx = default, long bytesTx = default, long connectAtMs = default, long disconnectAtMs = default, EventOutcomeResponse outcome = default, TransportProtocolResponse protocol = default, Guid sessionId = default, string targetHost = default, string targetIp = default, int targetPort = default)
+        public TrafficEventResponse(long activeDurationMs = default(long), long bytesRx = default(long), long bytesTx = default(long), long connectAtMs = default(long), long disconnectAtMs = default(long), EventOutcomeResponse outcome = default(EventOutcomeResponse), TransportProtocolResponse protocol = default(TransportProtocolResponse), Guid sessionId = default(Guid), string targetHost = default(string), string targetIp = default(string), int targetPort = default(int))
         {
             this.ActiveDurationMs = activeDurationMs;
             this.BytesRx = bytesRx;

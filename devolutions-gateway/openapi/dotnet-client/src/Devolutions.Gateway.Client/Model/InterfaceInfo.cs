@@ -52,7 +52,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="family">family (required).</param>
         /// <param name="mac">mac.</param>
         /// <param name="netmask">netmask.</param>
-        public InterfaceInfo(string address = default, string broadcast = default, AddressFamily family = default, string mac = default, string netmask = default)
+        public InterfaceInfo(string address = default(string), string broadcast = default(string), AddressFamily family = default(AddressFamily), string mac = default(string), string netmask = default(string))
         {
             // to ensure "address" is required (not null)
             if (address == null)

@@ -48,7 +48,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="subnet">subnet (required).</param>
         /// <param name="tcpProbe">tcpProbe (required).</param>
         /// <param name="zeroConf">zeroConf (required).</param>
-        public NetworkScanSourceCapabilitiesDto(bool broadcast = default, bool dnsResolve = default, bool ipv4 = default, bool ipv6 = default, bool subnet = default, bool tcpProbe = default, bool zeroConf = default)
+        public NetworkScanSourceCapabilitiesDto(bool broadcast = default(bool), bool dnsResolve = default(bool), bool ipv4 = default(bool), bool ipv6 = default(bool), bool subnet = default(bool), bool tcpProbe = default(bool), bool zeroConf = default(bool))
         {
             this.Broadcast = broadcast;
             this.DnsResolve = dnsResolve;

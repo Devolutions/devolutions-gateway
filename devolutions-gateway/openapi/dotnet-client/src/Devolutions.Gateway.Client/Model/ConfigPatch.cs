@@ -39,7 +39,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="id">This Gateway&#39;s unique ID.</param>
         /// <param name="subProvisionerPublicKey">subProvisionerPublicKey.</param>
         /// <param name="subscriber">subscriber.</param>
-        public ConfigPatch(Guid? id = default, SubProvisionerKey subProvisionerPublicKey = default, Subscriber subscriber = default)
+        public ConfigPatch(Guid? id = default(Guid?), SubProvisionerKey subProvisionerPublicKey = default(SubProvisionerKey), Subscriber subscriber = default(Subscriber))
         {
             this.Id = id;
             this.SubProvisionerPublicKey = subProvisionerPublicKey;

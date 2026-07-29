@@ -9,11 +9,12 @@
  */
 
 
+export type HostScanStateDto = 'queued' | 'probing' | 'reachable' | 'unreachable';
+
 export const HostScanStateDto = {
-    Queued: 'queued',
-    Probing: 'probing',
-    Reachable: 'reachable',
-    Unreachable: 'unreachable'
-} as const;
-export type HostScanStateDto = typeof HostScanStateDto[keyof typeof HostScanStateDto];
+    Queued: 'queued' as HostScanStateDto,
+    Probing: 'probing' as HostScanStateDto,
+    Reachable: 'reachable' as HostScanStateDto,
+    Unreachable: 'unreachable' as HostScanStateDto
+};
 

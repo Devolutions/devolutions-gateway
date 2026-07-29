@@ -100,7 +100,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ClockDiagnostic</returns>
-        System.Threading.Tasks.Task<ClockDiagnostic> GetClockDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ClockDiagnostic> GetClockDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves server&#39;s clock in order to diagnose clock drifting.
@@ -111,7 +111,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (ClockDiagnostic)</returns>
-        System.Threading.Tasks.Task<ApiResponse<ClockDiagnostic>> GetClockDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<ClockDiagnostic>> GetClockDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Retrieves a subset of the configuration, for diagnosis purposes.
         /// </summary>
@@ -121,7 +121,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ConfigDiagnostic</returns>
-        System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves a subset of the configuration, for diagnosis purposes.
@@ -132,7 +132,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (ConfigDiagnostic)</returns>
-        System.Threading.Tasks.Task<ApiResponse<ConfigDiagnostic>> GetConfigurationDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<ConfigDiagnostic>> GetConfigurationDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Retrieves latest logs.
         /// </summary>
@@ -142,7 +142,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        System.Threading.Tasks.Task<string> GetLogsAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<string> GetLogsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves latest logs.
@@ -153,7 +153,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        System.Threading.Tasks.Task<ApiResponse<string>> GetLogsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<string>> GetLogsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -421,7 +421,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ClockDiagnostic</returns>
-        public async System.Threading.Tasks.Task<ClockDiagnostic> GetClockDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<ClockDiagnostic> GetClockDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<ClockDiagnostic> localVarResponse = await GetClockDiagnosticWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -433,7 +433,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (ClockDiagnostic)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<ClockDiagnostic>> GetClockDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<ClockDiagnostic>> GetClockDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -528,7 +528,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ConfigDiagnostic</returns>
-        public async System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationDiagnosticAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<ConfigDiagnostic> localVarResponse = await GetConfigurationDiagnosticWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -540,7 +540,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (ConfigDiagnostic)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<ConfigDiagnostic>> GetConfigurationDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<ConfigDiagnostic>> GetConfigurationDiagnosticWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -641,7 +641,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        public async System.Threading.Tasks.Task<string> GetLogsAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<string> GetLogsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<string> localVarResponse = await GetLogsWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -653,7 +653,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> GetLogsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> GetLogsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();

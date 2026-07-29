@@ -48,7 +48,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="varInterface">varInterface (required).</param>
         /// <param name="prefixLength">prefixLength.</param>
         /// <param name="startAddress">startAddress (required).</param>
-        public NetworkScanSourceDto(string address = default, string broadcastAddress = default, NetworkScanSourceCapabilitiesDto capabilities = default, string endAddress = default, NetworkInterfaceDto varInterface = default, int? prefixLength = default, string startAddress = default)
+        public NetworkScanSourceDto(string address = default(string), string broadcastAddress = default(string), NetworkScanSourceCapabilitiesDto capabilities = default(NetworkScanSourceCapabilitiesDto), string endAddress = default(string), NetworkInterfaceDto varInterface = default(NetworkInterfaceDto), int? prefixLength = default(int?), string startAddress = default(string))
         {
             // to ensure "address" is required (not null)
             if (address == null)

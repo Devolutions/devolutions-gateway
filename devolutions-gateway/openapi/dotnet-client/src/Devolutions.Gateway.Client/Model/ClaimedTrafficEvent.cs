@@ -65,7 +65,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="targetIp">Concrete target IP address after resolution (required).</param>
         /// <param name="targetPort">Target port number for the connection (required).</param>
         /// <param name="id">Database ID of the claimed event (used for acknowledgment, ULID format) (required).</param>
-        public ClaimedTrafficEvent(long activeDurationMs = default, long bytesRx = default, long bytesTx = default, long connectAtMs = default, long disconnectAtMs = default, EventOutcomeResponse outcome = default, TransportProtocolResponse protocol = default, Guid sessionId = default, string targetHost = default, string targetIp = default, int targetPort = default, string id = default)
+        public ClaimedTrafficEvent(long activeDurationMs = default(long), long bytesRx = default(long), long bytesTx = default(long), long connectAtMs = default(long), long disconnectAtMs = default(long), EventOutcomeResponse outcome = default(EventOutcomeResponse), TransportProtocolResponse protocol = default(TransportProtocolResponse), Guid sessionId = default(Guid), string targetHost = default(string), string targetIp = default(string), int targetPort = default(int), string id = default(string))
         {
             this.ActiveDurationMs = activeDurationMs;
             this.BytesRx = bytesRx;

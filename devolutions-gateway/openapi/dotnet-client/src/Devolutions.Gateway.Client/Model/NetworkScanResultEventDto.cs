@@ -79,7 +79,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="serviceLabel">serviceLabel.</param>
         /// <param name="serviceType">serviceType.</param>
         /// <param name="source">source (required).</param>
-        public NetworkScanResultEventDto(string address = default, ScanResultSourceDto discoverySource = default, string hostName = default, HostScanStateDto? hostScanState = default, string interfaceId = default, string interfaceName = default, bool? isReachable = default, NetworkScanResultKindDto kind = default, string macAddress = default, int? port = default, int? responseTimeMs = default, string serviceLabel = default, string serviceType = default, ScanOriginDto source = default)
+        public NetworkScanResultEventDto(string address = default(string), ScanResultSourceDto discoverySource = default(ScanResultSourceDto), string hostName = default(string), HostScanStateDto? hostScanState = default(HostScanStateDto?), string interfaceId = default(string), string interfaceName = default(string), bool? isReachable = default(bool?), NetworkScanResultKindDto kind = default(NetworkScanResultKindDto), string macAddress = default(string), int? port = default(int?), int? responseTimeMs = default(int?), string serviceLabel = default(string), string serviceType = default(string), ScanOriginDto source = default(ScanOriginDto))
         {
             // to ensure "address" is required (not null)
             if (address == null)

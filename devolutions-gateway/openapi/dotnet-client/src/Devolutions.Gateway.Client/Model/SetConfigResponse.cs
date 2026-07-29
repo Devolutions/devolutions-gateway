@@ -37,7 +37,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="SetConfigResponse" /> class.
         /// </summary>
         /// <param name="probeTypeErrors">An optional list of probes that this server could not parse..</param>
-        public SetConfigResponse(List<MonitorDefinitionProbeTypeError> probeTypeErrors = default)
+        public SetConfigResponse(List<MonitorDefinitionProbeTypeError> probeTypeErrors = default(List<MonitorDefinitionProbeTypeError>))
         {
             this.ProbeTypeErrors = probeTypeErrors;
         }

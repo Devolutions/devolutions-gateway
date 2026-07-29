@@ -1,6 +1,5 @@
-import { HttpHeaders, HttpParameterCodec } from '@angular/common/http';
+import { HttpParameterCodec } from '@angular/common/http';
 import { Param } from './param';
-import { OpenApiHttpParams } from './query.params';
 
 export interface ConfigurationParameters {
     /**
@@ -67,30 +66,26 @@ export class Configuration {
      */
     credentials: {[ key: string ]: string | (() => string | undefined)};
 
-constructor({ accessToken, apiKeys, basePath, credentials, encodeParam, encoder, password, username, withCredentials }: ConfigurationParameters = {}) {
-        if (apiKeys) {
-            this.apiKeys = apiKeys;
+    constructor(configurationParameters: ConfigurationParameters = {}) {
+        this.apiKeys = configurationParameters.apiKeys;
+        this.username = configurationParameters.username;
+        this.password = configurationParameters.password;
+        this.accessToken = configurationParameters.accessToken;
+        this.basePath = configurationParameters.basePath;
+        this.withCredentials = configurationParameters.withCredentials;
+        this.encoder = configurationParameters.encoder;
+        if (configurationParameters.encodeParam) {
+            this.encodeParam = configurationParameters.encodeParam;
         }
-        if (username !== undefined) {
-            this.username = username;
+        else {
+            this.encodeParam = param => this.defaultEncodeParam(param);
         }
-        if (password !== undefined) {
-            this.password = password;
+        if (configurationParameters.credentials) {
+            this.credentials = configurationParameters.credentials;
         }
-        if (accessToken !== undefined) {
-            this.accessToken = accessToken;
+        else {
+            this.credentials = {};
         }
-        if (basePath !== undefined) {
-            this.basePath = basePath;
-        }
-        if (withCredentials !== undefined) {
-            this.withCredentials = withCredentials;
-        }
-        if (encoder) {
-            this.encoder = encoder;
-        }
-        this.encodeParam = encodeParam ?? (param => this.defaultEncodeParam(param));
-        this.credentials = credentials ?? {};
 
         // init default jrec_token credential
         if (!this.credentials['jrec_token']) {
@@ -196,8 +191,8 @@ constructor({ accessToken, apiKeys, basePath, credentials, encodeParam, encoder,
      * @return True if the given MIME is JSON, false otherwise.
      */
     public isJsonMime(mime: string): boolean {
-        const jsonMime: RegExp = /^(application\/json|[^;/ \t]+\/[^;/ \t]+[+]json)[ \t]*(;.*)?$/i;
-        return mime !== null && jsonMime.test(mime);
+        const jsonMime: RegExp = new RegExp('^(application\/json|[^;/ \t]+\/[^;/ \t]+[+]json)[ \t]*(;.*)?$', 'i');
+        return mime !== null && (jsonMime.test(mime) || mime.toLowerCase() === 'application/json-patch+json');
     }
 
     public lookupCredential(key: string): string | undefined {
@@ -205,20 +200,6 @@ constructor({ accessToken, apiKeys, basePath, credentials, encodeParam, encoder,
         return typeof value === 'function'
             ? value()
             : value;
-    }
-
-    public addCredentialToHeaders(credentialKey: string, headerName: string, headers: HttpHeaders, prefix?: string): HttpHeaders {
-        const value = this.lookupCredential(credentialKey);
-        return value
-            ? headers.set(headerName, (prefix ?? '') + value)
-            : headers;
-    }
-
-    public addCredentialToQuery(credentialKey: string, paramName: string, query: OpenApiHttpParams): OpenApiHttpParams {
-        const value = this.lookupCredential(credentialKey);
-        return value
-            ? query.set(paramName, value)
-            : query;
     }
 
     private defaultEncodeParam(param: Param): string {

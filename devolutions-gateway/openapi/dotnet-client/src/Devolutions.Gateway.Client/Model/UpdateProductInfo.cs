@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="UpdateProductInfo" /> class.
         /// </summary>
         /// <param name="varVersion">Requested or installed version: &#x60;\&quot;latest\&quot;&#x60; or &#x60;\&quot;YYYY.M.D\&quot;&#x60; / &#x60;\&quot;YYYY.M.D.R\&quot;&#x60;. (required).</param>
-        public UpdateProductInfo(string varVersion = default)
+        public UpdateProductInfo(string varVersion = default(string))
         {
             // to ensure "varVersion" is required (not null)
             if (varVersion == null)

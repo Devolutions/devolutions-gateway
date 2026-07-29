@@ -124,7 +124,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="requestBody">JSON-encoded list of session IDs</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of DeleteManyResult</returns>
-        System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Mass-deletes recordings stored on this instance
@@ -136,7 +136,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="requestBody">JSON-encoded list of session IDs</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (DeleteManyResult)</returns>
-        System.Threading.Tasks.Task<ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Deletes a recording stored on this instance
         /// </summary>
@@ -147,7 +147,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task DeleteRecordingAsync(Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteRecordingAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Deletes a recording stored on this instance
@@ -159,7 +159,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> DeleteRecordingWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Object>> DeleteRecordingWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Lists all recordings stored on this instance
         /// </summary>
@@ -170,7 +170,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="active">When true, only the active recordings are returned</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;Guid&gt;</returns>
-        System.Threading.Tasks.Task<List<Guid>> ListRecordingsAsync(bool active, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<List<Guid>> ListRecordingsAsync(bool active, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Lists all recordings stored on this instance
@@ -182,7 +182,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="active">When true, only the active recordings are returned</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;Guid&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<Guid>>> ListRecordingsWithHttpInfoAsync(bool active, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<List<Guid>>> ListRecordingsWithHttpInfoAsync(bool active, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Retrieves a recording file for a given session
         /// </summary>
@@ -194,7 +194,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="filename">Name of recording file to retrieve</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of FileParameter</returns>
-        System.Threading.Tasks.Task<FileParameter> PullRecordingFileAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<FileParameter> PullRecordingFileAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves a recording file for a given session
@@ -207,7 +207,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="filename">Name of recording file to retrieve</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (FileParameter)</returns>
-        System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingFileWithHttpInfoAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingFileWithHttpInfoAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -490,7 +490,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="requestBody">JSON-encoded list of session IDs</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of DeleteManyResult</returns>
-        public async System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult> localVarResponse = await DeleteManyRecordingsWithHttpInfoAsync(requestBody, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -503,7 +503,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="requestBody">JSON-encoded list of session IDs</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (DeleteManyResult)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'requestBody' is set
             if (requestBody == null)
@@ -612,7 +612,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task DeleteRecordingAsync(Guid id, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task DeleteRecordingAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             await DeleteRecordingWithHttpInfoAsync(id, cancellationToken).ConfigureAwait(false);
         }
@@ -624,7 +624,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> DeleteRecordingWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> DeleteRecordingWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -729,7 +729,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="active">When true, only the active recordings are returned</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;Guid&gt;</returns>
-        public async System.Threading.Tasks.Task<List<Guid>> ListRecordingsAsync(bool active, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<List<Guid>> ListRecordingsAsync(bool active, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<List<Guid>> localVarResponse = await ListRecordingsWithHttpInfoAsync(active, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -742,7 +742,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="active">When true, only the active recordings are returned</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;Guid&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<Guid>>> ListRecordingsWithHttpInfoAsync(bool active, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<Guid>>> ListRecordingsWithHttpInfoAsync(bool active, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -856,7 +856,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="filename">Name of recording file to retrieve</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of FileParameter</returns>
-        public async System.Threading.Tasks.Task<FileParameter> PullRecordingFileAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<FileParameter> PullRecordingFileAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<FileParameter> localVarResponse = await PullRecordingFileWithHttpInfoAsync(id, filename, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -870,7 +870,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="filename">Name of recording file to retrieve</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (FileParameter)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<FileParameter>> PullRecordingFileWithHttpInfoAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<FileParameter>> PullRecordingFileWithHttpInfoAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'filename' is set
             if (filename == null)

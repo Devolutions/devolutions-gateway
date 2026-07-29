@@ -9,9 +9,10 @@
  */
 
 
+export type ConnectionMode = 'rdv' | 'fwd';
+
 export const ConnectionMode = {
-    Rdv: 'rdv',
-    Fwd: 'fwd'
-} as const;
-export type ConnectionMode = typeof ConnectionMode[keyof typeof ConnectionMode];
+    Rdv: 'rdv' as ConnectionMode,
+    Fwd: 'fwd' as ConnectionMode
+};
 

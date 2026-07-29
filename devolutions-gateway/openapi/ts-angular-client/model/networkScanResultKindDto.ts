@@ -9,9 +9,10 @@
  */
 
 
+export type NetworkScanResultKindDto = 'host' | 'service';
+
 export const NetworkScanResultKindDto = {
-    Host: 'host',
-    Service: 'service'
-} as const;
-export type NetworkScanResultKindDto = typeof NetworkScanResultKindDto[keyof typeof NetworkScanResultKindDto];
+    Host: 'host' as NetworkScanResultKindDto,
+    Service: 'service' as NetworkScanResultKindDto
+};
 

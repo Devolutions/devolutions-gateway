@@ -9,10 +9,11 @@
  */
 
 
+export type EventOutcomeResponse = 'connect_failure' | 'normal_termination' | 'abnormal_termination';
+
 export const EventOutcomeResponse = {
-    ConnectFailure: 'connect_failure',
-    NormalTermination: 'normal_termination',
-    AbnormalTermination: 'abnormal_termination'
-} as const;
-export type EventOutcomeResponse = typeof EventOutcomeResponse[keyof typeof EventOutcomeResponse];
+    ConnectFailure: 'connect_failure' as EventOutcomeResponse,
+    NormalTermination: 'normal_termination' as EventOutcomeResponse,
+    AbnormalTermination: 'abnormal_termination' as EventOutcomeResponse
+};
 

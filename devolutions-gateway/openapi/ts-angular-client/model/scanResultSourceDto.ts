@@ -9,12 +9,13 @@
  */
 
 
+export type ScanResultSourceDto = 'subnet' | 'broadcast' | 'tcp_probe' | 'gateway' | 'zero_conf';
+
 export const ScanResultSourceDto = {
-    Subnet: 'subnet',
-    Broadcast: 'broadcast',
-    TcpProbe: 'tcp_probe',
-    Gateway: 'gateway',
-    ZeroConf: 'zero_conf'
-} as const;
-export type ScanResultSourceDto = typeof ScanResultSourceDto[keyof typeof ScanResultSourceDto];
+    Subnet: 'subnet' as ScanResultSourceDto,
+    Broadcast: 'broadcast' as ScanResultSourceDto,
+    TcpProbe: 'tcp_probe' as ScanResultSourceDto,
+    Gateway: 'gateway' as ScanResultSourceDto,
+    ZeroConf: 'zero_conf' as ScanResultSourceDto
+};
 

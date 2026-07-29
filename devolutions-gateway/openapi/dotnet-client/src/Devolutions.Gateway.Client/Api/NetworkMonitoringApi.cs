@@ -86,7 +86,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of MonitoringLogResponse</returns>
-        System.Threading.Tasks.Task<MonitoringLogResponse> DrainMonitoringLogAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MonitoringLogResponse> DrainMonitoringLogAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Monitors store their results in a temporary log, which is returned here.
@@ -97,7 +97,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (MonitoringLogResponse)</returns>
-        System.Threading.Tasks.Task<ApiResponse<MonitoringLogResponse>> DrainMonitoringLogWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<MonitoringLogResponse>> DrainMonitoringLogWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Replace the current monitoring configuration with the configuration in the request body.
         /// </summary>
@@ -108,7 +108,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="monitorsConfig">JSON object containing a list of monitors</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of SetConfigResponse</returns>
-        System.Threading.Tasks.Task<SetConfigResponse> SetMonitoringConfigAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<SetConfigResponse> SetMonitoringConfigAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Replace the current monitoring configuration with the configuration in the request body.
@@ -120,7 +120,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="monitorsConfig">JSON object containing a list of monitors</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (SetConfigResponse)</returns>
-        System.Threading.Tasks.Task<ApiResponse<SetConfigResponse>> SetMonitoringConfigWithHttpInfoAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<SetConfigResponse>> SetMonitoringConfigWithHttpInfoAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -394,7 +394,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of MonitoringLogResponse</returns>
-        public async System.Threading.Tasks.Task<MonitoringLogResponse> DrainMonitoringLogAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<MonitoringLogResponse> DrainMonitoringLogAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<MonitoringLogResponse> localVarResponse = await DrainMonitoringLogWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -406,7 +406,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (MonitoringLogResponse)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<MonitoringLogResponse>> DrainMonitoringLogWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<MonitoringLogResponse>> DrainMonitoringLogWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -516,7 +516,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="monitorsConfig">JSON object containing a list of monitors</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of SetConfigResponse</returns>
-        public async System.Threading.Tasks.Task<SetConfigResponse> SetMonitoringConfigAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<SetConfigResponse> SetMonitoringConfigAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<SetConfigResponse> localVarResponse = await SetMonitoringConfigWithHttpInfoAsync(monitorsConfig, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -529,7 +529,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="monitorsConfig">JSON object containing a list of monitors</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (SetConfigResponse)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<SetConfigResponse>> SetMonitoringConfigWithHttpInfoAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<SetConfigResponse>> SetMonitoringConfigWithHttpInfoAsync(MonitorsConfig monitorsConfig, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'monitorsConfig' is set
             if (monitorsConfig == null)

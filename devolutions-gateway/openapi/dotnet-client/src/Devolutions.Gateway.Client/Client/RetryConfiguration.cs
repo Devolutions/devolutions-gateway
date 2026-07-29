@@ -22,11 +22,11 @@ namespace Devolutions.Gateway.Client.Client
         /// <summary>
         /// Retry policy
         /// </summary>
-        public static ISyncPolicy<HttpResponseMessage> RetryPolicy { get; set; }
+        public static Policy<HttpResponseMessage> RetryPolicy { get; set; }
 
         /// <summary>
         /// Async retry policy
         /// </summary>
-        public static IAsyncPolicy<HttpResponseMessage> AsyncRetryPolicy { get; set; }
+        public static AsyncPolicy<HttpResponseMessage> AsyncRetryPolicy { get; set; }
     }
 }

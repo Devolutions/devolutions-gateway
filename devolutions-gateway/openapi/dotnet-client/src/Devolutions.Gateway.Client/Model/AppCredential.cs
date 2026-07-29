@@ -50,7 +50,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="kind">kind (required).</param>
         /// <param name="password">Password for the credential.  Required for \&quot;username-password\&quot; kind..</param>
         /// <param name="username">Username for the credential.  Required for \&quot;username-password\&quot; kind..</param>
-        public AppCredential(AppCredentialKind kind = default, string password = default, string username = default)
+        public AppCredential(AppCredentialKind kind = default(AppCredentialKind), string password = default(string), string username = default(string))
         {
             this.Kind = kind;
             this.Password = password;

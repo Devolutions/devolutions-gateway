@@ -47,7 +47,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="port">port.</param>
         /// <param name="probe">probe (required).</param>
         /// <param name="timeout">timeout (required).</param>
-        public MonitorDefinition(string address = default, string id = default, long interval = default, int? port = default, MonitoringProbeType probe = default, long timeout = default)
+        public MonitorDefinition(string address = default(string), string id = default(string), long interval = default(long), int? port = default(int?), MonitoringProbeType probe = default(MonitoringProbeType), long timeout = default(long))
         {
             // to ensure "address" is required (not null)
             if (address == null)

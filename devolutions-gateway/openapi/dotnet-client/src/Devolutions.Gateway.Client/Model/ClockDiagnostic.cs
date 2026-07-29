@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="timestampMillis">Current time in milliseconds (required).</param>
         /// <param name="timestampSecs">Current time in seconds (required).</param>
-        public ClockDiagnostic(long timestampMillis = default, long timestampSecs = default)
+        public ClockDiagnostic(long timestampMillis = default(long), long timestampSecs = default(long))
         {
             this.TimestampMillis = timestampMillis;
             this.TimestampSecs = timestampSecs;

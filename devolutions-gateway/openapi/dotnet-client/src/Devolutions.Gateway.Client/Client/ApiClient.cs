@@ -84,7 +84,7 @@ namespace Devolutions.Gateway.Client.Client
 
         public async Task<T> Deserialize<T>(HttpResponseMessage response)
         {
-            var result = (T)await Deserialize(response, typeof(T)).ConfigureAwait(false);
+            var result = (T) await Deserialize(response, typeof(T)).ConfigureAwait(false);
             return result;
         }
 
@@ -100,13 +100,13 @@ namespace Devolutions.Gateway.Client.Client
             // process response headers, e.g. Access-Control-Allow-Methods
             foreach (var responseHeader in response.Headers)
             {
-                headers.Add(responseHeader.Key + "=" + ClientUtils.ParameterToString(responseHeader.Value));
+                headers.Add(responseHeader.Key + "=" +  ClientUtils.ParameterToString(responseHeader.Value));
             }
 
             // process response content headers, e.g. Content-Type
             foreach (var responseHeader in response.Content.Headers)
             {
-                headers.Add(responseHeader.Key + "=" + ClientUtils.ParameterToString(responseHeader.Value));
+                headers.Add(responseHeader.Key + "=" +  ClientUtils.ParameterToString(responseHeader.Value));
             }
 
             // RFC 2183 & RFC 2616
@@ -117,8 +117,7 @@ namespace Devolutions.Gateway.Client.Client
             }
             else if (type == typeof(FileParameter))
             {
-                if (headers != null)
-                {
+                if (headers != null) {
                     foreach (var header in headers)
                     {
                         var match = fileNameRegex.Match(header.ToString());
@@ -197,7 +196,6 @@ namespace Devolutions.Gateway.Client.Client
     /// </remarks>
     public partial class ApiClient : IDisposable, ISynchronousClient, IAsynchronousClient
     {
-        private static readonly HttpRequestOptionsKey<List<Cookie>> _httpOptionsCookieContainerKey = new("CookieContainer");
         private readonly string _baseUrl;
 
         private readonly HttpClientHandler _httpClientHandler;
@@ -290,8 +288,7 @@ namespace Devolutions.Gateway.Client.Client
         /// </summary>
         public void Dispose()
         {
-            if(_disposeClient)
-            {
+            if(_disposeClient) {
                 _httpClient.Dispose();
             }
         }
@@ -419,7 +416,7 @@ namespace Devolutions.Gateway.Client.Client
             // TODO provide an alternative that allows cookies per request instead of per API client
             if (options.Cookies != null && options.Cookies.Count > 0)
             {
-                request.Options.Set(_httpOptionsCookieContainerKey, options.Cookies);
+                request.Properties["CookieContainer"] = options.Cookies;
             }
 
             return request;
@@ -430,7 +427,7 @@ namespace Devolutions.Gateway.Client.Client
 
         private async Task<ApiResponse<T>> ToApiResponse<T>(HttpResponseMessage response, object responseData, Uri uri)
         {
-            T result = (T)responseData;
+            T result = (T) responseData;
             string rawContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             var transformed = new ApiResponse<T>(response.StatusCode, new Multimap<string, string>(), result, rawContent)
@@ -465,7 +462,7 @@ namespace Devolutions.Gateway.Client.Client
                         transformed.Cookies.Add(cookie);
                     }
                 }
-                catch (PlatformNotSupportedException) { }
+                catch (PlatformNotSupportedException) {}
             }
 
             return transformed;
@@ -478,7 +475,7 @@ namespace Devolutions.Gateway.Client.Client
 
         private async Task<ApiResponse<T>> ExecAsync<T>(HttpRequestMessage req,
             IReadableConfiguration configuration,
-            System.Threading.CancellationToken cancellationToken = default)
+            System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             CancellationTokenSource timeoutTokenSource = null;
             CancellationTokenSource finalTokenSource = null;
@@ -487,7 +484,7 @@ namespace Devolutions.Gateway.Client.Client
 
             try
             {
-                if (configuration.Timeout > TimeSpan.Zero)
+                if (configuration.Timeout > 0)
                 {
                     timeoutTokenSource = new CancellationTokenSource(configuration.Timeout);
                     finalTokenSource = CancellationTokenSource.CreateLinkedTokenSource(finalToken, timeoutTokenSource.Token);
@@ -502,14 +499,15 @@ namespace Devolutions.Gateway.Client.Client
 
                 if (configuration.ClientCertificates != null)
                 {
-                    if (_httpClientHandler == null) throw new InvalidOperationException("Configuration `ClientCertificates` not supported when the client is explicitly created without an HttpClientHandler, use the proper constructor.");
+                    if(_httpClientHandler == null) throw new InvalidOperationException("Configuration `ClientCertificates` not supported when the client is explicitly created without an HttpClientHandler, use the proper constructor.");
                     _httpClientHandler.ClientCertificates.AddRange(configuration.ClientCertificates);
                 }
 
+                var cookieContainer = req.Properties.ContainsKey("CookieContainer") ? req.Properties["CookieContainer"] as List<Cookie> : null;
 
-                if (req.Options.TryGetValue(_httpOptionsCookieContainerKey, out var cookieContainer))
+                if (cookieContainer != null)
                 {
-                    if (_httpClientHandler == null) throw new InvalidOperationException("Request property `CookieContainer` not supported when the client is explicitly created without an HttpClientHandler, use the proper constructor.");
+                    if(_httpClientHandler == null) throw new InvalidOperationException("Request property `CookieContainer` not supported when the client is explicitly created without an HttpClientHandler, use the proper constructor.");
                     foreach (var cookie in cookieContainer)
                     {
                         _httpClientHandler.CookieContainer.Add(cookie);
@@ -539,7 +537,7 @@ namespace Devolutions.Gateway.Client.Client
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return await ToApiResponse<T>(response, default, req.RequestUri).ConfigureAwait(false);
+                    return await ToApiResponse<T>(response, default(T), req.RequestUri).ConfigureAwait(false);
                 }
 
                 object responseData = await deserializer.Deserialize<T>(response).ConfigureAwait(false);
@@ -547,11 +545,11 @@ namespace Devolutions.Gateway.Client.Client
                 // if the response type is oneOf/anyOf, call FromJSON to deserialize the data
                 if (typeof(Devolutions.Gateway.Client.Model.AbstractOpenAPISchema).IsAssignableFrom(typeof(T)))
                 {
-                    responseData = (T)typeof(T).GetMethod("FromJson").Invoke(null, new object[] { response.Content });
+                    responseData = (T) typeof(T).GetMethod("FromJson").Invoke(null, new object[] { response.Content });
                 }
                 else if (typeof(T).Name == "Stream") // for binary response
                 {
-                    responseData = (T)(object) await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    responseData = (T) (object) await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
                 }
 
                 InterceptResponse(req, response);
@@ -591,7 +589,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> GetAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> GetAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Get, path, options, config), config, cancellationToken);
@@ -606,7 +604,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> PostAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> PostAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Post, path, options, config), config, cancellationToken);
@@ -621,7 +619,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> PutAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> PutAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Put, path, options, config), config, cancellationToken);
@@ -636,7 +634,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> DeleteAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> DeleteAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Delete, path, options, config), config, cancellationToken);
@@ -651,7 +649,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> HeadAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> HeadAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Head, path, options, config), config, cancellationToken);
@@ -666,7 +664,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> OptionsAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> OptionsAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(HttpMethod.Options, path, options, config), config, cancellationToken);
@@ -681,7 +679,7 @@ namespace Devolutions.Gateway.Client.Client
         /// GlobalConfiguration has been done before calling this method.</param>
         /// <param name="cancellationToken">Token that enables callers to cancel the request.</param>
         /// <returns>A Task containing ApiResponse</returns>
-        public Task<ApiResponse<T>> PatchAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ApiResponse<T>> PatchAsync<T>(string path, RequestOptions options, IReadableConfiguration configuration = null, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             var config = configuration ?? GlobalConfiguration.Instance;
             return ExecAsync<T>(NewRequest(new HttpMethod("PATCH"), path, options, config), config, cancellationToken);

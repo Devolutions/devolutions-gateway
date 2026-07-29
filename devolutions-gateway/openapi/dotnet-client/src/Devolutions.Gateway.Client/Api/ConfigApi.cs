@@ -65,7 +65,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Modifies configuration
@@ -77,7 +77,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -358,7 +358,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             await PatchConfigWithHttpInfoAsync(configPatch, cancellationToken).ConfigureAwait(false);
         }
@@ -370,7 +370,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'configPatch' is set
             if (configPatch == null)

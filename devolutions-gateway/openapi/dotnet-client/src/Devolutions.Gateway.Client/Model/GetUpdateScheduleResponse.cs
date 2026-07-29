@@ -47,7 +47,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="products">Products the agent autonomously polls for new versions..</param>
         /// <param name="updateWindowEnd">End of the maintenance window as seconds past midnight (local time, exclusive). &#x60;None&#x60; means no upper bound (single check at &#x60;UpdateWindowStart&#x60;)..</param>
         /// <param name="updateWindowStart">Start of the maintenance window as seconds past midnight (local time). (required).</param>
-        public GetUpdateScheduleResponse(bool enabled = default, long interval = default, string manifestVersion = default, List<string> products = default, int? updateWindowEnd = default, int updateWindowStart = default)
+        public GetUpdateScheduleResponse(bool enabled = default(bool), long interval = default(long), string manifestVersion = default(string), List<string> products = default(List<string>), int? updateWindowEnd = default(int?), int updateWindowStart = default(int))
         {
             this.Enabled = enabled;
             this.Interval = interval;

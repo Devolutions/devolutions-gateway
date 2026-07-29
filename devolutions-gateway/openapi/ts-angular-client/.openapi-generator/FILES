@@ -1,6 +1,5 @@
 .gitignore
 README.md
-api.base.service.ts
 api.module.ts
 api/api.ts
 api/config.service.ts
@@ -79,7 +78,5 @@ model/updateRequestSchema.ts
 ng-package.json
 package.json
 param.ts
-provide-api.ts
-query.params.ts
 tsconfig.json
 variables.ts

@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="foundCount">Number of recordings found (required).</param>
         /// <param name="notFoundCount">Number of recordings not found (required).</param>
-        public DeleteManyResult(int foundCount = default, int notFoundCount = default)
+        public DeleteManyResult(int foundCount = default(int), int notFoundCount = default(int))
         {
             this.FoundCount = foundCount;
             this.NotFoundCount = notFoundCount;

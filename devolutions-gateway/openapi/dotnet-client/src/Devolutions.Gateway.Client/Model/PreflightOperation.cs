@@ -54,7 +54,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="targetCredential">targetCredential.</param>
         /// <param name="timeToLive">Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
-        public PreflightOperation(string hostToResolve = default, Guid id = default, PreflightOperationKind kind = default, AppCredential proxyCredential = default, AppCredential targetCredential = default, int? timeToLive = default, string token = default)
+        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
             this.Id = id;
             this.Kind = kind;

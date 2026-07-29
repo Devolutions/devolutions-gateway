@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="MonitorsConfig" /> class.
         /// </summary>
         /// <param name="monitors">monitors (required).</param>
-        public MonitorsConfig(List<MonitorDefinition> monitors = default)
+        public MonitorsConfig(List<MonitorDefinition> monitors = default(List<MonitorDefinition>))
         {
             // to ensure "monitors" is required (not null)
             if (monitors == null)
