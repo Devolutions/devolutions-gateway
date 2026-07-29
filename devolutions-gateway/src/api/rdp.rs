@@ -25,7 +25,7 @@ pub async fn handler(
         subscriber_tx,
         recordings,
         shutdown_signal,
-        credential_injection,
+        synthetic_kdc_registry,
         provisioning,
         agent_tunnel_handle,
         ..
@@ -47,7 +47,7 @@ pub async fn handler(
             subscriber_tx,
             recordings.active_recordings,
             source_addr,
-            credential_injection,
+            synthetic_kdc_registry,
             provisioning,
             agent_tunnel_handle,
         )
@@ -68,7 +68,7 @@ async fn handle_socket(
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     source_addr: SocketAddr,
-    credential_injection: crate::credential_injection_kdc::CredentialInjectionKdcService,
+    synthetic_kdc_registry: crate::credential_injection::SyntheticKdcRegistry,
     provisioning: crate::provisioning::ProvisioningStore,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
@@ -87,7 +87,7 @@ async fn handle_socket(
         sessions,
         subscriber_tx,
         &active_recordings,
-        &credential_injection,
+        &synthetic_kdc_registry,
         &provisioning,
         agent_tunnel_handle,
     )

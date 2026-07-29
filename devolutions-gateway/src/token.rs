@@ -1313,15 +1313,21 @@ pub fn extract_dst_alt(token: &str) -> anyhow::Result<Vec<String>> {
         .collect()
 }
 
-/// Validate the association-token claims required by credential injection.
+pub(crate) struct CredentialInjectionTokenData {
+    pub(crate) jti: Uuid,
+    pub(crate) target_hostname: String,
+}
+
+/// Parse the association-token data required by credential injection.
 ///
-/// This is intentionally a token-layer shape check only.
-/// The credential-injection KDC still lazily extracts the target hostname from the original token
-/// when it builds its per-session state.
-pub fn validate_credential_injection_association_token(token: &str) -> anyhow::Result<Uuid> {
+/// This is intentionally a token-layer shape check only; normal connection authorization still
+/// validates the token before consuming the provisioned data.
+pub(crate) fn validate_credential_injection_association_token(
+    token: &str,
+) -> anyhow::Result<CredentialInjectionTokenData> {
     let jti = extract_jti(token).context("read jti from association token")?;
-    extract_credential_injection_target_hostname(token)?;
-    Ok(jti)
+    let target_hostname = extract_credential_injection_target_hostname(token)?;
+    Ok(CredentialInjectionTokenData { jti, target_hostname })
 }
 
 /// Extract the target hostname used by credential injection from an association token.
