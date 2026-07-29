@@ -8,10 +8,12 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::credential::{AppCredentialMapping, CleartextAppCredentialMapping};
+use crate::target_connection_options::TargetConnectionOptions;
 
 #[derive(Debug)]
 pub(crate) struct ProvisioningEntry {
     pub(crate) mapping: Option<AppCredentialMapping>,
+    pub(crate) connection_options: Option<TargetConnectionOptions>,
 }
 
 #[derive(Debug)]
@@ -59,6 +61,7 @@ impl ProvisioningStore {
         &self,
         token: String,
         mapping: Option<CleartextAppCredentialMapping>,
+        connection_options: Option<TargetConnectionOptions>,
         time_to_live: time::Duration,
     ) -> Result<Option<ArcProvisioningEntry>, InsertError> {
         let jti = crate::token::extract_jti(&token)
@@ -70,7 +73,10 @@ impl ProvisioningStore {
             .map_err(InsertError::Internal)?;
         let record = ProvisioningRecord {
             token,
-            value: ProvisioningEntry { mapping },
+            value: ProvisioningEntry {
+                mapping,
+                connection_options,
+            },
             expires_at: time::OffsetDateTime::now_utc() + time_to_live,
         };
 
@@ -154,7 +160,7 @@ mod tests {
         let jti = Uuid::new_v4();
 
         let previous = store
-            .insert(token(jti), None, time::Duration::minutes(5))
+            .insert(token(jti), None, None, time::Duration::minutes(5))
             .expect("record inserts");
 
         assert!(previous.is_none());
@@ -166,7 +172,7 @@ mod tests {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
-            .insert(token(jti), None, time::Duration::seconds(-1))
+            .insert(token(jti), None, None, time::Duration::seconds(-1))
             .expect("record inserts");
 
         store.remove_expired(time::OffsetDateTime::now_utc());

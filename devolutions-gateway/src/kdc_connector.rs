@@ -261,7 +261,7 @@ impl KdcConnector {
     /// goes away entirely.
     pub async fn send_network_request(&self, request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
         match request.url.scheme() {
-            "tcp" | "udp" => {
+            scheme if crate::target_connection_options::is_supported_krb_kdc_scheme(scheme) => {
                 let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
                 self.send(&target_addr, &request.data)

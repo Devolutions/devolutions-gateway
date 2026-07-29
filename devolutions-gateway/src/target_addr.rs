@@ -216,6 +216,14 @@ impl TryFrom<url::Url> for TargetAddr {
     }
 }
 
+impl TryFrom<&TargetAddr> for url::Url {
+    type Error = url::ParseError;
+
+    fn try_from(target: &TargetAddr) -> Result<Self, Self::Error> {
+        url::Url::parse(target.as_str())
+    }
+}
+
 impl fmt::Display for TargetAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.serialization)

@@ -359,18 +359,10 @@ pub(crate) struct CredentialInjectionKerberosConfigs {
     pub client: Option<ironrdp_connector::credssp::KerberosConfig>,
 }
 
-/// Whether a credential-injection session speaks Kerberos (vs NTLM). Decided once so both CredSSP
-/// legs agree — sspi's acceptor and initiator must speak the same package or the handshake fails
-/// reading one as the other. Kerberos needs the experimental opt-in AND a domain-qualified target
-/// (a domainless account can't get a ticket).
-fn injection_uses_kerberos(
-    enable_unstable: bool,
-    kerberos_credential_injection: bool,
-    protocol: CredentialInjectionClientAcceptorProtocol,
-) -> bool {
-    enable_unstable
-        && kerberos_credential_injection
-        && matches!(protocol, CredentialInjectionClientAcceptorProtocol::Kerberos)
+/// Whether a credential-injection session speaks Kerberos (vs NTLM). `None` means the feature is
+/// disabled; otherwise the target credential determines the package for both CredSSP legs.
+fn injection_uses_kerberos(protocol: Option<CredentialInjectionClientAcceptorProtocol>) -> bool {
+    matches!(protocol, Some(CredentialInjectionClientAcceptorProtocol::Kerberos))
 }
 
 /// Build the Kerberos config for both CredSSP legs from the single [`injection_uses_kerberos`]
@@ -381,25 +373,25 @@ pub(crate) fn credential_injection_kerberos_configs(
     gateway_hostname: &str,
     credential_injection_kdc: &CredentialInjectionKdc,
 ) -> anyhow::Result<CredentialInjectionKerberosConfigs> {
-    let protocol = credential_injection_kdc.client_acceptor_protocol()?;
+    let protocol = (conf.debug.enable_unstable && conf.debug.kerberos_credential_injection)
+        .then(|| credential_injection_kdc.client_acceptor_protocol())
+        .transpose()?;
 
-    if !injection_uses_kerberos(
-        conf.debug.enable_unstable,
-        conf.debug.kerberos_credential_injection,
-        protocol,
-    ) {
+    if !injection_uses_kerberos(protocol) {
         return Ok(CredentialInjectionKerberosConfigs {
             server: None,
             client: None,
         });
     }
 
+    let krb_kdc = credential_injection_kdc
+        .krb_kdc()
+        .context("Kerberos credential injection requires target connection option krb_kdc")?;
+
     Ok(CredentialInjectionKerberosConfigs {
         server: Some(credential_injection_kdc.server_kerberos_config(client_addr)?),
         client: Some(ironrdp_connector::credssp::KerberosConfig {
-            // TODO: Provision the target KDC through connection options after the store is generalized.
-            // See https://github.com/Devolutions/devolutions-gateway/pull/1862#pullrequestreview-4774565673.
-            kdc_proxy_url: None,
+            kdc_proxy_url: Some(url::Url::try_from(krb_kdc).context("convert target KDC address to URL")?),
             hostname: gateway_hostname.to_owned(),
         }),
     })
@@ -676,14 +668,8 @@ mod tests {
     fn injection_uses_kerberos_requires_optin_and_domain_qualified_target() {
         use CredentialInjectionClientAcceptorProtocol::{Kerberos, Ntlm};
 
-        assert!(injection_uses_kerberos(true, true, Kerberos));
-
-        // Either opt-in off => NTLM, even for a Kerberos-capable target.
-        assert!(!injection_uses_kerberos(false, true, Kerberos));
-        assert!(!injection_uses_kerberos(true, false, Kerberos));
-
-        // Domainless target can't get a ticket => NTLM regardless of the flags.
-        assert!(!injection_uses_kerberos(true, true, Ntlm));
-        assert!(!injection_uses_kerberos(false, false, Ntlm));
+        assert!(injection_uses_kerberos(Some(Kerberos)));
+        assert!(!injection_uses_kerberos(Some(Ntlm)));
+        assert!(!injection_uses_kerberos(None));
     }
 }
