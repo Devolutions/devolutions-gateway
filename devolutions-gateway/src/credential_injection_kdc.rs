@@ -29,6 +29,7 @@ use uuid::Uuid;
 use crate::config::ConfHandle;
 use crate::credential::{AppCredential, AppCredentialMapping};
 use crate::provisioning::{ArcProvisioningEntry, ProvisioningStore};
+use crate::target_connection_options::TargetConnectionOptions;
 
 // The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
 // never leave the process: `intercept_network_request` recognises this hostname and dispatches
@@ -42,6 +43,7 @@ pub(crate) struct CredentialInjectionKdc {
     jti: Uuid,
     raw_token: String,
     credential_mapping: AppCredentialMapping,
+    connection_options: Option<TargetConnectionOptions>,
     // Client target hostname. It is not a hostname of the end machine, but a DGW hostname the client
     // uses when connecting.
     target_hostname: String,
@@ -141,10 +143,15 @@ impl CredentialInjectionKdc {
             jti,
             raw_token: credential_entry.token.clone(),
             credential_mapping: mapping.clone(),
+            connection_options: credential_entry.connection_options.clone(),
             target_hostname,
             session,
             kdc_config,
         })
+    }
+
+    pub(crate) fn krb_kdc(&self) -> Option<&crate::target_addr::TargetAddr> {
+        self.connection_options.as_ref()?.krb_kdc()
     }
 
     pub(crate) fn jti(&self) -> Uuid {
@@ -480,10 +487,11 @@ impl CredentialService {
     /// already been evicted by `provisioning::CleanupTask` while its session cache entry was still
     /// awaiting the next `sweep_orphans` tick — without an unconditional drop here, a fresh
     /// provisioning under the same JTI would reuse stale key material.
-    pub fn insert(
+    pub(crate) fn insert(
         &self,
         token: String,
         mapping: Option<crate::credential::CleartextAppCredentialMapping>,
+        connection_options: Option<TargetConnectionOptions>,
         time_to_live: time::Duration,
     ) -> Result<Option<ArcProvisioningEntry>, crate::provisioning::InsertError> {
         // Snapshot the JTI from the new token so we can invalidate the matching session entry
@@ -493,13 +501,15 @@ impl CredentialService {
         let jti = crate::token::extract_jti(&token)
             .context("failed to extract token ID")
             .map_err(crate::provisioning::InsertError::InvalidToken)?;
-        let previous = self.credentials.insert(token, mapping, time_to_live)?;
+        let previous = self
+            .credentials
+            .insert(token, mapping, connection_options, time_to_live)?;
         self.sessions.lock().remove(&jti);
         Ok(previous)
     }
 
     /// Look up a credential entry by its association-token JTI.
-    pub fn get(&self, jti: Uuid) -> Option<ArcProvisioningEntry> {
+    pub(crate) fn get(&self, jti: Uuid) -> Option<ArcProvisioningEntry> {
         self.credentials.get(jti)
     }
 
@@ -670,6 +680,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username(target_username)),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -729,6 +740,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::seconds(-1),
             )
             .expect("credential entry inserts");
@@ -751,6 +763,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -787,6 +800,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -807,6 +821,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -821,6 +836,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry re-inserts");
@@ -843,6 +859,7 @@ mod tests {
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
+                None,
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -937,7 +954,7 @@ mod tests {
         let jti = Uuid::new_v4();
 
         service
-            .insert(association_token(jti), None, time::Duration::minutes(5))
+            .insert(association_token(jti), None, None, time::Duration::minutes(5))
             .expect("provision-token entry inserts");
 
         assert!(
@@ -947,6 +964,25 @@ mod tests {
             ),
             "KDC tokens with jet_cred_id must require provision-credentials state"
         );
+    }
+
+    #[test]
+    fn service_kdc_for_lazily_extracts_target_hostname_from_entry_token() {
+        let service = CredentialService::new(mock_conf_handle());
+        let jti = Uuid::new_v4();
+
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                None,
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+
+        let kdc = service.kdc_for(jti).expect("credential-injection KDC resolves");
+
+        assert_eq!(kdc.target_hostname, "target.example");
     }
 
     #[test]

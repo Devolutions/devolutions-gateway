@@ -68,6 +68,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         PreflightOperationKind,
         AppCredential,
         AppCredentialKind,
+        TargetConnectionOptions,
         PreflightOutput,
         PreflightOutputKind,
         PreflightAlertStatus,
@@ -382,6 +383,10 @@ struct PreflightOperation {
     ///
     /// Required for "provision-credentials" kind.
     target_credential: Option<AppCredential>,
+    /// Options used by the Gateway when connecting to the target.
+    ///
+    /// Optional parameter for "provision-credentials" kind.
+    connection_options: Option<TargetConnectionOptions>,
     /// The hostname to perform DNS resolution on.
     ///
     /// Required for "resolve-host" kind.
@@ -390,6 +395,15 @@ struct PreflightOperation {
     ///
     /// Optional parameter for "provision-token" and "provision-credentials" kinds.
     time_to_live: Option<u32>,
+}
+
+#[allow(unused)]
+#[derive(Deserialize, utoipa::ToSchema)]
+struct TargetConnectionOptions {
+    /// Kerberos KDC address for the target-side CredSSP connection.
+    ///
+    /// Supported schemes are `tcp` and `udp`.
+    krb_kdc: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::credential::{AppCredentialMapping, CleartextAppCredentialMapping};
+use crate::target_connection_options::TargetConnectionOptions;
 
 /// Error returned by [`ProvisioningStore::insert`].
 #[derive(Debug)]
@@ -50,20 +51,21 @@ impl ProvisioningStore {
         Self(Arc::new(Mutex::new(ProvisioningEntries::new())))
     }
 
-    pub fn insert(
+    pub(crate) fn insert(
         &self,
         token: String,
         mapping: Option<CleartextAppCredentialMapping>,
+        connection_options: Option<TargetConnectionOptions>,
         time_to_live: time::Duration,
     ) -> Result<Option<ArcProvisioningEntry>, InsertError> {
         let mapping = mapping
             .map(CleartextAppCredentialMapping::encrypt)
             .transpose()
             .map_err(InsertError::Internal)?;
-        self.0.lock().insert(token, mapping, time_to_live)
+        self.0.lock().insert(token, mapping, connection_options, time_to_live)
     }
 
-    pub fn get(&self, token_id: Uuid) -> Option<ArcProvisioningEntry> {
+    pub(crate) fn get(&self, token_id: Uuid) -> Option<ArcProvisioningEntry> {
         self.0.lock().get(token_id)
     }
 }
@@ -75,9 +77,10 @@ struct ProvisioningEntries {
 
 #[derive(Debug)]
 pub struct ProvisioningEntry {
-    pub token: String,
-    pub mapping: Option<AppCredentialMapping>,
-    pub expires_at: time::OffsetDateTime,
+    pub(crate) token: String,
+    pub(crate) mapping: Option<AppCredentialMapping>,
+    pub(crate) connection_options: Option<TargetConnectionOptions>,
+    pub(crate) expires_at: time::OffsetDateTime,
 }
 
 pub type ArcProvisioningEntry = Arc<ProvisioningEntry>;
@@ -93,6 +96,7 @@ impl ProvisioningEntries {
         &mut self,
         token: String,
         mapping: Option<AppCredentialMapping>,
+        connection_options: Option<TargetConnectionOptions>,
         time_to_live: time::Duration,
     ) -> Result<Option<ArcProvisioningEntry>, InsertError> {
         let jti = crate::token::extract_jti(&token)
@@ -102,6 +106,7 @@ impl ProvisioningEntries {
         let entry = ProvisioningEntry {
             token,
             mapping,
+            connection_options,
             expires_at: time::OffsetDateTime::now_utc() + time_to_live,
         };
 
