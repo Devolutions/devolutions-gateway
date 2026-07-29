@@ -132,17 +132,21 @@ impl CredentialInjectionKdc {
         target_hostname: String,
         session: Arc<CredentialInjectionKdcSession>,
     ) -> anyhow::Result<Self> {
+        let mapping = credential_entry
+            .mapping
+            .as_ref()
+            .context("credential entry has no credential-injection mapping")?;
         anyhow::ensure!(
             jti == session.jti,
             "credential entry JTI does not match credential-injection KDC session JTI",
         );
 
-        let kdc_config = build_kdc_config(&session, &credential_entry.mapping.proxy)?;
+        let kdc_config = build_kdc_config(&session, &mapping.proxy)?;
 
         Ok(Self {
             jti,
             raw_token: credential_entry.token.clone(),
-            credential_mapping: credential_entry.mapping.clone(),
+            credential_mapping: mapping.clone(),
             connection_options: credential_entry.connection_options.clone(),
             target_hostname,
             session,
@@ -489,7 +493,7 @@ impl CredentialService {
     pub(crate) fn insert_credentials(
         &self,
         token: String,
-        mapping: crate::credential::CleartextAppCredentialMapping,
+        mapping: Option<crate::credential::CleartextAppCredentialMapping>,
         time_to_live: time::Duration,
     ) -> Result<bool, crate::provisioning::InsertError> {
         // Snapshot the JTI from the new token so we can invalidate the matching session entry
@@ -691,7 +695,7 @@ mod tests {
         store
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username(target_username),
+                Some(cleartext_mapping_with_target_username(target_username)),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -750,7 +754,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::seconds(-1),
             )
             .expect("credential entry inserts");
@@ -772,7 +776,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -808,7 +812,7 @@ mod tests {
         let replaced = service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -828,7 +832,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -842,7 +846,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry re-inserts");
@@ -864,7 +868,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
@@ -979,7 +983,7 @@ mod tests {
         service
             .insert_credentials(
                 association_token(jti),
-                cleartext_mapping_with_target_username("target"),
+                Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
