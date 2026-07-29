@@ -9,16 +9,15 @@
  */
 
 
-export type PreflightAlertStatus = 'general-failure' | 'info' | 'warn' | 'unsupported-operation' | 'invalid-parameters' | 'internal-server-error' | 'host-resolution-failure' | 'agent-version-lookup-failure';
-
 export const PreflightAlertStatus = {
-    GeneralFailure: 'general-failure' as PreflightAlertStatus,
-    Info: 'info' as PreflightAlertStatus,
-    Warn: 'warn' as PreflightAlertStatus,
-    UnsupportedOperation: 'unsupported-operation' as PreflightAlertStatus,
-    InvalidParameters: 'invalid-parameters' as PreflightAlertStatus,
-    InternalServerError: 'internal-server-error' as PreflightAlertStatus,
-    HostResolutionFailure: 'host-resolution-failure' as PreflightAlertStatus,
-    AgentVersionLookupFailure: 'agent-version-lookup-failure' as PreflightAlertStatus
-};
+    GeneralFailure: 'general-failure',
+    Info: 'info',
+    Warn: 'warn',
+    UnsupportedOperation: 'unsupported-operation',
+    InvalidParameters: 'invalid-parameters',
+    InternalServerError: 'internal-server-error',
+    HostResolutionFailure: 'host-resolution-failure',
+    AgentVersionLookupFailure: 'agent-version-lookup-failure'
+} as const;
+export type PreflightAlertStatus = typeof PreflightAlertStatus[keyof typeof PreflightAlertStatus];
 

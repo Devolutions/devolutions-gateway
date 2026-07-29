@@ -9,14 +9,13 @@
  */
 
 
-export type PreflightOutputKind = 'version' | 'agent-version' | 'running-session-count' | 'recording-storage-health' | 'resolved-host' | 'alert';
-
 export const PreflightOutputKind = {
-    Version: 'version' as PreflightOutputKind,
-    AgentVersion: 'agent-version' as PreflightOutputKind,
-    RunningSessionCount: 'running-session-count' as PreflightOutputKind,
-    RecordingStorageHealth: 'recording-storage-health' as PreflightOutputKind,
-    ResolvedHost: 'resolved-host' as PreflightOutputKind,
-    Alert: 'alert' as PreflightOutputKind
-};
+    Version: 'version',
+    AgentVersion: 'agent-version',
+    RunningSessionCount: 'running-session-count',
+    RecordingStorageHealth: 'recording-storage-health',
+    ResolvedHost: 'resolved-host',
+    Alert: 'alert'
+} as const;
+export type PreflightOutputKind = typeof PreflightOutputKind[keyof typeof PreflightOutputKind];
 

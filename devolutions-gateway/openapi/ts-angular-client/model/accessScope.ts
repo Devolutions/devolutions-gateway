@@ -9,24 +9,26 @@
  */
 
 
-export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read' | 'gateway.update' | 'gateway.preflight' | 'gateway.traffic.claim' | 'gateway.traffic.ack' | 'gateway.net.monitor.config' | 'gateway.net.monitor.drain';
-
 export const AccessScope = {
-    Star: '*' as AccessScope,
-    GatewaySessionsRead: 'gateway.sessions.read' as AccessScope,
-    GatewaySessionTerminate: 'gateway.session.terminate' as AccessScope,
-    GatewayAssociationsRead: 'gateway.associations.read' as AccessScope,
-    GatewayDiagnosticsRead: 'gateway.diagnostics.read' as AccessScope,
-    GatewayJrlRead: 'gateway.jrl.read' as AccessScope,
-    GatewayConfigWrite: 'gateway.config.write' as AccessScope,
-    GatewayHeartbeatRead: 'gateway.heartbeat.read' as AccessScope,
-    GatewayRecordingDelete: 'gateway.recording.delete' as AccessScope,
-    GatewayRecordingsRead: 'gateway.recordings.read' as AccessScope,
-    GatewayUpdate: 'gateway.update' as AccessScope,
-    GatewayPreflight: 'gateway.preflight' as AccessScope,
-    GatewayTrafficClaim: 'gateway.traffic.claim' as AccessScope,
-    GatewayTrafficAck: 'gateway.traffic.ack' as AccessScope,
-    GatewayNetMonitorConfig: 'gateway.net.monitor.config' as AccessScope,
-    GatewayNetMonitorDrain: 'gateway.net.monitor.drain' as AccessScope
-};
+    Star: '*',
+    GatewaySessionsRead: 'gateway.sessions.read',
+    GatewaySessionTerminate: 'gateway.session.terminate',
+    GatewayAssociationsRead: 'gateway.associations.read',
+    GatewayDiagnosticsRead: 'gateway.diagnostics.read',
+    GatewayJrlRead: 'gateway.jrl.read',
+    GatewayConfigWrite: 'gateway.config.write',
+    GatewayHeartbeatRead: 'gateway.heartbeat.read',
+    GatewayRecordingDelete: 'gateway.recording.delete',
+    GatewayRecordingsRead: 'gateway.recordings.read',
+    GatewayUpdate: 'gateway.update',
+    GatewayUpdateRead: 'gateway.update.read',
+    GatewayPreflight: 'gateway.preflight',
+    GatewayTrafficClaim: 'gateway.traffic.claim',
+    GatewayTrafficAck: 'gateway.traffic.ack',
+    GatewayNetMonitorConfig: 'gateway.net.monitor.config',
+    GatewayNetMonitorDrain: 'gateway.net.monitor.drain',
+    GatewayAgentDelete: 'gateway.agent.delete',
+    GatewayAgentRead: 'gateway.agent.read'
+} as const;
+export type AccessScope = typeof AccessScope[keyof typeof AccessScope];
 

@@ -9,13 +9,12 @@
  */
 
 
-export type DataEncoding = 'Multibase' | 'Base64' | 'Base64Pad' | 'Base64Url' | 'Base64UrlPad';
-
 export const DataEncoding = {
-    Multibase: 'Multibase' as DataEncoding,
-    Base64: 'Base64' as DataEncoding,
-    Base64Pad: 'Base64Pad' as DataEncoding,
-    Base64Url: 'Base64Url' as DataEncoding,
-    Base64UrlPad: 'Base64UrlPad' as DataEncoding
-};
+    Multibase: 'Multibase',
+    Base64: 'Base64',
+    Base64Pad: 'Base64Pad',
+    Base64Url: 'Base64Url',
+    Base64UrlPad: 'Base64UrlPad'
+} as const;
+export type DataEncoding = typeof DataEncoding[keyof typeof DataEncoding];
 
