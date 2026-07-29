@@ -63,6 +63,7 @@ docs/SetConfigResponse.md
 docs/SetUpdateScheduleRequest.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
+docs/TargetConnectionOptions.md
 docs/TrafficApi.md
 docs/TrafficEventResponse.md
 docs/TransportProtocolResponse.md
@@ -154,6 +155,7 @@ src/Devolutions.Gateway.Client/Model/SetConfigResponse.cs
 src/Devolutions.Gateway.Client/Model/SetUpdateScheduleRequest.cs
 src/Devolutions.Gateway.Client/Model/SubProvisionerKey.cs
 src/Devolutions.Gateway.Client/Model/Subscriber.cs
+src/Devolutions.Gateway.Client/Model/TargetConnectionOptions.cs
 src/Devolutions.Gateway.Client/Model/TrafficEventResponse.cs
 src/Devolutions.Gateway.Client/Model/TransportProtocolResponse.cs
 src/Devolutions.Gateway.Client/Model/UpdateProductInfo.cs
