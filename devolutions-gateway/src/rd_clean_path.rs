@@ -541,8 +541,7 @@ pub async fn handle(
     // proxy-based credential injection mode. Otherwise, we continue the usual
     // clean path procedure. The credential store is keyed on the association token's JTI.
     if let Some(jti) = crate::token::extract_jti(token).ok()
-        && let Some(entry) = credentials.get(jti)
-        && entry.mapping.is_some()
+        && credentials.get(jti).is_some()
     {
         let credential_injection_kdc = credentials.kdc_for(jti)?;
         anyhow::ensure!(token == credential_injection_kdc.raw_token(), "token mismatch");
