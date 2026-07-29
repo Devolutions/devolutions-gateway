@@ -317,45 +317,43 @@ async fn handle_operation(
                 },
             });
         }
-        OP_PROVISION_TOKEN => {
-            let ProvisionTokenParams { token, time_to_live } =
-                from_params(operation.params).map_err(PreflightError::invalid_params)?;
-            validate_time_to_live(time_to_live)?;
-
-            // provision-token stores nothing: the current model has no credential-less entry, and a
-            // token-only entry never affected connection handling. Kept so older callers still get a
-            // well-formed token validated and acknowledged.
-            crate::token::extract_jti(&token).map_err(|error| {
-                PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
-            })?;
-
-            outputs.push(PreflightOutput {
-                operation_id: operation.id,
-                kind: PreflightOutputKind::Ack,
-            });
-        }
-        OP_PROVISION_CREDENTIALS => {
-            let ProvisionCredentialsParams {
-                token,
-                mapping,
-                time_to_live,
-            } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+        OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            // Same store path as master: provision-token inserts a token-only row (mapping=None);
+            // provision-credentials inserts with a mapping. Connection options are a separate op.
+            let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
+            let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
+                let ProvisionTokenParams { token, time_to_live } =
+                    from_params(operation.params).map_err(PreflightError::invalid_params)?;
+                (token, time_to_live, None)
+            } else {
+                let ProvisionCredentialsParams {
+                    token,
+                    mapping,
+                    time_to_live,
+                } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+                (token, time_to_live, Some(mapping))
+            };
             let time_to_live = validate_time_to_live(time_to_live)?;
 
-            crate::token::validate_credential_injection_association_token(&token)
-                .inspect_err(|error| {
-                    warn!(
-                        %operation.id,
-                        error = format!("{error:#}"),
-                        "Credential-injection token is not valid"
-                    )
-                })
-                .map_err(|error| {
-                    PreflightError::new(
-                        PreflightAlertStatus::InvalidParams,
-                        format!("invalid credential-injection token: {error:#}"),
-                    )
-                })?;
+            // Provision-credentials tokens must be valid association tokens with the credential
+            // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
+            // never reaches the credential store with malformed input.
+            if is_provision_credentials {
+                crate::token::validate_credential_injection_association_token(&token)
+                    .inspect_err(|error| {
+                        warn!(
+                            %operation.id,
+                            error = format!("{error:#}"),
+                            "Credential-injection token is not valid"
+                        )
+                    })
+                    .map_err(|error| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            format!("invalid credential-injection token: {error:#}"),
+                        )
+                    })?;
+            }
 
             let replaced = credentials
                 .insert_credentials(token, mapping, time_to_live)
@@ -375,7 +373,7 @@ async fn handle_operation(
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
-                        message: "existing provisioned credentials were replaced".to_owned(),
+                        message: "an existing credential entry was replaced".to_owned(),
                     },
                 });
             }

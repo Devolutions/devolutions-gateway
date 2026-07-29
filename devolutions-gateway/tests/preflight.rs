@@ -238,31 +238,42 @@ async fn test_provision_credentials_rejects_missing_target_hostname() -> anyhow:
 }
 
 #[tokio::test]
-async fn test_provision_token_acks_without_storing() -> anyhow::Result<()> {
+async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
     let _guard = init_logger();
 
     let (app, _state, _handles) = make_router()?;
 
+    // Same JTI twice: second provision-token replaces the stored token-only entry (master behavior).
     let token = unsigned_jws(json!({
         "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8",
         "dst_hst": "target.example:3389"
     }))?;
 
-    let op_id = Uuid::new_v4();
-    let op = json!([{
-        "id": op_id,
+    let op_id1 = Uuid::new_v4();
+    let op_id2 = Uuid::new_v4();
+
+    let op1 = json!([{
+        "id": op_id1,
         "kind": "provision-token",
         "token": token,
     }]);
 
-    let response = app.oneshot(preflight_request(op)?).await?;
-    assert_eq!(response.status(), StatusCode::OK);
+    app.clone().oneshot(preflight_request(op1)?).await?;
+
+    let op2 = json!([{
+        "id": op_id2,
+        "kind": "provision-token",
+        "token": token,
+    }]);
+
+    let response = app.oneshot(preflight_request(op2)?).await?;
     let body = response.into_body().collect().await?.to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body)?;
 
-    // provision-token is validate+ack only; it does not store and never emits a replace alert.
-    assert_eq!(body.as_array().expect("an array").len(), 1);
-    assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
+    assert_eq!(body.as_array().expect("an array").len(), 2);
+    assert_eq!(body[0]["kind"], "alert");
+    assert!(body[0]["alert_message"].as_str().unwrap().contains("replaced"));
+    assert_eq!(body[1]["kind"], "ack");
 
     Ok(())
 }
