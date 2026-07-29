@@ -11,10 +11,10 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::InsertError;
 use crate::credential_injection_kdc::CredentialService;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
+use crate::provisioning::InsertError;
 use crate::session::SessionMessageSender;
 
 const OP_GET_VERSION: &str = "get-version";

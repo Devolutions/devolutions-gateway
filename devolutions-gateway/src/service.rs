@@ -350,7 +350,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
-    tasks.register(devolutions_gateway::credential::CleanupTask {
+    tasks.register(devolutions_gateway::provisioning::CleanupTask {
         handle: credentials.credential_store().clone(),
     });
 
