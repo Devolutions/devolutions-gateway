@@ -30,6 +30,7 @@ pub mod log;
 pub mod middleware;
 pub mod ngrok;
 pub mod plugin_manager;
+pub mod provisioning;
 pub mod proxy;
 pub mod rd_clean_path;
 pub mod rdp_pcb;
@@ -61,7 +62,8 @@ pub struct DgwState {
     pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
     pub recordings: recording::RecordingMessageSender,
     pub job_queue_handle: job_queue::JobQueueHandle,
-    pub credentials: credential_injection_kdc::CredentialService,
+    pub provisioning: provisioning::ProvisioningStore,
+    pub credential_injection: credential_injection_kdc::CredentialInjectionKdcService,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
@@ -89,7 +91,8 @@ impl DgwState {
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let (traffic_audit_handle, traffic_audit_rx) = traffic_audit::TrafficAuditHandle::new();
-        let credentials = credential_injection_kdc::CredentialService::new();
+        let provisioning = provisioning::ProvisioningStore::new();
+        let credential_injection = credential_injection_kdc::CredentialInjectionKdcService::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
@@ -102,7 +105,8 @@ impl DgwState {
             recordings: recording_manager_handle,
             job_queue_handle,
             traffic_audit_handle,
-            credentials,
+            provisioning,
+            credential_injection,
             monitoring_state,
             agent_tunnel_handle: None,
         };

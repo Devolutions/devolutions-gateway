@@ -1,6 +1,6 @@
 //! In-memory credential encryption using ChaCha20-Poly1305.
 //!
-//! This module provides encryption-at-rest for passwords stored in the credential store.
+//! This module provides encryption-at-rest for passwords managed by the credential service.
 //! A randomly generated 256-bit master key is held in a [`ProtectedBytes<32>`] allocation backed by `secure-memory`, which applies
 //! the best available OS hardening (mlock, guard pages, core-dump exclusion) and always zeroizes on drop.
 //!

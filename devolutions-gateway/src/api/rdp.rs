@@ -25,7 +25,8 @@ pub async fn handler(
         subscriber_tx,
         recordings,
         shutdown_signal,
-        credentials,
+        credential_injection,
+        provisioning,
         agent_tunnel_handle,
         ..
     }): State<DgwState>,
@@ -46,7 +47,8 @@ pub async fn handler(
             subscriber_tx,
             recordings.active_recordings,
             source_addr,
-            credentials,
+            credential_injection,
+            provisioning,
             agent_tunnel_handle,
         )
         .instrument(span)
@@ -66,7 +68,8 @@ async fn handle_socket(
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     source_addr: SocketAddr,
-    credentials: crate::credential_injection_kdc::CredentialService,
+    credential_injection: crate::credential_injection_kdc::CredentialInjectionKdcService,
+    provisioning: crate::provisioning::ProvisioningStore,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
     let (stream, close_handle) = crate::ws::handle(
@@ -84,7 +87,8 @@ async fn handle_socket(
         sessions,
         subscriber_tx,
         &active_recordings,
-        &credentials,
+        &credential_injection,
+        &provisioning,
         agent_tunnel_handle,
     )
     .await;
