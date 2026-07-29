@@ -8,7 +8,6 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string] $AppToken,
-    [string[]] $Hubs = @('default'),
     [switch] $NoBuild
 )
 
@@ -36,8 +35,7 @@ $dockerArgs = @(
     '-e', "PSU_SERVER_URL=$ServerUrl",
     '-e', "PSU_AGENT_ID=$AgentId",
     '-e', "PSU_DISPLAY_NAME=$DisplayName",
-    '-e', "PSU_APP_TOKEN=$AppToken",
-    '-e', "PSU_HUBS=$($Hubs -join ',')"
+    '-e', "PSU_APP_TOKEN=$AppToken"
 )
 
 $dockerArgs += $ImageName

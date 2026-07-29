@@ -7,25 +7,6 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-IFS=',' read -r -a hubs <<< "${PSU_HUBS:-default}"
-hubs_json=""
-for hub in "${hubs[@]}"; do
-    hub="${hub#${hub%%[![:space:]]*}}"
-    hub="${hub%${hub##*[![:space:]]}}"
-    if [ -z "${hub}" ]; then
-        continue
-    fi
-
-    if [ -n "${hubs_json}" ]; then
-        hubs_json="${hubs_json}, "
-    fi
-    hubs_json="${hubs_json}\"$(json_escape "${hub}")\""
-done
-
-if [ -z "${hubs_json}" ]; then
-    hubs_json='"default"'
-fi
-
 if [ -z "${PSU_APP_TOKEN:-}" ]; then
     echo "PSU_APP_TOKEN is required" >&2
     exit 1
@@ -46,7 +27,6 @@ cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
     "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",
     "DisplayName": "$(json_escape "${PSU_DISPLAY_NAME:-Devolutions Agent Linux}")",
 ${app_token_property}
-    "Hubs": [ ${hubs_json} ],
     "PowerShell": {
       "ExecutablePath": "$(json_escape "${POWERSHELL_EXECUTABLE:-pwsh}")"
     }
