@@ -9,7 +9,7 @@
  */
 
 
-export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read' | 'gateway.update' | 'gateway.preflight' | 'gateway.traffic.claim' | 'gateway.traffic.ack' | 'gateway.net.monitor.config' | 'gateway.net.monitor.drain';
+export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read' | 'gateway.update' | 'gateway.update.read' | 'gateway.preflight' | 'gateway.traffic.claim' | 'gateway.traffic.ack' | 'gateway.net.monitor.config' | 'gateway.net.monitor.drain' | 'gateway.agent.delete' | 'gateway.agent.read';
 
 export const AccessScope = {
     Star: '*' as AccessScope,
@@ -23,10 +23,13 @@ export const AccessScope = {
     GatewayRecordingDelete: 'gateway.recording.delete' as AccessScope,
     GatewayRecordingsRead: 'gateway.recordings.read' as AccessScope,
     GatewayUpdate: 'gateway.update' as AccessScope,
+    GatewayUpdateRead: 'gateway.update.read' as AccessScope,
     GatewayPreflight: 'gateway.preflight' as AccessScope,
     GatewayTrafficClaim: 'gateway.traffic.claim' as AccessScope,
     GatewayTrafficAck: 'gateway.traffic.ack' as AccessScope,
     GatewayNetMonitorConfig: 'gateway.net.monitor.config' as AccessScope,
-    GatewayNetMonitorDrain: 'gateway.net.monitor.drain' as AccessScope
+    GatewayNetMonitorDrain: 'gateway.net.monitor.drain' as AccessScope,
+    GatewayAgentDelete: 'gateway.agent.delete' as AccessScope,
+    GatewayAgentRead: 'gateway.agent.read' as AccessScope
 };
 
