@@ -41,6 +41,8 @@ pub(crate) struct CredentialInjectionKdc {
     jti: Uuid,
     raw_token: String,
     credential_mapping: AppCredentialMapping,
+    // Client target hostname. It is not a hostname of the end machine, but a DGW hostname the client
+    // uses when connecting.
     target_hostname: String,
     session: Arc<CredentialInjectionKdcSession>,
     // The KDC crate models users with plaintext passwords, so this object owns those secrets
@@ -187,7 +189,8 @@ impl CredentialInjectionKdc {
 
         // The SPN that the client puts on its AP-REQ ticket is the one for the target RDP
         // server (`TERMSRV/<target>`). Gateway-as-CredSSP-server is impersonating that target,
-        // so ServerProperties must claim the same SPN or sspi-rs rejects the ticket.
+        // so `ServerProperties` must claim the same SPN as the gateway listener or sspi-rs
+        // rejects the ticket.
         Ok(sspi::KerberosServerConfig {
             kerberos_config: sspi::KerberosConfig {
                 kdc_url: Some(kdc_url),
