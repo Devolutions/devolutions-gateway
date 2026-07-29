@@ -46,10 +46,15 @@ try {
 
 		Write-Host "Generate target"
 
+		# The generator wrapper looks for openapitools.json next to the nearest package.json,
+		# which is the repository root, not this folder — so point it here or it silently
+		# ignores our pinned version and grabs whatever the latest release happens to be.
 		$Cmd = @(
-			'npx', 
-			'openapi-generator-cli', 
-			'generate', 
+			'npx',
+			'--yes',
+			'"@openapitools/openapi-generator-cli"',
+			"`"--openapitools=$PSScriptRoot/openapitools.json`"",
+			'generate',
 			'-i',
 			$target.SpecFile,
 			'-g',
