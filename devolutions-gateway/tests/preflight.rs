@@ -231,43 +231,6 @@ async fn test_provision_credentials_rejects_missing_target_hostname() -> anyhow:
 }
 
 #[tokio::test]
-async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
-    let _guard = init_logger();
-
-    let (app, _state, _handles) = make_router()?;
-
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgifQ.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
-
-    let op_id1 = Uuid::new_v4();
-    let op_id2 = Uuid::new_v4();
-
-    let op1 = json!([{
-        "id": op_id1,
-        "kind": "provision-token",
-        "token": token,
-    }]);
-
-    app.clone().oneshot(preflight_request(op1)?).await?;
-
-    let op2 = json!([{
-        "id": op_id2,
-        "kind": "provision-token",
-        "token": token,
-    }]);
-
-    let response = app.oneshot(preflight_request(op2)?).await?;
-    let body = response.into_body().collect().await?.to_bytes();
-    let body: serde_json::Value = serde_json::from_slice(&body)?;
-
-    assert_eq!(body.as_array().expect("an array").len(), 2);
-    assert_eq!(body[0]["kind"], "alert");
-    assert!(body[0]["alert_message"].as_str().unwrap().contains("replaced"));
-    assert_eq!(body[1]["kind"], "ack");
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_provision_invalid_params() -> anyhow::Result<()> {
     let _guard = init_logger();
 
@@ -287,6 +250,29 @@ async fn test_provision_invalid_params() -> anyhow::Result<()> {
 
     let request = preflight_request(op)?;
     let response = app.oneshot(request).await?;
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert_eq!(body.as_array().expect("an array").len(), 1);
+    assert_eq!(body[0]["kind"], "alert");
+    assert_eq!(body[0]["alert_status"], "invalid-parameters");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_provision_token_rejects_garbage_token() -> anyhow::Result<()> {
+    let _guard = init_logger();
+
+    let (app, _state, _handles) = make_router()?;
+
+    let op = json!([{
+        "id": Uuid::new_v4(),
+        "kind": "provision-token",
+        "token": "not-a-jwt",
+    }]);
+
+    let response = app.oneshot(preflight_request(op)?).await?;
     let body = response.into_body().collect().await?.to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body)?;
 

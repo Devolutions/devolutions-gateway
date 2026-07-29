@@ -13,7 +13,7 @@ use crate::DgwState;
 use crate::config::Conf;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
-use crate::provisioning::{InsertError, ProvisioningStore};
+use crate::provisioning::ProvisioningStore;
 use crate::session::SessionMessageSender;
 
 const OP_GET_VERSION: &str = "get-version";
@@ -22,6 +22,7 @@ const OP_GET_RUNNING_SESSION_COUNT: &str = "get-running-session-count";
 const OP_GET_RECORDING_STORAGE_HEALTH: &str = "get-recording-storage-health";
 const OP_PROVISION_TOKEN: &str = "provision-token";
 const OP_PROVISION_CREDENTIALS: &str = "provision-credentials";
+const OP_PROVISION_CONNECTION_OPTIONS: &str = "provision-connection-options";
 const OP_RESOLVE_HOST: &str = "resolve-host";
 
 const DEFAULT_TTL: Duration = Duration::minutes(15);
@@ -45,8 +46,14 @@ struct ProvisionTokenParams {
 struct ProvisionCredentialsParams {
     token: String,
     #[serde(flatten)]
-    mapping: crate::credential::CleartextAppCredentialMapping,
-    connection_options: Option<crate::target_connection_options::TargetConnectionOptions>,
+    credentials: crate::credential::CleartextAppCredentials,
+    time_to_live: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProvisionConnectionOptionsParams {
+    token: String,
+    connection_options: crate::target_connection_options::TargetConnectionOptions,
     time_to_live: Option<u32>,
 }
 
@@ -309,77 +316,94 @@ async fn handle_operation(
                 },
             });
         }
-        OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
-            let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
-            let (token, time_to_live, mapping, connection_options) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
-                let ProvisionTokenParams { token, time_to_live } =
-                    from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, None, None)
-            } else {
-                let ProvisionCredentialsParams {
-                    token,
-                    mapping,
-                    connection_options,
-                    time_to_live,
-                } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, Some(mapping), connection_options)
-            };
+        OP_PROVISION_TOKEN => {
+            let ProvisionTokenParams { token, time_to_live } =
+                from_params(operation.params).map_err(PreflightError::invalid_params)?;
+            validate_time_to_live(time_to_live)?;
 
-            let time_to_live = time_to_live
-                .map(i64::from)
-                .map(Duration::seconds)
-                .unwrap_or(DEFAULT_TTL);
+            // provision-token stores nothing: the current model has no credential-less entry, and a
+            // token-only entry never affected connection handling. It is kept only so older callers
+            // that still send it get a well-formed token validated and acknowledged.
+            crate::token::extract_jti(&token).map_err(|error| {
+                PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
+            })?;
 
-            if time_to_live > MAX_TTL {
-                return Err(PreflightError {
-                    status: PreflightAlertStatus::InvalidParams,
-                    message: format!(
-                        "provided time_to_live ({time_to_live}) is exceeding the maximum TTL duration ({MAX_TTL})"
-                    ),
-                });
-            }
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::Ack,
+            });
+        }
+        OP_PROVISION_CREDENTIALS => {
+            let ProvisionCredentialsParams {
+                token,
+                credentials,
+                time_to_live,
+            } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+            let time_to_live = validate_time_to_live(time_to_live)?;
 
-            // Provision-credentials tokens must be valid association tokens with the credential
-            // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
-            // never reaches the provisioning store with malformed input.
-            if is_provision_credentials {
-                crate::token::validate_credential_injection_association_token(&token)
-                    .inspect_err(|error| {
-                        warn!(
-                            %operation.id,
-                            error = format!("{error:#}"),
-                            "Credential-injection token is not valid"
-                        )
-                    })
-                    .map_err(|error| {
-                        PreflightError::new(
-                            PreflightAlertStatus::InvalidParams,
-                            format!("invalid credential-injection token: {error:#}"),
-                        )
-                    })?;
-            }
-
-            let previous_entry = provisioning
-                .insert(token, mapping, connection_options, time_to_live)
-                .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
-                .map_err(|error| match error {
-                    InsertError::InvalidToken(error) => {
-                        PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
-                    }
-                    InsertError::Internal(_) => PreflightError::new(
-                        PreflightAlertStatus::InternalServerError,
-                        "an internal error occurred".to_owned(),
-                    ),
+            let token_data = crate::token::validate_credential_injection_association_token(&token)
+                .inspect_err(|error| {
+                    warn!(
+                        %operation.id,
+                        error = format!("{error:#}"),
+                        "Credential-injection token is not valid"
+                    )
+                })
+                .map_err(|error| {
+                    PreflightError::new(
+                        PreflightAlertStatus::InvalidParams,
+                        format!("invalid credential-injection token: {error:#}"),
+                    )
                 })?;
 
-            // A replaced entry produces a new provisioning entry, so the credential-injection KDC
-            // service re-derives its session on the next lookup — no explicit invalidation here.
-            if previous_entry.is_some() {
+            let replaced = provisioning
+                .insert_credentials(token_data, credentials, time_to_live)
+                .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
+                .map_err(|_| {
+                    PreflightError::new(
+                        PreflightAlertStatus::InternalServerError,
+                        "an internal error occurred".to_owned(),
+                    )
+                })?;
+
+            if replaced {
                 outputs.push(PreflightOutput {
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
-                        message: "an existing provisioning entry was replaced".to_owned(),
+                        message: "existing provisioned credentials were replaced".to_owned(),
+                    },
+                });
+            }
+
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::Ack,
+            });
+        }
+        OP_PROVISION_CONNECTION_OPTIONS => {
+            let ProvisionConnectionOptionsParams {
+                token,
+                connection_options,
+                time_to_live,
+            } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+            let time_to_live = validate_time_to_live(time_to_live)?;
+
+            // Connection options are generic routing metadata, not credential-injection state, so
+            // they only need a JTI to key by — not the full credential-injection token shape that
+            // provision-credentials requires.
+            let jti = crate::token::extract_jti(&token).map_err(|error| {
+                PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
+            })?;
+
+            let replaced = provisioning.insert_connection_options(jti, connection_options, time_to_live);
+
+            if replaced {
+                outputs.push(PreflightOutput {
+                    operation_id: operation.id,
+                    kind: PreflightOutputKind::Alert {
+                        status: PreflightAlertStatus::Info,
+                        message: "existing provisioned connection options were replaced".to_owned(),
                     },
                 });
             }
@@ -425,6 +449,22 @@ async fn handle_operation(
 
 fn from_params<T: de::DeserializeOwned>(params: serde_json::Map<String, serde_json::Value>) -> serde_json::Result<T> {
     serde_json::from_value(serde_json::Value::Object(params))
+}
+
+fn validate_time_to_live(time_to_live: Option<u32>) -> Result<Duration, PreflightError> {
+    let time_to_live = time_to_live
+        .map(i64::from)
+        .map(Duration::seconds)
+        .unwrap_or(DEFAULT_TTL);
+
+    if time_to_live > MAX_TTL {
+        return Err(PreflightError::new(
+            PreflightAlertStatus::InvalidParams,
+            format!("provided time_to_live ({time_to_live}) is exceeding the maximum TTL duration ({MAX_TTL})"),
+        ));
+    }
+
+    Ok(time_to_live)
 }
 
 /// Redacts sensitive fields in JSON values.

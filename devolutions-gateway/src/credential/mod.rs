@@ -30,9 +30,9 @@ impl AppCredential {
     }
 }
 
-/// Application protocol level credential mapping
+/// Application protocol level credentials.
 #[derive(Debug, Clone)]
-pub struct AppCredentialMapping {
+pub struct AppCredentials {
     pub proxy: AppCredential,
     pub target: AppCredential,
 }
@@ -64,18 +64,18 @@ impl CleartextAppCredential {
     }
 }
 
-/// Cleartext credential mapping received from the API, used for deserialization only.
+/// Cleartext credentials received from the API, used for deserialization only.
 #[derive(Debug, Deserialize)]
-pub struct CleartextAppCredentialMapping {
+pub struct CleartextAppCredentials {
     #[serde(rename = "proxy_credential")]
     pub proxy: CleartextAppCredential,
     #[serde(rename = "target_credential")]
     pub target: CleartextAppCredential,
 }
 
-impl CleartextAppCredentialMapping {
-    pub(crate) fn encrypt(self) -> anyhow::Result<AppCredentialMapping> {
-        Ok(AppCredentialMapping {
+impl CleartextAppCredentials {
+    pub(crate) fn encrypt(self) -> anyhow::Result<AppCredentials> {
+        Ok(AppCredentials {
             proxy: self.proxy.encrypt()?,
             target: self.target.encrypt()?,
         })

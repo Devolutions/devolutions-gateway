@@ -1803,7 +1803,7 @@ components:
           description: |-
             Minimum persistence duration in seconds for the data provisioned via this operation.
 
-            Optional parameter for "provision-token" and "provision-credentials" kinds.
+            Optional parameter for "provision-token", "provision-credentials" and "provision-connection-options" kinds.
           nullable: true
           minimum: 0
         token:
@@ -1811,7 +1811,7 @@ components:
           description: |-
             The token to be stored on the proxy-side.
 
-            Required for "provision-token" and "provision-credentials" kinds.
+            Required for "provision-token", "provision-credentials" and "provision-connection-options" kinds.
           nullable: true
     PreflightOperationKind:
       type: string
@@ -1822,6 +1822,7 @@ components:
       - get-recording-storage-health
       - provision-token
       - provision-credentials
+      - provision-connection-options
       - resolve-host
     PreflightOutput:
       type: object

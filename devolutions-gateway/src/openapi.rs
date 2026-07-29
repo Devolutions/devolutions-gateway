@@ -373,7 +373,7 @@ struct PreflightOperation {
     kind: PreflightOperationKind,
     /// The token to be stored on the proxy-side.
     ///
-    /// Required for "provision-token" and "provision-credentials" kinds.
+    /// Required for "provision-token", "provision-credentials" and "provision-connection-options" kinds.
     token: Option<String>,
     /// The credential to use to authorize the client at the proxy-level.
     ///
@@ -385,7 +385,7 @@ struct PreflightOperation {
     target_credential: Option<AppCredential>,
     /// Options used by the Gateway when connecting to the target.
     ///
-    /// Optional for "provision-credentials" kind.
+    /// Required for "provision-connection-options" kind.
     connection_options: Option<TargetConnectionOptions>,
     /// The hostname to perform DNS resolution on.
     ///
@@ -393,7 +393,7 @@ struct PreflightOperation {
     host_to_resolve: Option<String>,
     /// Minimum persistence duration in seconds for the data provisioned via this operation.
     ///
-    /// Optional parameter for "provision-token" and "provision-credentials" kinds.
+    /// Optional parameter for "provision-token", "provision-credentials" and "provision-connection-options" kinds.
     time_to_live: Option<u32>,
 }
 
@@ -420,6 +420,8 @@ enum PreflightOperationKind {
     ProvisionToken,
     #[serde(rename = "provision-credentials")]
     ProvisionCredentials,
+    #[serde(rename = "provision-connection-options")]
+    ProvisionConnectionOptions,
     #[serde(rename = "resolve-host")]
     ResolveHost,
 }

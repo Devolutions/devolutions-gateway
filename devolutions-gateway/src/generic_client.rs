@@ -8,14 +8,14 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::CredentialInjectionKdcService;
+use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
 use crate::provisioning::ProvisioningStore;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
+use crate::token::{self, ConnectionMode, CurrentJrl, Protocol, RecordingPolicy, TokenCache};
 use crate::upstream::{self, ConnectedUpstream};
 
 #[derive(TypedBuilder)]
@@ -28,7 +28,7 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
-    credential_injection: CredentialInjectionKdcService,
+    synthetic_kdc_registry: SyntheticKdcRegistry,
     provisioning: ProvisioningStore,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
@@ -53,7 +53,7 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
-            credential_injection,
+            synthetic_kdc_registry,
             provisioning,
             agent_tunnel_handle,
         } = self;
@@ -131,7 +131,7 @@ where
 
                 span.record("target", selected_target.to_string());
 
-                let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
+                let is_rdp = matches!(claims.jet_ap, token::ApplicationProtocol::Known(Protocol::Rdp));
 
                 let info = SessionInfo::builder()
                     .id(claims.jet_aid)
@@ -146,20 +146,19 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
-                // We support proxy-based credential injection for RDP.
-                // If a credential mapping has been pushed, we automatically switch to this mode.
-                // Otherwise, we continue the generic procedure.
-                //
-                // RdpProxy is generic over the server stream, so credential injection works
-                // regardless of whether the upstream is direct TCP or tunnelled via an agent.
-                // The provisioning store is keyed on the association token's JTI, so a direct
-                // lookup by `claims.jti` is the primary path.
-                if is_rdp
-                    && let Some(credential_injection_kdc) =
-                        credential_injection.resolve_injection_kdc(&provisioning, claims.jti, token)?
-                {
+                if is_rdp && let Some(provisioned_connection) = provisioning.get(claims.jti) {
+                    let credential_injection = CredentialInjection::from_provisioned(
+                        claims.jti,
+                        provisioned_connection,
+                        selected_target.host(),
+                        conf.debug.enable_unstable && conf.debug.kerberos_credential_injection,
+                    )?;
+
+                    let credential_injection =
+                        credential_injection.maybe_register_synthetic_kdc(&synthetic_kdc_registry);
+
                     info!(
-                        jti = %credential_injection_kdc.jti(),
+                        jti = %credential_injection.jti(),
                         "RDP-TLS forwarding with credential injection"
                     );
 
@@ -169,21 +168,24 @@ where
                         agent_tunnel_handle.clone(),
                     );
 
-                    // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
-                    return crate::rdp_proxy::RdpProxy::builder()
+                    let credssp_session = crate::rdp_proxy::CredsspSession::builder()
                         .conf(conf)
                         .session_info(info)
                         .client_addr(client_addr)
-                        .client_stream(client_stream)
                         .server_addr(server_addr)
-                        .server_stream(server_stream)
+                        .credential_injection(credential_injection)
                         .sessions(sessions)
                         .subscriber_tx(subscriber_tx)
-                        .credential_injection_kdc(credential_injection_kdc)
-                        .client_stream_leftover_bytes(leftover_bytes)
                         .server_dns_name(selected_target.host().to_owned())
                         .disconnect_interest(disconnect_interest)
                         .kdc_connector(kdc_connector)
+                        .build();
+
+                    return crate::rdp_proxy::RdpProxy::builder()
+                        .session(credssp_session)
+                        .client_stream(client_stream)
+                        .server_stream(server_stream)
+                        .client_stream_leftover_bytes(leftover_bytes)
                         .build()
                         .run()
                         .await

@@ -268,7 +268,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .context("failed to initialize traffic audit manager")?;
 
     let provisioning = devolutions_gateway::provisioning::ProvisioningStore::new();
-    let credential_injection = devolutions_gateway::credential_injection_kdc::CredentialInjectionKdcService::new();
+    let synthetic_kdc_registry = devolutions_gateway::credential_injection::SyntheticKdcRegistry::new();
 
     let filesystem_monitor_config_cache = devolutions_gateway::api::monitoring::FilesystemConfigCache::new(
         config::get_data_dir().join("monitors_cache.json"),
@@ -317,7 +317,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         recordings: recording_manager_handle.clone(),
         job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
         provisioning: provisioning.clone(),
-        credential_injection: credential_injection.clone(),
+        synthetic_kdc_registry: synthetic_kdc_registry.clone(),
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
@@ -353,10 +353,6 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
     tasks.register(provisioning.cleanup_task());
-
-    tasks.register(devolutions_gateway::credential_injection_kdc::CleanupTask {
-        service: credential_injection,
-    });
 
     tasks.register(devolutions_log::LogDeleterTask::<GatewayLog>::new(
         conf.log_file.clone(),

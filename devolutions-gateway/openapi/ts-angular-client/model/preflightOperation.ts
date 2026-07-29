@@ -26,11 +26,11 @@ export interface PreflightOperation {
     proxy_credential?: AppCredential | null;
     target_credential?: AppCredential | null;
     /**
-     * Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\" and \"provision-credentials\" kinds.
+     * Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\", \"provision-credentials\" and \"provision-connection-options\" kinds.
      */
     time_to_live?: number | null;
     /**
-     * The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kinds.
+     * The token to be stored on the proxy-side.  Required for \"provision-token\", \"provision-credentials\" and \"provision-connection-options\" kinds.
      */
     token?: string | null;
 }
