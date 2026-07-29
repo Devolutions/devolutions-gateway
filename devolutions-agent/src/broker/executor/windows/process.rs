@@ -18,6 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 use crate::broker::executor::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, ProcessStartedCallback, tail_utf8};
 use crate::broker::operation_tracker::OperationTracker;
+use crate::broker::policy_security;
 
 /// Create a process under the given token and wait for exit.
 ///
@@ -34,6 +35,7 @@ pub(super) fn create_process(
     command: &[String],
     session_id: u32,
     capture: bool,
+    requires_elevation: bool,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
     let cmd_line = CommandLine::new(command.to_vec());
@@ -48,7 +50,7 @@ pub(super) fn create_process(
     let user_env = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
 
     let exe_name = command.first().context("empty command")?;
-    let resolved_exe = resolve_executable(exe_name, &user_env)?;
+    let resolved_exe = resolve_executable(exe_name, &user_env, requires_elevation)?;
 
     info!(
         exe = %resolved_exe.display(),
@@ -206,12 +208,24 @@ pub(super) fn create_process(
 ///
 /// Handles both absolute paths and bare names (e.g., `winget.exe`).
 /// Appends `.exe` if no extension is present and the file is not found as-is.
-fn resolve_executable(exe_name: &str, env: &std::collections::HashMap<String, String>) -> anyhow::Result<PathBuf> {
+///
+/// When `requires_elevation` is true (the command will run with an elevated or
+/// machine-scope token), the resolved executable must additionally be writable only by
+/// SYSTEM or the built-in Administrators group; otherwise a standard user could replace
+/// the binary (e.g. via a weakly-ACL'd `%ProgramData%` install root) and have the broker
+/// launch it with elevated privileges. This check is skipped for non-elevated executions,
+/// since per-user tool installs (pip venvs, `~/.cargo`, etc.) are not admin-owned.
+fn resolve_executable(
+    exe_name: &str,
+    env: &std::collections::HashMap<String, String>,
+    requires_elevation: bool,
+) -> anyhow::Result<PathBuf> {
     let exe_path = Path::new(exe_name);
 
     // If already an absolute path, just verify it exists.
     if exe_path.is_absolute() {
         if exe_path.exists() {
+            policy_security::verify_elevated_executable_security(exe_path, requires_elevation)?;
             return Ok(exe_path.to_owned());
         }
         bail!("executable not found at absolute path: {}", exe_path.display());
@@ -244,6 +258,7 @@ fn resolve_executable(exe_name: &str, env: &std::collections::HashMap<String, St
             let file_name = format!("{}{}", exe_name, ext);
             candidate.push(&file_name);
             if candidate.exists() && is_trusted_winget_path(&candidate, env) {
+                policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
                 return Ok(candidate);
             }
         }
@@ -279,4 +294,67 @@ fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<Stri
 
     candidate.starts_with(&format!("{program_files}\\windowsapps\\"))
         || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use win_api_wrappers::identity::sid::Sid;
+    use win_api_wrappers::security::acl::{
+        Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
+    };
+    use win_api_wrappers::str::U16CString;
+    use windows::Win32::Foundation::GENERIC_ALL;
+    use windows::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
+    use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
+
+    use super::*;
+
+    fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
+        ExplicitAccess {
+            access_permissions: permissions,
+            access_mode: GRANT_ACCESS,
+            inheritance: NO_INHERITANCE,
+            trustee: Trustee::Sid(sid),
+        }
+    }
+
+    fn make_everyone_writable(path: &Path) {
+        let everyone = Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID");
+        let dacl = InheritableAcl {
+            kind: InheritableAclKind::Protected,
+            acl: Acl::new()
+                .and_then(|acl| acl.set_entries(&[grant(GENERIC_ALL.0, everyone)]))
+                .expect("build ACL with Everyone full-control entry"),
+        };
+        let name = U16CString::from_os_str(path.as_os_str()).expect("no interior NUL in temp path");
+        set_named_security_info(&name, SE_FILE_OBJECT, None, None, Some(&dacl), None)
+            .expect("set everyone-writable DACL");
+    }
+
+    #[test]
+    fn elevated_execution_rejects_everyone_writable_absolute_executable() {
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        make_everyone_writable(temp.path());
+
+        let env = HashMap::new();
+        let error = resolve_executable(&temp.path().display().to_string(), &env, true)
+            .expect_err("an everyone-writable executable must be rejected when it will run with an elevated token");
+        assert!(
+            error.to_string().contains("elevated package-manager executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn non_elevated_execution_allows_everyone_writable_absolute_executable() {
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        make_everyone_writable(temp.path());
+
+        let env = HashMap::new();
+        let resolved = resolve_executable(&temp.path().display().to_string(), &env, false)
+            .expect("non-elevated executables are not subject to the admin-only-writable check");
+        assert_eq!(resolved, temp.path());
+    }
 }
