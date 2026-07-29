@@ -37,7 +37,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="UpdateRequestSchema" /> class.
         /// </summary>
         /// <param name="products">Map of product name to update information..</param>
-        public UpdateRequestSchema(Dictionary<string, UpdateProductInfo> products = default)
+        public UpdateRequestSchema(Dictionary<string, UpdateProductInfo> products = default(Dictionary<string, UpdateProductInfo>))
         {
             this.Products = products;
         }

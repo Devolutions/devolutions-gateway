@@ -44,7 +44,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
         /// <param name="id">This Gateway&#39;s unique ID.</param>
         /// <param name="varVersion">Gateway service version.</param>
-        public Identity(string hostname = default, Guid? id = default, string varVersion = default)
+        public Identity(string hostname = default(string), Guid? id = default(Guid?), string varVersion = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)

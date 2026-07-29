@@ -50,7 +50,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="contentType">contentType (required).</param>
         /// <param name="lifetime">The validity duration in seconds for the app token.  This value cannot exceed the configured maximum lifetime. If no value is provided, the configured maximum lifetime will be granted..</param>
         /// <param name="subject">The username used to request the app token. (required).</param>
-        public AppTokenSignRequest(AppTokenContentType contentType = default, long? lifetime = default, string subject = default)
+        public AppTokenSignRequest(AppTokenContentType contentType = default(AppTokenContentType), long? lifetime = default(long?), string subject = default(string))
         {
             this.ContentType = contentType;
             // to ensure "subject" is required (not null)

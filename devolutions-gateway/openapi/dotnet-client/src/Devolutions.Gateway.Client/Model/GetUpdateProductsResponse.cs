@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="manifestVersion">Version of the &#x60;update_status.json&#x60; format in &#x60;\&quot;major.minor\&quot;&#x60; form (e.g. &#x60;\&quot;1.1\&quot;&#x60;). (required).</param>
         /// <param name="products">Map of product name to API-specific product info..</param>
-        public GetUpdateProductsResponse(string manifestVersion = default, Dictionary<string, UpdateProductInfo> products = default)
+        public GetUpdateProductsResponse(string manifestVersion = default(string), Dictionary<string, UpdateProductInfo> products = default(Dictionary<string, UpdateProductInfo>))
         {
             // to ensure "manifestVersion" is required (not null)
             if (manifestVersion == null)

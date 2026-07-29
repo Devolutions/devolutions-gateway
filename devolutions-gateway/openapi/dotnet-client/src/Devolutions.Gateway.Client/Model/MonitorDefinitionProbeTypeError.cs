@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="id">The ID of the monitor definition in the client-provided config (required).</param>
         /// <param name="probe">The monitor type that was not supported (required).</param>
-        public MonitorDefinitionProbeTypeError(string id = default, string probe = default)
+        public MonitorDefinitionProbeTypeError(string id = default(string), string probe = default(string))
         {
             // to ensure "id" is required (not null)
             if (id == null)

@@ -9,8 +9,9 @@
  */
 
 
+export type ScanOriginDto = 'gateway';
+
 export const ScanOriginDto = {
-    Gateway: 'gateway'
-} as const;
-export type ScanOriginDto = typeof ScanOriginDto[keyof typeof ScanOriginDto];
+    Gateway: 'gateway' as ScanOriginDto
+};
 

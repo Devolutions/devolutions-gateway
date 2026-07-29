@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="AckRequest" /> class.
         /// </summary>
         /// <param name="ids">Array of event IDs to acknowledge (1-10000 items, ULID format) (required).</param>
-        public AckRequest(List<string> ids = default)
+        public AckRequest(List<string> ids = default(List<string>))
         {
             // to ensure "ids" is required (not null)
             if (ids == null)

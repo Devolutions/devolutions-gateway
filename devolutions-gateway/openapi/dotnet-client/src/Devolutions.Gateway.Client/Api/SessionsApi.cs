@@ -80,7 +80,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;SessionInfo&gt;</returns>
-        System.Threading.Tasks.Task<List<SessionInfo>> GetSessionsAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<List<SessionInfo>> GetSessionsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Lists running sessions
@@ -91,7 +91,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;SessionInfo&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<SessionInfo>>> GetSessionsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<List<SessionInfo>>> GetSessionsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Terminate forcefully a running session
         /// </summary>
@@ -102,7 +102,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Session / association ID of the session to terminate</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task TerminateSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task TerminateSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Terminate forcefully a running session
@@ -114,7 +114,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Session / association ID of the session to terminate</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> TerminateSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Object>> TerminateSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -388,7 +388,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;SessionInfo&gt;</returns>
-        public async System.Threading.Tasks.Task<List<SessionInfo>> GetSessionsAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<List<SessionInfo>> GetSessionsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<List<SessionInfo>> localVarResponse = await GetSessionsWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -400,7 +400,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;SessionInfo&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<SessionInfo>>> GetSessionsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<SessionInfo>>> GetSessionsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -503,7 +503,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Session / association ID of the session to terminate</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task TerminateSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task TerminateSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             await TerminateSessionWithHttpInfoAsync(id, cancellationToken).ConfigureAwait(false);
         }
@@ -515,7 +515,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Session / association ID of the session to terminate</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> TerminateSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> TerminateSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();

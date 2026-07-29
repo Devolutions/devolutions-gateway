@@ -55,7 +55,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="recordingPolicy">Recording Policy (required).</param>
         /// <param name="startTimestamp">Date this session was started (required).</param>
         /// <param name="timeToLive">Maximum session duration in minutes (0 is used for the infinite duration).</param>
-        public SessionInfo(string applicationProtocol = default, Guid associationId = default, ConnectionMode connectionMode = default, string destinationHost = default, bool filteringPolicy = default, bool recordingPolicy = default, DateTime startTimestamp = default, long? timeToLive = default)
+        public SessionInfo(string applicationProtocol = default(string), Guid associationId = default(Guid), ConnectionMode connectionMode = default(ConnectionMode), string destinationHost = default(string), bool filteringPolicy = default(bool), bool recordingPolicy = default(bool), DateTime startTimestamp = default(DateTime), long? timeToLive = default(long?))
         {
             // to ensure "applicationProtocol" is required (not null)
             if (applicationProtocol == null)

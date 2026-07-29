@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="token">Bearer token to use when making HTTP requests (required).</param>
         /// <param name="url">HTTP URL where notification messages are to be sent (required).</param>
-        public Subscriber(string token = default, string url = default)
+        public Subscriber(string token = default(string), string url = default(string))
         {
             // to ensure "token" is required (not null)
             if (token == null)

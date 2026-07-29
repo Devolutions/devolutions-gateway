@@ -46,7 +46,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="responseMessage">responseMessage.</param>
         /// <param name="responseSuccess">responseSuccess (required).</param>
         /// <param name="responseTime">Duration it took for the response to be received, in seconds.  On error, this value is set to f64::INFINITY. (required).</param>
-        public MonitorResult(string monitorId = default, DateTime requestStartTime = default, string responseMessage = default, bool responseSuccess = default, double responseTime = default)
+        public MonitorResult(string monitorId = default(string), DateTime requestStartTime = default(DateTime), string responseMessage = default(string), bool responseSuccess = default(bool), double responseTime = default(double))
         {
             // to ensure "monitorId" is required (not null)
             if (monitorId == null)

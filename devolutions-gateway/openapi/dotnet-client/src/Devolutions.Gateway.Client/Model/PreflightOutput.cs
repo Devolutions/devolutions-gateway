@@ -65,7 +65,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="resolvedHost">Hostname that was resolved.  Set for \&quot;resolved-host\&quot; kind..</param>
         /// <param name="runningSessionCount">Number of running sessions.  Set for \&quot;running-session-count\&quot; kind..</param>
         /// <param name="varVersion">Service version.  Set for \&quot;version\&quot; kind..</param>
-        public PreflightOutput(string agentVersion = default, string alertMessage = default, PreflightAlertStatus? alertStatus = default, PreflightOutputKind kind = default, Guid operationId = default, long? recordingStorageAvailableSpace = default, bool? recordingStorageIsWriteable = default, long? recordingStorageTotalSpace = default, List<string> resolvedAddresses = default, string resolvedHost = default, int? runningSessionCount = default, string varVersion = default)
+        public PreflightOutput(string agentVersion = default(string), string alertMessage = default(string), PreflightAlertStatus? alertStatus = default(PreflightAlertStatus?), PreflightOutputKind kind = default(PreflightOutputKind), Guid operationId = default(Guid), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), List<string> resolvedAddresses = default(List<string>), string resolvedHost = default(string), int? runningSessionCount = default(int?), string varVersion = default(string))
         {
             this.Kind = kind;
             this.OperationId = operationId;

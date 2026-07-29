@@ -49,7 +49,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="recordingStorageTotalSpace">The total space of the disk used to store recordings, in bytes.  Since v2024.1.6..</param>
         /// <param name="runningSessionCount">Number of running sessions. (required).</param>
         /// <param name="varVersion">Gateway service version. (required).</param>
-        public Heartbeat(string agentVersion = default, string hostname = default, Guid? id = default, long? recordingStorageAvailableSpace = default, bool? recordingStorageIsWriteable = default, long? recordingStorageTotalSpace = default, int runningSessionCount = default, string varVersion = default)
+        public Heartbeat(string agentVersion = default(string), string hostname = default(string), Guid? id = default(Guid?), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), int runningSessionCount = default(int), string varVersion = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)

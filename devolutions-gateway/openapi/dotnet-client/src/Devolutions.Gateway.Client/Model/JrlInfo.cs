@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="iat">JWT \&quot;Issued At\&quot; claim of JRL (required).</param>
         /// <param name="jti">Unique ID for current JRL (required).</param>
-        public JrlInfo(long iat = default, Guid jti = default)
+        public JrlInfo(long iat = default(long), Guid jti = default(Guid))
         {
             this.Iat = iat;
             this.Jti = jti;

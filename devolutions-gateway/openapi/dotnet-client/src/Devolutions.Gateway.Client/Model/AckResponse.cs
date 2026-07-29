@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="AckResponse" /> class.
         /// </summary>
         /// <param name="deletedCount">Number of events that were acknowledged and deleted (required).</param>
-        public AckResponse(long deletedCount = default)
+        public AckResponse(long deletedCount = default(long))
         {
             this.DeletedCount = deletedCount;
         }

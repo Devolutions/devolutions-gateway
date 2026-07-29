@@ -1,35 +1,34 @@
-# @devolutions/gateway-client@0.15.0
+## @devolutions/gateway-client@0.15.0
 
 Protocol-aware fine-grained relay server
 
 The version of the OpenAPI document: 2026.2.4
 
-## Building
+### Building
 
 To install the required dependencies and to build the typescript sources run:
-
-```console
+```
 npm install
 npm run build
 ```
 
-## Publishing
+### publishing
 
-First build the package then run `npm publish dist` (don't forget to specify the `dist` folder!)
+First build the package then run ```npm publish dist``` (don't forget to specify the `dist` folder!)
 
-## Consuming
+### consuming
 
 Navigate to the folder of your consuming project and run one of next commands.
 
 _published:_
 
-```console
+```
 npm install @devolutions/gateway-client@0.15.0 --save
 ```
 
 _without publishing (not recommended):_
 
-```console
+```
 npm install PATH_TO_GENERATED_PACKAGE/dist.tgz --save
 ```
 
@@ -38,126 +37,173 @@ _It's important to take the tgz file, otherwise you'll get trouble with links on
 _using `npm link`:_
 
 In PATH_TO_GENERATED_PACKAGE/dist:
-
-```console
+```
 npm link
 ```
 
 In your project:
-
-```console
+```
 npm link @devolutions/gateway-client
 ```
 
 __Note for Windows users:__ The Angular CLI has troubles to use linked npm packages.
-Please refer to this issue <https://github.com/angular/angular-cli/issues/8284> for a solution / workaround.
+Please refer to this issue https://github.com/angular/angular-cli/issues/8284 for a solution / workaround.
 Published packages are not effected by this issue.
 
-### General usage
+
+#### General usage
 
 In your Angular project:
 
-```typescript
 
-import { ApplicationConfig } from '@angular/core';
-import { provideHttpClient } from '@angular/common/http';
-import { provideApi } from '@devolutions/gateway-client';
-
-export const appConfig: ApplicationConfig = {
-    providers: [
-        // ...
-        provideHttpClient(),
-        provideApi()
-    ],
-};
 ```
-
-**NOTE**
-If you're still using `AppModule` and haven't [migrated](https://angular.dev/reference/migrations/standalone) yet, you can still import an Angular module:
-```typescript
+// without configuring providers
 import { ApiModule } from '@devolutions/gateway-client';
-```
+import { HttpClientModule } from '@angular/common/http';
 
-If different from the generated base path, during app bootstrap, you can provide the base path to your service.
-
-```typescript
-import { ApplicationConfig } from '@angular/core';
-import { provideHttpClient } from '@angular/common/http';
-import { provideApi } from '@devolutions/gateway-client';
-
-export const appConfig: ApplicationConfig = {
-    providers: [
-        // ...
-        provideHttpClient(),
-        provideApi('http://localhost:9999')
+@NgModule({
+    imports: [
+        ApiModule,
+        // make sure to import the HttpClientModule in the AppModule only,
+        // see https://github.com/angular/angular/issues/20575
+        HttpClientModule
     ],
-};
+    declarations: [ AppComponent ],
+    providers: [],
+    bootstrap: [ AppComponent ]
+})
+export class AppModule {}
 ```
 
-```typescript
-// with a custom configuration
-import { ApplicationConfig } from '@angular/core';
-import { provideHttpClient } from '@angular/common/http';
-import { provideApi } from '@devolutions/gateway-client';
+```
+// configuring providers
+import { ApiModule, Configuration, ConfigurationParameters } from '@devolutions/gateway-client';
 
-export const appConfig: ApplicationConfig = {
+export function apiConfigFactory (): Configuration {
+  const params: ConfigurationParameters = {
+    // set configuration parameters here.
+  }
+  return new Configuration(params);
+}
+
+@NgModule({
+    imports: [ ApiModule.forRoot(apiConfigFactory) ],
+    declarations: [ AppComponent ],
+    providers: [],
+    bootstrap: [ AppComponent ]
+})
+export class AppModule {}
+```
+
+```
+// configuring providers with an authentication service that manages your access tokens
+import { ApiModule, Configuration } from '@devolutions/gateway-client';
+
+@NgModule({
+    imports: [ ApiModule ],
+    declarations: [ AppComponent ],
     providers: [
-        // ...
-        provideHttpClient(),
-        provideApi({
-            withCredentials: true,
-            username: 'user',
-            password: 'password'
-        })
+      {
+        provide: Configuration,
+        useFactory: (authService: AuthService) => new Configuration(
+          {
+            basePath: environment.apiUrl,
+            accessToken: authService.getAccessToken.bind(authService)
+          }
+        ),
+        deps: [AuthService],
+        multi: false
+      }
     ],
-};
+    bootstrap: [ AppComponent ]
+})
+export class AppModule {}
 ```
 
-```typescript
-// with factory building a custom configuration
-import { ApplicationConfig } from '@angular/core';
-import { provideHttpClient } from '@angular/common/http';
-import { provideApi, Configuration } from '@devolutions/gateway-client';
+```
+import { DefaultApi } from '@devolutions/gateway-client';
 
-export const appConfig: ApplicationConfig = {
-    providers: [
-        // ...
-        provideHttpClient(),
-        {
-            provide: Configuration,
-            useFactory: (authService: AuthService) => new Configuration({
-                    basePath: 'http://localhost:9999',
-                    withCredentials: true,
-                    username: authService.getUsername(),
-                    password: authService.getPassword(),
-            }),
-            deps: [AuthService],
-            multi: false
-        }
-    ],
-};
+export class AppComponent {
+    constructor(private apiGateway: DefaultApi) { }
+}
 ```
 
-### Using multiple OpenAPI files / APIs
+Note: The ApiModule is restricted to being instantiated once app wide.
+This is to ensure that all services are treated as singletons.
 
-In order to use multiple APIs generated from different OpenAPI files,
+#### Using multiple OpenAPI files / APIs / ApiModules
+In order to use multiple `ApiModules` generated from different OpenAPI files,
 you can create an alias name when importing the modules
 in order to avoid naming conflicts:
-
-```typescript
-import { provideApi as provideUserApi } from 'my-user-api-path';
-import { provideApi as provideAdminApi } from 'my-admin-api-path';
+```
+import { ApiModule } from 'my-api-path';
+import { ApiModule as OtherApiModule } from 'my-other-api-path';
 import { HttpClientModule } from '@angular/common/http';
+
+@NgModule({
+  imports: [
+    ApiModule,
+    OtherApiModule,
+    // make sure to import the HttpClientModule in the AppModule only,
+    // see https://github.com/angular/angular/issues/20575
+    HttpClientModule
+  ]
+})
+export class AppModule {
+
+}
+```
+
+
+### Set service base path
+If different than the generated base path, during app bootstrap, you can provide the base path to your service.
+
+```
+import { BASE_PATH } from '@devolutions/gateway-client';
+
+bootstrap(AppComponent, [
+    { provide: BASE_PATH, useValue: 'https://your-web-service.com' },
+]);
+```
+or
+
+```
+import { BASE_PATH } from '@devolutions/gateway-client';
+
+@NgModule({
+    imports: [],
+    declarations: [ AppComponent ],
+    providers: [ provide: BASE_PATH, useValue: 'https://your-web-service.com' ],
+    bootstrap: [ AppComponent ]
+})
+export class AppModule {}
+```
+
+
+#### Using @angular/cli
+First extend your `src/environments/*.ts` files by adding the corresponding base path:
+
+```
+export const environment = {
+  production: false,
+  API_BASE_PATH: 'http://127.0.0.1:8080'
+};
+```
+
+In the src/app/app.module.ts:
+```
+import { BASE_PATH } from '@devolutions/gateway-client';
 import { environment } from '../environments/environment';
 
-export const appConfig: ApplicationConfig = {
-    providers: [
-        // ...
-        provideHttpClient(),
-        provideUserApi(environment.basePath),
-        provideAdminApi(environment.basePath),
-    ],
-};
+@NgModule({
+  declarations: [
+    AppComponent
+  ],
+  imports: [ ],
+  providers: [{ provide: BASE_PATH, useValue: environment.API_BASE_PATH }],
+  bootstrap: [ AppComponent ]
+})
+export class AppModule { }
 ```
 
 ### Customizing path parameter encoding
@@ -173,7 +219,6 @@ pass an arrow-function or method-reference to the `encodeParam` property of the 
 (see [General Usage](#general-usage) above).
 
 Example value for use in your Configuration-Provider:
-
 ```typescript
 new Configuration({
     encodeParam: (param: Param) => myFancyParamEncoder(param),

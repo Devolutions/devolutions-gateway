@@ -83,7 +83,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="appTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        System.Threading.Tasks.Task<string> SignAppTokenAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<string> SignAppTokenAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Requests a web application token using the configured authorization method
@@ -95,7 +95,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="appTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        System.Threading.Tasks.Task<ApiResponse<string>> SignAppTokenWithHttpInfoAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<string>> SignAppTokenWithHttpInfoAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Requests a session token using a web application token
         /// </summary>
@@ -106,7 +106,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="sessionTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        System.Threading.Tasks.Task<string> SignSessionTokenAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<string> SignSessionTokenAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Requests a session token using a web application token
@@ -118,7 +118,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="sessionTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        System.Threading.Tasks.Task<ApiResponse<string>> SignSessionTokenWithHttpInfoAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<string>> SignSessionTokenWithHttpInfoAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -401,7 +401,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="appTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        public async System.Threading.Tasks.Task<string> SignAppTokenAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<string> SignAppTokenAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<string> localVarResponse = await SignAppTokenWithHttpInfoAsync(appTokenSignRequest, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -414,7 +414,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="appTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> SignAppTokenWithHttpInfoAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> SignAppTokenWithHttpInfoAsync(AppTokenSignRequest appTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'appTokenSignRequest' is set
             if (appTokenSignRequest == null)
@@ -530,7 +530,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="sessionTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of string</returns>
-        public async System.Threading.Tasks.Task<string> SignSessionTokenAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<string> SignSessionTokenAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<string> localVarResponse = await SignSessionTokenWithHttpInfoAsync(sessionTokenSignRequest, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -543,7 +543,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="sessionTokenSignRequest">JSON-encoded payload specifying the desired claims</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (string)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> SignSessionTokenWithHttpInfoAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<string>> SignSessionTokenWithHttpInfoAsync(SessionTokenSignRequest sessionTokenSignRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'sessionTokenSignRequest' is set
             if (sessionTokenSignRequest == null)

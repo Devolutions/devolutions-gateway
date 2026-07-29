@@ -9,9 +9,10 @@
  */
 
 
+export type AddressFamily = 'IPv4' | 'IPv6';
+
 export const AddressFamily = {
-    Ipv4: 'IPv4',
-    Ipv6: 'IPv6'
-} as const;
-export type AddressFamily = typeof AddressFamily[keyof typeof AddressFamily];
+    Ipv4: 'IPv4' as AddressFamily,
+    Ipv6: 'IPv6' as AddressFamily
+};
 

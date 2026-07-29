@@ -9,9 +9,10 @@
  */
 
 
+export type TransportProtocolResponse = 'tcp' | 'udp';
+
 export const TransportProtocolResponse = {
-    Tcp: 'tcp',
-    Udp: 'udp'
-} as const;
-export type TransportProtocolResponse = typeof TransportProtocolResponse[keyof typeof TransportProtocolResponse];
+    Tcp: 'tcp' as TransportProtocolResponse,
+    Udp: 'udp' as TransportProtocolResponse
+};
 

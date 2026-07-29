@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="MonitoringProbeTypeOneOf" /> class.
         /// </summary>
         /// <param name="unknown">unknown (required).</param>
-        public MonitoringProbeTypeOneOf(string unknown = default)
+        public MonitoringProbeTypeOneOf(string unknown = default(string))
         {
             // to ensure "unknown" is required (not null)
             if (unknown == null)

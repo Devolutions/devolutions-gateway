@@ -57,7 +57,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="format">format.</param>
         /// <param name="id">The key ID for this subkey (required).</param>
         /// <param name="value">The binary-to-text-encoded key data (required).</param>
-        public SubProvisionerKey(DataEncoding? encoding = default, PubKeyFormat? format = default, string id = default, string value = default)
+        public SubProvisionerKey(DataEncoding? encoding = default(DataEncoding?), PubKeyFormat? format = default(PubKeyFormat?), string id = default(string), string value = default(string))
         {
             // to ensure "id" is required (not null)
             if (id == null)

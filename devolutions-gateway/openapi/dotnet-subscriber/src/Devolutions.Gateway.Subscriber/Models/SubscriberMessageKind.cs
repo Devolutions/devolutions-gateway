@@ -30,21 +30,21 @@ namespace Devolutions.Gateway.Subscriber.Models
         {
             
             /// <summary>
-            /// Enum SessionStarted for session.started
+            /// Enum Started for session.started
             /// </summary>
             [EnumMember(Value = "session.started")]
-            SessionStarted = 1,
+            Started = 1,
             
             /// <summary>
-            /// Enum SessionEnded for session.ended
+            /// Enum Ended for session.ended
             /// </summary>
             [EnumMember(Value = "session.ended")]
-            SessionEnded = 2,
+            Ended = 2,
             
             /// <summary>
-            /// Enum SessionList for session.list
+            /// Enum List for session.list
             /// </summary>
             [EnumMember(Value = "session.list")]
-            SessionList = 3
+            List = 3
         }
 }

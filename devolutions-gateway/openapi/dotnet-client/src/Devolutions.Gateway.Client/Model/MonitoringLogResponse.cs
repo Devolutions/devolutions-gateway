@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="MonitoringLogResponse" /> class.
         /// </summary>
         /// <param name="entries">entries (required).</param>
-        public MonitoringLogResponse(List<MonitorResult> entries = default)
+        public MonitoringLogResponse(List<MonitorResult> entries = default(List<MonitorResult>))
         {
             // to ensure "entries" is required (not null)
             if (entries == null)

@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Initializes a new instance of the <see cref="NetworkInterfacesResponse" /> class.
         /// </summary>
         /// <param name="interfaces">interfaces (required).</param>
-        public NetworkInterfacesResponse(List<NetworkScanSourceDto> interfaces = default)
+        public NetworkInterfacesResponse(List<NetworkScanSourceDto> interfaces = default(List<NetworkScanSourceDto>))
         {
             // to ensure "interfaces" is required (not null)
             if (interfaces == null)

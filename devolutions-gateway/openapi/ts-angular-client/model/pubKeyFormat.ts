@@ -9,9 +9,10 @@
  */
 
 
+export type PubKeyFormat = 'Spki' | 'Pkcs1';
+
 export const PubKeyFormat = {
-    Spki: 'Spki',
-    Pkcs1: 'Pkcs1'
-} as const;
-export type PubKeyFormat = typeof PubKeyFormat[keyof typeof PubKeyFormat];
+    Spki: 'Spki' as PubKeyFormat,
+    Pkcs1: 'Pkcs1' as PubKeyFormat
+};
 

@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="externalUrl">URL to use from external networks (required).</param>
         /// <param name="internalUrl">URL to use on local network (required).</param>
-        public ListenerUrls(string externalUrl = default, string internalUrl = default)
+        public ListenerUrls(string externalUrl = default(string), string internalUrl = default(string))
         {
             // to ensure "externalUrl" is required (not null)
             if (externalUrl == null)

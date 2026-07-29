@@ -11,10 +11,10 @@
 
 import { Inject, Injectable, Optional }                      from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams,
-         HttpResponse, HttpEvent, HttpContext 
+         HttpResponse, HttpEvent, HttpParameterCodec, HttpContext 
         }       from '@angular/common/http';
+import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
-import { OpenApiHttpParams, QueryParamStyle } from '../query.params';
 
 // @ts-ignore
 import { GetUpdateProductsResponse } from '../model/getUpdateProductsResponse';
@@ -28,26 +28,79 @@ import { UpdateRequestSchema } from '../model/updateRequestSchema';
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS }                     from '../variables';
 import { Configuration }                                     from '../configuration';
-import { BaseService } from '../api.base.service';
 
 
 
 @Injectable({
   providedIn: 'root'
 })
-export class UpdateService extends BaseService {
+export class UpdateService {
 
-    constructor(protected httpClient: HttpClient, @Optional() @Inject(BASE_PATH) basePath: string|string[], @Optional() configuration?: Configuration) {
-        super(basePath, configuration);
+    protected basePath = 'http://localhost';
+    public defaultHeaders = new HttpHeaders();
+    public configuration = new Configuration();
+    public encoder: HttpParameterCodec;
+
+    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string|string[], @Optional() configuration: Configuration) {
+        if (configuration) {
+            this.configuration = configuration;
+        }
+        if (typeof this.configuration.basePath !== 'string') {
+            const firstBasePath = Array.isArray(basePath) ? basePath[0] : undefined;
+            if (firstBasePath != undefined) {
+                basePath = firstBasePath;
+            }
+
+            if (typeof basePath !== 'string') {
+                basePath = this.basePath;
+            }
+            this.configuration.basePath = basePath;
+        }
+        this.encoder = this.configuration.encoder || new CustomHttpParameterCodec();
+    }
+
+
+    // @ts-ignore
+    private addToHttpParams(httpParams: HttpParams, value: any, key?: string): HttpParams {
+        if (typeof value === "object" && value instanceof Date === false) {
+            httpParams = this.addToHttpParamsRecursive(httpParams, value);
+        } else {
+            httpParams = this.addToHttpParamsRecursive(httpParams, value, key);
+        }
+        return httpParams;
+    }
+
+    private addToHttpParamsRecursive(httpParams: HttpParams, value?: any, key?: string): HttpParams {
+        if (value == null) {
+            return httpParams;
+        }
+
+        if (typeof value === "object") {
+            if (Array.isArray(value)) {
+                (value as any[]).forEach( elem => httpParams = this.addToHttpParamsRecursive(httpParams, elem, key));
+            } else if (value instanceof Date) {
+                if (key != null) {
+                    httpParams = httpParams.append(key, (value as Date).toISOString().substring(0, 10));
+                } else {
+                   throw Error("key may not be null if value is Date");
+                }
+            } else {
+                Object.keys(value).forEach( k => httpParams = this.addToHttpParamsRecursive(
+                    httpParams, value[k], key != null ? `${key}.${k}` : k));
+            }
+        } else if (key != null) {
+            httpParams = httpParams.append(key, value);
+        } else {
+            throw Error("key may not be null if value is not object or array");
+        }
+        return httpParams;
     }
 
     /**
      * Retrieve the currently installed version of each Devolutions product.
      * Reads &#x60;update_status.json&#x60;, which is written by the Devolutions Agent on startup and refreshed after every update run.  When the file does not exist (agent not installed or is an older version), the endpoint returns HTTP 503 because updater status is unavailable.
-     * @endpoint get /jet/update
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
-     * @param options additional options
      */
     public getUpdateProducts(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<GetUpdateProductsResponse>;
     public getUpdateProducts(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<GetUpdateProductsResponse>>;
@@ -56,19 +109,34 @@ export class UpdateService extends BaseService {
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
         // authentication (scope_token) required
-        localVarHeaders = this.configuration.addCredentialToHeaders('scope_token', 'Authorization', localVarHeaders, 'Bearer ');
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
 
-        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
-            'application/json'
-        ]);
+        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
+        if (localVarHttpHeaderAcceptSelected === undefined) {
+            // to determine the Accept header
+            const httpHeaderAccepts: string[] = [
+                'application/json'
+            ];
+            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
+        }
         if (localVarHttpHeaderAcceptSelected !== undefined) {
             localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
         }
 
-        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+        let localVarHttpContext: HttpContext | undefined = options && options.context;
+        if (localVarHttpContext === undefined) {
+            localVarHttpContext = new HttpContext();
+        }
 
-        const localVarTransferCache: boolean = options?.transferCache ?? true;
+        let localVarTransferCache: boolean | undefined = options && options.transferCache;
+        if (localVarTransferCache === undefined) {
+            localVarTransferCache = true;
+        }
 
 
         let responseType_: 'text' | 'json' | 'blob' = 'json';
@@ -83,15 +151,14 @@ export class UpdateService extends BaseService {
         }
 
         let localVarPath = `/jet/update`;
-        const { basePath, withCredentials } = this.configuration;
-        return this.httpClient.request<GetUpdateProductsResponse>('get', `${basePath}${localVarPath}`,
+        return this.httpClient.request<GetUpdateProductsResponse>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
-                ...(withCredentials ? { withCredentials } : {}),
+                withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,
                 observe: observe,
-                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                transferCache: localVarTransferCache,
                 reportProgress: reportProgress
             }
         );
@@ -100,10 +167,8 @@ export class UpdateService extends BaseService {
     /**
      * Retrieve the current Devolutions Agent auto-update schedule.
      * Reads the &#x60;Schedule&#x60; field from &#x60;update_status.json&#x60;.  When the field is absent the response contains zeroed defaults (&#x60;Enabled: false&#x60;, interval &#x60;0&#x60;, window start &#x60;0&#x60;, no products).
-     * @endpoint get /jet/update/schedule
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
-     * @param options additional options
      */
     public getUpdateSchedule(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<GetUpdateScheduleResponse>;
     public getUpdateSchedule(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<GetUpdateScheduleResponse>>;
@@ -112,19 +177,34 @@ export class UpdateService extends BaseService {
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
         // authentication (scope_token) required
-        localVarHeaders = this.configuration.addCredentialToHeaders('scope_token', 'Authorization', localVarHeaders, 'Bearer ');
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
 
-        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
-            'application/json'
-        ]);
+        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
+        if (localVarHttpHeaderAcceptSelected === undefined) {
+            // to determine the Accept header
+            const httpHeaderAccepts: string[] = [
+                'application/json'
+            ];
+            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
+        }
         if (localVarHttpHeaderAcceptSelected !== undefined) {
             localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
         }
 
-        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+        let localVarHttpContext: HttpContext | undefined = options && options.context;
+        if (localVarHttpContext === undefined) {
+            localVarHttpContext = new HttpContext();
+        }
 
-        const localVarTransferCache: boolean = options?.transferCache ?? true;
+        let localVarTransferCache: boolean | undefined = options && options.transferCache;
+        if (localVarTransferCache === undefined) {
+            localVarTransferCache = true;
+        }
 
 
         let responseType_: 'text' | 'json' | 'blob' = 'json';
@@ -139,15 +219,14 @@ export class UpdateService extends BaseService {
         }
 
         let localVarPath = `/jet/update/schedule`;
-        const { basePath, withCredentials } = this.configuration;
-        return this.httpClient.request<GetUpdateScheduleResponse>('get', `${basePath}${localVarPath}`,
+        return this.httpClient.request<GetUpdateScheduleResponse>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
-                ...(withCredentials ? { withCredentials } : {}),
+                withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,
                 observe: observe,
-                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                transferCache: localVarTransferCache,
                 reportProgress: reportProgress
             }
         );
@@ -156,11 +235,9 @@ export class UpdateService extends BaseService {
     /**
      * Set the Devolutions Agent auto-update schedule.
      * Writes the &#x60;Schedule&#x60; field into &#x60;update.json&#x60;.  The agent watches this file and applies the new schedule immediately, then persists it to &#x60;agent.json&#x60;.  All other fields in &#x60;update.json&#x60; are preserved; the &#x60;VersionMinor&#x60; field is reset to the minor version this gateway build understands so the agent does not see an unknown future version.
-     * @endpoint post /jet/update/schedule
      * @param setUpdateScheduleRequest 
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
-     * @param options additional options
      */
     public setUpdateSchedule(setUpdateScheduleRequest: SetUpdateScheduleRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<object>;
     public setUpdateSchedule(setUpdateScheduleRequest: SetUpdateScheduleRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<object>>;
@@ -172,19 +249,34 @@ export class UpdateService extends BaseService {
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
         // authentication (scope_token) required
-        localVarHeaders = this.configuration.addCredentialToHeaders('scope_token', 'Authorization', localVarHeaders, 'Bearer ');
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
 
-        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
-            'application/json'
-        ]);
+        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
+        if (localVarHttpHeaderAcceptSelected === undefined) {
+            // to determine the Accept header
+            const httpHeaderAccepts: string[] = [
+                'application/json'
+            ];
+            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
+        }
         if (localVarHttpHeaderAcceptSelected !== undefined) {
             localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
         }
 
-        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+        let localVarHttpContext: HttpContext | undefined = options && options.context;
+        if (localVarHttpContext === undefined) {
+            localVarHttpContext = new HttpContext();
+        }
 
-        const localVarTransferCache: boolean = options?.transferCache ?? true;
+        let localVarTransferCache: boolean | undefined = options && options.transferCache;
+        if (localVarTransferCache === undefined) {
+            localVarTransferCache = true;
+        }
 
 
         // to determine the Content-Type header
@@ -208,16 +300,15 @@ export class UpdateService extends BaseService {
         }
 
         let localVarPath = `/jet/update/schedule`;
-        const { basePath, withCredentials } = this.configuration;
-        return this.httpClient.request<object>('post', `${basePath}${localVarPath}`,
+        return this.httpClient.request<object>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 body: setUpdateScheduleRequest,
                 responseType: <any>responseType_,
-                ...(withCredentials ? { withCredentials } : {}),
+                withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,
                 observe: observe,
-                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                transferCache: localVarTransferCache,
                 reportProgress: reportProgress
             }
         );
@@ -226,44 +317,52 @@ export class UpdateService extends BaseService {
     /**
      * Trigger an update for one or more Devolutions products.
      * Writes the requested version(s) into &#x60;Agent/update.json&#x60;, which is watched by Devolutions Agent. When a requested version is higher than the installed version the agent proceeds with the update.  **Body form** (preferred): pass a JSON body with a &#x60;Products&#x60; map.  **Query-param form** (legacy, gateway-only): &#x60;POST /jet/update?version&#x3D;latest&#x60;. This form updates only the Gateway product and is kept for backward compatibility.  Both forms cannot be used simultaneously; doing so returns HTTP 400.
-     * @endpoint post /jet/update
      * @param version Gateway-only target version; use the request body for multi-product updates
      * @param updateRequestSchema Products and target versions to update
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
-     * @param options additional options
      */
     public triggerUpdate(version?: string, updateRequestSchema?: UpdateRequestSchema, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<object>;
     public triggerUpdate(version?: string, updateRequestSchema?: UpdateRequestSchema, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<object>>;
     public triggerUpdate(version?: string, updateRequestSchema?: UpdateRequestSchema, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<object>>;
     public triggerUpdate(version?: string, updateRequestSchema?: UpdateRequestSchema, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
 
-        let localVarQueryParameters = new OpenApiHttpParams(this.encoder);
-
-        localVarQueryParameters = this.addToHttpParams(
-            localVarQueryParameters,
-            'version',
-            <any>version,
-            QueryParamStyle.Form,
-            true,
-        );
-
+        let localVarQueryParameters = new HttpParams({encoder: this.encoder});
+        if (version !== undefined && version !== null) {
+          localVarQueryParameters = this.addToHttpParams(localVarQueryParameters,
+            <any>version, 'version');
+        }
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
         // authentication (scope_token) required
-        localVarHeaders = this.configuration.addCredentialToHeaders('scope_token', 'Authorization', localVarHeaders, 'Bearer ');
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
 
-        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
-            'application/json'
-        ]);
+        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
+        if (localVarHttpHeaderAcceptSelected === undefined) {
+            // to determine the Accept header
+            const httpHeaderAccepts: string[] = [
+                'application/json'
+            ];
+            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
+        }
         if (localVarHttpHeaderAcceptSelected !== undefined) {
             localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
         }
 
-        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+        let localVarHttpContext: HttpContext | undefined = options && options.context;
+        if (localVarHttpContext === undefined) {
+            localVarHttpContext = new HttpContext();
+        }
 
-        const localVarTransferCache: boolean = options?.transferCache ?? true;
+        let localVarTransferCache: boolean | undefined = options && options.transferCache;
+        if (localVarTransferCache === undefined) {
+            localVarTransferCache = true;
+        }
 
 
         // to determine the Content-Type header
@@ -287,17 +386,16 @@ export class UpdateService extends BaseService {
         }
 
         let localVarPath = `/jet/update`;
-        const { basePath, withCredentials } = this.configuration;
-        return this.httpClient.request<object>('post', `${basePath}${localVarPath}`,
+        return this.httpClient.request<object>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 body: updateRequestSchema,
-                params: localVarQueryParameters.toHttpParams(),
+                params: localVarQueryParameters,
                 responseType: <any>responseType_,
-                ...(withCredentials ? { withCredentials } : {}),
+                withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,
                 observe: observe,
-                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                transferCache: localVarTransferCache,
                 reportProgress: reportProgress
             }
         );

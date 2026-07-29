@@ -65,7 +65,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="preflightOperation"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;PreflightOutput&gt;</returns>
-        System.Threading.Tasks.Task<List<PreflightOutput>> PostPreflightAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<List<PreflightOutput>> PostPreflightAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Performs a batch of preflight operations
@@ -77,7 +77,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="preflightOperation"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;PreflightOutput&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<PreflightOutput>>> PostPreflightWithHttpInfoAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<List<PreflightOutput>>> PostPreflightWithHttpInfoAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -360,7 +360,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="preflightOperation"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;PreflightOutput&gt;</returns>
-        public async System.Threading.Tasks.Task<List<PreflightOutput>> PostPreflightAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<List<PreflightOutput>> PostPreflightAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<List<PreflightOutput>> localVarResponse = await PostPreflightWithHttpInfoAsync(preflightOperation, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -373,7 +373,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="preflightOperation"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;PreflightOutput&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<PreflightOutput>>> PostPreflightWithHttpInfoAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<PreflightOutput>>> PostPreflightWithHttpInfoAsync(List<PreflightOperation> preflightOperation, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'preflightOperation' is set
             if (preflightOperation == null)

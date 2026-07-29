@@ -50,7 +50,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="mtu">MTU in bytes when known..</param>
         /// <param name="name">name (required).</param>
         /// <param name="speedMbps">Link speed in megabits per second when reported by the OS..</param>
-        public NetworkInterfaceDto(string description = default, string id = default, int? index = default, bool? isUp = default, string linkType = default, string macAddress = default, int? mtu = default, string name = default, long? speedMbps = default)
+        public NetworkInterfaceDto(string description = default(string), string id = default(string), int? index = default(int?), bool? isUp = default(bool?), string linkType = default(string), string macAddress = default(string), int? mtu = default(int?), string name = default(string), long? speedMbps = default(long?))
         {
             // to ensure "id" is required (not null)
             if (id == null)

@@ -102,7 +102,9 @@ Modifies configuration
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -562,7 +564,9 @@ If you try to delete more than 50,000 recordings at once, you should split the l
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -665,7 +669,9 @@ Deletes a recording stored on this instance
 | X
 | null
 | 
+
 |===
+
 
 
 
@@ -771,7 +777,9 @@ Lists all recordings stored on this instance
 | X
 | null
 | 
+
 |===
+
 
 ===== Return Type
 
@@ -862,12 +870,15 @@ Retrieves a recording file for a given session
 | X
 | null
 | 
+
 | filename
 | Name of recording file to retrieve 
 | X
 | null
 | 
+
 |===
+
 
 
 
@@ -1302,162 +1313,195 @@ The endpoint is upgraded from HTTP, so OpenAPI describes the **handshake**: the 
 | -
 | null
 | 
+
 | ping_timeout
 | Timeout in milliseconds (default is 500) 
 | -
 | null
 | 
+
 | broadcast_timeout
 | Timeout in milliseconds (default is 1000) 
 | -
 | null
 | 
+
 | port_scan_timeout
 | Timeout in milliseconds (default is 1000) 
 | -
 | null
 | 
+
 | netbios_timeout
 | Timeout in milliseconds (default is 1000) 
 | -
 | null
 | 
+
 | netbios_interval
 | Interval in milliseconds (default is 200) 
 | -
 | null
 | 
+
 | mdns_query_timeout
 | The maximum time for each mdns query in milliseconds. (default is 5 * 1000) 
 | -
 | null
 | 
+
 | max_wait
 | The maximum duration for whole networking scan in milliseconds. Highly suggested! 
 | -
 | null
 | 
+
 | range
 | The start and end IP address of the range to scan. for example: 10.10.0.0-10.10.0.255 <<String>>
 | -
 | null
 | 
+
 | target
 | Explicit single-host targets to scan. Each value must parse as an IPv4 or IPv6 address; invalid values yield a structured `{ error: \"invalid_target\", value: \"<raw>\" }` 400 rather than a generic serde rejection at extraction time (mirrors the `range=` / `probe=` validation path). <<String>>
 | -
 | null
 | 
+
 | interface_id
 | Gateway network interface IDs to use as scan sources. <<String>>
 | -
 | null
 | 
+
 | probe
-| The probes to run. Each value is either `ping`, a port number (`22`), or a named service (`rdp`, `https`, ΓÇª). Validation is deferred to scan-time so failures can be surfaced as a structured 400 ΓÇö naming the offending value ΓÇö instead of a generic serde rejection at extraction time. <<String>>
+| The probes to run. Each value is either `ping`, a port number (`22`), or a named service (`rdp`, `https`, …). Validation is deferred to scan-time so failures can be surfaced as a structured 400 — naming the offending value — instead of a generic serde rejection at extraction time. <<String>>
 | -
 | null
 | 
+
 | enable_ping_start
 | **Legacy alias** for `report_ping_start`. Prefer the explicit name in new clients; kept so existing consumers don't break. 
 | -
 | null
 | 
+
 | enable_broadcast
 | Enable the execution of broadcast scan 
 | -
 | null
 | 
+
 | enable_subnet_scan
 | Enable the ping scan on subnet 
 | -
 | null
 | 
+
 | enable_zeroconf
 | Enable ZeroConf/mDNS 
 | -
 | null
 | 
+
 | enable_netbios
 | Enable NetBIOS name-service queries. Default `true` for backward compatibility. Set `false` (or pair with explicit `target=`) to keep NetBIOS from sweeping the surrounding subnet when the caller only wants results for the targets they listed. 
 | -
 | null
 | 
+
 | enable_resolve_dns
 | Enable resolve dns 
 | -
 | null
 | 
+
 | include_host_results
 | Include host-only results. 
 | -
 | null
 | 
+
 | report_ping_start
 | Emit ping queued/start host results. 
 | -
 | null
 | 
+
 | report_ping_success
 | Emit ping success host results. 
 | -
 | null
 | 
+
 | report_ping_failure
 | Emit ping failure host results. 
 | -
 | null
 | 
+
 | enable_tcp_probes
 | Enable TCP service probes. 
 | -
 | null
 | 
+
 | range_interface_policy
 | Policy applied when `range=` and `interface_id=` are both provided. Accepted values: `intersect_selected_interfaces` (default) or `allow_cross_interface_range`. Invalid values yield a structured `{ error: \"invalid_range_interface_policy\", value: \"<raw>\" }` 400 instead of a generic serde rejection (mirrors the `range=` / `probe=` / `target=` validation path). 
 | -
 | null
 | 
+
 | allow_cross_interface_range
 | **Legacy alias** for `range_interface_policy=allow_cross_interface_range`. Prefer the structured policy in new clients. 
 | -
 | null
 | 
+
 | response_format
 | Response shape emitted on the websocket. Accepted values: `legacy` (default) or `network_scan_result_v1`. Invalid values yield a structured `{ error: \"invalid_response_format\", value: \"<raw>\" }` 400 instead of a generic serde rejection. 
 | -
 | null
 | 
+
 | max_concurrency
 | Maximum scanner concurrency. 
 | -
 | null
 | 
+
 | max_ping_concurrency
 | Maximum ping probe concurrency. 
 | -
 | null
 | 
+
 | max_tcp_probe_concurrency
 | Maximum TCP probe concurrency. 
 | -
 | null
 | 
+
 | enable_failure
-| **Legacy alias** for `report_ping_failure`. `enable_failure=true` only opts into ping-failure events; TCP-probe failure events require the explicit `report_tcp_failure=true` and are not affected by this alias.  **Behavior change:** historically this single flag controlled both ping-failure and TCP-probe-failure reporting. The two are now split: clients that want the old \"both at once\" semantics must send `enable_failure=true&report_tcp_failure=true` together. The split is intentional ΓÇö TCP-probe failures are typically high-volume noise that callers were filtering client-side anyway, so the two streams are independently gated. 
+| **Legacy alias** for `report_ping_failure`. `enable_failure=true` only opts into ping-failure events; TCP-probe failure events require the explicit `report_tcp_failure=true` and are not affected by this alias.  **Behavior change:** historically this single flag controlled both ping-failure and TCP-probe-failure reporting. The two are now split: clients that want the old \"both at once\" semantics must send `enable_failure=true&report_tcp_failure=true` together. The split is intentional — TCP-probe failures are typically high-volume noise that callers were filtering client-side anyway, so the two streams are independently gated. 
 | -
 | null
 | 
+
 | report_tcp_failure
 | Enable TCP port knocking failure events. 
 | -
 | null
 | 
+
 | interface_bind_strict
 | When `true`, fail with HTTP 400 if a ping/TCP-probe socket cannot be bound to the planner-selected interface. Default `false` (warn and fall back to default routing). 
 | -
 | null
 | 
+
 |===
+
 
 ===== Return Type
 
@@ -1636,7 +1680,9 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -1739,7 +1785,9 @@ Performs a batch of preflight operations
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -1917,7 +1965,9 @@ Terminate forcefully a running session
 | X
 | null
 | 
+
 |===
+
 
 
 
@@ -2024,7 +2074,9 @@ Acknowledge traffic audit events and remove them from the queue
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -2131,12 +2183,15 @@ Claim traffic audit events for processing
 | X
 | null
 | 
+
 | max
 | Maximum number of events to claim (1-1000, default: 100) 
 | X
 | null
 | 
+
 |===
+
 
 ===== Return Type
 
@@ -2398,7 +2453,9 @@ Writes the `Schedule` field into `update.json`.  The agent watches this file and
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -2503,6 +2560,7 @@ Writes the requested version(s) into `Agent/update.json`, which is watched by De
 | -
 | 
 | 
+
 |===
 
 
@@ -2518,7 +2576,9 @@ Writes the requested version(s) into `Agent/update.json`, which is watched by De
 | -
 | null
 | 
+
 |===
+
 
 ===== Return Type
 
@@ -2624,7 +2684,9 @@ Requests a web application token using the configured authorization method
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -2724,7 +2786,9 @@ Requests a session token using a web application token
 | X
 | 
 | 
+
 |===
+
 
 
 
@@ -4945,5 +5009,6 @@ and whose values are update information.
 |     
 
 |===
+
 
 

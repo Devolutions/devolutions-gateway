@@ -45,7 +45,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="id">This Gateway&#39;s unique ID.</param>
         /// <param name="listeners">Listeners configured on this instance (required).</param>
         /// <param name="varVersion">Gateway service version (required).</param>
-        public ConfigDiagnostic(string hostname = default, Guid? id = default, List<ListenerUrls> listeners = default, string varVersion = default)
+        public ConfigDiagnostic(string hostname = default(string), Guid? id = default(Guid?), List<ListenerUrls> listeners = default(List<ListenerUrls>), string varVersion = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)

@@ -97,7 +97,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="version">Gateway-only target version; use the request body for multi-product updates (optional) (deprecated)</param>
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <returns>Object</returns>
-        Object TriggerUpdate(string? version = default, UpdateRequestSchema? updateRequestSchema = default);
+        Object TriggerUpdate(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?));
 
         /// <summary>
         /// Trigger an update for one or more Devolutions products.
@@ -109,7 +109,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="version">Gateway-only target version; use the request body for multi-product updates (optional) (deprecated)</param>
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <returns>ApiResponse of Object</returns>
-        ApiResponse<Object> TriggerUpdateWithHttpInfo(string? version = default, UpdateRequestSchema? updateRequestSchema = default);
+        ApiResponse<Object> TriggerUpdateWithHttpInfo(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?));
         #endregion Synchronous Operations
     }
 
@@ -128,7 +128,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of GetUpdateProductsResponse</returns>
-        System.Threading.Tasks.Task<GetUpdateProductsResponse> GetUpdateProductsAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<GetUpdateProductsResponse> GetUpdateProductsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieve the currently installed version of each Devolutions product.
@@ -139,7 +139,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (GetUpdateProductsResponse)</returns>
-        System.Threading.Tasks.Task<ApiResponse<GetUpdateProductsResponse>> GetUpdateProductsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<GetUpdateProductsResponse>> GetUpdateProductsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Retrieve the current Devolutions Agent auto-update schedule.
         /// </summary>
@@ -149,7 +149,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of GetUpdateScheduleResponse</returns>
-        System.Threading.Tasks.Task<GetUpdateScheduleResponse> GetUpdateScheduleAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<GetUpdateScheduleResponse> GetUpdateScheduleAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieve the current Devolutions Agent auto-update schedule.
@@ -160,7 +160,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (GetUpdateScheduleResponse)</returns>
-        System.Threading.Tasks.Task<ApiResponse<GetUpdateScheduleResponse>> GetUpdateScheduleWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<GetUpdateScheduleResponse>> GetUpdateScheduleWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Set the Devolutions Agent auto-update schedule.
         /// </summary>
@@ -171,7 +171,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="setUpdateScheduleRequest"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        System.Threading.Tasks.Task<Object> SetUpdateScheduleAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<Object> SetUpdateScheduleAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Set the Devolutions Agent auto-update schedule.
@@ -183,7 +183,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="setUpdateScheduleRequest"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> SetUpdateScheduleWithHttpInfoAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Object>> SetUpdateScheduleWithHttpInfoAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Trigger an update for one or more Devolutions products.
         /// </summary>
@@ -195,7 +195,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        System.Threading.Tasks.Task<Object> TriggerUpdateAsync(string? version = default, UpdateRequestSchema? updateRequestSchema = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<Object> TriggerUpdateAsync(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?), System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Trigger an update for one or more Devolutions products.
@@ -208,7 +208,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(string? version = default, UpdateRequestSchema? updateRequestSchema = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?), System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -482,7 +482,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of GetUpdateProductsResponse</returns>
-        public async System.Threading.Tasks.Task<GetUpdateProductsResponse> GetUpdateProductsAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<GetUpdateProductsResponse> GetUpdateProductsAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateProductsResponse> localVarResponse = await GetUpdateProductsWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -494,7 +494,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (GetUpdateProductsResponse)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateProductsResponse>> GetUpdateProductsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateProductsResponse>> GetUpdateProductsWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -595,7 +595,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of GetUpdateScheduleResponse</returns>
-        public async System.Threading.Tasks.Task<GetUpdateScheduleResponse> GetUpdateScheduleAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<GetUpdateScheduleResponse> GetUpdateScheduleAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateScheduleResponse> localVarResponse = await GetUpdateScheduleWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -607,7 +607,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (GetUpdateScheduleResponse)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateScheduleResponse>> GetUpdateScheduleWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<GetUpdateScheduleResponse>> GetUpdateScheduleWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -717,7 +717,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="setUpdateScheduleRequest"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        public async System.Threading.Tasks.Task<Object> SetUpdateScheduleAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Object> SetUpdateScheduleAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = await SetUpdateScheduleWithHttpInfoAsync(setUpdateScheduleRequest, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -730,7 +730,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="setUpdateScheduleRequest"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> SetUpdateScheduleWithHttpInfoAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> SetUpdateScheduleWithHttpInfoAsync(SetUpdateScheduleRequest setUpdateScheduleRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'setUpdateScheduleRequest' is set
             if (setUpdateScheduleRequest == null)
@@ -784,7 +784,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="version">Gateway-only target version; use the request body for multi-product updates (optional) (deprecated)</param>
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <returns>Object</returns>
-        public Object TriggerUpdate(string? version = default, UpdateRequestSchema? updateRequestSchema = default)
+        public Object TriggerUpdate(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = TriggerUpdateWithHttpInfo(version, updateRequestSchema);
             return localVarResponse.Data;
@@ -797,7 +797,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="version">Gateway-only target version; use the request body for multi-product updates (optional) (deprecated)</param>
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <returns>ApiResponse of Object</returns>
-        public Devolutions.Gateway.Client.Client.ApiResponse<Object> TriggerUpdateWithHttpInfo(string? version = default, UpdateRequestSchema? updateRequestSchema = default)
+        public Devolutions.Gateway.Client.Client.ApiResponse<Object> TriggerUpdateWithHttpInfo(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?))
         {
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
@@ -849,7 +849,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        public async System.Threading.Tasks.Task<Object> TriggerUpdateAsync(string? version = default, UpdateRequestSchema? updateRequestSchema = default, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Object> TriggerUpdateAsync(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?), System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = await TriggerUpdateWithHttpInfoAsync(version, updateRequestSchema, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -863,7 +863,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="updateRequestSchema">Products and target versions to update (optional)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(string? version = default, UpdateRequestSchema? updateRequestSchema = default, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(string? version = default(string?), UpdateRequestSchema? updateRequestSchema = default(UpdateRequestSchema?), System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();

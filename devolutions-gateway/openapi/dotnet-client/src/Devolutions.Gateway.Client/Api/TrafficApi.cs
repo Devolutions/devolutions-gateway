@@ -85,7 +85,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="ackRequest">Array of event IDs to acknowledge</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of AckResponse</returns>
-        System.Threading.Tasks.Task<AckResponse> AckTrafficEventsAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<AckResponse> AckTrafficEventsAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Acknowledge traffic audit events and remove them from the queue
@@ -97,7 +97,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="ackRequest">Array of event IDs to acknowledge</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (AckResponse)</returns>
-        System.Threading.Tasks.Task<ApiResponse<AckResponse>> AckTrafficEventsWithHttpInfoAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<AckResponse>> AckTrafficEventsWithHttpInfoAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Claim traffic audit events for processing
         /// </summary>
@@ -109,7 +109,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="max">Maximum number of events to claim (1-1000, default: 100)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;ClaimedTrafficEvent&gt;</returns>
-        System.Threading.Tasks.Task<List<ClaimedTrafficEvent>> ClaimTrafficEventsAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<List<ClaimedTrafficEvent>> ClaimTrafficEventsAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Claim traffic audit events for processing
@@ -122,7 +122,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="max">Maximum number of events to claim (1-1000, default: 100)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;ClaimedTrafficEvent&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<ClaimedTrafficEvent>>> ClaimTrafficEventsWithHttpInfoAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<List<ClaimedTrafficEvent>>> ClaimTrafficEventsWithHttpInfoAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -405,7 +405,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="ackRequest">Array of event IDs to acknowledge</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of AckResponse</returns>
-        public async System.Threading.Tasks.Task<AckResponse> AckTrafficEventsAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<AckResponse> AckTrafficEventsAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<AckResponse> localVarResponse = await AckTrafficEventsWithHttpInfoAsync(ackRequest, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -418,7 +418,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="ackRequest">Array of event IDs to acknowledge</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (AckResponse)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<AckResponse>> AckTrafficEventsWithHttpInfoAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<AckResponse>> AckTrafficEventsWithHttpInfoAsync(AckRequest ackRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             // verify the required parameter 'ackRequest' is set
             if (ackRequest == null)
@@ -533,7 +533,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="max">Maximum number of events to claim (1-1000, default: 100)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of List&lt;ClaimedTrafficEvent&gt;</returns>
-        public async System.Threading.Tasks.Task<List<ClaimedTrafficEvent>> ClaimTrafficEventsAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<List<ClaimedTrafficEvent>> ClaimTrafficEventsAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<List<ClaimedTrafficEvent>> localVarResponse = await ClaimTrafficEventsWithHttpInfoAsync(leaseMs, max, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -547,7 +547,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="max">Maximum number of events to claim (1-1000, default: 100)</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (List&lt;ClaimedTrafficEvent&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<ClaimedTrafficEvent>>> ClaimTrafficEventsWithHttpInfoAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<List<ClaimedTrafficEvent>>> ClaimTrafficEventsWithHttpInfoAsync(int leaseMs, int max, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();

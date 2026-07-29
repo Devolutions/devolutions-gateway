@@ -62,7 +62,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Identity</returns>
-        System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Performs a health check
@@ -73,7 +73,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Identity)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Identity>> GetHealthWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<ApiResponse<Identity>> GetHealthWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -341,7 +341,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Identity</returns>
-        public async System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
             Devolutions.Gateway.Client.Client.ApiResponse<Identity> localVarResponse = await GetHealthWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -353,7 +353,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Identity)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Identity>> GetHealthWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Identity>> GetHealthWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
