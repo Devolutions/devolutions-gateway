@@ -70,10 +70,16 @@ namespace Devolutions.Gateway.Client.Model
         ProvisionCredentials = 6,
 
         /// <summary>
+        /// Enum ProvisionConnectionOptions for value: provision-connection-options
+        /// </summary>
+        [EnumMember(Value = "provision-connection-options")]
+        ProvisionConnectionOptions = 7,
+
+        /// <summary>
         /// Enum ResolveHost for value: resolve-host
         /// </summary>
         [EnumMember(Value = "resolve-host")]
-        ResolveHost = 7
+        ResolveHost = 8
     }
 
     public static class PreflightOperationKindExtensions
@@ -97,6 +103,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "provision-token";
                 case PreflightOperationKind.ProvisionCredentials:
                     return "provision-credentials";
+                case PreflightOperationKind.ProvisionConnectionOptions:
+                    return "provision-connection-options";
                 case PreflightOperationKind.ResolveHost:
                     return "resolve-host";
                 default:
