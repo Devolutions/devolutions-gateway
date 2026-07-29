@@ -660,8 +660,7 @@ pub async fn handle(
     // proxy-based credential injection mode. Otherwise, we continue the usual
     // clean path procedure. The credential store is keyed on the association token's JTI.
     if let Some(jti) = crate::token::extract_jti(token).ok()
-        && let Some(entry) = credentials.get(jti)
-        && entry.mapping.is_some()
+        && credentials.get(jti).is_some()
     {
         // VMConnect needs pre-X.224 CredSSP against the Hyper-V host cert on the client.
         // Proxy CredSSP MITM is X.224-first and is not supported for this ordering.

@@ -153,8 +153,7 @@ where
                 // lookup by `claims.jti` is the primary path.
                 if is_rdp
                     && let Some(entry) = credentials.get(claims.jti)
-                    && entry.mapping.is_some()
-                {
+                            {
                     anyhow::ensure!(token == entry.token, "token mismatch");
                     let credential_injection_kdc = credentials.kdc_for(claims.jti)?;
 
