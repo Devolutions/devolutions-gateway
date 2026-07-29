@@ -1,17 +1,23 @@
-//! Policy file security validation.
+//! Admin-only-writable file security validation.
 //!
-//! The policy file is the entire authorization control for the package broker.
-//! `C:\ProgramData` subtrees are a known spot for over-permissive inherited ACEs:
-//! if a standard user can write the policy file, they can self-authorize arbitrary
-//! elevated installs.
+//! Shared by two trust boundaries in the package broker:
+//! - The policy file, which is the entire authorization control for the broker.
+//! - Package-manager executables resolved for elevated/machine-scope execution
+//!   (e.g. `winget.exe`, `choco.exe`).
 //!
-//! As defense-in-depth, before trusting a loaded policy, we verify that the file is
-//! owned by SYSTEM or the built-in Administrators group and that its DACL does not
-//! grant write access to any other principal.
-//! The broker fails closed (pauses) when this check fails.
+//! `C:\ProgramData` subtrees (and similar install roots) are a known spot for
+//! over-permissive inherited ACEs: if a standard user can write the policy file, they
+//! can self-authorize arbitrary elevated installs; if they can write (or replace) the
+//! executable the broker launches with an elevated token, they can run arbitrary code
+//! as SYSTEM/Administrator.
+//!
+//! As defense-in-depth, before trusting such a file, we verify that it is owned by
+//! SYSTEM or the built-in Administrators group and that its DACL does not grant write
+//! access to any other principal. Callers fail closed when this check fails.
 
 use std::fs::File;
 use std::os::windows::io::AsRawHandle as _;
+use std::path::Path;
 
 use anyhow::{Context as _, bail};
 use windows::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree};
@@ -61,13 +67,27 @@ impl Drop for OwnedSecurityDescriptor {
 /// descriptor belongs to the very same file that is subsequently read (no TOCTOU window
 /// via file replacement).
 ///
+/// See [`verify_admin_only_writable`] for the exact rules.
+pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
+    verify_admin_only_writable(file, "policy file")
+}
+
+/// Verify that `file` may only be written by SYSTEM or built-in Administrators.
+///
+/// The check is performed on the already-opened file handle so the verified security
+/// descriptor belongs to the very same file that is subsequently used (no TOCTOU window
+/// via file replacement).
+///
+/// `subject` is a short human-readable description of the file, used in error messages
+/// (e.g. `"policy file"` or `"elevated package-manager executable"`).
+///
 /// Rules (fail-closed):
 /// - The owner must be SYSTEM or the built-in Administrators group.
 /// - A DACL must be present (a NULL DACL grants everyone full control).
 /// - Every access-allowed ACE granting write access must have SYSTEM or the built-in
 ///   Administrators group as the trustee.
 /// - Unsupported (object/callback) access-allowed ACE types are rejected.
-pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
+pub(crate) fn verify_admin_only_writable(file: &File, subject: &str) -> anyhow::Result<()> {
     let handle = HANDLE(file.as_raw_handle());
 
     let mut owner = PSID::default();
@@ -90,36 +110,63 @@ pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
     };
 
     if ret != ERROR_SUCCESS {
-        bail!("failed to read policy file security information: error {}", ret.0);
+        bail!("failed to read {subject} security information: error {}", ret.0);
     }
 
     // SAFETY: On success, `owner` and `dacl` point into `descriptor` (or are null), which
     // outlives this call.
-    unsafe { verify_owner_and_dacl(owner, dacl) }
+    unsafe { verify_owner_and_dacl(subject, owner, dacl) }
+}
+
+/// Opens `path` and verifies that it may only be written by SYSTEM or built-in Administrators.
+///
+/// Convenience wrapper for callers that only have a path (not an already-open file handle),
+/// such as the executor verifying a resolved package-manager executable before running it
+/// with an elevated or machine-scope token. See [`verify_admin_only_writable`] for the exact
+/// rules. Fails closed (including when the file cannot be opened at all).
+pub(crate) fn verify_admin_only_writable_path(path: &Path, subject: &str) -> anyhow::Result<()> {
+    let file = File::open(path).with_context(|| format!("failed to open {subject} at {}", path.display()))?;
+    verify_admin_only_writable(&file, subject)
+}
+
+/// Verify that a resolved package-manager executable which will be launched with an
+/// elevated or machine-scope token is only writable by SYSTEM or built-in Administrators.
+///
+/// No-op when `requires_elevation` is false, since non-elevated tool installs (pip venvs,
+/// `~/.cargo`, `~/.bun`, etc.) are not expected to live under admin-only-writable paths.
+/// Fails closed on any error (including when the file cannot be opened), so a resolution
+/// or permission issue never silently allows an untrusted binary to run elevated.
+pub(crate) fn verify_elevated_executable_security(path: &Path, requires_elevation: bool) -> anyhow::Result<()> {
+    if !requires_elevation {
+        return Ok(());
+    }
+
+    let subject = format!("elevated package-manager executable '{}'", path.display());
+    verify_admin_only_writable_path(path, &subject)
 }
 
 /// Verify that `owner` is trusted and that `dacl` grants write access to trusted SIDs only.
 ///
-/// See [`verify_policy_file_security`] for the exact rules.
+/// See [`verify_admin_only_writable`] for the exact rules.
 ///
 /// # Safety
 ///
 /// - `owner` must be null or point to a valid SID.
 /// - `dacl` must be null or point to a valid, initialized ACL.
-unsafe fn verify_owner_and_dacl(owner: PSID, dacl: *const ACL) -> anyhow::Result<()> {
+unsafe fn verify_owner_and_dacl(subject: &str, owner: PSID, dacl: *const ACL) -> anyhow::Result<()> {
     if owner.0.is_null() {
-        bail!("policy file has no owner information");
+        bail!("{subject} has no owner information");
     }
 
     // SAFETY: Per function contract, `owner` points to a valid SID.
     if !unsafe { is_trusted_sid(owner) } {
         // SAFETY: Per function contract, `owner` points to a valid SID.
         let owner_string = unsafe { sid_to_string(owner) };
-        bail!("policy file owner {owner_string} is not SYSTEM or built-in Administrators");
+        bail!("{subject} owner {owner_string} is not SYSTEM or built-in Administrators");
     }
 
     if dacl.is_null() {
-        bail!("policy file has a NULL DACL granting full control to everyone");
+        bail!("{subject} has a NULL DACL granting full control to everyone");
     }
 
     // SAFETY: Per function contract, `dacl` is a valid, non-null pointer to an initialized ACL.
@@ -129,7 +176,7 @@ unsafe fn verify_owner_and_dacl(owner: PSID, dacl: *const ACL) -> anyhow::Result
         let mut ace_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
 
         // SAFETY: `dacl` is a valid ACL pointer and `idx` is within `AceCount`.
-        unsafe { GetAce(dacl, idx, &mut ace_ptr) }.context("failed to read policy file DACL entry")?;
+        unsafe { GetAce(dacl, idx, &mut ace_ptr) }.with_context(|| format!("failed to read {subject} DACL entry"))?;
 
         // SAFETY: GetAce succeeded, so `ace_ptr` points to an ACE starting with an ACE_HEADER.
         let header = unsafe { &*ace_ptr.cast::<ACE_HEADER>() };
@@ -152,12 +199,12 @@ unsafe fn verify_owner_and_dacl(owner: PSID, dacl: *const ACL) -> anyhow::Result
                     // SAFETY: `trustee` points to a valid SID inside the ACE.
                     let trustee_string = unsafe { sid_to_string(trustee) };
                     bail!(
-                        "policy file DACL grants write access to {trustee_string}; only SYSTEM and built-in Administrators may be able to write the policy"
+                        "{subject} DACL grants write access to {trustee_string}; only SYSTEM and built-in Administrators may be able to write it"
                     );
                 }
             }
             // Fail closed on object/callback and other exotic allow ACE types.
-            other => bail!("policy file DACL contains unsupported ACE type {other}"),
+            other => bail!("{subject} DACL contains unsupported ACE type {other}"),
         }
     }
 
@@ -270,7 +317,7 @@ mod tests {
         fn verify(&self) -> anyhow::Result<()> {
             // SAFETY: `owner` and `dacl` point into the owned security descriptor, which outlives
             // this call.
-            unsafe { verify_owner_and_dacl(self.owner, self.dacl) }
+            unsafe { verify_owner_and_dacl("test file", self.owner, self.dacl) }
         }
     }
 
@@ -369,7 +416,7 @@ mod tests {
         }
     }
 
-    fn set_security(path: &std::path::Path, owner: Option<&Sid>, entries: &[ExplicitAccess]) -> anyhow::Result<()> {
+    fn set_security(path: &Path, owner: Option<&Sid>, entries: &[ExplicitAccess]) -> anyhow::Result<()> {
         let dacl = InheritableAcl {
             kind: InheritableAclKind::Protected,
             acl: Acl::new()?.set_entries(entries)?,
@@ -421,5 +468,31 @@ mod tests {
         let file = File::open(temp.path()).unwrap();
 
         verify_policy_file_security(&file).expect("SYSTEM/Administrators-only policy file must be accepted");
+    }
+
+    #[test]
+    fn everyone_writable_executable_path_is_rejected() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+
+        let everyone = Sid::from_well_known(WinWorldSid, None).unwrap();
+        set_security(temp.path(), None, &[grant(GENERIC_ALL.0, everyone)]).unwrap();
+
+        let error = verify_admin_only_writable_path(temp.path(), "elevated package-manager executable").unwrap_err();
+        assert!(
+            error.to_string().contains("elevated package-manager executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn missing_executable_path_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("does-not-exist.exe");
+
+        let error = verify_admin_only_writable_path(&missing, "elevated package-manager executable").unwrap_err();
+        assert!(
+            error.to_string().contains("failed to open"),
+            "unexpected error: {error}"
+        );
     }
 }
