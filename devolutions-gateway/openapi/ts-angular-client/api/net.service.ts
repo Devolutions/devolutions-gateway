@@ -11,89 +11,38 @@
 
 import { Inject, Injectable, Optional }                      from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams,
-         HttpResponse, HttpEvent, HttpParameterCodec, HttpContext 
+         HttpResponse, HttpEvent, HttpContext 
         }       from '@angular/common/http';
-import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
+import { OpenApiHttpParams, QueryParamStyle } from '../query.params';
 
 // @ts-ignore
 import { InterfaceInfo } from '../model/interfaceInfo';
+// @ts-ignore
+import { NetworkInterfacesResponse } from '../model/networkInterfacesResponse';
 
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS }                     from '../variables';
 import { Configuration }                                     from '../configuration';
+import { BaseService } from '../api.base.service';
 
 
 
 @Injectable({
   providedIn: 'root'
 })
-export class NetService {
+export class NetService extends BaseService {
 
-    protected basePath = 'http://localhost';
-    public defaultHeaders = new HttpHeaders();
-    public configuration = new Configuration();
-    public encoder: HttpParameterCodec;
-
-    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string|string[], @Optional() configuration: Configuration) {
-        if (configuration) {
-            this.configuration = configuration;
-        }
-        if (typeof this.configuration.basePath !== 'string') {
-            const firstBasePath = Array.isArray(basePath) ? basePath[0] : undefined;
-            if (firstBasePath != undefined) {
-                basePath = firstBasePath;
-            }
-
-            if (typeof basePath !== 'string') {
-                basePath = this.basePath;
-            }
-            this.configuration.basePath = basePath;
-        }
-        this.encoder = this.configuration.encoder || new CustomHttpParameterCodec();
-    }
-
-
-    // @ts-ignore
-    private addToHttpParams(httpParams: HttpParams, value: any, key?: string): HttpParams {
-        if (typeof value === "object" && value instanceof Date === false) {
-            httpParams = this.addToHttpParamsRecursive(httpParams, value);
-        } else {
-            httpParams = this.addToHttpParamsRecursive(httpParams, value, key);
-        }
-        return httpParams;
-    }
-
-    private addToHttpParamsRecursive(httpParams: HttpParams, value?: any, key?: string): HttpParams {
-        if (value == null) {
-            return httpParams;
-        }
-
-        if (typeof value === "object") {
-            if (Array.isArray(value)) {
-                (value as any[]).forEach( elem => httpParams = this.addToHttpParamsRecursive(httpParams, elem, key));
-            } else if (value instanceof Date) {
-                if (key != null) {
-                    httpParams = httpParams.append(key, (value as Date).toISOString().substring(0, 10));
-                } else {
-                   throw Error("key may not be null if value is Date");
-                }
-            } else {
-                Object.keys(value).forEach( k => httpParams = this.addToHttpParamsRecursive(
-                    httpParams, value[k], key != null ? `${key}.${k}` : k));
-            }
-        } else if (key != null) {
-            httpParams = httpParams.append(key, value);
-        } else {
-            throw Error("key may not be null if value is not object or array");
-        }
-        return httpParams;
+    constructor(protected httpClient: HttpClient, @Optional() @Inject(BASE_PATH) basePath: string|string[], @Optional() configuration?: Configuration) {
+        super(basePath, configuration);
     }
 
     /**
      * Lists network interfaces
+     * @endpoint get /jet/net/config
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
+     * @param options additional options
      */
     public getNetConfig(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<Array<{ [key: string]: Array<InterfaceInfo>; }>>;
     public getNetConfig(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<{ [key: string]: Array<InterfaceInfo>; }>>>;
@@ -102,34 +51,19 @@ export class NetService {
 
         let localVarHeaders = this.defaultHeaders;
 
-        let localVarCredential: string | undefined;
         // authentication (netscan_token) required
-        localVarCredential = this.configuration.lookupCredential('netscan_token');
-        if (localVarCredential) {
-            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
-        }
+        localVarHeaders = this.configuration.addCredentialToHeaders('netscan_token', 'Authorization', localVarHeaders, 'Bearer ');
 
-        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
-        if (localVarHttpHeaderAcceptSelected === undefined) {
-            // to determine the Accept header
-            const httpHeaderAccepts: string[] = [
-                'application/json'
-            ];
-            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
-        }
+        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
+            'application/json'
+        ]);
         if (localVarHttpHeaderAcceptSelected !== undefined) {
             localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
         }
 
-        let localVarHttpContext: HttpContext | undefined = options && options.context;
-        if (localVarHttpContext === undefined) {
-            localVarHttpContext = new HttpContext();
-        }
+        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
 
-        let localVarTransferCache: boolean | undefined = options && options.transferCache;
-        if (localVarTransferCache === undefined) {
-            localVarTransferCache = true;
-        }
+        const localVarTransferCache: boolean = options?.transferCache ?? true;
 
 
         let responseType_: 'text' | 'json' | 'blob' = 'json';
@@ -144,14 +78,448 @@ export class NetService {
         }
 
         let localVarPath = `/jet/net/config`;
-        return this.httpClient.request<Array<{ [key: string]: Array<InterfaceInfo>; }>>('get', `${this.configuration.basePath}${localVarPath}`,
+        const { basePath, withCredentials } = this.configuration;
+        return this.httpClient.request<Array<{ [key: string]: Array<InterfaceInfo>; }>>('get', `${basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
-                withCredentials: this.configuration.withCredentials,
+                ...(withCredentials ? { withCredentials } : {}),
                 headers: localVarHeaders,
                 observe: observe,
-                transferCache: localVarTransferCache,
+                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                reportProgress: reportProgress
+            }
+        );
+    }
+
+    /**
+     * Lists Gateway network scan sources.
+     * @endpoint get /jet/net/interfaces
+     * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
+     * @param reportProgress flag to report request and response progress.
+     * @param options additional options
+     */
+    public getNetInterfaces(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<NetworkInterfacesResponse>;
+    public getNetInterfaces(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<NetworkInterfacesResponse>>;
+    public getNetInterfaces(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<NetworkInterfacesResponse>>;
+    public getNetInterfaces(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+
+        let localVarHeaders = this.defaultHeaders;
+
+        // authentication (netscan_token) required
+        localVarHeaders = this.configuration.addCredentialToHeaders('netscan_token', 'Authorization', localVarHeaders, 'Bearer ');
+
+        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
+            'application/json'
+        ]);
+        if (localVarHttpHeaderAcceptSelected !== undefined) {
+            localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
+        }
+
+        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+
+        const localVarTransferCache: boolean = options?.transferCache ?? true;
+
+
+        let responseType_: 'text' | 'json' | 'blob' = 'json';
+        if (localVarHttpHeaderAcceptSelected) {
+            if (localVarHttpHeaderAcceptSelected.startsWith('text')) {
+                responseType_ = 'text';
+            } else if (this.configuration.isJsonMime(localVarHttpHeaderAcceptSelected)) {
+                responseType_ = 'json';
+            } else {
+                responseType_ = 'blob';
+            }
+        }
+
+        let localVarPath = `/jet/net/interfaces`;
+        const { basePath, withCredentials } = this.configuration;
+        return this.httpClient.request<NetworkInterfacesResponse>('get', `${basePath}${localVarPath}`,
+            {
+                context: localVarHttpContext,
+                responseType: <any>responseType_,
+                ...(withCredentials ? { withCredentials } : {}),
+                headers: localVarHeaders,
+                observe: observe,
+                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
+                reportProgress: reportProgress
+            }
+        );
+    }
+
+    /**
+     * Stream network scan events over a websocket.
+     * The endpoint is upgraded from HTTP, so OpenAPI describes the **handshake**: the query parameters that drive the scan (validated before upgrade) and the legacy / v1 event payloads streamed back as JSON text frames. See &#x60;NetworkScanResultEvent&#x60; for the v1 shape and &#x60;LegacyScanEvent&#x60; for the legacy shape (selected via &#x60;response_format&#x60;).
+     * @endpoint get /jet/net/scan
+     * @param pingInterval Interval in milliseconds (default is 200)
+     * @param pingTimeout Timeout in milliseconds (default is 500)
+     * @param broadcastTimeout Timeout in milliseconds (default is 1000)
+     * @param portScanTimeout Timeout in milliseconds (default is 1000)
+     * @param netbiosTimeout Timeout in milliseconds (default is 1000)
+     * @param netbiosInterval Interval in milliseconds (default is 200)
+     * @param mdnsQueryTimeout The maximum time for each mdns query in milliseconds. (default is 5 * 1000)
+     * @param maxWait The maximum duration for whole networking scan in milliseconds. Highly suggested!
+     * @param range The start and end IP address of the range to scan. for example: 10.10.0.0-10.10.0.255
+     * @param target Explicit single-host targets to scan. Each value must parse as an IPv4 or IPv6 address; invalid values yield a structured &#x60;{ error: \&quot;invalid_target\&quot;, value: \&quot;&lt;raw&gt;\&quot; }&#x60; 400 rather than a generic serde rejection at extraction time (mirrors the &#x60;range&#x3D;&#x60; / &#x60;probe&#x3D;&#x60; validation path).
+     * @param interfaceId Gateway network interface IDs to use as scan sources.
+     * @param probe The probes to run. Each value is either &#x60;ping&#x60;, a port number (&#x60;22&#x60;), or a named service (&#x60;rdp&#x60;, &#x60;https&#x60;, ΓÇª). Validation is deferred to scan-time so failures can be surfaced as a structured 400 ΓÇö naming the offending value ΓÇö instead of a generic serde rejection at extraction time.
+     * @param enablePingStart **Legacy alias** for &#x60;report_ping_start&#x60;. Prefer the explicit name in new clients; kept so existing consumers don\&#39;t break.
+     * @param enableBroadcast Enable the execution of broadcast scan
+     * @param enableSubnetScan Enable the ping scan on subnet
+     * @param enableZeroconf Enable ZeroConf/mDNS
+     * @param enableNetbios Enable NetBIOS name-service queries. Default &#x60;true&#x60; for backward compatibility. Set &#x60;false&#x60; (or pair with explicit &#x60;target&#x3D;&#x60;) to keep NetBIOS from sweeping the surrounding subnet when the caller only wants results for the targets they listed.
+     * @param enableResolveDns Enable resolve dns
+     * @param includeHostResults Include host-only results.
+     * @param reportPingStart Emit ping queued/start host results.
+     * @param reportPingSuccess Emit ping success host results.
+     * @param reportPingFailure Emit ping failure host results.
+     * @param enableTcpProbes Enable TCP service probes.
+     * @param rangeInterfacePolicy Policy applied when &#x60;range&#x3D;&#x60; and &#x60;interface_id&#x3D;&#x60; are both provided. Accepted values: &#x60;intersect_selected_interfaces&#x60; (default) or &#x60;allow_cross_interface_range&#x60;. Invalid values yield a structured &#x60;{ error: \&quot;invalid_range_interface_policy\&quot;, value: \&quot;&lt;raw&gt;\&quot; }&#x60; 400 instead of a generic serde rejection (mirrors the &#x60;range&#x3D;&#x60; / &#x60;probe&#x3D;&#x60; / &#x60;target&#x3D;&#x60; validation path).
+     * @param allowCrossInterfaceRange **Legacy alias** for &#x60;range_interface_policy&#x3D;allow_cross_interface_range&#x60;. Prefer the structured policy in new clients.
+     * @param responseFormat Response shape emitted on the websocket. Accepted values: &#x60;legacy&#x60; (default) or &#x60;network_scan_result_v1&#x60;. Invalid values yield a structured &#x60;{ error: \&quot;invalid_response_format\&quot;, value: \&quot;&lt;raw&gt;\&quot; }&#x60; 400 instead of a generic serde rejection.
+     * @param maxConcurrency Maximum scanner concurrency.
+     * @param maxPingConcurrency Maximum ping probe concurrency.
+     * @param maxTcpProbeConcurrency Maximum TCP probe concurrency.
+     * @param enableFailure **Legacy alias** for &#x60;report_ping_failure&#x60;. &#x60;enable_failure&#x3D;true&#x60; only opts into ping-failure events; TCP-probe failure events require the explicit &#x60;report_tcp_failure&#x3D;true&#x60; and are not affected by this alias.  **Behavior change:** historically this single flag controlled both ping-failure and TCP-probe-failure reporting. The two are now split: clients that want the old \&quot;both at once\&quot; semantics must send &#x60;enable_failure&#x3D;true&amp;report_tcp_failure&#x3D;true&#x60; together. The split is intentional ΓÇö TCP-probe failures are typically high-volume noise that callers were filtering client-side anyway, so the two streams are independently gated.
+     * @param reportTcpFailure Enable TCP port knocking failure events.
+     * @param interfaceBindStrict When &#x60;true&#x60;, fail with HTTP 400 if a ping/TCP-probe socket cannot be bound to the planner-selected interface. Default &#x60;false&#x60; (warn and fall back to default routing).
+     * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
+     * @param reportProgress flag to report request and response progress.
+     * @param options additional options
+     */
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any> {
+
+        let localVarQueryParameters = new OpenApiHttpParams(this.encoder);
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'ping_interval',
+            <any>pingInterval,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'ping_timeout',
+            <any>pingTimeout,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'broadcast_timeout',
+            <any>broadcastTimeout,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'port_scan_timeout',
+            <any>portScanTimeout,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'netbios_timeout',
+            <any>netbiosTimeout,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'netbios_interval',
+            <any>netbiosInterval,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'mdns_query_timeout',
+            <any>mdnsQueryTimeout,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'max_wait',
+            <any>maxWait,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'range',
+            <any>range,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'target',
+            <any>target,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'interface_id',
+            <any>interfaceId,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'probe',
+            <any>probe,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_ping_start',
+            <any>enablePingStart,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_broadcast',
+            <any>enableBroadcast,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_subnet_scan',
+            <any>enableSubnetScan,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_zeroconf',
+            <any>enableZeroconf,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_netbios',
+            <any>enableNetbios,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_resolve_dns',
+            <any>enableResolveDns,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'include_host_results',
+            <any>includeHostResults,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'report_ping_start',
+            <any>reportPingStart,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'report_ping_success',
+            <any>reportPingSuccess,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'report_ping_failure',
+            <any>reportPingFailure,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_tcp_probes',
+            <any>enableTcpProbes,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'range_interface_policy',
+            <any>rangeInterfacePolicy,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'allow_cross_interface_range',
+            <any>allowCrossInterfaceRange,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'response_format',
+            <any>responseFormat,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'max_concurrency',
+            <any>maxConcurrency,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'max_ping_concurrency',
+            <any>maxPingConcurrency,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'max_tcp_probe_concurrency',
+            <any>maxTcpProbeConcurrency,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'enable_failure',
+            <any>enableFailure,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'report_tcp_failure',
+            <any>reportTcpFailure,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        localVarQueryParameters = this.addToHttpParams(
+            localVarQueryParameters,
+            'interface_bind_strict',
+            <any>interfaceBindStrict,
+            QueryParamStyle.Form,
+            true,
+        );
+
+
+        let localVarHeaders = this.defaultHeaders;
+
+        // authentication (netscan_token) required
+        localVarHeaders = this.configuration.addCredentialToHeaders('netscan_token', 'Authorization', localVarHeaders, 'Bearer ');
+
+        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
+        ]);
+        if (localVarHttpHeaderAcceptSelected !== undefined) {
+            localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
+        }
+
+        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+
+        const localVarTransferCache: boolean = options?.transferCache ?? true;
+
+
+        let responseType_: 'text' | 'json' | 'blob' = 'json';
+        if (localVarHttpHeaderAcceptSelected) {
+            if (localVarHttpHeaderAcceptSelected.startsWith('text')) {
+                responseType_ = 'text';
+            } else if (this.configuration.isJsonMime(localVarHttpHeaderAcceptSelected)) {
+                responseType_ = 'json';
+            } else {
+                responseType_ = 'blob';
+            }
+        }
+
+        let localVarPath = `/jet/net/scan`;
+        const { basePath, withCredentials } = this.configuration;
+        return this.httpClient.request<any>('get', `${basePath}${localVarPath}`,
+            {
+                context: localVarHttpContext,
+                params: localVarQueryParameters.toHttpParams(),
+                responseType: <any>responseType_,
+                ...(withCredentials ? { withCredentials } : {}),
+                headers: localVarHeaders,
+                observe: observe,
+                ...(localVarTransferCache !== undefined ? { transferCache: localVarTransferCache } : {}),
                 reportProgress: reportProgress
             }
         );

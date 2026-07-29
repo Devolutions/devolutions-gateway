@@ -9,9 +9,8 @@
  */
 
 
-export type AppTokenContentType = 'WEBAPP';
-
 export const AppTokenContentType = {
-    Webapp: 'WEBAPP' as AppTokenContentType
-};
+    Webapp: 'WEBAPP'
+} as const;
+export type AppTokenContentType = typeof AppTokenContentType[keyof typeof AppTokenContentType];
 

@@ -9,11 +9,10 @@
  */
 
 
-export type SessionTokenContentType = 'ASSOCIATION' | 'JMUX' | 'KDC';
-
 export const SessionTokenContentType = {
-    Association: 'ASSOCIATION' as SessionTokenContentType,
-    Jmux: 'JMUX' as SessionTokenContentType,
-    Kdc: 'KDC' as SessionTokenContentType
-};
+    Association: 'ASSOCIATION',
+    Jmux: 'JMUX',
+    Kdc: 'KDC'
+} as const;
+export type SessionTokenContentType = typeof SessionTokenContentType[keyof typeof SessionTokenContentType];
 
