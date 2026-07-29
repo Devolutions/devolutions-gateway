@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_tunnel_proto::{
-    ConnectResponse, ControlMessage, ControlStream, FramedRecv, SessionStream, current_time_millis,
+    ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, FramedRecv, SessionStream, current_time_millis,
 };
-use anyhow::{Context as _, bail};
+use anyhow::{Context as _, anyhow, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
@@ -217,10 +217,10 @@ async fn run_single_connection(
     }
 
     // Build domain advertisement list: explicit config + auto-detection.
-    let mut advertise_domains: Vec<agent_tunnel_proto::DomainAdvertisement> = tunnel_conf
+    let mut advertise_domains: Vec<DomainAdvertisement> = tunnel_conf
         .advertise_domains
         .iter()
-        .map(|d| agent_tunnel_proto::DomainAdvertisement {
+        .map(|d| DomainAdvertisement {
             domain: agent_tunnel_proto::DomainName::new(d),
             auto_detected: false,
         })
@@ -233,7 +233,7 @@ async fn run_single_connection(
                 .any(|d| d.domain.as_str().eq_ignore_ascii_case(&detected))
             {
                 info!(domain = %detected, "Auto-detected DNS domain");
-                advertise_domains.push(agent_tunnel_proto::DomainAdvertisement {
+                advertise_domains.push(DomainAdvertisement {
                     domain: agent_tunnel_proto::DomainName::new(detected),
                     auto_detected: true,
                 });
@@ -325,7 +325,8 @@ async fn run_single_connection(
             result = connection.accept_bi() => {
                 let (send, recv) = result.context("accept incoming bidi stream")?;
                 let subnets = advertise_subnets.clone();
-                task_handles.spawn(run_session_proxy(subnets, send, recv));
+                let domains = advertise_domains.clone();
+                task_handles.spawn(run_session_proxy(subnets, domains, send, recv));
             }
 
             // Reap completed session tasks.
@@ -667,7 +668,19 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 // Session proxy
 // ---------------------------------------------------------------------------
 
-async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::SendStream, recv: quinn::RecvStream) {
+/// How long we get to resolve the target and open the TCP connection.
+///
+/// The Gateway stops waiting for the ConnectResponse after 30s
+/// (`crates/agent-tunnel/src/listener.rs`). We have to give up before it does, otherwise a
+/// black-holed target outlives its deadline and it never hears why we failed.
+const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
+
+async fn run_session_proxy(
+    advertise_subnets: Vec<Ipv4Network>,
+    advertise_domains: Vec<DomainAdvertisement>,
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+) {
     let _: anyhow::Result<()> = async {
         let mut session: SessionStream<_, _> = (send, recv).into();
 
@@ -683,23 +696,43 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
         );
 
         let protocol_version = connect_msg.protocol_version();
-        if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
-            warn!(
-                %protocol_version,
-                %e,
-                "Rejecting ConnectRequest: unsupported protocol version"
-            );
-            let response = ConnectResponse::error(format!("unsupported protocol version: {e}"));
-            session
-                .send_response(&response)
-                .await
-                .context("send ConnectResponse error for unsupported version")?;
-            bail!("unsupported protocol version in ConnectRequest");
-        }
 
-        let target = Target::parse(connect_msg.target()).context("parse connect target")?;
-        let candidates = resolve_target(&target, &advertise_subnets).await?;
-        let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
+        let connect_result = tokio::time::timeout(CONNECT_DEADLINE, async {
+            agent_tunnel_proto::validate_protocol_version(protocol_version).context("unsupported protocol version")?;
+
+            let target = Target::parse(connect_msg.target()).context("parse connect target")?;
+            let candidates = resolve_target(&target, &advertise_subnets, &advertise_domains).await?;
+            connect_to_target(&candidates).await
+        })
+        .await
+        .unwrap_or_else(|_elapsed| {
+            Err(anyhow!(
+                "timed out after {}s resolving or connecting to target",
+                CONNECT_DEADLINE.as_secs()
+            ))
+        });
+
+        // Whatever went wrong has to travel back as a ConnectResponse::Error — returning
+        // early instead drops the stream and the Gateway just sees an unexplained EOF.
+        let (tcp_stream, selected_target) = match connect_result {
+            Ok(connected) => connected,
+            Err(error) => {
+                let reason = format!("{error:#}");
+                warn!(
+                    session_id = %connect_msg.session_id(),
+                    target = %connect_msg.target(),
+                    protocol_version,
+                    error = %reason,
+                    "Rejecting ConnectRequest"
+                );
+                session
+                    .send_response(&ConnectResponse::error(reason))
+                    .await
+                    .context("send ConnectResponse error")?;
+                return Err(error);
+            }
+        };
+
         info!(target = %selected_target, "TCP connection established");
 
         session
