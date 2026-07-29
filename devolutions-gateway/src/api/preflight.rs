@@ -11,10 +11,9 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::InsertError;
-use crate::credential_injection_kdc::CredentialService;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
+use crate::provisioning::{InsertError, ProvisioningStore};
 use crate::session::SessionMessageSender;
 
 const OP_GET_VERSION: &str = "get-version";
@@ -196,7 +195,7 @@ pub(super) async fn post_preflight(
     State(DgwState {
         conf_handle,
         sessions,
-        credentials,
+        provisioning,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -223,13 +222,13 @@ pub(super) async fn post_preflight(
                 let outputs = outputs.clone();
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
-                let credentials = credentials.clone();
+                let provisioning = provisioning.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credentials).await {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &provisioning).await {
                         outputs.push(PreflightOutput {
                             operation_id,
                             kind: PreflightOutputKind::Alert {
@@ -256,7 +255,7 @@ async fn handle_operation(
     outputs: &Outputs,
     conf: &Conf,
     sessions: &SessionMessageSender,
-    credentials: &CredentialService,
+    provisioning: &ProvisioningStore,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -340,7 +339,7 @@ async fn handle_operation(
 
             // Provision-credentials tokens must be valid association tokens with the credential
             // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
-            // never reaches the credential store with malformed input.
+            // never reaches the provisioning store with malformed input.
             if is_provision_credentials {
                 crate::token::validate_credential_injection_association_token(&token)
                     .inspect_err(|error| {
@@ -358,7 +357,7 @@ async fn handle_operation(
                     })?;
             }
 
-            let previous_entry = credentials
+            let previous_entry = provisioning
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|error| match error {
@@ -371,14 +370,14 @@ async fn handle_operation(
                     ),
                 })?;
 
-            // `CredentialService::insert` already drops the cached Kerberos session for a
-            // replaced entry, so no explicit invalidation is needed here.
+            // A replaced entry produces a new provisioning entry, so the credential-injection KDC
+            // service re-derives its session on the next lookup — no explicit invalidation here.
             if previous_entry.is_some() {
                 outputs.push(PreflightOutput {
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
-                        message: "an existing credential entry was replaced".to_owned(),
+                        message: "an existing provisioning entry was replaced".to_owned(),
                     },
                 });
             }

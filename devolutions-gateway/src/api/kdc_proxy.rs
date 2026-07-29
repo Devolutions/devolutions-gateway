@@ -22,7 +22,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 async fn kdc_proxy(
     State(DgwState {
         conf_handle,
-        credentials,
+        credential_injection,
+        provisioning,
         agent_tunnel_handle,
         ..
     }): State<DgwState>,
@@ -47,7 +48,9 @@ async fn kdc_proxy(
         KdcDestination::Inject { jti } => {
             enforce_credential_injection_enabled(jti, conf.debug.enable_unstable)?;
 
-            let kdc = credentials.kdc_for(jti).map_err(credential_injection_resolve_error)?;
+            let kdc = credential_injection
+                .kdc_for(&provisioning, jti)
+                .map_err(credential_injection_resolve_error)?;
 
             debug!(
                 jti = %kdc.jti(),

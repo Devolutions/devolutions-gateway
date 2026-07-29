@@ -11,7 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialService};
+use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialInjectionKdcService};
+use crate::provisioning::ProvisioningStore;
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
@@ -520,7 +521,8 @@ pub async fn handle(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
-    credentials: &CredentialService,
+    credential_injection: &CredentialInjectionKdcService,
+    provisioning: &ProvisioningStore,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     // Special handshake of our RDP extension
@@ -539,13 +541,10 @@ pub async fn handle(
 
     // If a credential mapping has been pushed, we automatically switch to
     // proxy-based credential injection mode. Otherwise, we continue the usual
-    // clean path procedure. The credential store is keyed on the association token's JTI.
+    // clean path procedure. The provisioning store is keyed on the association token's JTI.
     if let Some(jti) = crate::token::extract_jti(token).ok()
-        && let Some(entry) = credentials.get(jti)
-        && entry.mapping.is_some()
+        && let Some(credential_injection_kdc) = credential_injection.resolve_injection_kdc(provisioning, jti, token)?
     {
-        let credential_injection_kdc = credentials.kdc_for(jti)?;
-        anyhow::ensure!(token == credential_injection_kdc.raw_token(), "token mismatch");
         debug!(
             jti = %credential_injection_kdc.jti(),
             "Switching to RdpProxy for credential injection (WebSocket)"

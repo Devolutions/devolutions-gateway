@@ -8,7 +8,8 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::CredentialService;
+use crate::credential_injection_kdc::CredentialInjectionKdcService;
+use crate::provisioning::ProvisioningStore;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -27,7 +28,8 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
-    credentials: CredentialService,
+    credential_injection: CredentialInjectionKdcService,
+    provisioning: ProvisioningStore,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -51,7 +53,8 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
-            credentials,
+            credential_injection,
+            provisioning,
             agent_tunnel_handle,
         } = self;
 
@@ -149,15 +152,12 @@ where
                 //
                 // RdpProxy is generic over the server stream, so credential injection works
                 // regardless of whether the upstream is direct TCP or tunnelled via an agent.
-                // The credential store is keyed on the association token's JTI, so a direct
+                // The provisioning store is keyed on the association token's JTI, so a direct
                 // lookup by `claims.jti` is the primary path.
                 if is_rdp
-                    && let Some(entry) = credentials.get(claims.jti)
-                    && entry.mapping.is_some()
+                    && let Some(credential_injection_kdc) =
+                        credential_injection.resolve_injection_kdc(&provisioning, claims.jti, token)?
                 {
-                    anyhow::ensure!(token == entry.token, "token mismatch");
-                    let credential_injection_kdc = credentials.kdc_for(claims.jti)?;
-
                     info!(
                         jti = %credential_injection_kdc.jti(),
                         "RDP-TLS forwarding with credential injection"
