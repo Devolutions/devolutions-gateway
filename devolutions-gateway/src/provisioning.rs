@@ -301,12 +301,16 @@ mod tests {
     fn credentials_and_options_replace_independently() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
-        assert!(!store
-            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
-            .expect("insert"));
-        assert!(store
-            .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
-            .expect("replace"));
+        assert!(
+            !store
+                .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
+                .expect("insert")
+        );
+        assert!(
+            store
+                .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
+                .expect("replace")
+        );
 
         assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
         assert!(store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
