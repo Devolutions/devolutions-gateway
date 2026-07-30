@@ -546,15 +546,16 @@ impl CredentialService {
             CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
         })?;
 
-        let target_hostname = crate::token::extract_credential_injection_target_hostname(&credential_entry.token)
-            .map_err(|source| {
-                warn!(
-                    %jti,
-                    error = format!("{source:#}"),
-                    "KDC token references invalid credential-injection association token"
-                );
-                CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
-            })?;
+        // Validate association-token shape for credential injection (dst_hst present, etc.).
+        // SPN / acceptor hostname comes from gateway config below (#1856), not dst_hst.
+        crate::token::extract_credential_injection_target_hostname(&credential_entry.token).map_err(|source| {
+            warn!(
+                %jti,
+                error = format!("{source:#}"),
+                "KDC token references invalid credential-injection association token"
+            );
+            CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
+        })?;
 
         let proxy_username = app_credential_username(&mapping.proxy).to_owned();
         // Atomic get-or-insert: holds the lock long enough to guarantee a single Arc<Session>
