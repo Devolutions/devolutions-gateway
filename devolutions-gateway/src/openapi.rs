@@ -68,7 +68,6 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         PreflightOperationKind,
         AppCredential,
         AppCredentialKind,
-        TargetConnectionOptions,
         PreflightOutput,
         PreflightOutputKind,
         PreflightAlertStatus,
@@ -373,8 +372,7 @@ struct PreflightOperation {
     kind: PreflightOperationKind,
     /// The token to be stored on the proxy-side.
     ///
-    /// Required for "provision-token", "provision-credentials", and
-    /// "provision-connection-options" kinds.
+    /// Required for "provision-token" and "provision-credentials" kinds.
     token: Option<String>,
     /// The credential to use to authorize the client at the proxy-level.
     ///
@@ -384,28 +382,14 @@ struct PreflightOperation {
     ///
     /// Required for "provision-credentials" kind.
     target_credential: Option<AppCredential>,
-    /// Options used by the Gateway when connecting to the target.
-    ///
-    /// Required for "provision-connection-options" kind.
-    connection_options: Option<TargetConnectionOptions>,
     /// The hostname to perform DNS resolution on.
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
     /// Minimum persistence duration in seconds for the data provisioned via this operation.
     ///
-    /// Optional parameter for "provision-token", "provision-credentials", and
-    /// "provision-connection-options" kinds.
+    /// Optional parameter for "provision-token" and "provision-credentials" kinds.
     time_to_live: Option<u32>,
-}
-
-#[allow(unused)]
-#[derive(Deserialize, utoipa::ToSchema)]
-struct TargetConnectionOptions {
-    /// Kerberos KDC address for the target-side CredSSP connection.
-    ///
-    /// Supported schemes are `tcp` and `udp`.
-    krb_kdc: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -422,8 +406,6 @@ enum PreflightOperationKind {
     ProvisionToken,
     #[serde(rename = "provision-credentials")]
     ProvisionCredentials,
-    #[serde(rename = "provision-connection-options")]
-    ProvisionConnectionOptions,
     #[serde(rename = "resolve-host")]
     ResolveHost,
 }
