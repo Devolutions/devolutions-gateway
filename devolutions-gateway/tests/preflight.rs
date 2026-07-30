@@ -306,7 +306,6 @@ async fn test_provision_connection_options_success() -> anyhow::Result<()> {
     assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
 
-
     Ok(())
 }
 
@@ -347,7 +346,6 @@ async fn test_provision_credentials_and_connection_options_fold() -> anyhow::Res
     assert_eq!(body.as_array().expect("an array").len(), 2);
     assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
     assert_eq!(body[1]["kind"], "ack", "{:?}", body[1]);
-
 
     Ok(())
 }
