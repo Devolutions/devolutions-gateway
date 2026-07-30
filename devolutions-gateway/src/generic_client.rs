@@ -161,7 +161,7 @@ where
                     anyhow::ensure!(token == entry.token, "token mismatch");
                     let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
                     let credential_injection =
-                        CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
+                        CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled, &conf.hostname)?
                             .register_if_kerberos(&synthetic_kdc_registry);
 
                     info!(
