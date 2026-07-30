@@ -448,7 +448,6 @@ async fn handle_operation(
     Ok(())
 }
 
-
 fn validate_time_to_live(time_to_live: Option<u32>) -> Result<Duration, PreflightError> {
     let time_to_live = time_to_live
         .map(i64::from)
