@@ -42,7 +42,6 @@ const IN_PROCESS_KDC_HOST: &str = "cred.invalid";
 /// CredSSP server-leg intercept need — not proxy/target passwords or routing bags.
 pub(crate) struct CredentialInjectionKdc {
     jti: Uuid,
-    /// Gateway hostname the client connects to — used as `TERMSRV/<this>` SPN (#1856), not `dst_hst`.
     target_hostname: String,
     realm: String,
     acceptor_principal_name: String,
@@ -204,14 +203,10 @@ impl CredentialInjection {
     }
 
     /// RDP chef: owned groceries → prepared dish. Does not touch the registry.
-    ///
-    /// `gateway_hostname` is the Gateway's configured hostname (#1856): CredSSP server SPN is
-    /// `TERMSRV/<gateway_hostname>`, not the association-token `dst_hst` (final RDP target).
     pub(crate) fn from_provisioned(
         jti: Uuid,
         credential_entry: ProvisioningEntry,
         kerberos_enabled: bool,
-        gateway_hostname: &str,
     ) -> Result<PreparedCredentialInjection, CredentialInjectionKdcResolveError> {
         let ProvisioningEntry {
             token,
@@ -224,9 +219,7 @@ impl CredentialInjection {
             CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
         })?;
 
-        // Validate association-token shape for credential injection (dst_hst present, no dst_alt).
-        // SPN / acceptor hostname comes from gateway config, not dst_hst (#1856).
-        crate::token::extract_credential_injection_target_hostname(&token).map_err(|source| {
+        let target_hostname = crate::token::extract_credential_injection_target_hostname(&token).map_err(|source| {
             warn!(
                 %jti,
                 error = format!("{source:#}"),
@@ -264,7 +257,7 @@ impl CredentialInjection {
             })?;
 
         let proxy_username = app_credential_username(&mapping.proxy).to_owned();
-        let synthetic = CredentialInjectionKdc::new(jti, gateway_hostname.to_owned(), &proxy_username, &mapping.proxy)
+        let synthetic = CredentialInjectionKdc::new(jti, target_hostname, &proxy_username, &mapping.proxy)
             .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })?;
 
         Ok(PreparedCredentialInjection::Kerberos(KerberosCredentialInjection {
@@ -701,7 +694,7 @@ mod tests {
         let jti = Uuid::new_v4();
         let entry = dummy_entry(jti, "administrator@example.invalid");
         let registry = SyntheticKdcRegistry::new();
-        let injection = CredentialInjection::from_provisioned(jti, entry, false, "dgateway.localhost.com")
+        let injection = CredentialInjection::from_provisioned(jti, entry, false)
             .expect("prepared")
             .register_if_kerberos(&registry);
         assert!(!injection.uses_kerberos());
@@ -713,7 +706,7 @@ mod tests {
         let jti = Uuid::new_v4();
         let entry = dummy_entry(jti, "Administrator");
         let registry = SyntheticKdcRegistry::new();
-        let injection = CredentialInjection::from_provisioned(jti, entry, true, "dgateway.localhost.com")
+        let injection = CredentialInjection::from_provisioned(jti, entry, true)
             .expect("prepared")
             .register_if_kerberos(&registry);
         assert!(!injection.uses_kerberos());
@@ -723,7 +716,7 @@ mod tests {
     fn from_provisioned_requires_krb_kdc_for_kerberos() {
         let jti = Uuid::new_v4();
         let entry = dummy_entry(jti, "administrator@example.invalid");
-        let err = CredentialInjection::from_provisioned(jti, entry, true, "dgateway.localhost.com").expect_err("kdc");
+        let err = CredentialInjection::from_provisioned(jti, entry, true).expect_err("kdc");
         assert!(matches!(err, CredentialInjectionKdcResolveError::MissingKrbKdc { .. }));
     }
 
@@ -735,8 +728,7 @@ mod tests {
         let entry = store.take(jti).expect("entry");
         assert!(store.take(jti).is_none(), "take consumes groceries");
         let registry = SyntheticKdcRegistry::new();
-        let prepared =
-            CredentialInjection::from_provisioned(jti, entry, true, "dgateway.localhost.com").expect("prepared");
+        let prepared = CredentialInjection::from_provisioned(jti, entry, true).expect("prepared");
         assert!(registry.get(jti).is_none(), "not published until register_if_kerberos");
         let injection = prepared.register_if_kerberos(&registry);
         assert!(injection.uses_kerberos());
@@ -744,18 +736,6 @@ mod tests {
         assert_eq!(
             registry.get(jti).expect("live kdc").jti(),
             injection.as_kerberos().expect("kerberos").synthetic_kdc().jti()
-        );
-        // #1856: SPN host is Gateway hostname, not association-token dst_hst (target.example).
-        assert_eq!(injection.as_kerberos().expect("kerberos").synthetic_kdc().jti(), jti);
-        let kdc = registry.get(jti).expect("live kdc");
-        let spn_host = format!("{kdc:?}");
-        assert!(
-            spn_host.contains("dgateway.localhost.com"),
-            "synthetic KDC must use gateway hostname for SPN, got {spn_host}"
-        );
-        assert!(
-            !spn_host.contains("target.example"),
-            "synthetic KDC must not use dst_hst host for SPN, got {spn_host}"
         );
     }
 

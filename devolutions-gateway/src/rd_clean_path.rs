@@ -539,7 +539,7 @@ pub async fn handle(
     {
         anyhow::ensure!(token == entry.token, "token mismatch");
         let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
-        let credential_injection = CredentialInjection::from_provisioned(jti, entry, kerberos_enabled, &conf.hostname)?
+        let credential_injection = CredentialInjection::from_provisioned(jti, entry, kerberos_enabled)?
             .register_if_kerberos(synthetic_kdc_registry);
         debug!(
             jti = %credential_injection.jti(),
