@@ -5,9 +5,8 @@ use picky_krb::messages::KdcProxyMessage;
 use uuid::Uuid;
 
 use crate::DgwState;
-use crate::credential_injection_kdc::{
-    CredentialInjectionKdcInterception, CredentialInjectionKdcRequest, CredentialInjectionKdcResolveError,
-    kdc_proxy_message_realm,
+use crate::credential_injection::{
+    CredentialInjectionKdcInterception, CredentialInjectionKdcRequest, kdc_proxy_message_realm,
 };
 use crate::extract::KdcToken;
 use crate::http::HttpError;
@@ -22,7 +21,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 async fn kdc_proxy(
     State(DgwState {
         conf_handle,
-        credentials,
+        synthetic_kdc_registry,
         agent_tunnel_handle,
         ..
     }): State<DgwState>,
@@ -47,7 +46,9 @@ async fn kdc_proxy(
         KdcDestination::Inject { jti } => {
             enforce_credential_injection_enabled(jti, conf.debug.enable_unstable)?;
 
-            let kdc = credentials.kdc_for(jti).map_err(credential_injection_resolve_error)?;
+            let kdc = synthetic_kdc_registry
+                .get(jti)
+                .ok_or_else(|| HttpError::bad_request().msg("no live synthetic KDC published for this session"))?;
 
             debug!(
                 jti = %kdc.jti(),
@@ -89,17 +90,6 @@ async fn kdc_proxy(
             )
             .await
         }
-    }
-}
-
-fn credential_injection_resolve_error(error: CredentialInjectionKdcResolveError) -> HttpError {
-    match error {
-        CredentialInjectionKdcResolveError::BuildKdcConfig { .. } => HttpError::internal()
-            .with_msg("credential-injection KDC could not be initialized")
-            .build(error),
-        _ => HttpError::bad_request()
-            .with_msg("credential-injection state is not available")
-            .build(error),
     }
 }
 
