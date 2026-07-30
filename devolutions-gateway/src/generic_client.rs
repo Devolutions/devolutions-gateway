@@ -8,7 +8,8 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::CredentialService;
+use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
+use crate::provisioning::ProvisioningStore;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -27,7 +28,8 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
-    credentials: CredentialService,
+    provisioning: ProvisioningStore,
+    synthetic_kdc_registry: SyntheticKdcRegistry,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -51,7 +53,8 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
-            credentials,
+            provisioning,
+            synthetic_kdc_registry,
             agent_tunnel_handle,
         } = self;
 
@@ -152,14 +155,18 @@ where
                 // The credential store is keyed on the association token's JTI, so a direct
                 // lookup by `claims.jti` is the primary path.
                 if is_rdp
-                    && let Some(entry) = credentials.get(claims.jti)
+                    && let Some(entry) = provisioning.take(claims.jti)
                     && entry.mapping.is_some()
                 {
                     anyhow::ensure!(token == entry.token, "token mismatch");
-                    let credential_injection_kdc = credentials.kdc_for(claims.jti)?;
+                    let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
+                    let credential_injection =
+                        CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
+                            .register_if_kerberos(&synthetic_kdc_registry);
 
                     info!(
-                        jti = %credential_injection_kdc.jti(),
+                        jti = %credential_injection.jti(),
+                        kerberos = credential_injection.uses_kerberos(),
                         "RDP-TLS forwarding with credential injection"
                     );
 
@@ -179,7 +186,7 @@ where
                         .server_stream(server_stream)
                         .sessions(sessions)
                         .subscriber_tx(subscriber_tx)
-                        .credential_injection_kdc(credential_injection_kdc)
+                        .credential_injection(credential_injection)
                         .client_stream_leftover_bytes(leftover_bytes)
                         .server_dns_name(selected_target.host().to_owned())
                         .disconnect_interest(disconnect_interest)

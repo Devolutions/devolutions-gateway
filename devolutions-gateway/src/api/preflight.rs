@@ -11,10 +11,9 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential_injection_kdc::CredentialService;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
-use crate::provisioning::InsertError;
+use crate::provisioning::{InsertError, ProvisioningStore};
 use crate::session::SessionMessageSender;
 
 const OP_GET_VERSION: &str = "get-version";
@@ -204,7 +203,7 @@ pub(super) async fn post_preflight(
     State(DgwState {
         conf_handle,
         sessions,
-        credentials,
+        provisioning,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -231,13 +230,13 @@ pub(super) async fn post_preflight(
                 let outputs = outputs.clone();
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
-                let credentials = credentials.clone();
+                let provisioning = provisioning.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credentials).await {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &provisioning).await {
                         outputs.push(PreflightOutput {
                             operation_id,
                             kind: PreflightOutputKind::Alert {
@@ -264,7 +263,7 @@ async fn handle_operation(
     outputs: &Outputs,
     conf: &Conf,
     sessions: &SessionMessageSender,
-    credentials: &CredentialService,
+    provisioning: &ProvisioningStore,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -355,7 +354,7 @@ async fn handle_operation(
                     })?;
             }
 
-            let replaced = credentials
+            let replaced = provisioning
                 .insert_credentials(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|error| match error {
@@ -397,7 +396,7 @@ async fn handle_operation(
                 PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
             })?;
 
-            let replaced = credentials.insert_connection_options(jti, connection_options, time_to_live);
+            let replaced = provisioning.insert_connection_options(jti, connection_options, time_to_live);
 
             if replaced {
                 outputs.push(PreflightOutput {
