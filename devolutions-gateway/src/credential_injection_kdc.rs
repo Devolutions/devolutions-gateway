@@ -973,7 +973,9 @@ mod tests {
     }
 
     #[test]
-    fn service_kdc_for_lazily_extracts_target_hostname_from_entry_token() {
+    fn service_kdc_for_uses_gateway_hostname_for_spn() {
+        // #1856: SPN / acceptor hostname is the Gateway hostname from config, not dst_hst.
+        // Token dst_hst is still validated (missing/invalid shape fails kdc_for).
         let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
@@ -987,7 +989,7 @@ mod tests {
 
         let kdc = service.kdc_for(jti).expect("credential-injection KDC resolves");
 
-        assert_eq!(kdc.target_hostname, "target.example");
+        assert_eq!(kdc.target_hostname, "dgateway.localhost.com");
     }
 
     #[test]
