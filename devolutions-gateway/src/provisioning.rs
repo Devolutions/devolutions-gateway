@@ -129,6 +129,19 @@ impl ProvisioningStore {
         self.connection_options.lock().insert(jti, entry).is_some()
     }
 
+    /// True when the credentials half is live and carries an injection mapping.
+    ///
+    /// Does not consume the entry — use before auth when deciding whether to take the
+    /// credential-injection path.
+    pub(crate) fn has_mapping(&self, jti: Uuid) -> bool {
+        let now = time::OffsetDateTime::now_utc();
+        let entries = self.credentials.lock();
+        match entries.get(&jti) {
+            Some(entry) if now < entry.expires_at => entry.mapping.is_some(),
+            _ => false,
+        }
+    }
+
     /// Take the provisioned view for a session (one-shot).
     ///
     /// Removes the credentials half (required) and any live connection-options half for `jti`.

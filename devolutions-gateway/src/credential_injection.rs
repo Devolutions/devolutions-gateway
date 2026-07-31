@@ -531,7 +531,8 @@ pub struct SyntheticKdcRegistry {
 #[derive(Debug, Default)]
 struct RegistryInner {
     live: HashMap<Uuid, PublishedSyntheticKdc>,
-    next_generation: HashMap<Uuid, u64>,
+    /// Registry-wide monotonic counter (not per-JTI) so generations stay unique without leaking map entries.
+    next_generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -573,16 +574,15 @@ impl SyntheticKdcRegistry {
         }
     }
 
-    fn allocate_generation(inner: &mut RegistryInner, jti: Uuid) -> u64 {
-        let slot = inner.next_generation.entry(jti).or_insert(0);
-        *slot = slot.wrapping_add(1);
-        *slot
+    fn allocate_generation(inner: &mut RegistryInner) -> u64 {
+        inner.next_generation = inner.next_generation.wrapping_add(1);
+        inner.next_generation
     }
 
     pub(crate) fn register(&self, kdc: Arc<CredentialInjectionKdc>) -> SyntheticKdcRegistration {
         let jti = kdc.jti();
         let mut inner = self.inner.lock();
-        let generation = Self::allocate_generation(&mut inner, jti);
+        let generation = Self::allocate_generation(&mut inner);
         inner.live.insert(jti, PublishedSyntheticKdc { generation, kdc });
         debug!(%jti, generation, "published synthetic KDC");
         SyntheticKdcRegistration {

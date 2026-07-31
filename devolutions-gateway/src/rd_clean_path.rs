@@ -320,7 +320,8 @@ async fn handle_with_credential_injection(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
-    credential_injection: CredentialInjection,
+    provisioning: &ProvisioningStore,
+    synthetic_kdc_registry: &SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
@@ -363,6 +364,19 @@ async fn handle_with_credential_injection(
     )
     .await
     .context("RDCleanPath authorization failed")?;
+
+    let token = cleanpath_pdu
+        .proxy_auth
+        .as_deref()
+        .context("missing token in RDCleanPath PDU")?;
+    let entry = provisioning
+        .take(claims.jti)
+        .context("provisioned credentials missing after authorization")?;
+    anyhow::ensure!(entry.mapping.is_some(), "provisioned entry has no credential mapping");
+    anyhow::ensure!(token == entry.token, "token mismatch");
+    let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
+    let credential_injection = CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
+        .register_if_kerberos(synthetic_kdc_registry);
 
     let ConnectedRdpServer {
         tls_stream: server_stream,
@@ -532,20 +546,12 @@ pub async fn handle(
 
     // If a credential mapping has been pushed, we automatically switch to
     // proxy-based credential injection mode. Otherwise, we continue the usual
-    // clean path procedure. The credential store is keyed on the association token's JTI.
+    // clean path procedure. Peek only here — take after authorize_cleanpath so an
+    // unverified token cannot burn a victim JTI's one-shot groceries.
     if let Some(jti) = crate::token::extract_jti(token).ok()
-        && let Some(entry) = provisioning.take(jti)
-        && entry.mapping.is_some()
+        && provisioning.has_mapping(jti)
     {
-        anyhow::ensure!(token == entry.token, "token mismatch");
-        let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
-        let credential_injection = CredentialInjection::from_provisioned(jti, entry, kerberos_enabled)?
-            .register_if_kerberos(synthetic_kdc_registry);
-        debug!(
-            jti = %credential_injection.jti(),
-            kerberos = credential_injection.uses_kerberos(),
-            "Switching to RdpProxy for credential injection (WebSocket)"
-        );
+        debug!(%jti, "Switching to RdpProxy for credential injection (WebSocket)");
 
         return handle_with_credential_injection(
             client_stream,
@@ -557,7 +563,8 @@ pub async fn handle(
             subscriber_tx,
             active_recordings,
             cleanpath_pdu,
-            credential_injection,
+            provisioning,
+            synthetic_kdc_registry,
             agent_tunnel_handle.clone(),
         )
         .await;
