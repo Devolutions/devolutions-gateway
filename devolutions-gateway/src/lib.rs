@@ -30,6 +30,7 @@ pub mod log;
 pub mod middleware;
 pub mod ngrok;
 pub mod plugin_manager;
+pub mod provisioning;
 pub mod proxy;
 pub mod rd_clean_path;
 pub mod rdp_pcb;

@@ -27,7 +27,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::config::ConfHandle;
-use crate::credential::{AppCredential, AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle};
+use crate::credential::{AppCredential, AppCredentialMapping};
+use crate::provisioning::{ArcProvisioningEntry, ProvisioningStore};
 
 // The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
 // never leave the process: `intercept_network_request` recognises this hostname and dispatches
@@ -121,7 +122,7 @@ impl fmt::Debug for CredentialInjectionKdc {
 impl CredentialInjectionKdc {
     fn from_parts(
         jti: Uuid,
-        credential_entry: ArcCredentialEntry,
+        credential_entry: ArcProvisioningEntry,
         target_hostname: String,
         session: Arc<CredentialInjectionKdcSession>,
     ) -> anyhow::Result<Self> {
@@ -435,7 +436,7 @@ fn random_32_bytes() -> Vec<u8> {
 
 /// One-stop service for credential storage and credential-injection KDC state.
 ///
-/// Wraps the protocol-neutral [`CredentialStoreHandle`] and adds a Kerberos session cache keyed by
+/// Wraps the protocol-neutral [`ProvisioningStore`] and adds a Kerberos session cache keyed by
 /// association-token JTI. The credential store remains the single source of truth for entry
 /// lifetime; the session cache piggybacks on it (Arc-cloned credentials at lookup time, with stale
 /// sessions evicted on insert-replacement and by a periodic sweep).
@@ -448,7 +449,7 @@ pub struct CredentialService {
     // build the SPN for the CredSSP acceptor. The hostname cannot not be a plain `String`, because
     // the config can be reloaded at runtime.
     conf_handle: ConfHandle,
-    credentials: CredentialStoreHandle,
+    credentials: ProvisioningStore,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<CredentialInjectionKdcSession>>>>,
 }
 
@@ -466,7 +467,7 @@ impl CredentialService {
     pub fn new(conf_handle: ConfHandle) -> Self {
         Self {
             conf_handle,
-            credentials: CredentialStoreHandle::new(),
+            credentials: ProvisioningStore::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -475,8 +476,8 @@ impl CredentialService {
     ///
     /// Any previously-cached Kerberos session for the same JTI is dropped: it was derived from
     /// the prior provisioning and is no longer valid for the new entry. We invalidate even when
-    /// `CredentialStoreHandle::insert` reports no replacement, because the prior entry may have
-    /// already been evicted by `credential::CleanupTask` while its session cache entry was still
+    /// `ProvisioningStore::insert` reports no replacement, because the prior entry may have
+    /// already been evicted by `provisioning::CleanupTask` while its session cache entry was still
     /// awaiting the next `sweep_orphans` tick — without an unconditional drop here, a fresh
     /// provisioning under the same JTI would reuse stale key material.
     pub fn insert(
@@ -484,27 +485,27 @@ impl CredentialService {
         token: String,
         mapping: Option<crate::credential::CleartextAppCredentialMapping>,
         time_to_live: time::Duration,
-    ) -> Result<Option<ArcCredentialEntry>, crate::credential::InsertError> {
+    ) -> Result<Option<ArcProvisioningEntry>, crate::provisioning::InsertError> {
         // Snapshot the JTI from the new token so we can invalidate the matching session entry
-        // regardless of whether the credential store reports a replacement. `CredentialStore::insert`
+        // regardless of whether the credential store reports a replacement. `ProvisioningStore::insert`
         // re-extracts internally; both calls go through the same code path, so an invalid token
         // here will surface as the same `InvalidToken` error downstream.
         let jti = crate::token::extract_jti(&token)
             .context("failed to extract token ID")
-            .map_err(crate::credential::InsertError::InvalidToken)?;
+            .map_err(crate::provisioning::InsertError::InvalidToken)?;
         let previous = self.credentials.insert(token, mapping, time_to_live)?;
         self.sessions.lock().remove(&jti);
         Ok(previous)
     }
 
     /// Look up a credential entry by its association-token JTI.
-    pub fn get(&self, jti: Uuid) -> Option<ArcCredentialEntry> {
+    pub fn get(&self, jti: Uuid) -> Option<ArcProvisioningEntry> {
         self.credentials.get(jti)
     }
 
-    /// Borrow the inner [`CredentialStoreHandle`] for plumbing that genuinely needs the
+    /// Borrow the inner [`ProvisioningStore`] for plumbing that genuinely needs the
     /// protocol-neutral primitive (e.g. wiring the background expiry task).
-    pub fn credential_store(&self) -> &CredentialStoreHandle {
+    pub fn credential_store(&self) -> &ProvisioningStore {
         &self.credentials
     }
 
@@ -519,7 +520,7 @@ impl CredentialService {
             CredentialInjectionKdcResolveError::MissingCredential { jti }
         })?;
 
-        // `CredentialStoreHandle::get` does not enforce expiry — entries are evicted asynchronously
+        // `ProvisioningStore::get` does not enforce expiry — entries are evicted asynchronously
         // by the credential cleanup task. Treat a stale entry as already gone so we never build a
         // KDC against expired credentials.
         if time::OffsetDateTime::now_utc() >= credential_entry.expires_at {
@@ -663,8 +664,8 @@ mod tests {
         }))
     }
 
-    fn dummy_entry_with_target_username(jti: Uuid, target_username: &str) -> ArcCredentialEntry {
-        let store = CredentialStoreHandle::new();
+    fn dummy_entry_with_target_username(jti: Uuid, target_username: &str) -> ArcProvisioningEntry {
+        let store = ProvisioningStore::new();
         store
             .insert(
                 association_token(jti),
@@ -676,7 +677,7 @@ mod tests {
         store.get(jti).expect("credential entry is indexed by JTI")
     }
 
-    fn dummy_entry(jti: Uuid) -> ArcCredentialEntry {
+    fn dummy_entry(jti: Uuid) -> ArcProvisioningEntry {
         dummy_entry_with_target_username(jti, "target")
     }
 
@@ -721,7 +722,7 @@ mod tests {
         let service = CredentialService::new(mock_conf_handle());
         let jti = Uuid::new_v4();
 
-        // Negative TTL: entry is born already expired. `CredentialStoreHandle::get` does not
+        // Negative TTL: entry is born already expired. `ProvisioningStore::get` does not
         // filter on expiry, so the service's own check is what guarantees we never build a KDC
         // over stale credentials.
         service
@@ -775,9 +776,9 @@ mod tests {
 
         // Simulate the race called out by Codex: a previous provisioning's session is still
         // cached, but the credential entry has already been evicted (e.g. by
-        // `credential::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
+        // `provisioning::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
         // under the same JTI must drop the stale session regardless of whether
-        // `CredentialStoreHandle::insert` reports a replacement, otherwise the next `kdc_for`
+        // `ProvisioningStore::insert` reports a replacement, otherwise the next `kdc_for`
         // would reuse the old key material.
         let stale_session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
         service.sessions.lock().insert(jti, Arc::clone(&stale_session));
@@ -851,11 +852,11 @@ mod tests {
 
         // Simulate credential store eviction: build a parallel service whose credential store is
         // empty but whose session cache is shared with the original. A more faithful test would
-        // drive `credential::cleanup_task` to expire the entry, but it sleeps for 15 minutes
+        // drive `provisioning::cleanup_task` to expire the entry, but it sleeps for 15 minutes
         // between ticks. Swapping the inner store is the deterministic equivalent.
         let orphaned_service = CredentialService {
             conf_handle: mock_conf_handle(),
-            credentials: CredentialStoreHandle::new(),
+            credentials: ProvisioningStore::new(),
             sessions: Arc::clone(&service.sessions),
         };
 
