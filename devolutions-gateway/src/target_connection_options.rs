@@ -86,7 +86,7 @@ mod tests {
         }))
         .expect_err("unsupported KDC protocol should be rejected");
 
-        assert!(error.to_string().contains("unsupported KDC protocol: https"));
+        assert!(error.to_string().contains("unsupported kdc protocol: https"));
     }
 
     #[test]
