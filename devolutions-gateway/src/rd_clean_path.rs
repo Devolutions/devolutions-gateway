@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use ironrdp_pdu::nego;
-use ironrdp_rdcleanpath::RDCleanPathPdu;
+use ironrdp_rdcleanpath::{RDCleanPath, RDCleanPathPdu, RDCleanPathV1, RDCleanPathV2, VERSION_1};
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -230,17 +230,17 @@ struct ConnectedRdpServer {
     tls_stream: tokio_rustls::client::TlsStream<UpstreamLeg>,
     server_addr: SocketAddr,
     selected_target: TargetAddr,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
-/// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
+/// Establish a connection to the RDP server and perform the version-specific front sequence.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
-/// the WebSocket forwarders in [`crate::upstream`]; here we just do the RDP-specific
-/// PCB + X224 + TLS upgrade on top of whatever leg that returns.
+/// the WebSocket forwarders in [`crate::upstream`].
+/// Version 1 performs PCB + X.224 + TLS; version 2 performs the opaque server PCB + TLS.
 async fn connect_rdp_server(
     claims: &AssociationTokenClaims,
-    cleanpath_pdu: RDCleanPathPdu,
+    cleanpath: RDCleanPath,
     agent_tunnel_handle: Option<&Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> Result<ConnectedRdpServer, CleanPathError> {
     let crate::token::ConnectionMode::Fwd { ref targets, .. } = claims.jet_cm else {
@@ -268,24 +268,38 @@ async fn connect_rdp_server(
     debug!(%selected_target, "Connected to destination server");
     tracing::Span::current().record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable.
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_stream.write_all(pcb.as_bytes()).await?;
-    }
+    let x224_rsp = match cleanpath {
+        RDCleanPath::V1(RDCleanPathV1::Request {
+            preconnection_blob,
+            x224_connection_request,
+            ..
+        }) => {
+            if let Some(pcb) = preconnection_blob {
+                server_stream.write_all(pcb.as_bytes()).await?;
+            }
+            server_stream.write_all(x224_connection_request.as_bytes()).await?;
 
-    // Send X224 connection request.
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
-
-    trace!("Receiving X224 response");
-
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
+            trace!("Receiving X224 response");
+            Some(
+                read_x224_response(&mut server_stream)
+                    .await
+                    .with_context(|| format!("read X224 response from {selected_target}"))
+                    .map_err(CleanPathError::BadRequest)?,
+            )
+        }
+        RDCleanPath::V2(RDCleanPathV2::Request {
+            server_preconnection_pdu,
+            ..
+        }) => {
+            server_stream.write_all(server_preconnection_pdu.as_bytes()).await?;
+            None
+        }
+        _ => {
+            return anyhow::Error::msg("unexpected RDCleanPath message")
+                .pipe(CleanPathError::BadRequest)
+                .pipe(Err);
+        }
+    };
 
     trace!("Establishing TLS connection with server");
 
@@ -369,9 +383,16 @@ async fn handle_with_credential_injection(
         server_addr,
         selected_target: destination,
         x224_rsp,
-    } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
+    } = connect_rdp_server(
+        &claims,
+        cleanpath_pdu
+            .into_enum()
+            .context("invalid RDCleanPath version 1 PDU")?,
+        agent_tunnel_handle.as_ref(),
+    )
         .await
         .context("RDCleanPath connection failed")?;
+    let x224_rsp = x224_rsp.context("RDCleanPath version 1 response is missing X.224")?;
 
     // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
@@ -523,6 +544,7 @@ pub async fn handle(
     let cleanpath_pdu = read_cleanpath_pdu(&mut client_stream)
         .await
         .context("couldn't read cleanpath PDU")?;
+    let request_version = cleanpath_pdu.version;
 
     // Early credential detection: check if we should use RdpProxy instead.
     let token = cleanpath_pdu
@@ -533,7 +555,8 @@ pub async fn handle(
     // If a credential mapping has been pushed, we automatically switch to
     // proxy-based credential injection mode. Otherwise, we continue the usual
     // clean path procedure. The credential store is keyed on the association token's JTI.
-    if let Some(jti) = crate::token::extract_jti(token).ok()
+    if cleanpath_pdu.version == VERSION_1
+        && let Some(jti) = crate::token::extract_jti(token).ok()
         && let Some(entry) = provisioning.take(jti)
         && entry.mapping.is_some()
     {
@@ -577,7 +600,11 @@ pub async fn handle(
         )
         .await?;
 
-        let connected = connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await?;
+        let cleanpath = cleanpath_pdu
+            .into_enum()
+            .context("invalid RDCleanPath PDU")
+            .map_err(CleanPathError::BadRequest)?;
+        let connected = connect_rdp_server(&auth.claims, cleanpath, agent_tunnel_handle.as_ref()).await?;
 
         Ok::<_, CleanPathError>((auth, connected))
     }
@@ -585,7 +612,8 @@ pub async fn handle(
     {
         Ok(result) => result,
         Err(error) => {
-            let response = RDCleanPathPdu::from(&error);
+            let mut response = RDCleanPathPdu::from(&error);
+            response.version = request_version;
             send_clean_path_response(&mut client_stream, &response).await?;
             return anyhow::Error::new(error)
                 .context("an error occurred when processing cleanpath PDU")
@@ -612,8 +640,12 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .context("build RDCleanPath response")?;
+    let rdcleanpath_rsp = if let Some(x224_rsp) = x224_rsp {
+        RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
+    } else {
+        RDCleanPathPdu::new_v2_response(server_addr.to_string(), x509_chain)
+    }
+    .context("build RDCleanPath response")?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
