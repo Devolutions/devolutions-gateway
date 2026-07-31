@@ -404,7 +404,7 @@ where
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "CredSSP loop needs framed IO, identity, optional synthetic KDC, and KdcConnector together",
+        reason = "CredSSP loop needs framed IO, identity, optional synthetic KDC, and KdcConnector together"
     )]
     async fn credssp_loop<S>(
         framed: &mut ironrdp_tokio::Framed<S>,
