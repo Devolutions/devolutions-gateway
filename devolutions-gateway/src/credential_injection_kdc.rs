@@ -487,7 +487,7 @@ impl CredentialService {
         time_to_live: time::Duration,
     ) -> Result<Option<ArcProvisioningEntry>, crate::provisioning::InsertError> {
         // Snapshot the JTI from the new token so we can invalidate the matching session entry
-        // regardless of whether the credential store reports a replacement. `CredentialStore::insert`
+        // regardless of whether the credential store reports a replacement. `ProvisioningStore::insert`
         // re-extracts internally; both calls go through the same code path, so an invalid token
         // here will surface as the same `InvalidToken` error downstream.
         let jti = crate::token::extract_jti(&token)
@@ -776,7 +776,7 @@ mod tests {
 
         // Simulate the race called out by Codex: a previous provisioning's session is still
         // cached, but the credential entry has already been evicted (e.g. by
-        // `credential::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
+        // `provisioning::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
         // under the same JTI must drop the stale session regardless of whether
         // `ProvisioningStore::insert` reports a replacement, otherwise the next `kdc_for`
         // would reuse the old key material.
@@ -852,7 +852,7 @@ mod tests {
 
         // Simulate credential store eviction: build a parallel service whose credential store is
         // empty but whose session cache is shared with the original. A more faithful test would
-        // drive `credential::cleanup_task` to expire the entry, but it sleeps for 15 minutes
+        // drive `provisioning::cleanup_task` to expire the entry, but it sleeps for 15 minutes
         // between ticks. Swapping the inner store is the deterministic equivalent.
         let orphaned_service = CredentialService {
             conf_handle: mock_conf_handle(),

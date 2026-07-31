@@ -40,7 +40,7 @@ pub struct AppCredentialMapping {
 /// Cleartext credential received from the API, used for deserialization only.
 ///
 /// Passwords are encrypted and stored as [`AppCredential`] inside the provisioning store.
-/// This type is never stored directly — hand it to [`ProvisioningStore::insert`].
+/// This type is never stored directly — hand it to [`crate::provisioning::ProvisioningStore::insert`].
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind")]
 pub enum CleartextAppCredential {
@@ -67,7 +67,7 @@ impl CleartextAppCredential {
 
 /// Cleartext credential mapping received from the API, used for deserialization only.
 ///
-/// Passwords are encrypted on write. Hand this directly to [`ProvisioningStore::insert`].
+/// Passwords are encrypted on write. Hand this directly to [`crate::provisioning::ProvisioningStore::insert`].
 #[derive(Debug, Deserialize)]
 pub struct CleartextAppCredentialMapping {
     #[serde(rename = "proxy_credential")]
