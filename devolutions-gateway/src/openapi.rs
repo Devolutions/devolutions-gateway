@@ -404,7 +404,7 @@ struct PreflightOperation {
 struct TargetConnectionOptions {
     /// Kerberos KDC address for the target-side CredSSP connection.
     ///
-    /// Supported schemes are `tcp` and `udp`.
+    /// Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
     krb_kdc: Option<String>,
 }
 
@@ -422,10 +422,11 @@ enum PreflightOperationKind {
     ProvisionToken,
     #[serde(rename = "provision-credentials")]
     ProvisionCredentials,
-    #[serde(rename = "provision-connection-options")]
-    ProvisionConnectionOptions,
     #[serde(rename = "resolve-host")]
     ResolveHost,
+    // Append-only: keep after ResolveHost so generated C# numeric values for existing variants stay stable.
+    #[serde(rename = "provision-connection-options")]
+    ProvisionConnectionOptions,
 }
 
 #[allow(unused)]
