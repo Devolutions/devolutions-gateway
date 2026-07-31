@@ -38,11 +38,11 @@ pub(crate) fn is_supported_krb_kdc_scheme(scheme: &str) -> bool {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum InvalidKdcAddr {
-    #[error("unsupported KDC protocol: {0}")]
+    #[error("unsupported kdc protocol: {0}")]
     UnsupportedScheme(String),
-    #[error("KDC address is missing a host: {0}")]
+    #[error("kdc address is missing a host: {0}")]
     MissingHost(String),
-    #[error("KDC address is not a valid URL: {0}")]
+    #[error("kdc address is not a valid url: {0}")]
     NotAUrl(String),
 }
 
