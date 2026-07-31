@@ -805,7 +805,7 @@ mod tests {
         // cached, but the credential entry has already been evicted (e.g. by
         // `provisioning::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
         // under the same JTI must drop the stale session regardless of whether
-        // `ProvisioningStore::insert` reports a replacement, otherwise the next `kdc_for`
+        // `ProvisioningStore::insert_credentials` reports a replacement, otherwise the next `kdc_for`
         // would reuse the old key material.
         let stale_session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
         service.sessions.lock().insert(jti, Arc::clone(&stale_session));

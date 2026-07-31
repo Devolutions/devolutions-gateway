@@ -396,12 +396,12 @@ pub(crate) fn credential_injection_kerberos_configs(
 
     let krb_kdc = credential_injection_kdc
         .krb_kdc()
-        .context("Kerberos credential injection requires the krb_kdc target connection option")?;
+        .context("kerberos credential injection requires the krb_kdc target connection option")?;
 
     Ok(CredentialInjectionKerberosConfigs {
         server: Some(credential_injection_kdc.server_kerberos_config(client_addr)?),
         client: Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: Some(url::Url::try_from(krb_kdc).context("convert target KDC address to URL")?),
+            kdc_proxy_url: Some(url::Url::try_from(krb_kdc).context("convert target kdc address to url")?),
             hostname: gateway_hostname.to_owned(),
         }),
     })
