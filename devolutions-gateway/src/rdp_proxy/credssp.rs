@@ -402,7 +402,10 @@ where
 
     return result;
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "CredSSP loop needs framed IO, identity, optional synthetic KDC, and KdcConnector together",
+    )]
     async fn credssp_loop<S>(
         framed: &mut ironrdp_tokio::Framed<S>,
         buf: &mut ironrdp_pdu::WriteBuf,
