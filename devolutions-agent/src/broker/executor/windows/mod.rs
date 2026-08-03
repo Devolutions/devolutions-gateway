@@ -168,7 +168,11 @@ fn execute_as_system(
     Ok(output)
 }
 
-/// Execute a command as the current user (development mode).
+/// Execute a command as the current user (non-SYSTEM mode).
+///
+/// This path is taken whenever the broker does not run as SYSTEM, regardless of build
+/// profile — e.g. when the agent binary is launched manually as a regular user instead
+/// of as the Windows service.
 ///
 /// Opens the current process token and uses the same `create_process_as_user`
 /// code path as SYSTEM mode, ensuring consistent behavior (environment, desktop, flags).
@@ -183,7 +187,7 @@ fn execute_as_current_user(
 ) -> anyhow::Result<ExecutionOutput> {
     info!(
         effective_user = %ctx.effective_user,
-        "Executing command as current user (dev mode)"
+        "Executing command as current user (non-SYSTEM mode)"
     );
 
     let token = Process::current_process()
@@ -197,8 +201,8 @@ fn execute_as_current_user(
     if process_user_sid != ctx.user_sid {
         bail!(
             "pipe client user SID '{}' does not match broker process user SID '{}'; \
-             user-scope execution in development mode is only supported when the client \
-             and the broker run as the same user",
+             user-scope execution is only supported when the client \
+             and the broker run as the same user (broker is not running as SYSTEM)",
             ctx.user_sid,
             process_user_sid,
         );
@@ -1647,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn dev_mode_rejects_client_user_different_from_broker_user() {
+    fn non_system_mode_rejects_client_user_different_from_broker_user() {
         let ctx = ExecutionContext {
             kill_processes: Vec::new(),
             pre_command: None,
