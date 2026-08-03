@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use now_policy_api::{Elevation, Scope};
+use now_policy_api::{Elevation, ManagerName, Scope};
 use tracing::info;
 use win_api_wrappers::identity::sid::Sid;
 
@@ -57,6 +57,21 @@ pub struct ExecutionContext {
 
 pub type ProcessStartedCallback = std::sync::Arc<dyn Fn(DateTime<Utc>) + Send + Sync>;
 
+/// All package managers the broker knows how to drive.
+pub const BROKER_SUPPORTED_MANAGERS: [ManagerName; 11] = [
+    ManagerName::Winget,
+    ManagerName::Chocolatey,
+    ManagerName::Bun,
+    ManagerName::Cargo,
+    ManagerName::Dotnet,
+    ManagerName::Pip,
+    ManagerName::Npm,
+    ManagerName::PowerShell,
+    ManagerName::PowerShell7,
+    ManagerName::Scoop,
+    ManagerName::Vcpkg,
+];
+
 /// Trait for command execution strategies.
 #[async_trait]
 pub trait CommandExecutor: Send + Sync {
@@ -69,6 +84,16 @@ pub trait CommandExecutor: Send + Sync {
         ctx: &ExecutionContext,
         process_started: Option<ProcessStartedCallback>,
     ) -> anyhow::Result<ExecutionOutput>;
+
+    /// Probe which package managers are actually available for the target user.
+    ///
+    /// The default implementation reports no managers at all: availability must be
+    /// positively established by a platform executor, which overrides this to resolve
+    /// each manager executable using the same logic the execution path uses.
+    async fn probe_managers(&self, user_sid: &Sid) -> Vec<ManagerName> {
+        let _ = user_sid;
+        Vec::new()
+    }
 }
 
 /// Dry-run executor that only logs commands without running them.

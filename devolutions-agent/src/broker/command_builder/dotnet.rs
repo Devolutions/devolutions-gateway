@@ -120,7 +120,7 @@ fn dotnet_source(request: &PackageRequest) -> anyhow::Result<&str> {
     Ok(NUGET_ORG_V3_SOURCE)
 }
 
-fn trusted_dotnet_executable() -> String {
+pub(crate) fn trusted_dotnet_executable() -> String {
     let program_files = std::env::var("ProgramFiles")
         .ok()
         .filter(|path| trusted_program_files_path(path))

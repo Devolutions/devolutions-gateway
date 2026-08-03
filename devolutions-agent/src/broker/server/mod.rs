@@ -1,6 +1,8 @@
 //! Runtime implementation of the shared NOW package broker server facade.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -9,8 +11,8 @@ use now_policy::PolicyDocument;
 use now_policy_api::{
     Base64Utf8Data, CapabilitiesResponse, CapabilitiesResponseKind, Decision, DecisionInfo, Elevation, ErrorCode,
     ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse, ExecutionResponseKind,
-    HealthResponse, HealthResponseKind, HealthStatus, OperationStatus, OperationSubmission, PackageRequest, Scope,
-    StatusRequest, StatusResponse, StatusResponseKind, Transport,
+    HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName, OperationStatus,
+    OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -28,9 +30,49 @@ mod responses;
 
 pub use connection::serve_connection;
 use responses::{
-    api_version, default_manager_capabilities, diagnostics, error_response, new_operation_id, parse_rule_id,
-    policy_info, policy_validity_failure, request_summary, server_context,
+    api_version, diagnostics, error_response, filter_manager_capabilities, new_operation_id, parse_rule_id,
+    policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
 };
+
+/// How long a per-user manager availability probe stays fresh before it is re-run.
+const MANAGER_PROBE_TTL: Duration = Duration::from_secs(60);
+
+/// Per-user cache of probed manager availability.
+///
+/// Probing walks the target user's environment (PATH lookups and file checks); the cache
+/// keeps capability requests cheap while still picking up newly (un)installed managers
+/// after the TTL elapses.
+pub struct ManagerProbeCache {
+    ttl: Duration,
+    entries: parking_lot::Mutex<HashMap<String, (Instant, Vec<ManagerName>)>>,
+}
+
+impl Default for ManagerProbeCache {
+    fn default() -> Self {
+        Self::with_ttl(MANAGER_PROBE_TTL)
+    }
+}
+
+impl ManagerProbeCache {
+    fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entries: parking_lot::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get_fresh(&self, user_key: &str) -> Option<Vec<ManagerName>> {
+        let entries = self.entries.lock();
+        entries
+            .get(user_key)
+            .filter(|(probed_at, _)| probed_at.elapsed() < self.ttl)
+            .map(|(_, managers)| managers.clone())
+    }
+
+    fn insert(&self, user_key: String, managers: Vec<ManagerName>) {
+        self.entries.lock().insert(user_key, (Instant::now(), managers));
+    }
+}
 
 /// Shared server state.
 pub struct BrokerState {
@@ -40,6 +82,7 @@ pub struct BrokerState {
     pub pipe_name: String,
     pub tracker: OperationTracker,
     pub skip_signature_validation: bool,
+    pub manager_probe_cache: ManagerProbeCache,
 }
 
 struct EvaluatedRequest {
@@ -69,7 +112,7 @@ impl PackageBrokerServer for BrokerConnection {
     }
 
     async fn capabilities(&self) -> CapabilitiesResponse {
-        self.state.capabilities().await
+        self.state.capabilities(self.client.user_sid()).await
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
@@ -124,15 +167,39 @@ impl BrokerState {
         }
     }
 
-    async fn capabilities(&self) -> CapabilitiesResponse {
+    async fn capabilities(&self, user_sid: &Sid) -> CapabilitiesResponse {
         CapabilitiesResponse {
             response_kind: CapabilitiesResponseKind,
             response_version: api_version(),
             server: server_context(),
             transports: vec![Transport::HttpNamedPipe],
-            managers: default_manager_capabilities(),
+            managers: self.probed_manager_capabilities(user_sid).await,
             max_request_body_bytes: MAX_REQUEST_BODY_BYTES as u64,
         }
+    }
+
+    /// Capabilities for the managers actually available to the target user.
+    ///
+    /// Availability is probed through the executor (mirroring execution-time resolution)
+    /// and cached per user for [`MANAGER_PROBE_TTL`].
+    async fn probed_manager_capabilities(&self, user_sid: &Sid) -> Vec<ManagerCapability> {
+        let user_key = user_sid.to_string();
+
+        let available = match self.manager_probe_cache.get_fresh(&user_key) {
+            Some(available) => available,
+            None => {
+                let available = self.executor.probe_managers(user_sid).await;
+                info!(
+                    user_sid = %user_key,
+                    available_managers = ?available,
+                    "Probed package manager availability"
+                );
+                self.manager_probe_cache.insert(user_key, available.clone());
+                available
+            }
+        };
+
+        filter_manager_capabilities(supported_manager_capabilities(), &available)
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
@@ -374,6 +441,8 @@ impl PackageRequestClientOwner for PackageRequest {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use chrono::Utc;
     use now_policy::{
         PackageBrokerPolicy, PolicyEnforcement, PolicyMetadata, PolicySchemaUri, ResourceId, RulePrecedence,
@@ -394,6 +463,27 @@ mod tests {
             _process_started: Option<ProcessStartedCallback>,
         ) -> anyhow::Result<ExecutionOutput> {
             anyhow::bail!("not used in tests")
+        }
+    }
+
+    struct FakeExecutor {
+        available: Vec<ManagerName>,
+        probe_count: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for FakeExecutor {
+        async fn execute(
+            &self,
+            _ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            anyhow::bail!("not used in this test")
+        }
+
+        async fn probe_managers(&self, _user_sid: &Sid) -> Vec<ManagerName> {
+            self.probe_count.fetch_add(1, Ordering::SeqCst);
+            self.available.clone()
         }
     }
 
@@ -429,6 +519,7 @@ mod tests {
             pipe_name: "test-pipe".to_owned(),
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
+            manager_probe_cache: Default::default(),
         }
     }
 
@@ -439,7 +530,7 @@ mod tests {
             request_id: api::ResourceId::from("req-1"),
             created_at: Utc::now(),
             operation: api::Operation::Install,
-            manager: api::ManagerName::Winget,
+            manager: ManagerName::Winget,
             source: api::RequestSource {
                 name: "winget".to_owned(),
                 url: None,
@@ -534,5 +625,74 @@ mod tests {
             panic!("expected request to be evaluated");
         };
         assert!(evaluated.would_execute);
+    }
+
+    fn make_state(available: Vec<ManagerName>) -> (Arc<BrokerState>, Arc<FakeExecutor>) {
+        make_state_with_cache(available, Default::default())
+    }
+
+    fn make_state_with_cache(
+        available: Vec<ManagerName>,
+        manager_probe_cache: ManagerProbeCache,
+    ) -> (Arc<BrokerState>, Arc<FakeExecutor>) {
+        let executor = Arc::new(FakeExecutor {
+            available,
+            probe_count: AtomicUsize::new(0),
+        });
+        let state = Arc::new(BrokerState {
+            policy: RwLock::new(None),
+            executor: Arc::clone(&executor) as Arc<dyn CommandExecutor>,
+            pipe_name: "test-pipe".to_owned(),
+            tracker: OperationTracker::new(),
+            skip_signature_validation: true,
+            manager_probe_cache,
+        });
+        (state, executor)
+    }
+
+    fn test_sid() -> Sid {
+        Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).unwrap()
+    }
+
+    #[tokio::test]
+    async fn capabilities_only_advertise_probed_managers() {
+        let (state, _) = make_state(vec![ManagerName::Winget, ManagerName::PowerShell]);
+
+        let response = state.capabilities(&test_sid()).await;
+
+        let managers: Vec<ManagerName> = response.managers.iter().map(|capability| capability.manager).collect();
+        assert_eq!(managers, vec![ManagerName::Winget, ManagerName::PowerShell]);
+    }
+
+    #[tokio::test]
+    async fn capabilities_empty_when_no_manager_available() {
+        let (state, _) = make_state(Vec::new());
+
+        let response = state.capabilities(&test_sid()).await;
+
+        assert!(response.managers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn manager_probe_is_cached_per_user() {
+        let (state, executor) = make_state(vec![ManagerName::Winget]);
+        let sid = test_sid();
+
+        state.capabilities(&sid).await;
+        state.capabilities(&sid).await;
+
+        assert_eq!(executor.probe_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn manager_probe_is_refreshed_after_ttl_expiry() {
+        let (state, executor) =
+            make_state_with_cache(vec![ManagerName::Winget], ManagerProbeCache::with_ttl(Duration::ZERO));
+        let sid = test_sid();
+
+        state.capabilities(&sid).await;
+        state.capabilities(&sid).await;
+
+        assert_eq!(executor.probe_count.load(Ordering::SeqCst), 2);
     }
 }
