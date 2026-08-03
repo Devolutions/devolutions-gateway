@@ -106,21 +106,19 @@ impl CommandExecutor for WindowsExecutor {
                 .filter(|manager| manager_is_available(*manager, &user_env))
                 .collect())
         })
-        .await;
+        .await
+        .context("blocking task panicked")
+        .and_then(std::convert::identity);
 
         match probed {
-            Ok(Ok(managers)) => managers,
-            Ok(Err(error)) => {
+            Ok(managers) => managers,
+            Err(error) => {
                 // Fail closed: the same session/environment lookup is required for execution,
                 // so a manager that cannot be verified cannot run either.
                 warn!(
                     error = format!("{error:#}"),
                     "Failed to probe package manager availability; advertising no managers"
                 );
-                Vec::new()
-            }
-            Err(error) => {
-                warn!(%error, "Package manager availability probe panicked; advertising no managers");
                 Vec::new()
             }
         }
