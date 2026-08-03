@@ -9,6 +9,7 @@ mod windows_pipe {
 
     use anyhow::Context as _;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+    use tokio::sync::Semaphore;
     use tokio_util::sync::CancellationToken;
     use tracing::{error, info, warn};
     use win_api_wrappers::identity::sid::Sid;
@@ -25,13 +26,44 @@ mod windows_pipe {
     /// Default pipe name for the package broker.
     pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
 
+    /// Maximum number of concurrently served pipe connections.
+    ///
+    /// Connection setup performs unauthenticated work (client process identity lookups)
+    /// before any signature gate, so a connection flood could otherwise trigger unbounded
+    /// work and task spawning. While all slots are taken, no pipe instance is listening and
+    /// further clients fail to connect until a slot frees up.
+    const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+    /// Deadline for serving a single pipe connection, from accept to response completion.
+    ///
+    /// Each connection serves exactly one HTTP request (`keep_alive` is disabled) and all
+    /// endpoints respond without blocking on package operations (execution is asynchronous,
+    /// tracked via the operation tracker), so a healthy exchange completes well within this
+    /// deadline. Without it, idle clients holding their connection open without sending a
+    /// request would each pin a connection slot indefinitely and could exhaust the pool.
+    const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Start the named pipe server and accept connections until shutdown.
     pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
         let pipe_name = state.pipe_name.clone();
         info!(%pipe_name, "Starting named pipe server");
 
+        let connection_permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+
         let mut first_instance = true;
         loop {
+            // Wait for a free connection slot before exposing a new pipe instance,
+            // bounding the number of concurrently served connections.
+            let permit = tokio::select! {
+                permit = Arc::clone(&connection_permits).acquire_owned() => {
+                    permit.expect("the semaphore is never closed")
+                }
+                _ = shutdown.cancelled() => {
+                    info!("Pipe server shutting down");
+                    return Ok(());
+                }
+            };
+
             // Create a new pipe instance for each connection.
             let server = create_pipe_instance(&pipe_name, first_instance)?;
             first_instance = false;
@@ -40,18 +72,32 @@ mod windows_pipe {
                 result = server.connect() => {
                     match result {
                         Ok(()) => {
-                            let client = match PipeClient::from_connected_pipe(&server) {
-                                Ok(client) => client,
-                                Err(error) => {
-                                    warn!(%error, "Rejected named pipe client");
-                                    continue;
-                                }
-                            };
-                            info!("Client connected to named pipe");
-                            let router = build_router_for_client(Arc::clone(&state), client);
+                            let state = Arc::clone(&state);
                             tokio::spawn(async move {
-                                serve_connection(server, router).await;
-                                info!("Client disconnected from named pipe");
+                                // The permit is held for the lifetime of the connection task.
+                                let _permit = permit;
+
+                                let serve = async move {
+                                    // Capture the client identity off the accept loop so a slow
+                                    // lookup cannot stall accepting other connections.
+                                    let client = match PipeClient::from_connected_pipe(&server) {
+                                        Ok(client) => client,
+                                        Err(error) => {
+                                            warn!(%error, "Rejected named pipe client");
+                                            return;
+                                        }
+                                    };
+                                    info!("Client connected to named pipe");
+                                    let router = build_router_for_client(state, client);
+                                    serve_connection(server, router).await;
+                                    info!("Client disconnected from named pipe");
+                                };
+
+                                // Enforce a deadline so idle or slow clients cannot pin
+                                // a connection slot indefinitely.
+                                if tokio::time::timeout(CONNECTION_DEADLINE, serve).await.is_err() {
+                                    warn!("Closed named pipe connection: deadline exceeded");
+                                }
                             });
                         }
                         Err(error) => {

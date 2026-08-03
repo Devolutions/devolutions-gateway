@@ -20,18 +20,16 @@ use crate::code_signing::validate_devolutions_authenticode_signature;
 pub(crate) struct PipeClient {
     process_id: u32,
     executable_path: PathBuf,
-    user: ClientUser,
-}
-
-#[derive(Clone, Debug)]
-struct ClientUser {
     /// Security identifier of the pipe client process token user, captured at connect.
-    sid: Sid,
-    domain: String,
-    name: String,
+    user_sid: Sid,
 }
 
 impl PipeClient {
+    /// Captures the identity of the process on the other end of a connected pipe instance.
+    ///
+    /// Deliberately limited to fast, local syscalls (no account-name resolution, which may
+    /// hit a domain controller), because it runs before any signature gate and is therefore
+    /// unauthenticated work a connection flood can trigger.
     pub(crate) fn from_connected_pipe(server: &NamedPipeServer) -> anyhow::Result<Self> {
         let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
         let process = Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION)
@@ -39,31 +37,23 @@ impl PipeClient {
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
-        let sid = process
+        let user_sid = process
             .token(TOKEN_QUERY)
             .with_context(|| format!("failed to open pipe client process {process_id} token"))?
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
             .sid;
-        let account = sid
-            .lookup_account(None)
-            .with_context(|| format!("failed to resolve pipe client process {process_id} user"))?;
-        let user = ClientUser {
-            sid,
-            domain: account.domain_name.to_string_lossy(),
-            name: account.name.to_string_lossy(),
-        };
 
         Ok(Self {
             process_id,
             executable_path,
-            user,
+            user_sid,
         })
     }
 
     /// Security identifier of the authenticated pipe client user, captured at connect.
     pub(crate) fn user_sid(&self) -> &Sid {
-        &self.user.sid
+        &self.user_sid
     }
 
     pub(crate) fn validate_request(
@@ -116,15 +106,28 @@ impl PipeClient {
         let requested_sid = resolve_account_sid(effective_user)
             .with_context(|| format!("failed to resolve request effective_user '{effective_user}'"))?;
 
-        if requested_sid == self.user.sid {
+        if requested_sid == self.user_sid {
             return Ok(());
         }
 
+        // Resolve the client account name lazily, only on this rare error path; doing it at
+        // connect time would be unauthenticated work triggerable by a connection flood.
+        let client_account = self
+            .user_sid
+            .lookup_account(None)
+            .map(|account| {
+                format!(
+                    "{}\\{}",
+                    account.domain_name.to_string_lossy(),
+                    account.name.to_string_lossy()
+                )
+            })
+            .unwrap_or_else(|_| String::from("<unresolved>"));
+
         bail!(
-            "pipe client user '{}\\{}' ({}) does not match request effective_user '{}' ({})",
-            self.user.domain,
-            self.user.name,
-            self.user.sid,
+            "pipe client user '{}' ({}) does not match request effective_user '{}' ({})",
+            client_account,
+            self.user_sid,
             effective_user,
             requested_sid
         )
@@ -256,21 +259,16 @@ mod tests {
     }
 
     fn system_client() -> PipeClient {
-        let (domain, name) = system_account_names();
         PipeClient {
             process_id: 0,
             executable_path: PathBuf::new(),
-            user: ClientUser {
-                sid: system_sid(),
-                domain,
-                name,
-            },
+            user_sid: system_sid(),
         }
     }
 
     #[cfg(not(feature = "dev-skip-broker-signature"))]
-    fn client_user() -> ClientUser {
-        system_client().user
+    fn client_user_sid() -> Sid {
+        system_client().user_sid
     }
 
     #[test]
@@ -355,7 +353,7 @@ mod tests {
             let client = PipeClient {
                 process_id: std::process::id(),
                 executable_path: std::env::current_exe().expect("current test executable path"),
-                user: client_user(),
+                user_sid: client_user_sid(),
             };
 
             assert!(client.validate_signature(true).is_err());
