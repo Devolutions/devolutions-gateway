@@ -61,6 +61,13 @@ impl CommandExecutor for WindowsExecutor {
         let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
         reject_unsupported_vcpkg_elevation(ctx)?;
 
+        // SECURITY: Defense in depth — the broker server already rejects such
+        // requests, and `run_plan` re-checks the actual execution token; never
+        // run policy-ungoverned pre/post commands elevated.
+        if requires_elevation && (ctx.pre_command.is_some() || ctx.post_command.is_some()) {
+            bail!("pre/post operation commands are only allowed for non-elevated execution");
+        }
+
         if !self.is_system && requires_elevation {
             bail!(
                 "elevated execution requested but broker is not running as SYSTEM; \
@@ -233,6 +240,20 @@ fn run_plan(
         bail!("elevated Bun package operations are not supported by the broker");
     }
 
+    // SECURITY: Pre/post commands are raw strings whose content is not governed by
+    // the policy, so they must never run elevated. The request flags are already
+    // checked upstream, but the token actually running the plan is what matters
+    // (e.g. a broker launched from an elevated shell, or a full session token when
+    // UAC is disabled), so query the token itself right before running.
+    if ctx.pre_command.is_some() || ctx.post_command.is_some() {
+        let is_elevated = token
+            .is_elevated()
+            .context("failed to query execution token elevation")?;
+        if is_elevated {
+            bail!("pre/post operation commands are only allowed for non-elevated execution");
+        }
+    }
+
     // 1. Kill requested processes (best-effort; a missing process is not an error).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
@@ -266,14 +287,17 @@ fn run_plan(
     let command = prepare_main_command(token, &ctx.command)?;
     let output = create_process(token, command.args(), session_id, ctx.capture_output, process_started)?;
 
-    // 4. Post-operation command — runs after the main command; failures are logged only.
+    // 4. Post-operation command — runs after the main command; failures are logged only
+    //    so a completed main operation is never reported as failed by its post-hook.
     if let Some(post) = &ctx.post_command {
         info!("Running post-operation command");
-        let command = prepare_shell_command(token, post)?;
-        match create_process(token, command.args(), session_id, false, None) {
-            Ok(out) if out.exit_code == 0 => {}
-            Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
-            Err(error) => warn!(%error, "Post-operation command failed"),
+        match prepare_shell_command(token, post) {
+            Ok(command) => match create_process(token, command.args(), session_id, false, None) {
+                Ok(out) if out.exit_code == 0 => {}
+                Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
+                Err(error) => warn!(%error, "Post-operation command failed"),
+            },
+            Err(error) => warn!(%error, "Failed to prepare post-operation command"),
         }
     }
 
@@ -1141,11 +1165,11 @@ mod tests {
     use win_api_wrappers::identity::sid::Sid;
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, execute_as_current_user,
+        POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
         prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
         reject_unsupported_vcpkg_elevation,
     };
-    use crate::broker::executor::ExecutionContext;
+    use crate::broker::executor::{CommandExecutor as _, ExecutionContext};
 
     #[test]
     fn shell_command_uses_utf8_temp_batch_file() {
@@ -1648,6 +1672,29 @@ mod tests {
         ctx.scope = Some(Scope::Machine);
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("machine-scope vcpkg should fail");
         assert!(error.to_string().contains("machine-scope"));
+    }
+
+    #[tokio::test]
+    async fn elevated_pre_post_commands_are_rejected_by_executor() {
+        let ctx = ExecutionContext {
+            kill_processes: Vec::new(),
+            pre_command: Some("echo before".to_owned()),
+            command: vec!["winget.exe".to_owned(), "install".to_owned()],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
+                .expect("well-known Everyone SID"),
+            elevation: Elevation::Elevated,
+            scope: Some(Scope::User),
+            capture_output: false,
+        };
+
+        let executor = WindowsExecutor { is_system: true };
+        let error = executor
+            .execute(&ctx, None)
+            .await
+            .expect_err("elevated pre-command should fail");
+        assert!(error.to_string().contains("non-elevated"));
     }
 
     #[test]
