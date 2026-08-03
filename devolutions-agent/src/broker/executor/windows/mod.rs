@@ -9,15 +9,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
-use now_policy_api::{Elevation, Scope};
+use now_policy_api::{Elevation, ManagerName, Scope};
 use tracing::{debug, info, warn};
+use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_ALL_ACCESS, TOKEN_QUERY};
 
-use super::{CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
+use super::{BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
 
 mod process;
 mod token;
@@ -90,6 +91,98 @@ impl CommandExecutor for WindowsExecutor {
         .await
         .context("blocking task panicked")?
     }
+
+    async fn probe_managers(&self, user_sid: &Sid) -> Vec<ManagerName> {
+        let is_system = self.is_system;
+        let user_sid = user_sid.clone();
+
+        // All Win32 calls are blocking — run in a blocking thread.
+        let probed = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ManagerName>> {
+            let user_env = probe_user_environment(is_system, &user_sid)?;
+            Ok(BROKER_SUPPORTED_MANAGERS
+                .into_iter()
+                .filter(|manager| manager_is_available(*manager, &user_env))
+                .collect())
+        })
+        .await;
+
+        match probed {
+            Ok(Ok(managers)) => managers,
+            Ok(Err(error)) => {
+                // Fail open: advertising the full set preserves the previous behavior when the
+                // target user environment cannot be inspected (e.g., no active session).
+                warn!(
+                    error = format!("{error:#}"),
+                    "Failed to probe package manager availability; advertising all supported managers"
+                );
+                BROKER_SUPPORTED_MANAGERS.to_vec()
+            }
+            Err(error) => {
+                warn!(%error, "Package manager availability probe panicked; advertising all supported managers");
+                BROKER_SUPPORTED_MANAGERS.to_vec()
+            }
+        }
+    }
+}
+
+/// Load the environment block of the target user identified by `user_sid`.
+///
+/// In SYSTEM (service) mode the token comes from the user's active session, matching the
+/// token later used for execution. In user (development) mode the current process token is used.
+fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<HashMap<String, String>> {
+    let token = if is_system {
+        // WTSQueryUserToken (used by find_user_session) requires the SeTcb privilege.
+        let mut process_token = Process::current_process()
+            .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)
+            .context("failed to open process token for privilege adjustment")?;
+        let _priv_tcb =
+            ScopedPrivileges::enter(&mut process_token, &[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
+
+        let (_session_id, user_token) =
+            find_user_session(user_sid).context("failed to find active session for user")?;
+        user_token
+    } else {
+        Process::current_process()
+            .token(TOKEN_ALL_ACCESS)
+            .context("failed to open current process token")?
+    };
+
+    win_api_wrappers::utils::environment_block(Some(&token), false).context("failed to load user environment block")
+}
+
+/// Check whether a package manager is usable for the target user, mirroring the executable
+/// resolution rules the execution path applies for that manager.
+fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>) -> bool {
+    match manager {
+        ManagerName::Winget => resolve_winget_executable(user_env).is_ok(),
+        ManagerName::Chocolatey => default_chocolatey_install_dir()
+            .and_then(|root| resolve_trusted_chocolatey_executable(Some(user_env), &root))
+            .is_ok(),
+        ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
+        ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
+        ManagerName::Dotnet => {
+            Path::new(&crate::broker::command_builder::dotnet::trusted_dotnet_executable()).is_file()
+        }
+        ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok(),
+        // npm runs through the user PATH `npm` shim inside the trusted PowerShell wrapper.
+        ManagerName::Npm => path_contains_executable(user_env, &["npm.cmd", "npm.exe"]),
+        ManagerName::PowerShell => Path::new(&trusted_windows_powershell_executable()).is_file(),
+        ManagerName::PowerShell7 => Path::new(&trusted_powershell7_executable()).is_file(),
+        // Scoop is driven through the user's `scoop.ps1` shim resolved from PATH.
+        ManagerName::Scoop => path_contains_executable(user_env, &["scoop.ps1", "scoop.cmd"]),
+        ManagerName::Vcpkg => resolve_vcpkg_executable(user_env).is_ok(),
+        _ => false,
+    }
+}
+
+/// Return true when any of `names` exists as a file in a directory listed in the environment PATH.
+fn path_contains_executable(env: &HashMap<String, String>, names: &[&str]) -> bool {
+    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
+    path_var
+        .split(';')
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+        .any(|dir| names.iter().any(|name| PathBuf::from(dir).join(name).is_file()))
 }
 
 /// Execute a command in the context of the target user's session (SYSTEM mode).

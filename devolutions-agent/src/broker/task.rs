@@ -104,6 +104,7 @@ impl Task for BrokerTask {
             pipe_name: self.config.pipe_name.clone(),
             tracker: crate::broker::operation_tracker::OperationTracker::new(),
             skip_signature_validation: self.config.skip_signature_validation,
+            manager_probe_cache: Default::default(),
         });
 
         // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.

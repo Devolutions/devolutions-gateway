@@ -21,7 +21,11 @@ pub(super) fn server_context() -> ServerContext {
     }
 }
 
-pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
+/// Capability descriptions for every manager the broker can drive.
+///
+/// This is the full supported set; the server filters it down to the managers actually
+/// available for the requesting user (see [`crate::broker::server::BrokerState`]).
+pub(super) fn supported_manager_capabilities() -> Vec<ManagerCapability> {
     vec![
         ManagerCapability {
             manager: ManagerName::Winget,
@@ -155,6 +159,16 @@ pub(super) fn default_manager_capabilities() -> Vec<ManagerCapability> {
             max_operation_timeout_seconds: Some(OperationTracker::operation_timeout().as_secs()),
         },
     ]
+}
+
+/// Keep only the capabilities of managers reported available by the probe.
+pub(super) fn filter_manager_capabilities(
+    all: Vec<ManagerCapability>,
+    available: &[ManagerName],
+) -> Vec<ManagerCapability> {
+    all.into_iter()
+        .filter(|capability| available.contains(&capability.manager))
+        .collect()
 }
 
 pub(super) fn request_summary(request: &PackageRequest) -> RequestSummary {
