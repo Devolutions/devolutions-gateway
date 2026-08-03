@@ -50,7 +50,10 @@ pub(super) fn create_process(
     let user_env = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
 
     let exe_name = command.first().context("empty command")?;
-    let resolved_exe = resolve_executable(exe_name, &user_env, requires_elevation)?;
+    // `_exe_guard` (when elevation is required) keeps the verified executable locked
+    // against modification and replacement until this function returns, i.e. after the
+    // spawned process has finished.
+    let (resolved_exe, _exe_guard) = resolve_executable(exe_name, &user_env, requires_elevation)?;
 
     info!(
         exe = %resolved_exe.display(),
@@ -211,22 +214,29 @@ pub(super) fn create_process(
 ///
 /// When `requires_elevation` is true (the command will run with an elevated or
 /// machine-scope token), the resolved executable must additionally be writable only by
-/// SYSTEM or the built-in Administrators group; otherwise a standard user could replace
-/// the binary (e.g. via a weakly-ACL'd `%ProgramData%` install root) and have the broker
-/// launch it with elevated privileges. This check is skipped for non-elevated executions,
-/// since per-user tool installs (pip venvs, `~/.cargo`, etc.) are not admin-owned.
+/// trusted principals (SYSTEM, built-in Administrators, or TrustedInstaller); otherwise
+/// a standard user could replace the binary (e.g. via a weakly-ACL'd `%ProgramData%`
+/// install root) and have the broker launch it with elevated privileges. In that case
+/// the returned path is the final path pinned by the returned
+/// [`policy_security::VerifiedExecutable`] guard, which must be kept alive until the
+/// process has been spawned so the verified binary cannot be swapped in between. This
+/// check is skipped for non-elevated executions, since per-user tool installs (pip
+/// venvs, `~/.cargo`, etc.) are not admin-owned.
 fn resolve_executable(
     exe_name: &str,
     env: &std::collections::HashMap<String, String>,
     requires_elevation: bool,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let exe_path = Path::new(exe_name);
 
     // If already an absolute path, just verify it exists.
     if exe_path.is_absolute() {
         if exe_path.exists() {
-            policy_security::verify_elevated_executable_security(exe_path, requires_elevation)?;
-            return Ok(exe_path.to_owned());
+            let guard = policy_security::verify_elevated_executable_security(exe_path, requires_elevation)?;
+            let resolved = guard
+                .as_ref()
+                .map_or_else(|| exe_path.to_owned(), |g| g.path().to_owned());
+            return Ok((resolved, guard));
         }
         bail!("executable not found at absolute path: {}", exe_path.display());
     }
@@ -258,8 +268,9 @@ fn resolve_executable(
             let file_name = format!("{}{}", exe_name, ext);
             candidate.push(&file_name);
             if candidate.exists() && is_trusted_winget_path(&candidate, env) {
-                policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
-                return Ok(candidate);
+                let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
+                let resolved = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
+                return Ok((resolved, guard));
             }
         }
     }
@@ -335,11 +346,13 @@ mod tests {
 
     #[test]
     fn elevated_execution_rejects_everyone_writable_absolute_executable() {
-        let temp = tempfile::NamedTempFile::new().expect("create temp file");
-        make_everyone_writable(temp.path());
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let exe = temp_dir.path().join("fake.exe");
+        std::fs::write(&exe, b"").expect("write fake executable");
+        make_everyone_writable(&exe);
 
         let env = HashMap::new();
-        let error = resolve_executable(&temp.path().display().to_string(), &env, true)
+        let error = resolve_executable(&exe.display().to_string(), &env, true)
             .expect_err("an everyone-writable executable must be rejected when it will run with an elevated token");
         assert!(
             error.to_string().contains("elevated package-manager executable"),
@@ -349,12 +362,15 @@ mod tests {
 
     #[test]
     fn non_elevated_execution_allows_everyone_writable_absolute_executable() {
-        let temp = tempfile::NamedTempFile::new().expect("create temp file");
-        make_everyone_writable(temp.path());
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let exe = temp_dir.path().join("fake.exe");
+        std::fs::write(&exe, b"").expect("write fake executable");
+        make_everyone_writable(&exe);
 
         let env = HashMap::new();
-        let resolved = resolve_executable(&temp.path().display().to_string(), &env, false)
+        let (resolved, guard) = resolve_executable(&exe.display().to_string(), &env, false)
             .expect("non-elevated executables are not subject to the admin-only-writable check");
-        assert_eq!(resolved, temp.path());
+        assert_eq!(resolved, exe);
+        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 }

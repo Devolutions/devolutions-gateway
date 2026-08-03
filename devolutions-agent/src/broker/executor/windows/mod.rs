@@ -550,9 +550,11 @@ fn prepare_winget_script(
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (executable, args) = command.split_first().context("empty WinGet command")?;
-    let executable = user_env.map_or_else(
-        || Ok(executable.clone()),
-        |env| resolve_winget_executable(env, requires_elevation).map(|path| path.display().to_string()),
+    let (executable, exe_guard) = user_env.map_or_else(
+        || Ok((executable.clone(), None)),
+        |env| {
+            resolve_winget_executable(env, requires_elevation).map(|(path, guard)| (path.display().to_string(), guard))
+        },
     )?;
     append_batch_argument(&mut script, &executable)?;
     for arg in args {
@@ -578,7 +580,7 @@ fn prepare_winget_script(
         temp_script.path_string(),
     ];
 
-    Ok(PreparedCommand::with_script(prepared, temp_script))
+    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
 }
 
 fn prepare_chocolatey_script(
@@ -619,7 +621,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
-    let (executable, install_root) =
+    let (executable, install_root, exe_guard) =
         resolve_trusted_chocolatey_executable(user_env, default_install_root, requires_elevation)?;
     append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
     script.push_str("\r\n");
@@ -652,7 +654,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
         temp_script.path_string(),
     ];
 
-    Ok(PreparedCommand::with_script(prepared, temp_script))
+    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
 }
 
 fn prepare_vcpkg_script(
@@ -1013,7 +1015,7 @@ fn resolve_trusted_chocolatey_executable(
     user_env: Option<&HashMap<String, String>>,
     default_install_root: &Path,
     requires_elevation: bool,
-) -> anyhow::Result<(PathBuf, PathBuf)> {
+) -> anyhow::Result<(PathBuf, PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let install_root = user_env
         .and_then(|env| env_value_ignore_case(env, "ChocolateyInstall"))
         .filter(|value| !value.trim().is_empty())
@@ -1034,9 +1036,10 @@ fn resolve_trusted_chocolatey_executable(
         );
     }
 
-    policy_security::verify_elevated_executable_security(&executable, requires_elevation)?;
+    let guard = policy_security::verify_elevated_executable_security(&executable, requires_elevation)?;
+    let executable = guard.as_ref().map_or(executable, |g| g.path().to_owned());
 
-    Ok((executable, install_root))
+    Ok((executable, install_root, guard))
 }
 
 fn is_trusted_chocolatey_install_dir(install_root: &Path, default_install_root: &Path) -> bool {
@@ -1056,7 +1059,10 @@ fn env_value_ignore_case<'a>(env: &'a HashMap<String, String>, key: &str) -> Opt
         .map(|(_, value)| value.as_str())
 }
 
-fn resolve_winget_executable(env: &HashMap<String, String>, requires_elevation: bool) -> anyhow::Result<PathBuf> {
+fn resolve_winget_executable(
+    env: &HashMap<String, String>,
+    requires_elevation: bool,
+) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let path_var = env
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
@@ -1065,8 +1071,9 @@ fn resolve_winget_executable(env: &HashMap<String, String>, requires_elevation: 
     for dir in path_var.split(';') {
         let candidate = PathBuf::from(dir).join("winget.exe");
         if candidate.exists() && is_trusted_winget_path(&candidate, env) {
-            policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
-            return Ok(candidate);
+            let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
+            let candidate = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
+            return Ok((candidate, guard));
         }
     }
     bail!("trusted winget.exe not found in target user PATH");
@@ -1261,6 +1268,9 @@ fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyho
 struct PreparedCommand {
     command: Vec<String>,
     _script: Option<TmpFileGuard>,
+    /// Keeps a verified elevated executable embedded in the generated script locked
+    /// against modification and replacement until the command has finished running.
+    _exe_guard: Option<policy_security::VerifiedExecutable>,
 }
 
 impl PreparedCommand {
@@ -1268,6 +1278,7 @@ impl PreparedCommand {
         Self {
             command: command.to_vec(),
             _script: None,
+            _exe_guard: None,
         }
     }
 
@@ -1275,7 +1286,13 @@ impl PreparedCommand {
         Self {
             command,
             _script: Some(script),
+            _exe_guard: None,
         }
+    }
+
+    fn with_exe_guard(mut self, exe_guard: Option<policy_security::VerifiedExecutable>) -> Self {
+        self._exe_guard = exe_guard;
+        self
     }
 
     fn args(&self) -> &[String] {
@@ -1474,9 +1491,10 @@ mod tests {
             ("ProgramFiles".to_owned(), program_files.path().display().to_string()),
         ]);
 
-        let resolved =
+        let (resolved, guard) =
             resolve_winget_executable(&env, false).expect("non-elevated resolution is not subject to the ACL check");
         assert_eq!(resolved, winget_path);
+        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
     #[test]
@@ -1782,10 +1800,11 @@ mod tests {
         std::fs::write(&choco_path, "").expect("create fake choco");
         make_everyone_writable(&choco_path);
 
-        let (resolved, resolved_root) = resolve_trusted_chocolatey_executable(None, &install_root, false)
+        let (resolved, resolved_root, guard) = resolve_trusted_chocolatey_executable(None, &install_root, false)
             .expect("non-elevated resolution is not subject to the ACL check");
         assert_eq!(resolved, choco_path);
         assert_eq!(resolved_root, install_root);
+        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
     #[test]
