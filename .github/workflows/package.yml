@@ -496,6 +496,9 @@ jobs:
             $Env:DAGENT_SESSION_EXECUTABLE  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       -File | Select-Object -First 1
             $Env:DAGENT_TUN2SOCKS_EXE       = Join-Path $ArchRoot 'tun2socks.exe'
             $Env:DAGENT_WINTUN_DLL          = Join-Path $ArchRoot 'wintun.dll'
+            $MultiPwshDirectory              = Join-Path $Env:RUNNER_TEMP 'multi-pwsh' 'windows' $Arch
+            ./ci/download-multi-pwsh.ps1 -Architecture $Arch -Destination $MultiPwshDirectory
+            $Env:DAGENT_MULTI_PWSH_EXECUTABLE = Join-Path $MultiPwshDirectory 'multi-pwsh.exe'
 
             Write-Host "=== Regenerate Agent MSI ($Arch) ==="
             Write-Host "DAGENT_EXECUTABLE          = ${Env:DAGENT_EXECUTABLE}"
@@ -506,6 +509,7 @@ jobs:
             Write-Host "DAGENT_SESSION_EXECUTABLE  = ${Env:DAGENT_SESSION_EXECUTABLE}"
             Write-Host "DAGENT_TUN2SOCKS_EXE       = ${Env:DAGENT_TUN2SOCKS_EXE}"
             Write-Host "DAGENT_WINTUN_DLL          = ${Env:DAGENT_WINTUN_DLL}"
+            Write-Host "DAGENT_MULTI_PWSH_EXECUTABLE = ${Env:DAGENT_MULTI_PWSH_EXECUTABLE}"
 
             ./ci/tlk.ps1 package -Product agent -PackageOption generate -Architecture $Arch
 
