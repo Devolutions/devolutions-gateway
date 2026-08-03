@@ -34,6 +34,15 @@ mod windows_pipe {
     /// further clients fail to connect until a slot frees up.
     const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 
+    /// Deadline for serving a single pipe connection, from accept to response completion.
+    ///
+    /// Each connection serves exactly one HTTP request (`keep_alive` is disabled) and all
+    /// endpoints respond without blocking on package operations (execution is asynchronous,
+    /// tracked via the operation tracker), so a healthy exchange completes well within this
+    /// deadline. Without it, idle clients holding their connection open without sending a
+    /// request would each pin a connection slot indefinitely and could exhaust the pool.
+    const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Start the named pipe server and accept connections until shutdown.
     pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
         let pipe_name = state.pipe_name.clone();
@@ -68,19 +77,27 @@ mod windows_pipe {
                                 // The permit is held for the lifetime of the connection task.
                                 let _permit = permit;
 
-                                // Capture the client identity off the accept loop so a slow
-                                // lookup cannot stall accepting other connections.
-                                let client = match PipeClient::from_connected_pipe(&server) {
-                                    Ok(client) => client,
-                                    Err(error) => {
-                                        warn!(%error, "Rejected named pipe client");
-                                        return;
-                                    }
+                                let serve = async move {
+                                    // Capture the client identity off the accept loop so a slow
+                                    // lookup cannot stall accepting other connections.
+                                    let client = match PipeClient::from_connected_pipe(&server) {
+                                        Ok(client) => client,
+                                        Err(error) => {
+                                            warn!(%error, "Rejected named pipe client");
+                                            return;
+                                        }
+                                    };
+                                    info!("Client connected to named pipe");
+                                    let router = build_router_for_client(state, client);
+                                    serve_connection(server, router).await;
+                                    info!("Client disconnected from named pipe");
                                 };
-                                info!("Client connected to named pipe");
-                                let router = build_router_for_client(state, client);
-                                serve_connection(server, router).await;
-                                info!("Client disconnected from named pipe");
+
+                                // Enforce a deadline so idle or slow clients cannot pin
+                                // a connection slot indefinitely.
+                                if tokio::time::timeout(CONNECTION_DEADLINE, serve).await.is_err() {
+                                    warn!("Closed named pipe connection: deadline exceeded");
+                                }
                             });
                         }
                         Err(error) => {
