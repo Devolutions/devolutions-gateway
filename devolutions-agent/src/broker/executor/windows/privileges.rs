@@ -134,5 +134,10 @@ mod tests {
             let refcounts = guard.as_ref().unwrap();
             assert_eq!(refcounts.get(&name.to_string_lossy()), Some(&0));
         }
+
+        // SeChangeNotify (bypass traverse checking) is enabled by default on every token;
+        // the last drop above disabled it process-wide, which breaks concurrent tests doing
+        // path normalization. Restore the default state.
+        adjust(&[name], true).unwrap();
     }
 }

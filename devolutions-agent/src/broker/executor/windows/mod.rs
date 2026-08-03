@@ -151,9 +151,10 @@ fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<Has
 /// resolution rules the execution path applies for that manager.
 fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>) -> bool {
     match manager {
-        ManagerName::Winget => resolve_winget_executable(user_env).is_ok(),
+        // Probing is not an elevated execution, so no executable ACL verification is needed.
+        ManagerName::Winget => resolve_winget_executable(user_env, false).is_ok(),
         ManagerName::Chocolatey => default_chocolatey_install_dir()
-            .and_then(|root| resolve_trusted_chocolatey_executable(Some(user_env), &root))
+            .and_then(|root| resolve_trusted_chocolatey_executable(Some(user_env), &root, false))
             .is_ok(),
         ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
         ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
