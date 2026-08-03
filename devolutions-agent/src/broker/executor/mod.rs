@@ -87,12 +87,12 @@ pub trait CommandExecutor: Send + Sync {
 
     /// Probe which package managers are actually available for the target user.
     ///
-    /// The default implementation optimistically reports every broker-supported manager;
-    /// platform executors override this to resolve each manager executable using the same
-    /// logic the execution path uses, so advertised capabilities match what would run.
+    /// The default implementation reports no managers at all: availability must be
+    /// positively established by a platform executor, which overrides this to resolve
+    /// each manager executable using the same logic the execution path uses.
     async fn probe_managers(&self, user_sid: &Sid) -> Vec<ManagerName> {
         let _ = user_sid;
-        BROKER_SUPPORTED_MANAGERS.to_vec()
+        Vec::new()
     }
 }
 
