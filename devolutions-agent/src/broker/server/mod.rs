@@ -7,10 +7,10 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
-    Base64Utf8Data, CapabilitiesResponse, CapabilitiesResponseKind, Decision, DecisionInfo, ErrorCode, ErrorResponse,
-    EvaluationResponse, EvaluationResponseKind, ExecutionResponse, ExecutionResponseKind, HealthResponse,
-    HealthResponseKind, HealthStatus, OperationStatus, OperationSubmission, PackageRequest, StatusRequest,
-    StatusResponse, StatusResponseKind, Transport,
+    Base64Utf8Data, CapabilitiesResponse, CapabilitiesResponseKind, Decision, DecisionInfo, Elevation, ErrorCode,
+    ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse, ExecutionResponseKind,
+    HealthResponse, HealthResponseKind, HealthStatus, OperationStatus, OperationSubmission, PackageRequest, Scope,
+    StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -251,20 +251,25 @@ impl BrokerState {
 
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
         // SECURITY: Pre/post operation commands are raw command strings executed via
-        // cmd.exe with a possibly elevated token, so any rule allowing them would grant
-        // arbitrary elevated code execution and make the package allowlist moot.
-        // The policy schema cannot restrict the command content yet, so such requests
-        // are rejected outright (fail-closed) before policy evaluation.
+        // cmd.exe with the execution token, and the policy schema cannot restrict
+        // their content yet. Running them elevated would grant arbitrary elevated
+        // code execution and make the package allowlist moot, so they are only
+        // accepted for non-elevated execution (standard elevation and non-machine
+        // scope; machine scope also elevates the execution token).
         // This gate is intentionally not bypassable by policy rules, `defaultDecision`,
         // or audit mode; revisit once the policy schema supports a content allowlist.
-        if request.options.pre_operation_command.is_some() || request.options.post_operation_command.is_some() {
+        let has_pre_post_commands =
+            request.options.pre_operation_command.is_some() || request.options.post_operation_command.is_some();
+        let requires_elevation =
+            request.client.requested_elevation == Elevation::Elevated || request.options.scope == Some(Scope::Machine);
+        if has_pre_post_commands && requires_elevation {
             warn!(
                 request_id = %request.request_id,
-                "Rejecting request: pre/post operation commands are not supported"
+                "Rejecting request: pre/post operation commands are not allowed for elevated execution"
             );
             return Err(error_response(
                 ErrorCode::ValidationFailed,
-                "pre/post operation commands are not supported: the policy schema cannot restrict their content yet",
+                "pre/post operation commands are only allowed for non-elevated execution",
             ));
         }
 
@@ -460,7 +465,7 @@ mod tests {
             },
             client: api::ClientContext {
                 transport: Transport::HttpNamedPipe,
-                requested_elevation: api::Elevation::Elevated,
+                requested_elevation: Elevation::Elevated,
                 effective_user: "DOMAIN\\user".to_owned(),
                 client_executable_path: "C:\\Program Files\\Devolutions\\Package Broker\\PackageBrokerClient.exe"
                     .to_owned(),
@@ -472,8 +477,9 @@ mod tests {
     }
 
     #[test]
-    fn pre_operation_command_is_rejected_even_under_permissive_policy() {
+    fn elevated_pre_operation_command_is_rejected_even_under_permissive_policy() {
         let mut request = request();
+        request.client.requested_elevation = Elevation::Elevated;
         request.options.pre_operation_command = Some("calc.exe".to_owned());
 
         let Err(error) = state().evaluate_request(&request) else {
@@ -483,14 +489,43 @@ mod tests {
     }
 
     #[test]
-    fn post_operation_command_is_rejected_even_under_permissive_policy() {
+    fn elevated_post_operation_command_is_rejected_even_under_permissive_policy() {
         let mut request = request();
+        request.client.requested_elevation = Elevation::Elevated;
         request.options.post_operation_command = Some("calc.exe".to_owned());
 
         let Err(error) = state().evaluate_request(&request) else {
             panic!("expected post-operation command to be rejected");
         };
         assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn machine_scope_pre_operation_command_is_rejected() {
+        // Machine scope elevates the execution token even with standard elevation.
+        let mut request = request();
+        request.client.requested_elevation = Elevation::Standard;
+        request.options.scope = Some(Scope::Machine);
+        request.options.pre_operation_command = Some("calc.exe".to_owned());
+
+        let Err(error) = state().evaluate_request(&request) else {
+            panic!("expected pre-operation command to be rejected");
+        };
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn non_elevated_pre_post_commands_are_accepted() {
+        let mut request = request();
+        request.client.requested_elevation = Elevation::Standard;
+        request.options.scope = Some(Scope::User);
+        request.options.pre_operation_command = Some("echo before".to_owned());
+        request.options.post_operation_command = Some("echo after".to_owned());
+
+        let Ok(evaluated) = state().evaluate_request(&request) else {
+            panic!("expected non-elevated pre/post commands to be accepted");
+        };
+        assert!(evaluated.would_execute);
     }
 
     #[test]

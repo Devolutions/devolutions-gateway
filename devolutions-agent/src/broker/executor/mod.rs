@@ -28,16 +28,17 @@ pub struct ExecutionContext {
     pub kill_processes: Vec<String>,
     /// Optional shell command to run before the main command (`cmd.exe /S /C`).
     ///
-    /// SECURITY: this is a raw command string executed with a possibly elevated token.
-    /// The broker server currently rejects requests carrying pre/post operation
-    /// commands (see `BrokerState::evaluate_request`), so this is always `None` until
-    /// the policy schema can restrict the command content.
+    /// SECURITY: this is a raw command string whose content is not governed by the
+    /// policy yet, so it is only accepted for non-elevated execution. The broker
+    /// server rejects requests carrying pre/post operation commands when the
+    /// execution token would be elevated (see `BrokerState::evaluate_request`),
+    /// and the executor refuses such plans as defense in depth.
     pub pre_command: Option<String>,
     /// The main package-manager command line as separate arguments (exe + args).
     pub command: Vec<String>,
     /// Optional shell command to run after the main command (`cmd.exe /S /C`).
     ///
-    /// SECURITY: same restrictions as `pre_command`; always `None` for now.
+    /// SECURITY: same restrictions as `pre_command`.
     pub post_command: Option<String>,
     /// Windows identity of the target user (e.g., `DOMAIN\username`), used for display and logging.
     pub effective_user: String,
