@@ -52,7 +52,14 @@ pwsh ci/download-tun2socks.ps1
 # Produces: tun2socks.exe and wintun.dll in the repo root
 ```
 
-## Step 3 — Build the .NET DesktopAgent
+## Step 3 — Download multi-pwsh
+
+```powershell
+cd D:\devolutions-gateway
+.\ci\download-multi-pwsh.ps1 -Architecture x64 -Destination "D:\devolutions-gateway\multi-pwsh"
+```
+
+## Step 4 — Build the .NET DesktopAgent
 
 ```powershell
 cd D:\devolutions-gateway\dotnet\DesktopAgent
@@ -60,7 +67,7 @@ dotnet build
 # Output: bin\Debug\net48\DevolutionsDesktopAgent.exe
 ```
 
-## Step 4 — Build the MSI
+## Step 5 — Build the MSI
 
 ```powershell
 cd D:\devolutions-gateway\package\AgentWindowsManaged
@@ -73,6 +80,7 @@ $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "$base\target\debug\DevolutionsPedmShellExt.ms
 $Env:DAGENT_SESSION_EXECUTABLE  = "$base\target\release\devolutions-session.exe"
 $Env:DAGENT_TUN2SOCKS_EXE       = "$base\tun2socks.exe"
 $Env:DAGENT_WINTUN_DLL          = "$base\wintun.dll"
+$Env:DAGENT_MULTI_PWSH_EXECUTABLE = "$base\multi-pwsh\multi-pwsh.exe"
 $Env:DAGENT_DESKTOP_AGENT_PATH  = "$base\dotnet\DesktopAgent\bin\Debug\net48"
 $version = (Get-Content "$base\VERSION" -Raw).Trim()
 if ($version.StartsWith("20")) { $version = $version.Substring(2) }  # strip century: 2026.1.0 → 26.1.0

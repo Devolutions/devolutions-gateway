@@ -864,6 +864,17 @@ jobs:
           }
         shell: pwsh
 
+      - name: Download multi-pwsh
+        id: multi-pwsh
+        if: ${{ matrix.os == 'windows' }}
+        run: |
+          $Destination = Join-Path $Env:RUNNER_TEMP "multi-pwsh" "windows" "${{ matrix.arch }}"
+          ./ci/download-multi-pwsh.ps1 -Architecture "${{ matrix.arch }}" -Destination $Destination
+          echo "executable-path=$(Join-Path $Destination 'multi-pwsh.exe')" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload tun2socks artifacts
         if: ${{ matrix.os == 'windows' }}
         uses: actions/upload-artifact@v7
@@ -933,6 +944,7 @@ jobs:
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
             $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
             $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
+            $Env:DAGENT_MULTI_PWSH_EXECUTABLE = "${{ steps.multi-pwsh.outputs.executable-path }}"
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
@@ -966,6 +978,7 @@ jobs:
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
             $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
             $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
+            $Env:DAGENT_MULTI_PWSH_EXECUTABLE = "${{ steps.multi-pwsh.outputs.executable-path }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

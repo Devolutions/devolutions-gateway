@@ -95,6 +95,8 @@ internal class Program
 
     private static string DevolutionsWintunDll => ResolveArtifact("DAGENT_WINTUN_DLL", "..\\..\\wintun.dll");
 
+    private static string DevolutionsMultiPwshExe => ResolveArtifact("DAGENT_MULTI_PWSH_EXECUTABLE", "..\\..\\multi-pwsh\\multi-pwsh.exe");
+
     private static Version DevolutionsAgentVersion
     {
         get
@@ -292,6 +294,10 @@ internal class Program
                     new (Features.AGENT_UPDATER_FEATURE, DevolutionsAgentUpdaterExePath)
                     {
                         TargetFileName = "DevolutionsAgentUpdater.exe"
+                    },
+                    new (Features.AGENT_FEATURE, DevolutionsMultiPwshExe)
+                    {
+                        TargetFileName = "multi-pwsh.exe"
                     }
                 },
                 Dirs = new[]
