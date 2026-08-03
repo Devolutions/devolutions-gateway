@@ -41,21 +41,36 @@ const MANAGER_PROBE_TTL: Duration = Duration::from_secs(60);
 ///
 /// Probing walks the target user's environment (PATH lookups and file checks); the cache
 /// keeps capability requests cheap while still picking up newly (un)installed managers
-/// after [`MANAGER_PROBE_TTL`].
-#[derive(Default)]
-pub struct ManagerProbeCache(parking_lot::Mutex<HashMap<String, (Instant, Vec<ManagerName>)>>);
+/// after the TTL elapses.
+pub struct ManagerProbeCache {
+    ttl: Duration,
+    entries: parking_lot::Mutex<HashMap<String, (Instant, Vec<ManagerName>)>>,
+}
+
+impl Default for ManagerProbeCache {
+    fn default() -> Self {
+        Self::with_ttl(MANAGER_PROBE_TTL)
+    }
+}
 
 impl ManagerProbeCache {
+    fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entries: parking_lot::Mutex::new(HashMap::new()),
+        }
+    }
+
     fn get_fresh(&self, user_key: &str) -> Option<Vec<ManagerName>> {
-        let cache = self.0.lock();
-        cache
+        let entries = self.entries.lock();
+        entries
             .get(user_key)
-            .filter(|(probed_at, _)| probed_at.elapsed() < MANAGER_PROBE_TTL)
+            .filter(|(probed_at, _)| probed_at.elapsed() < self.ttl)
             .map(|(_, managers)| managers.clone())
     }
 
     fn insert(&self, user_key: String, managers: Vec<ManagerName>) {
-        self.0.lock().insert(user_key, (Instant::now(), managers));
+        self.entries.lock().insert(user_key, (Instant::now(), managers));
     }
 }
 
@@ -613,6 +628,13 @@ mod tests {
     }
 
     fn make_state(available: Vec<ManagerName>) -> (Arc<BrokerState>, Arc<FakeExecutor>) {
+        make_state_with_cache(available, Default::default())
+    }
+
+    fn make_state_with_cache(
+        available: Vec<ManagerName>,
+        manager_probe_cache: ManagerProbeCache,
+    ) -> (Arc<BrokerState>, Arc<FakeExecutor>) {
         let executor = Arc::new(FakeExecutor {
             available,
             probe_count: AtomicUsize::new(0),
@@ -623,7 +645,7 @@ mod tests {
             pipe_name: "test-pipe".to_owned(),
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
-            manager_probe_cache: Default::default(),
+            manager_probe_cache,
         });
         (state, executor)
     }
@@ -660,5 +682,17 @@ mod tests {
         state.capabilities(&sid).await;
 
         assert_eq!(executor.probe_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn manager_probe_is_refreshed_after_ttl_expiry() {
+        let (state, executor) =
+            make_state_with_cache(vec![ManagerName::Winget], ManagerProbeCache::with_ttl(Duration::ZERO));
+        let sid = test_sid();
+
+        state.capabilities(&sid).await;
+        state.capabilities(&sid).await;
+
+        assert_eq!(executor.probe_count.load(Ordering::SeqCst), 2);
     }
 }

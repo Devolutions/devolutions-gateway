@@ -13,16 +13,18 @@ use now_policy_api::{Elevation, ManagerName, Scope};
 use tracing::{debug, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::security::privilege::{self, ScopedPrivileges};
+use win_api_wrappers::security::privilege;
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::WideString;
-use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_ALL_ACCESS, TOKEN_QUERY};
+use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
 use super::{BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
 
+mod privileges;
 mod process;
 mod token;
 
+use privileges::SharedPrivileges;
 use process::create_process;
 use token::{detect_running_as_system, find_user_session, get_elevated_token};
 
@@ -109,17 +111,17 @@ impl CommandExecutor for WindowsExecutor {
         match probed {
             Ok(Ok(managers)) => managers,
             Ok(Err(error)) => {
-                // Fail open: advertising the full set preserves the previous behavior when the
-                // target user environment cannot be inspected (e.g., no active session).
+                // Fail closed: the same session/environment lookup is required for execution,
+                // so a manager that cannot be verified cannot run either.
                 warn!(
                     error = format!("{error:#}"),
-                    "Failed to probe package manager availability; advertising all supported managers"
+                    "Failed to probe package manager availability; advertising no managers"
                 );
-                BROKER_SUPPORTED_MANAGERS.to_vec()
+                Vec::new()
             }
             Err(error) => {
-                warn!(%error, "Package manager availability probe panicked; advertising all supported managers");
-                BROKER_SUPPORTED_MANAGERS.to_vec()
+                warn!(%error, "Package manager availability probe panicked; advertising no managers");
+                Vec::new()
             }
         }
     }
@@ -132,11 +134,7 @@ impl CommandExecutor for WindowsExecutor {
 fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<HashMap<String, String>> {
     let token = if is_system {
         // WTSQueryUserToken (used by find_user_session) requires the SeTcb privilege.
-        let mut process_token = Process::current_process()
-            .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)
-            .context("failed to open process token for privilege adjustment")?;
-        let _priv_tcb =
-            ScopedPrivileges::enter(&mut process_token, &[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
+        let _privileges = SharedPrivileges::acquire(&[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
 
         let (_session_id, user_token) =
             find_user_session(user_sid).context("failed to find active session for user")?;
@@ -164,12 +162,20 @@ fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>
             Path::new(&crate::broker::command_builder::dotnet::trusted_dotnet_executable()).is_file()
         }
         ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok(),
-        // npm runs through the user PATH `npm` shim inside the trusted PowerShell wrapper.
-        ManagerName::Npm => path_contains_executable(user_env, &["npm.cmd", "npm.exe"]),
+        // npm runs through the user PATH `npm` shim inside the trusted Windows PowerShell wrapper,
+        // so both the shim and the host must exist.
+        ManagerName::Npm => {
+            Path::new(&trusted_windows_powershell_executable()).is_file()
+                && path_contains_executable(user_env, &["npm.cmd", "npm.exe"])
+        }
         ManagerName::PowerShell => Path::new(&trusted_windows_powershell_executable()).is_file(),
         ManagerName::PowerShell7 => Path::new(&trusted_powershell7_executable()).is_file(),
-        // Scoop is driven through the user's `scoop.ps1` shim resolved from PATH.
-        ManagerName::Scoop => path_contains_executable(user_env, &["scoop.ps1", "scoop.cmd"]),
+        // Scoop is driven through the user's `scoop.ps1` shim (resolved via `Get-Command
+        // -CommandType ExternalScript`) inside the trusted Windows PowerShell wrapper.
+        ManagerName::Scoop => {
+            Path::new(&trusted_windows_powershell_executable()).is_file()
+                && path_contains_executable(user_env, &["scoop.ps1"])
+        }
         ManagerName::Vcpkg => resolve_vcpkg_executable(user_env).is_ok(),
         _ => false,
     }
@@ -205,22 +211,16 @@ fn execute_as_system(
     );
 
     // Enable privileges required by CreateProcessAsUserW when running as SYSTEM.
-    // These are held by SYSTEM but not enabled by default.
-    let mut process_token = Process::current_process()
-        .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)
-        .context("failed to open process token for privilege adjustment")?;
-
-    debug!("Enabling SeTcb privilege");
-    let mut _priv_tcb =
-        ScopedPrivileges::enter(&mut process_token, &[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
-
-    debug!("Enabling SeAssignPrimaryToken privilege");
-    let mut _priv_primary = ScopedPrivileges::enter(_priv_tcb.token_mut(), &[privilege::SE_ASSIGNPRIMARYTOKEN_NAME])
-        .context("failed to enable SeAssignPrimaryToken")?;
-
-    debug!("Enabling SeIncreaseQuota privilege");
-    let _priv_quota = ScopedPrivileges::enter(_priv_primary.token_mut(), &[privilege::SE_INCREASE_QUOTA_NAME])
-        .context("failed to enable SeIncreaseQuota")?;
+    // These are held by SYSTEM but not enabled by default. The guard is reference-counted
+    // process-wide so concurrent requests (and availability probes) cannot disable a
+    // privilege out from under one another.
+    debug!("Enabling SeTcb, SeAssignPrimaryToken and SeIncreaseQuota privileges");
+    let _privileges = SharedPrivileges::acquire(&[
+        privilege::SE_TCB_NAME,
+        privilege::SE_ASSIGNPRIMARYTOKEN_NAME,
+        privilege::SE_INCREASE_QUOTA_NAME,
+    ])
+    .context("failed to enable privileges required for SYSTEM-mode execution")?;
 
     debug!("All privileges enabled, finding user session");
 
