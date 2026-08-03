@@ -27,10 +27,17 @@ pub struct ExecutionContext {
     /// Process image names to terminate before the operation (best-effort).
     pub kill_processes: Vec<String>,
     /// Optional shell command to run before the main command (`cmd.exe /S /C`).
+    ///
+    /// SECURITY: this is a raw command string executed with a possibly elevated token.
+    /// The broker server currently rejects requests carrying pre/post operation
+    /// commands (see `BrokerState::evaluate_request`), so this is always `None` until
+    /// the policy schema can restrict the command content.
     pub pre_command: Option<String>,
     /// The main package-manager command line as separate arguments (exe + args).
     pub command: Vec<String>,
     /// Optional shell command to run after the main command (`cmd.exe /S /C`).
+    ///
+    /// SECURITY: same restrictions as `pre_command`; always `None` for now.
     pub post_command: Option<String>,
     /// Windows identity of the target user (e.g., `DOMAIN\username`), used for display and logging.
     pub effective_user: String,

@@ -250,6 +250,24 @@ impl BrokerState {
     }
 
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
+        // SECURITY: Pre/post operation commands are raw command strings executed via
+        // cmd.exe with a possibly elevated token, so any rule allowing them would grant
+        // arbitrary elevated code execution and make the package allowlist moot.
+        // The policy schema cannot restrict the command content yet, so such requests
+        // are rejected outright (fail-closed) before policy evaluation.
+        // This gate is intentionally not bypassable by policy rules, `defaultDecision`,
+        // or audit mode; revisit once the policy schema supports a content allowlist.
+        if request.options.pre_operation_command.is_some() || request.options.post_operation_command.is_some() {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: pre/post operation commands are not supported"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "pre/post operation commands are not supported: the policy schema cannot restrict their content yet",
+            ));
+        }
+
         let received_at = Utc::now();
         let policy = {
             let guard = self.policy.read().expect("policy lock poisoned");
@@ -344,5 +362,142 @@ trait PackageRequestClientOwner {
 impl PackageRequestClientOwner for PackageRequest {
     fn client_owner_key(&self) -> String {
         self.client.owner_key()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use chrono::Utc;
+    use now_policy::{
+        PackageBrokerPolicy, PolicyEnforcement, PolicyMetadata, PolicySchemaUri, ResourceId, RulePrecedence,
+        SemanticVersion,
+    };
+    use now_policy_api as api;
+
+    use super::*;
+    use crate::broker::executor::{ExecutionOutput, ProcessStartedCallback};
+
+    struct NoopExecutor;
+
+    #[async_trait]
+    impl CommandExecutor for NoopExecutor {
+        async fn execute(
+            &self,
+            _ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            anyhow::bail!("not used in tests")
+        }
+    }
+
+    /// The most permissive policy possible: default Allow, no rules, audit mode on.
+    fn permissive_policy() -> PolicyDocument {
+        PolicyDocument {
+            _schema: PolicySchemaUri,
+            policy_version: SemanticVersion::from("1.0.0"),
+            policy_type: PackageBrokerPolicy,
+            metadata: PolicyMetadata {
+                id: ResourceId::from("test-policy"),
+                publisher: "Test".to_owned(),
+                revision: 1,
+                published_at: Utc::now(),
+                valid_from: None,
+                valid_until: None,
+                description: None,
+                support_url: None,
+            },
+            enforcement: PolicyEnforcement {
+                default_decision: now_policy::Decision::Allow,
+                rule_precedence: RulePrecedence::PriorityThenDeny,
+                audit_mode: Some(true),
+            },
+            rules: Vec::new(),
+        }
+    }
+
+    fn state() -> BrokerState {
+        BrokerState {
+            policy: RwLock::new(Some(Arc::new(permissive_policy()))),
+            executor: Arc::new(NoopExecutor),
+            pipe_name: "test-pipe".to_owned(),
+            tracker: OperationTracker::new(),
+            skip_signature_validation: true,
+        }
+    }
+
+    fn request() -> PackageRequest {
+        PackageRequest {
+            request_kind: api::PackageRequestKind,
+            request_version: api::API_VERSION_STR.into(),
+            request_id: api::ResourceId::from("req-1"),
+            created_at: Utc::now(),
+            operation: api::Operation::Install,
+            manager: api::ManagerName::Winget,
+            source: api::RequestSource {
+                name: "winget".to_owned(),
+                url: None,
+            },
+            package: api::RequestPackage {
+                id: api::PackageIdentifier("Contoso.Tools".to_owned()),
+                version: None,
+                architecture: None,
+                channel: None,
+            },
+            options: api::RequestOptions {
+                scope: None,
+                interactive: false,
+                skip_hash_check: false,
+                pre_release: false,
+                custom_install_location: None,
+                custom_parameters: Vec::new(),
+                pre_operation_command: None,
+                post_operation_command: None,
+                kill_before_operation: Vec::new(),
+                uninstall_previous: false,
+                no_upgrade: false,
+            },
+            client: api::ClientContext {
+                transport: Transport::HttpNamedPipe,
+                requested_elevation: api::Elevation::Elevated,
+                effective_user: "DOMAIN\\user".to_owned(),
+                client_executable_path: "C:\\Program Files\\Devolutions\\Package Broker\\PackageBrokerClient.exe"
+                    .to_owned(),
+                client_version: "1.0.0".to_owned(),
+            },
+            include_command_preview: false,
+            capture_output: false,
+        }
+    }
+
+    #[test]
+    fn pre_operation_command_is_rejected_even_under_permissive_policy() {
+        let mut request = request();
+        request.options.pre_operation_command = Some("calc.exe".to_owned());
+
+        let Err(error) = state().evaluate_request(&request) else {
+            panic!("expected pre-operation command to be rejected");
+        };
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn post_operation_command_is_rejected_even_under_permissive_policy() {
+        let mut request = request();
+        request.options.post_operation_command = Some("calc.exe".to_owned());
+
+        let Err(error) = state().evaluate_request(&request) else {
+            panic!("expected post-operation command to be rejected");
+        };
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn request_without_pre_post_commands_is_evaluated() {
+        let Ok(evaluated) = state().evaluate_request(&request()) else {
+            panic!("expected request to be evaluated");
+        };
+        assert!(evaluated.would_execute);
     }
 }

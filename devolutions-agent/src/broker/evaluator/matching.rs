@@ -36,7 +36,7 @@ pub(super) fn rule_matches(
         && bool_in_set(flags.has_pre_post_commands, &m.has_pre_post_commands)
         && bool_in_set(flags.has_kill_before_operation, &m.has_kill_before_operation)
         && bool_in_set(flags.has_uninstall_previous, &m.has_uninstall_previous)
-        && constraints_pass(&rule.constraints, request, flags)
+        && constraints_pass(&rule.constraints, rule.decision, request, flags)
 }
 
 fn operations_match(op: Operation, allowed: &BTreeSet<Operation>) -> bool {
@@ -199,10 +199,13 @@ mod tests {
         let mut request = request();
         request.options.interactive = true;
         let flags = RequestFlags::from_request(&request);
-        let rule = rule(PolicyMatch {
+        let mut rule = rule(PolicyMatch {
             interactive: BTreeSet::from([true]),
             ..Default::default()
         });
+        // Explicit permissive constraints: an allow-rule without constraints is
+        // deny-by-default for risky options such as interactive mode.
+        rule.constraints = Some(now_policy::PolicyConstraints::default());
 
         assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
     }

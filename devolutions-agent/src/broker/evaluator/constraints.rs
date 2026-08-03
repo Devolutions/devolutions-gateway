@@ -1,18 +1,28 @@
 //! Policy constraint checks.
 
-use now_policy::PolicyConstraints;
+use now_policy::{Decision, PolicyConstraints};
 use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::wildcard::wildcard_any_vec;
 
+/// Check whether a rule's constraints allow the request.
+///
+/// When a rule has no constraints (`None`), the behavior depends on the rule's decision:
+/// - Allow-rules are deny-by-default: they only match requests that carry no risky option,
+///   so `Constraints: null` is not a silent "allow every risky option".
+/// - Deny-rules remain unconstrained so they keep matching risky requests.
 pub(super) fn constraints_pass(
     constraints: &Option<PolicyConstraints>,
+    decision: Decision,
     request: &PackageRequest,
     flags: &RequestFlags,
 ) -> bool {
     let Some(c) = constraints else {
-        return true;
+        return match decision {
+            Decision::Allow => !request_has_risky_options(request, flags),
+            Decision::Deny => true,
+        };
     };
 
     if !c.allow_interactive && request.options.interactive {
@@ -70,6 +80,19 @@ pub(super) fn constraints_pass(
     }
 
     true
+}
+
+/// Returns true when the request uses any option gated by [`PolicyConstraints`].
+fn request_has_risky_options(request: &PackageRequest, flags: &RequestFlags) -> bool {
+    request.options.interactive
+        || request.options.skip_hash_check
+        || request.options.pre_release
+        || flags.has_custom_install_location
+        || flags.has_custom_parameters
+        || flags.has_pre_post_commands
+        || flags.has_kill_before_operation
+        || flags.has_uninstall_previous
+        || flags.no_upgrade
 }
 
 #[cfg(test)]
@@ -138,8 +161,31 @@ mod tests {
     }
 
     #[test]
-    fn missing_constraints_are_permissive() {
-        assert!(constraints_pass(&None, &request(), &flags()));
+    fn missing_constraints_allow_only_risk_free_requests() {
+        assert!(constraints_pass(&None, Decision::Allow, &request(), &flags()));
+    }
+
+    #[test]
+    fn missing_constraints_deny_risky_options_for_allow_rules() {
+        let mut risky_flags = flags();
+        risky_flags.has_pre_post_commands = true;
+        assert!(!constraints_pass(&None, Decision::Allow, &request(), &risky_flags));
+
+        let mut interactive_request = request();
+        interactive_request.options.interactive = true;
+        assert!(!constraints_pass(
+            &None,
+            Decision::Allow,
+            &interactive_request,
+            &flags()
+        ));
+    }
+
+    #[test]
+    fn missing_constraints_do_not_prevent_deny_rules_from_matching() {
+        let mut risky_flags = flags();
+        risky_flags.has_pre_post_commands = true;
+        assert!(constraints_pass(&None, Decision::Deny, &request(), &risky_flags));
     }
 
     #[test]
@@ -152,7 +198,12 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!constraints_pass(&Some(constraints), &request, &flags()));
+        assert!(!constraints_pass(
+            &Some(constraints),
+            Decision::Allow,
+            &request,
+            &flags()
+        ));
     }
 
     #[test]
@@ -167,13 +218,19 @@ mod tests {
         matching_flags.custom_install_location = "C:\\Tools\\Contoso".to_owned();
         assert!(constraints_pass(
             &Some(constraints.clone()),
+            Decision::Allow,
             &request(),
             &matching_flags
         ));
 
         let mut non_matching_flags = matching_flags;
         non_matching_flags.custom_install_location = "D:\\Temp\\Contoso".to_owned();
-        assert!(!constraints_pass(&Some(constraints), &request(), &non_matching_flags));
+        assert!(!constraints_pass(
+            &Some(constraints),
+            Decision::Allow,
+            &request(),
+            &non_matching_flags
+        ));
     }
 
     #[test]
@@ -188,7 +245,12 @@ mod tests {
         flags.has_custom_parameters = true;
         flags.custom_parameters = vec!["--force".to_owned()];
 
-        assert!(!constraints_pass(&Some(constraints), &request(), &flags));
+        assert!(!constraints_pass(
+            &Some(constraints),
+            Decision::Allow,
+            &request(),
+            &flags
+        ));
     }
 
     #[test]
@@ -202,17 +264,32 @@ mod tests {
         let mut exact_flags = flags();
         exact_flags.has_custom_parameters = true;
         exact_flags.custom_parameters = vec!["--SILENT".to_owned()];
-        assert!(constraints_pass(&Some(constraints.clone()), &request(), &exact_flags));
+        assert!(constraints_pass(
+            &Some(constraints.clone()),
+            Decision::Allow,
+            &request(),
+            &exact_flags
+        ));
 
         let mut pattern_flags = flags();
         pattern_flags.has_custom_parameters = true;
         pattern_flags.custom_parameters = vec!["/log=C:\\Temp\\install.log".to_owned()];
-        assert!(constraints_pass(&Some(constraints.clone()), &request(), &pattern_flags));
+        assert!(constraints_pass(
+            &Some(constraints.clone()),
+            Decision::Allow,
+            &request(),
+            &pattern_flags
+        ));
 
         let mut rejected_flags = flags();
         rejected_flags.has_custom_parameters = true;
         rejected_flags.custom_parameters = vec!["--force".to_owned()];
-        assert!(!constraints_pass(&Some(constraints), &request(), &rejected_flags));
+        assert!(!constraints_pass(
+            &Some(constraints),
+            Decision::Allow,
+            &request(),
+            &rejected_flags
+        ));
     }
 
     #[test]
@@ -224,6 +301,11 @@ mod tests {
         let mut flags = flags();
         flags.no_upgrade = true;
 
-        assert!(!constraints_pass(&Some(constraints), &request(), &flags));
+        assert!(!constraints_pass(
+            &Some(constraints),
+            Decision::Allow,
+            &request(),
+            &flags
+        ));
     }
 }
