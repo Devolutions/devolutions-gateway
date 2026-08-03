@@ -95,7 +95,7 @@ internal class Program
 
     private static string DevolutionsWintunDll => ResolveArtifact("DAGENT_WINTUN_DLL", "..\\..\\wintun.dll");
 
-    private static string DevolutionsMultiPwshExe => ResolveArtifact("DAGENT_MULTI_PWSH_EXECUTABLE");
+    private static string DevolutionsMultiPwshExe => ResolveArtifact("DAGENT_MULTI_PWSH_EXECUTABLE", "..\\..\\multi-pwsh\\multi-pwsh.exe");
 
     private static Version DevolutionsAgentVersion
     {

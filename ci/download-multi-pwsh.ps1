@@ -1,10 +1,15 @@
+#!/bin/env pwsh
+
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('x64', 'arm64')]
     [string] $Architecture,
+
     [Parameter(Mandatory = $true)]
     [string] $Destination
 )
+
+$ErrorActionPreference = 'Stop'
 
 $archiveName = "multi-pwsh-windows-$Architecture.zip"
 $downloadDirectory = Join-Path $Destination 'download'

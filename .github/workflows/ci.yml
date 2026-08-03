@@ -872,6 +872,8 @@ jobs:
           ./ci/download-multi-pwsh.ps1 -Architecture "${{ matrix.arch }}" -Destination $Destination
           echo "executable-path=$(Join-Path $Destination 'multi-pwsh.exe')" >> $Env:GITHUB_OUTPUT
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload tun2socks artifacts
         if: ${{ matrix.os == 'windows' }}
