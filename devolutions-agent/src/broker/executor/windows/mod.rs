@@ -19,6 +19,7 @@ use win_api_wrappers::utils::WideString;
 use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
 use super::{BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
+use crate::broker::policy_security;
 
 mod privileges;
 mod process;
@@ -150,9 +151,10 @@ fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<Has
 /// resolution rules the execution path applies for that manager.
 fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>) -> bool {
     match manager {
-        ManagerName::Winget => resolve_winget_executable(user_env).is_ok(),
+        // Probing is not an elevated execution, so no executable ACL verification is needed.
+        ManagerName::Winget => resolve_winget_executable(user_env, false).is_ok(),
         ManagerName::Chocolatey => default_chocolatey_install_dir()
-            .and_then(|root| resolve_trusted_chocolatey_executable(Some(user_env), &root))
+            .and_then(|root| resolve_trusted_chocolatey_executable(Some(user_env), &root, false))
             .is_ok(),
         ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
         ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
@@ -353,7 +355,7 @@ fn run_plan(
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false, None) {
+        match create_process(token, &kill_cmd, session_id, false, requires_elevation, None) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
@@ -363,8 +365,15 @@ fn run_plan(
     if let Some(pre) = &ctx.pre_command {
         info!("Running pre-operation command");
         let command = prepare_shell_command(token, pre)?;
-        let out = create_process(token, command.args(), session_id, ctx.capture_output, None)
-            .context("failed to run pre-operation command")?;
+        let out = create_process(
+            token,
+            command.args(),
+            session_id,
+            ctx.capture_output,
+            requires_elevation,
+            None,
+        )
+        .context("failed to run pre-operation command")?;
         if out.exit_code != 0 {
             bail!(
                 "pre-operation command exited with code {}: {}",
@@ -375,15 +384,22 @@ fn run_plan(
     }
 
     // 3. Main package-manager command.
-    let command = prepare_main_command(token, &ctx.command)?;
-    let output = create_process(token, command.args(), session_id, ctx.capture_output, process_started)?;
+    let command = prepare_main_command(token, &ctx.command, requires_elevation)?;
+    let output = create_process(
+        token,
+        command.args(),
+        session_id,
+        ctx.capture_output,
+        requires_elevation,
+        process_started,
+    )?;
 
     // 4. Post-operation command — runs after the main command; failures are logged only
     //    so a completed main operation is never reported as failed by its post-hook.
     if let Some(post) = &ctx.post_command {
         info!("Running post-operation command");
         match prepare_shell_command(token, post) {
-            Ok(command) => match create_process(token, command.args(), session_id, false, None) {
+            Ok(command) => match create_process(token, command.args(), session_id, false, requires_elevation, None) {
                 Ok(out) if out.exit_code == 0 => {}
                 Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
                 Err(error) => warn!(%error, "Post-operation command failed"),
@@ -395,27 +411,32 @@ fn run_plan(
     Ok(output)
 }
 
-fn prepare_main_command(token: &Token, command: &[String]) -> anyhow::Result<PreparedCommand> {
+fn prepare_main_command(
+    token: &Token,
+    command: &[String],
+    requires_elevation: bool,
+) -> anyhow::Result<PreparedCommand> {
     let user_env = win_api_wrappers::utils::environment_block(Some(token), false)
         .context("failed to load user environment block")?;
-    prepare_main_command_in(command, None, Some(&user_env))
+    prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
 }
 
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some((script, command_arg_index)) = powershell_inline_script(command) {
         return prepare_powershell_script(command, command_arg_index, script, temp_dir);
     }
 
     if executable_is(command, "winget.exe") {
-        return prepare_winget_script(command, temp_dir, user_env);
+        return prepare_winget_script(command, temp_dir, user_env, requires_elevation);
     }
 
     if executable_is(command, "choco.exe") {
-        return prepare_chocolatey_script(command, temp_dir, user_env);
+        return prepare_chocolatey_script(command, temp_dir, user_env, requires_elevation);
     }
 
     if executable_is(command, "cargo.exe") {
@@ -522,6 +543,7 @@ fn prepare_winget_script(
     command: &[String],
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
@@ -529,9 +551,11 @@ fn prepare_winget_script(
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (executable, args) = command.split_first().context("empty WinGet command")?;
-    let executable = user_env.map_or_else(
-        || Ok(executable.clone()),
-        |env| resolve_winget_executable(env).map(|path| path.display().to_string()),
+    let (executable, exe_guard) = user_env.map_or_else(
+        || Ok((executable.clone(), None)),
+        |env| {
+            resolve_winget_executable(env, requires_elevation).map(|(path, guard)| (path.display().to_string(), guard))
+        },
     )?;
     append_batch_argument(&mut script, &executable)?;
     for arg in args {
@@ -557,24 +581,32 @@ fn prepare_winget_script(
         temp_script.path_string(),
     ];
 
-    Ok(PreparedCommand::with_script(prepared, temp_script))
+    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
 }
 
 fn prepare_chocolatey_script(
     command: &[String],
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
-    prepare_chocolatey_script_in(command, temp_dir, user_env)
+    prepare_chocolatey_script_in(command, temp_dir, user_env, requires_elevation)
 }
 
 fn prepare_chocolatey_script_in(
     command: &[String],
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let default_install_root = default_chocolatey_install_dir()?;
-    prepare_chocolatey_script_in_with_default_install_root(command, temp_dir, user_env, &default_install_root)
+    prepare_chocolatey_script_in_with_default_install_root(
+        command,
+        temp_dir,
+        user_env,
+        &default_install_root,
+        requires_elevation,
+    )
 }
 
 fn prepare_chocolatey_script_in_with_default_install_root(
@@ -582,6 +614,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     temp_dir: Option<&Path>,
     user_env: Option<&HashMap<String, String>>,
     default_install_root: &Path,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
@@ -589,7 +622,8 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
 
     let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
-    let (executable, install_root) = resolve_trusted_chocolatey_executable(user_env, default_install_root)?;
+    let (executable, install_root, exe_guard) =
+        resolve_trusted_chocolatey_executable(user_env, default_install_root, requires_elevation)?;
     append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
     script.push_str("\r\n");
     append_batch_argument(&mut script, &executable.display().to_string())?;
@@ -621,7 +655,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
         temp_script.path_string(),
     ];
 
-    Ok(PreparedCommand::with_script(prepared, temp_script))
+    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
 }
 
 fn prepare_vcpkg_script(
@@ -981,7 +1015,8 @@ fn default_chocolatey_install_dir() -> anyhow::Result<PathBuf> {
 fn resolve_trusted_chocolatey_executable(
     user_env: Option<&HashMap<String, String>>,
     default_install_root: &Path,
-) -> anyhow::Result<(PathBuf, PathBuf)> {
+    requires_elevation: bool,
+) -> anyhow::Result<(PathBuf, PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let install_root = user_env
         .and_then(|env| env_value_ignore_case(env, "ChocolateyInstall"))
         .filter(|value| !value.trim().is_empty())
@@ -1002,7 +1037,10 @@ fn resolve_trusted_chocolatey_executable(
         );
     }
 
-    Ok((executable, install_root))
+    let guard = policy_security::verify_elevated_executable_security(&executable, requires_elevation)?;
+    let executable = guard.as_ref().map_or(executable, |g| g.path().to_owned());
+
+    Ok((executable, install_root, guard))
 }
 
 fn is_trusted_chocolatey_install_dir(install_root: &Path, default_install_root: &Path) -> bool {
@@ -1022,7 +1060,10 @@ fn env_value_ignore_case<'a>(env: &'a HashMap<String, String>, key: &str) -> Opt
         .map(|(_, value)| value.as_str())
 }
 
-fn resolve_winget_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+fn resolve_winget_executable(
+    env: &HashMap<String, String>,
+    requires_elevation: bool,
+) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let path_var = env
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
@@ -1031,7 +1072,9 @@ fn resolve_winget_executable(env: &HashMap<String, String>) -> anyhow::Result<Pa
     for dir in path_var.split(';') {
         let candidate = PathBuf::from(dir).join("winget.exe");
         if candidate.exists() && is_trusted_winget_path(&candidate, env) {
-            return Ok(candidate);
+            let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
+            let candidate = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
+            return Ok((candidate, guard));
         }
     }
     bail!("trusted winget.exe not found in target user PATH");
@@ -1226,6 +1269,9 @@ fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyho
 struct PreparedCommand {
     command: Vec<String>,
     _script: Option<TmpFileGuard>,
+    /// Keeps a verified elevated executable embedded in the generated script locked
+    /// against modification and replacement until the command has finished running.
+    _exe_guard: Option<policy_security::VerifiedExecutable>,
 }
 
 impl PreparedCommand {
@@ -1233,6 +1279,7 @@ impl PreparedCommand {
         Self {
             command: command.to_vec(),
             _script: None,
+            _exe_guard: None,
         }
     }
 
@@ -1240,7 +1287,13 @@ impl PreparedCommand {
         Self {
             command,
             _script: Some(script),
+            _exe_guard: None,
         }
+    }
+
+    fn with_exe_guard(mut self, exe_guard: Option<policy_security::VerifiedExecutable>) -> Self {
+        self._exe_guard = exe_guard;
+        self
     }
 
     fn args(&self) -> &[String] {
@@ -1251,16 +1304,46 @@ impl PreparedCommand {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::Path;
 
     use now_policy_api::{Elevation, Scope};
     use win_api_wrappers::identity::sid::Sid;
+    use win_api_wrappers::security::acl::{
+        Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
+    };
+    use win_api_wrappers::str::U16CString;
+    use windows::Win32::Foundation::GENERIC_ALL;
+    use windows::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
+    use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::{
         POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
         prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
-        reject_unsupported_vcpkg_elevation,
+        reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
     };
     use crate::broker::executor::{CommandExecutor as _, ExecutionContext};
+
+    fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
+        ExplicitAccess {
+            access_permissions: permissions,
+            access_mode: GRANT_ACCESS,
+            inheritance: NO_INHERITANCE,
+            trustee: Trustee::Sid(sid),
+        }
+    }
+
+    fn make_everyone_writable(path: &Path) {
+        let everyone = Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID");
+        let dacl = InheritableAcl {
+            kind: InheritableAclKind::Protected,
+            acl: Acl::new()
+                .and_then(|acl| acl.set_entries(&[grant(GENERIC_ALL.0, everyone)]))
+                .expect("build ACL with Everyone full-control entry"),
+        };
+        let name = U16CString::from_os_str(path.as_os_str()).expect("no interior NUL in temp path");
+        set_named_security_info(&name, SE_FILE_OBJECT, None, None, Some(&dacl), None)
+            .expect("set everyone-writable DACL");
+    }
 
     #[test]
     fn shell_command_uses_utf8_temp_batch_file() {
@@ -1288,7 +1371,7 @@ mod tests {
             "Write-Output 'héllo'".to_owned(),
         ];
         let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
 
         assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
@@ -1314,7 +1397,7 @@ mod tests {
             "Write-Output 'héllo'".to_owned(),
         ];
         let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
 
         assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
@@ -1334,7 +1417,7 @@ mod tests {
             "Write-Output 'héllo'".to_owned(),
         ];
         let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare PowerShell command");
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
 
         assert!(command.args()[0].ends_with(r"\PowerShell\7\pwsh.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
@@ -1358,7 +1441,8 @@ mod tests {
             "Vendor.Package&Name".to_owned(),
             "100%".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare WinGet command");
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare WinGet command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1370,6 +1454,48 @@ mod tests {
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
         assert!(script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\""));
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn winget_elevated_execution_rejects_everyone_writable_executable() {
+        let program_files = tempfile::tempdir().expect("create fake ProgramFiles");
+        let windows_apps = program_files.path().join("WindowsApps");
+        std::fs::create_dir_all(&windows_apps).expect("create fake WindowsApps dir");
+        let winget_path = windows_apps.join("winget.exe");
+        std::fs::write(&winget_path, b"").expect("write winget placeholder");
+        make_everyone_writable(&winget_path);
+
+        let env = HashMap::from([
+            ("PATH".to_owned(), windows_apps.display().to_string()),
+            ("ProgramFiles".to_owned(), program_files.path().display().to_string()),
+        ]);
+
+        let error = resolve_winget_executable(&env, true)
+            .expect_err("an everyone-writable winget.exe must be rejected for elevated execution");
+        assert!(
+            error.to_string().contains("elevated package-manager executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn winget_non_elevated_execution_allows_everyone_writable_executable() {
+        let program_files = tempfile::tempdir().expect("create fake ProgramFiles");
+        let windows_apps = program_files.path().join("WindowsApps");
+        std::fs::create_dir_all(&windows_apps).expect("create fake WindowsApps dir");
+        let winget_path = windows_apps.join("winget.exe");
+        std::fs::write(&winget_path, b"").expect("write winget placeholder");
+        make_everyone_writable(&winget_path);
+
+        let env = HashMap::from([
+            ("PATH".to_owned(), windows_apps.display().to_string()),
+            ("ProgramFiles".to_owned(), program_files.path().display().to_string()),
+        ]);
+
+        let (resolved, guard) =
+            resolve_winget_executable(&env, false).expect("non-elevated resolution is not subject to the ACL check");
+        assert_eq!(resolved, winget_path);
+        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
     #[test]
@@ -1386,8 +1512,8 @@ mod tests {
             "--global".to_owned(),
         ];
 
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare Bun command");
+        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
+            .expect("prepare Bun command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1418,7 +1544,7 @@ mod tests {
             "--global".to_owned(),
         ];
 
-        let command = prepare_main_command_in(&command, None, Some(&user_env)).expect("prepare Bun command");
+        let command = prepare_main_command_in(&command, None, Some(&user_env), false).expect("prepare Bun command");
 
         assert_eq!(command.args()[0], bun_path.display().to_string());
         assert_eq!(command.args()[1], "add");
@@ -1487,7 +1613,7 @@ mod tests {
     }
 
     /// Reads back the DACL of `path` as an SDDL string (`D:...`).
-    fn read_file_dacl_sddl(path: &std::path::Path) -> String {
+    fn read_file_dacl_sddl(path: &Path) -> String {
         use win_api_wrappers::utils::WideString;
         use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
         use windows::Win32::Security::Authorization::{
@@ -1570,6 +1696,7 @@ mod tests {
             Some(temp_dir.path()),
             Some(&env),
             &install_root,
+            false,
         )
         .expect("prepare Chocolatey command");
 
@@ -1606,6 +1733,7 @@ mod tests {
             Some(temp_dir.path()),
             Some(&env),
             &install_root,
+            false,
         ) {
             Ok(_) => panic!("missing trusted choco should fail"),
             Err(error) => error,
@@ -1637,11 +1765,47 @@ mod tests {
             Some(temp_dir.path()),
             Some(&env),
             &trusted_install_root,
+            false,
         ) {
             Ok(_) => panic!("non-system ChocolateyInstall should fail"),
             Err(error) => error,
         };
         assert!(error.to_string().contains("trusted system Chocolatey folder"));
+    }
+
+    #[test]
+    fn chocolatey_elevated_execution_rejects_everyone_writable_executable() {
+        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let install_root = program_data.path().join("chocolatey");
+        let choco_bin = install_root.join("bin");
+        std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
+        let choco_path = choco_bin.join("choco.exe");
+        std::fs::write(&choco_path, "").expect("create fake choco");
+        make_everyone_writable(&choco_path);
+
+        let error = resolve_trusted_chocolatey_executable(None, &install_root, true)
+            .expect_err("an everyone-writable choco.exe must be rejected for elevated execution");
+        assert!(
+            error.to_string().contains("elevated package-manager executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn chocolatey_non_elevated_execution_allows_everyone_writable_executable() {
+        let program_data = tempfile::tempdir().expect("create fake ProgramData");
+        let install_root = program_data.path().join("chocolatey");
+        let choco_bin = install_root.join("bin");
+        std::fs::create_dir_all(&choco_bin).expect("create fake Chocolatey bin");
+        let choco_path = choco_bin.join("choco.exe");
+        std::fs::write(&choco_path, "").expect("create fake choco");
+        make_everyone_writable(&choco_path);
+
+        let (resolved, resolved_root, guard) = resolve_trusted_chocolatey_executable(None, &install_root, false)
+            .expect("non-elevated resolution is not subject to the ACL check");
+        assert_eq!(resolved, choco_path);
+        assert_eq!(resolved_root, install_root);
+        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
     #[test]
@@ -1654,7 +1818,8 @@ mod tests {
             "--version".to_owned(),
             "15.1.0".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path()), None).expect("prepare Cargo command");
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare Cargo command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1680,7 +1845,7 @@ mod tests {
 
         let command = vec!["cargo.exe".to_owned(), "uninstall".to_owned(), "ripgrep".to_owned()];
         let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&env)).expect("prepare Cargo command");
+            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&env), false).expect("prepare Cargo command");
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
         assert!(script.contains(&format!(
@@ -1700,7 +1865,7 @@ mod tests {
             "C:\\Tools\\\"& whoami &\"".to_owned(),
         ];
 
-        let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None) {
+        let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None, false) {
             Ok(_) => panic!("quote should fail"),
             Err(error) => error,
         };
@@ -1721,8 +1886,8 @@ mod tests {
             "zlib:x64-windows".to_owned(),
         ];
         let user_env = HashMap::from([("VCPKG_ROOT".to_owned(), vcpkg_root.display().to_string())]);
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare vcpkg command");
+        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
+            .expect("prepare vcpkg command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1749,8 +1914,7 @@ mod tests {
             ],
             post_command: None,
             effective_user: "DOMAIN\\user".to_owned(),
-            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
-                .expect("well-known Everyone SID"),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
@@ -1773,8 +1937,7 @@ mod tests {
             command: vec!["winget.exe".to_owned(), "install".to_owned()],
             post_command: None,
             effective_user: "DOMAIN\\user".to_owned(),
-            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
-                .expect("well-known Everyone SID"),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
@@ -1801,8 +1964,7 @@ mod tests {
             post_command: None,
             effective_user: "DOMAIN\\other".to_owned(),
             // The Everyone (World) SID never matches the test process user SID.
-            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
-                .expect("well-known Everyone SID"),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
             capture_output: false,
@@ -1827,8 +1989,8 @@ mod tests {
             "requests==2.31.0".to_owned(),
             "--no-input".to_owned(),
         ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env)).expect("prepare Pip command");
+        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
+            .expect("prepare Pip command");
 
         assert_eq!(command.args()[0], python_path.display().to_string());
         assert_eq!(command.args()[1], "-m");
