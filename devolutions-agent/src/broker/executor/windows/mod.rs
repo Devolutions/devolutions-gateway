@@ -124,8 +124,10 @@ fn execute_as_system(
 
     debug!("All privileges enabled, finding user session");
 
-    let (session_id, user_token) =
-        find_user_session(&ctx.user_sid).context("failed to find active session for user")?;
+    let (session_id, user_token) = find_user_session(&ctx.user_sid).context(
+        "failed to find an active logon session for the target user; \
+         user-scope and interactive operations require the user to be logged on",
+    )?;
 
     info!(
         effective_user = %ctx.effective_user,
@@ -166,22 +168,45 @@ fn execute_as_system(
     Ok(output)
 }
 
-/// Execute a command as the current user (development mode).
+/// Execute a command as the current user (non-SYSTEM mode).
+///
+/// This path is taken whenever the broker does not run as SYSTEM, regardless of build
+/// profile — e.g. when the agent binary is launched manually as a regular user instead
+/// of as the Windows service.
 ///
 /// Opens the current process token and uses the same `create_process_as_user`
 /// code path as SYSTEM mode, ensuring consistent behavior (environment, desktop, flags).
+///
+/// The client identity must match the broker process user: the process token defines
+/// the target profile (`%LOCALAPPDATA%`, HKCU) and desktop session, so executing on
+/// behalf of a different pipe client would put user-scope installs into the wrong
+/// profile and interactive UIs on the wrong desktop.
 fn execute_as_current_user(
     ctx: &ExecutionContext,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
     info!(
         effective_user = %ctx.effective_user,
-        "Executing command as current user (dev mode)"
+        "Executing command as current user (non-SYSTEM mode)"
     );
 
     let token = Process::current_process()
         .token(TOKEN_ALL_ACCESS)
         .context("failed to open current process token")?;
+
+    let process_user_sid = token
+        .sid_and_attributes()
+        .context("failed to query current process token user SID")?
+        .sid;
+    if process_user_sid != ctx.user_sid {
+        bail!(
+            "pipe client user SID '{}' does not match broker process user SID '{}'; \
+             user-scope execution is only supported when the client \
+             and the broker run as the same user (broker is not running as SYSTEM)",
+            ctx.user_sid,
+            process_user_sid,
+        );
+    }
 
     let session_id = token.session_id().context("failed to query token session ID")?;
 
@@ -1116,8 +1141,9 @@ mod tests {
     use win_api_wrappers::identity::sid::Sid;
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, prepare_chocolatey_script_in_with_default_install_root,
-        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
+        POWERSHELL_UTF8_ENCODING_PREAMBLE, execute_as_current_user,
+        prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
+        reject_unsupported_vcpkg_elevation,
     };
     use crate::broker::executor::ExecutionContext;
 
@@ -1622,6 +1648,30 @@ mod tests {
         ctx.scope = Some(Scope::Machine);
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("machine-scope vcpkg should fail");
         assert!(error.to_string().contains("machine-scope"));
+    }
+
+    #[test]
+    fn non_system_mode_rejects_client_user_different_from_broker_user() {
+        let ctx = ExecutionContext {
+            kill_processes: Vec::new(),
+            pre_command: None,
+            command: vec![
+                r"C:\Windows\System32\cmd.exe".to_owned(),
+                "/C".to_owned(),
+                "exit".to_owned(),
+            ],
+            post_command: None,
+            effective_user: "DOMAIN\\other".to_owned(),
+            // The Everyone (World) SID never matches the test process user SID.
+            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
+                .expect("well-known Everyone SID"),
+            elevation: Elevation::Standard,
+            scope: Some(Scope::User),
+            capture_output: false,
+        };
+
+        let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");
+        assert!(error.to_string().contains("does not match broker process user SID"));
     }
 
     #[test]
