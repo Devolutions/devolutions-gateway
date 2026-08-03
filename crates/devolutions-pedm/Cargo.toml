@@ -13,7 +13,7 @@ publish = false
 anyhow = "1.0"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "tracing", "tower-log", "form", "original-uri", "matched-path"] }
 base16ct = { version = "0.2", features = ["std", "alloc"] }
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 digest = "0.10"
 hyper = { version = "1.6", features = ["server"] }

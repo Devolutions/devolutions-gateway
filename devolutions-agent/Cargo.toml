@@ -24,7 +24,7 @@ anyhow = "1"
 backoff = "0.4"
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "original-uri", "matched-path"] }
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 camino = { version = "1.1", features = ["serde1"] }
 ceviche = "0.7"
