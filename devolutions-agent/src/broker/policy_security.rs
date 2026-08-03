@@ -63,12 +63,24 @@ const WRITE_ACCESS_MASK: u32 = FILE_WRITE_DATA.0 /* modify content */
 /// Access rights on an ancestor directory that allow swapping a path component underneath
 /// a verified executable (renaming or deleting entries, or rewriting the directory's own
 /// security descriptor). Rights that only allow *adding* new entries are deliberately not
-/// included: they cannot redirect an existing path.
+/// included here: they cannot redirect an existing path component. The directory hosting
+/// the executable itself is held to the stricter [`PARENT_DIRECTORY_TAMPER_MASK`].
 const DIRECTORY_TAMPER_MASK: u32 = FILE_DELETE_CHILD.0 /* delete or rename child entries */
     | DELETE.0 /* delete or rename the directory itself */
     | WRITE_DAC.0 /* rewrite the DACL itself */
     | WRITE_OWNER.0 /* take ownership */
     | GENERIC_ALL.0; /* full control */
+
+/// Access rights on the directory hosting a verified executable that allow tampering with
+/// its execution. On top of [`DIRECTORY_TAMPER_MASK`], create rights are rejected: a
+/// principal able to add entries beside the executable can plant a DLL or another
+/// application-loaded resource that the elevated process picks up at start (side-loading),
+/// even though the verified binary itself is pinned. On directories, `FILE_WRITE_DATA` is
+/// `FILE_ADD_FILE` and `FILE_APPEND_DATA` is `FILE_ADD_SUBDIRECTORY`.
+const PARENT_DIRECTORY_TAMPER_MASK: u32 = DIRECTORY_TAMPER_MASK
+    | FILE_WRITE_DATA.0 /* add files (plant DLLs) */
+    | FILE_APPEND_DATA.0 /* add subdirectories */
+    | GENERIC_WRITE.0; /* generic write (maps to add rights) */
 
 /// `NT SERVICE\TrustedInstaller`, the Windows Modules Installer service SID.
 ///
@@ -204,13 +216,20 @@ pub(crate) fn verify_elevated_executable_security(
 }
 
 /// Verify that every ancestor directory of `path` denies untrusted principals the rights
-/// needed to swap a path component (see [`DIRECTORY_TAMPER_MASK`]).
+/// needed to tamper with the executable's resolution or loading.
 ///
-/// Without this, a principal with delete/rename rights on an ancestor could replace a
-/// whole directory subtree so the verified name resolves to a different file when the
-/// image is finally loaded.
+/// The directory hosting the executable is checked against
+/// [`PARENT_DIRECTORY_TAMPER_MASK`], which additionally rejects create rights: a principal
+/// able to add entries beside the binary can plant a DLL or another application-loaded
+/// resource that the elevated process side-loads at start. Higher ancestors are checked
+/// against [`DIRECTORY_TAMPER_MASK`]: without it, a principal with delete/rename rights
+/// could replace a whole directory subtree so the verified name resolves to a different
+/// file when the image is finally loaded. Create rights higher up are harmless (and are
+/// granted to unprivileged users on stock drive roots), since they cannot redirect an
+/// existing path component.
 fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
     let mut current = path.parent();
+    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
 
     while let Some(dir) = current {
         let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
@@ -226,9 +245,10 @@ fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()>
             &handle,
             &dir_subject,
             TrustedWriters::AdminOrTrustedInstaller,
-            DIRECTORY_TAMPER_MASK,
+            tamper_mask,
         )?;
 
+        tamper_mask = DIRECTORY_TAMPER_MASK;
         current = dir.parent();
     }
 
@@ -525,6 +545,10 @@ mod tests {
         }
 
         fn verify_as_executable(&self) -> anyhow::Result<()> {
+            self.verify_with_mask(WRITE_ACCESS_MASK)
+        }
+
+        fn verify_with_mask(&self, mask: u32) -> anyhow::Result<()> {
             // SAFETY: `owner` and `dacl` point into the owned security descriptor, which outlives
             // this call.
             unsafe {
@@ -533,7 +557,7 @@ mod tests {
                     self.owner,
                     self.dacl,
                     TrustedWriters::AdminOrTrustedInstaller,
-                    WRITE_ACCESS_MASK,
+                    mask,
                 )
             }
         }
@@ -632,6 +656,51 @@ mod tests {
         let sd = SddlDescriptor::parse(&sddl);
         let error = sd.verify().unwrap_err();
         assert!(error.to_string().contains("owner"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn untrusted_add_file_right_is_rejected_on_hosting_directory() {
+        // FILE_WRITE_DATA (0x2) on a directory is FILE_ADD_FILE: enough to plant a DLL
+        // beside the executable for side-loading into the elevated process.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x2;;;BU)");
+        let error = sd.verify_with_mask(PARENT_DIRECTORY_TAMPER_MASK).unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn untrusted_add_subdirectory_right_is_rejected_on_hosting_directory() {
+        // FILE_APPEND_DATA (0x4) on a directory is FILE_ADD_SUBDIRECTORY.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x4;;;AU)");
+        let error = sd.verify_with_mask(PARENT_DIRECTORY_TAMPER_MASK).unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn untrusted_create_rights_are_tolerated_on_higher_ancestors() {
+        // Stock drive roots grant Authenticated Users add-file/add-subdirectory rights;
+        // those cannot redirect an existing path component, so higher ancestors only
+        // reject rename/delete and descriptor rewrites.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;AU)");
+        sd.verify_with_mask(DIRECTORY_TAMPER_MASK)
+            .expect("create rights on higher ancestors must be tolerated");
+    }
+
+    #[test]
+    fn untrusted_delete_child_right_is_rejected_on_higher_ancestors() {
+        // FILE_DELETE_CHILD (0x40) lets a principal swap path components underneath the
+        // verified executable.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x40;;;BU)");
+        let error = sd.verify_with_mask(DIRECTORY_TAMPER_MASK).unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -1936,8 +1936,7 @@ mod tests {
             command: vec!["winget.exe".to_owned(), "install".to_owned()],
             post_command: None,
             effective_user: "DOMAIN\\user".to_owned(),
-            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
-                .expect("well-known Everyone SID"),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
@@ -1964,8 +1963,7 @@ mod tests {
             post_command: None,
             effective_user: "DOMAIN\\other".to_owned(),
             // The Everyone (World) SID never matches the test process user SID.
-            user_sid: Sid::from_well_known(windows::Win32::Security::WinWorldSid, None)
-                .expect("well-known Everyone SID"),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
             capture_output: false,
