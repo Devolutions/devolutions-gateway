@@ -62,7 +62,8 @@ impl CommandExecutor for WindowsExecutor {
         reject_unsupported_vcpkg_elevation(ctx)?;
 
         // SECURITY: Defense in depth — the broker server already rejects such
-        // requests, but never run policy-ungoverned pre/post commands elevated.
+        // requests, and `run_plan` re-checks the actual execution token; never
+        // run policy-ungoverned pre/post commands elevated.
         if requires_elevation && (ctx.pre_command.is_some() || ctx.post_command.is_some()) {
             bail!("pre/post operation commands are only allowed for non-elevated execution");
         }
@@ -239,6 +240,20 @@ fn run_plan(
         bail!("elevated Bun package operations are not supported by the broker");
     }
 
+    // SECURITY: Pre/post commands are raw strings whose content is not governed by
+    // the policy, so they must never run elevated. The request flags are already
+    // checked upstream, but the token actually running the plan is what matters
+    // (e.g. a broker launched from an elevated shell, or a full session token when
+    // UAC is disabled), so query the token itself right before running.
+    if ctx.pre_command.is_some() || ctx.post_command.is_some() {
+        let is_elevated = token
+            .is_elevated()
+            .context("failed to query execution token elevation")?;
+        if is_elevated {
+            bail!("pre/post operation commands are only allowed for non-elevated execution");
+        }
+    }
+
     // 1. Kill requested processes (best-effort; a missing process is not an error).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
@@ -272,14 +287,17 @@ fn run_plan(
     let command = prepare_main_command(token, &ctx.command)?;
     let output = create_process(token, command.args(), session_id, ctx.capture_output, process_started)?;
 
-    // 4. Post-operation command — runs after the main command; failures are logged only.
+    // 4. Post-operation command — runs after the main command; failures are logged only
+    //    so a completed main operation is never reported as failed by its post-hook.
     if let Some(post) = &ctx.post_command {
         info!("Running post-operation command");
-        let command = prepare_shell_command(token, post)?;
-        match create_process(token, command.args(), session_id, false, None) {
-            Ok(out) if out.exit_code == 0 => {}
-            Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
-            Err(error) => warn!(%error, "Post-operation command failed"),
+        match prepare_shell_command(token, post) {
+            Ok(command) => match create_process(token, command.args(), session_id, false, None) {
+                Ok(out) if out.exit_code == 0 => {}
+                Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
+                Err(error) => warn!(%error, "Post-operation command failed"),
+            },
+            Err(error) => warn!(%error, "Failed to prepare post-operation command"),
         }
     }
 
