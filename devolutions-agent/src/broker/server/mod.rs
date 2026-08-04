@@ -9,10 +9,11 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
-    Base64Utf8Data, CapabilitiesResponse, CapabilitiesResponseKind, Decision, DecisionInfo, Elevation, ErrorCode,
-    ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse, ExecutionResponseKind,
-    HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName, OperationStatus,
-    OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
+    Base64Utf8Data, CancelRequest, CancelResponse, CancelResponseKind, CapabilitiesResponse, CapabilitiesResponseKind,
+    Decision, DecisionInfo, Elevation, ErrorCode, ErrorResponse, EvaluationResponse, EvaluationResponseKind,
+    ExecutionResponse, ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability,
+    ManagerName, OperationStatus, OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse,
+    StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -148,6 +149,18 @@ impl PackageBrokerServer for BrokerConnection {
         let owner_key = request.client.owner_key();
         self.state.status_for_client(request, owner_key).await
     }
+
+    async fn cancel(&self, request: CancelRequest) -> Result<CancelResponse, ErrorResponse> {
+        self.client
+            .validate_cancel_request(&request, self.state.skip_signature_validation)
+            .map_err(|error| {
+                warn!(error = format!("{error:#}"), "Rejected package broker cancel request");
+                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
+            })?;
+
+        let owner_key = request.client.owner_key();
+        self.state.cancel_for_client(request, owner_key).await
+    }
 }
 
 impl BrokerState {
@@ -225,29 +238,34 @@ impl BrokerState {
         let operation = if evaluated.would_execute {
             let generated_operation_id = new_operation_id()?;
             let submitted_at = Utc::now();
-            let context = ExecutionContext {
-                kill_processes: request
-                    .options
-                    .kill_before_operation
-                    .iter()
-                    .map(|process| process.0.clone())
-                    .collect(),
-                pre_command: request.options.pre_operation_command.clone(),
-                command: evaluated.command.clone(),
-                post_command: request.options.post_operation_command.clone(),
-                effective_user: request.client.effective_user.clone(),
-                user_sid: user_sid.clone(),
-                elevation: request.client.requested_elevation,
-                scope: request.options.scope,
-                capture_output: request.capture_output,
-            };
-
             let owner_key = request.client_owner_key();
             let (operation_id, is_new_operation) = self
                 .tracker
                 .register(&owner_key, &request, generated_operation_id)
                 .map_err(|error| error_response(ErrorCode::Conflict, format!("{error:#}")))?;
             if is_new_operation {
+                let cancel_token = self
+                    .tracker
+                    .get(&operation_id)
+                    .map(|operation| operation.cancel_token)
+                    .unwrap_or_default();
+                let context = ExecutionContext {
+                    kill_processes: request
+                        .options
+                        .kill_before_operation
+                        .iter()
+                        .map(|process| process.0.clone())
+                        .collect(),
+                    pre_command: request.options.pre_operation_command.clone(),
+                    command: evaluated.command.clone(),
+                    post_command: request.options.post_operation_command.clone(),
+                    effective_user: request.client.effective_user.clone(),
+                    user_sid: user_sid.clone(),
+                    elevation: request.client.requested_elevation,
+                    scope: request.options.scope,
+                    capture_output: request.capture_output,
+                    cancel_token,
+                };
                 execution::spawn_execution(
                     Arc::clone(&self.executor),
                     self.tracker.clone(),
@@ -313,6 +331,42 @@ impl BrokerState {
             stdout: operation
                 .stdout
                 .map(|stdout| Base64Utf8Data(base64::engine::general_purpose::STANDARD.encode(stdout))),
+        })
+    }
+
+    async fn cancel_for_client(
+        &self,
+        request: CancelRequest,
+        owner_key: String,
+    ) -> Result<CancelResponse, ErrorResponse> {
+        if !owner_key.is_empty() && self.tracker.get_for_owner(&request.operation_id, &owner_key).is_none() {
+            return Err(error_response(ErrorCode::NotFound, "operation not found"));
+        }
+
+        let Some(operation) = self.tracker.request_cancel(&request.operation_id) else {
+            return Err(error_response(ErrorCode::NotFound, "operation not found"));
+        };
+
+        info!(
+                operation_id = %request.operation_id,
+                status = ?operation.status,
+                "Package operation cancelation requested"
+        );
+
+        let message = if operation.status == OperationStatus::Canceling {
+            operation.note.or_else(|| Some("cancelation requested".to_owned()))
+        } else {
+            operation.note
+        };
+
+        Ok(CancelResponse {
+            response_kind: CancelResponseKind,
+            response_version: api_version(),
+            server: server_context(),
+            operation_id: request.operation_id,
+            request_id: operation.request_id,
+            status: operation.status,
+            message,
         })
     }
 
@@ -567,6 +621,15 @@ mod tests {
         }
     }
 
+    fn cancel_request(operation_id: api::ResourceId) -> CancelRequest {
+        CancelRequest {
+            request_kind: api::CancelRequestKind,
+            request_version: api::API_VERSION_STR.into(),
+            operation_id,
+            client: request().client,
+        }
+    }
+
     #[test]
     fn elevated_pre_operation_command_is_rejected_even_under_permissive_policy() {
         let mut request = request();
@@ -694,5 +757,80 @@ mod tests {
         state.capabilities(&sid).await;
 
         assert_eq!(executor.probe_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn cancel_unknown_operation_returns_not_found() {
+        let Err(error) = state()
+            .cancel_for_client(
+                cancel_request(api::ResourceId::from("missing-operation")),
+                String::new(),
+            )
+            .await
+        else {
+            panic!("expected unknown cancel target to be rejected");
+        };
+
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn cancel_running_operation_sets_canceling_and_triggers_token() {
+        let state = state();
+        let package_request = request();
+        let operation_id = api::ResourceId::from("operation-1");
+        state
+            .tracker
+            .register("", &package_request, operation_id.clone())
+            .unwrap();
+
+        let response = state
+            .cancel_for_client(cancel_request(operation_id.clone()), String::new())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, OperationStatus::Canceling);
+        assert!(state.tracker.get(&operation_id).unwrap().cancel_token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_terminal_operation_returns_terminal_status() {
+        let state = state();
+        let package_request = request();
+        let operation_id = api::ResourceId::from("operation-1");
+        state
+            .tracker
+            .register("", &package_request, operation_id.clone())
+            .unwrap();
+        state
+            .tracker
+            .mark_completed(&operation_id, 0, "process exited successfully".to_owned(), None, None);
+
+        let response = state
+            .cancel_for_client(cancel_request(operation_id), String::new())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, OperationStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn cancel_owner_mismatch_returns_not_found() {
+        let state = state();
+        let package_request = request();
+        let operation_id = api::ResourceId::from("operation-1");
+        state
+            .tracker
+            .register("a|x", &package_request, operation_id.clone())
+            .unwrap();
+
+        let Err(error) = state
+            .cancel_for_client(cancel_request(operation_id), "b|y".to_owned())
+            .await
+        else {
+            panic!("expected owner mismatch to be rejected");
+        };
+
+        assert_eq!(error.code, ErrorCode::NotFound);
     }
 }

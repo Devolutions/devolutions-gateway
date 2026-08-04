@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, ManagerName, Scope};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use win_api_wrappers::identity::sid::Sid;
 
@@ -53,7 +54,21 @@ pub struct ExecutionContext {
     pub scope: Option<Scope>,
     /// When true, capture the main command's combined stdout+stderr.
     pub capture_output: bool,
+    /// Cancelation signal for the operation; the executor terminates the running process when triggered.
+    pub cancel_token: CancellationToken,
 }
+
+/// Marker error returned when execution is canceled by the client.
+#[derive(Debug)]
+pub struct ExecutionCanceled;
+
+impl std::fmt::Display for ExecutionCanceled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("operation canceled")
+    }
+}
+
+impl std::error::Error for ExecutionCanceled {}
 
 pub type ProcessStartedCallback = std::sync::Arc<dyn Fn(DateTime<Utc>) + Send + Sync>;
 

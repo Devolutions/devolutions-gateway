@@ -42,8 +42,8 @@ http-client-proxy = { path = "../crates/http-client-proxy" }
 ipnetwork = "0.20"
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
 now-policy = "0.2"
-now-policy-api = { version = "0.2", features = ["policy-compat"] }
-now-policy-server-template = { version = "0.2", features = ["policy-compat"] }
+now-policy-api = { version = "0.3", features = ["policy-compat"] }
+now-policy-server-template = { version = "0.3", features = ["policy-compat"] }
 parking_lot = "0.12"
 prost = "0.13"
 prost-types = "0.13"

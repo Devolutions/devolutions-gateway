@@ -39,6 +39,8 @@ pub struct TrackedOperation {
     pub stdout: Option<String>,
     /// Authenticated operation owner.
     pub owner_key: String,
+    /// Cancelation signal for the execution task.
+    pub cancel_token: CancellationToken,
     /// When this entry should be evicted (set upon completion/failure).
     pub expires_at: Option<DateTime<Utc>>,
 }
@@ -122,6 +124,7 @@ impl OperationTracker {
                 note: None,
                 stdout: None,
                 owner_key: owner_key.to_owned(),
+                cancel_token: CancellationToken::new(),
                 expires_at: None,
             },
         );
@@ -132,6 +135,9 @@ impl OperationTracker {
     pub fn mark_running(&self, request_id: &str, started_at: DateTime<Utc>) {
         let mut state = self.state.lock().expect("tracker lock poisoned");
         if let Some(op) = state.operations.get_mut(request_id) {
+            if op.status == OperationStatus::Canceling || op.status == OperationStatus::Canceled {
+                return;
+            }
             op.status = OperationStatus::Running;
             op.started_at = Some(started_at);
         }
@@ -149,6 +155,9 @@ impl OperationTracker {
     ) {
         let mut state = self.state.lock().expect("tracker lock poisoned");
         if let Some(op) = state.operations.get_mut(request_id) {
+            if op.status == OperationStatus::Canceled {
+                return;
+            }
             let now = Utc::now();
             if op.started_at.is_none()
                 && let Some(started_at) = started_at
@@ -173,8 +182,35 @@ impl OperationTracker {
     pub fn mark_failed(&self, request_id: &str, note: String, stdout: Option<String>) {
         let mut state = self.state.lock().expect("tracker lock poisoned");
         if let Some(op) = state.operations.get_mut(request_id) {
+            if op.status == OperationStatus::Canceled {
+                return;
+            }
             let now = Utc::now();
             op.status = OperationStatus::Failed;
+            op.note = Some(note);
+            op.stdout = stdout;
+            op.completed_at = Some(now);
+            op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
+        }
+    }
+
+    /// Request cancelation of an operation.
+    pub fn request_cancel(&self, operation_id: &str) -> Option<TrackedOperation> {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        let op = state.operations.get_mut(operation_id)?;
+        if !op.status.is_terminal() {
+            op.status = OperationStatus::Canceling;
+            op.cancel_token.cancel();
+        }
+        Some(op.clone())
+    }
+
+    /// Mark an operation as Canceled.
+    pub fn mark_canceled(&self, operation_id: &str, note: String, stdout: Option<String>) {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        if let Some(op) = state.operations.get_mut(operation_id) {
+            let now = Utc::now();
+            op.status = OperationStatus::Canceled;
             op.note = Some(note);
             op.stdout = stdout;
             op.completed_at = Some(now);

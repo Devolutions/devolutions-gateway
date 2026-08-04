@@ -10,6 +10,7 @@ use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
 use now_policy_api::{Elevation, ManagerName, Scope};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
@@ -18,7 +19,10 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
-use super::{BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
+use super::{
+    BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionCanceled, ExecutionContext, ExecutionOutput,
+    ProcessStartedCallback,
+};
 use crate::broker::policy_security;
 
 mod privileges;
@@ -329,6 +333,10 @@ fn run_plan(
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
     let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    if ctx.cancel_token.is_cancelled() {
+        return Err(anyhow::Error::new(ExecutionCanceled)).context("operation canceled by client request");
+    }
+
     if requires_elevation && command_is_bun(&ctx.command) {
         bail!("elevated Bun package operations are not supported by the broker");
     }
@@ -348,6 +356,7 @@ fn run_plan(
     }
 
     // 1. Kill requested processes (best-effort; a missing process is not an error).
+    let cleanup_cancel_token = CancellationToken::new();
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
             trusted_system32_executable("taskkill.exe"),
@@ -355,7 +364,15 @@ fn run_plan(
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false, requires_elevation, None) {
+        match create_process(
+            token,
+            &kill_cmd,
+            session_id,
+            false,
+            requires_elevation,
+            &cleanup_cancel_token,
+            None,
+        ) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
@@ -371,6 +388,7 @@ fn run_plan(
             session_id,
             ctx.capture_output,
             requires_elevation,
+            &ctx.cancel_token,
             None,
         )
         .context("failed to run pre-operation command")?;
@@ -391,6 +409,7 @@ fn run_plan(
         session_id,
         ctx.capture_output,
         requires_elevation,
+        &ctx.cancel_token,
         process_started,
     )?;
 
@@ -399,7 +418,15 @@ fn run_plan(
     if let Some(post) = &ctx.post_command {
         info!("Running post-operation command");
         match prepare_shell_command(token, post) {
-            Ok(command) => match create_process(token, command.args(), session_id, false, requires_elevation, None) {
+            Ok(command) => match create_process(
+                token,
+                command.args(),
+                session_id,
+                false,
+                requires_elevation,
+                &cleanup_cancel_token,
+                None,
+            ) {
                 Ok(out) if out.exit_code == 0 => {}
                 Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
                 Err(error) => warn!(%error, "Post-operation command failed"),
@@ -1317,7 +1344,7 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
+        CancellationToken, POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
         prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
         reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
     };
@@ -1918,6 +1945,7 @@ mod tests {
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: CancellationToken::new(),
         };
 
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("elevated vcpkg should fail");
@@ -1941,6 +1969,7 @@ mod tests {
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: CancellationToken::new(),
         };
 
         let executor = WindowsExecutor { is_system: true };
@@ -1968,6 +1997,7 @@ mod tests {
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: CancellationToken::new(),
         };
 
         let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");

@@ -48,8 +48,20 @@ pub(super) fn spawn_execution(
             }
             Err(error) => {
                 let note = format!("{error:#}");
-                error!(operation_id = %operation_id_string, %error, "Background execution failed");
-                tracker.mark_failed(&operation_id_string, note, None);
+                if error
+                    .downcast_ref::<crate::broker::executor::ExecutionCanceled>()
+                    .is_some()
+                {
+                    info!(operation_id = %operation_id_string, "Background execution canceled");
+                    tracker.mark_canceled(
+                        &operation_id_string,
+                        "operation canceled by client request".to_owned(),
+                        None,
+                    );
+                } else {
+                    error!(operation_id = %operation_id_string, %error, "Background execution failed");
+                    tracker.mark_failed(&operation_id_string, note, None);
+                }
             }
         }
     });

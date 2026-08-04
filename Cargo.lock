@@ -1524,7 +1524,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.118",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2593,8 +2593,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
+ "windows-link 0.1.3",
+ "windows-result 0.3.4",
 ]
 
 [[package]]
@@ -3120,7 +3120,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -4715,8 +4715,6 @@ dependencies = [
 [[package]]
 name = "now-policy"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc04b547209a37ecd3993eb47773ec6fa38f8cac178479079f650555bbedbbb"
 dependencies = [
  "chrono",
  "schemars",
@@ -4730,9 +4728,7 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca52de7d57fca9ea49cc10f229bdc31cfbdb37f7d49a6e7407fa60248d1df7c6"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4748,9 +4744,7 @@ dependencies = [
 
 [[package]]
 name = "now-policy-server-template"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88ce816e494a5034becfe105f30611284431275c24bdad3a8e7ef71a7b31e6e1"
+version = "0.3.0"
 dependencies = [
  "aide",
  "async-trait",
@@ -7400,7 +7394,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

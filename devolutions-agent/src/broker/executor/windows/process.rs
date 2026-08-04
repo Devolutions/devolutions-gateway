@@ -2,9 +2,11 @@
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context as _, bail};
 use chrono::Utc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use win_api_wrappers::process::{self, StartupInfo};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
@@ -16,9 +18,13 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use crate::broker::executor::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, ProcessStartedCallback, tail_utf8};
+use crate::broker::executor::{
+    ExecutionCanceled, ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, ProcessStartedCallback, tail_utf8,
+};
 use crate::broker::operation_tracker::OperationTracker;
 use crate::broker::policy_security;
+
+const WAIT_SLICE_MS: u32 = 500;
 
 /// Create a process under the given token and wait for exit.
 ///
@@ -36,6 +42,7 @@ pub(super) fn create_process(
     session_id: u32,
     capture: bool,
     requires_elevation: bool,
+    cancel_token: &CancellationToken,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
     let cmd_line = CommandLine::new(command.to_vec());
@@ -166,28 +173,51 @@ pub(super) fn create_process(
         })
     });
 
-    let timeout_ms = operation_timeout_ms();
-    if process_info
-        .process
-        .wait(Some(timeout_ms))
-        .context("failed to wait for process")?
-        == WAIT_TIMEOUT
-    {
-        warn!(
-            session_id,
-            pid = process_info.process_id,
-            timeout_ms,
-            "Process timed out; terminating"
-        );
-        process_info
+    let deadline = Instant::now() + OperationTracker::operation_timeout();
+    loop {
+        if process_info
             .process
-            .terminate(1)
-            .context("failed to terminate timed-out process")?;
-        let _ = process_info.process.wait(None);
-        bail!(
-            "operation timed out after {} seconds",
-            OperationTracker::operation_timeout().as_secs()
-        );
+            .wait(Some(WAIT_SLICE_MS))
+            .context("failed to wait for process")?
+            != WAIT_TIMEOUT
+        {
+            break;
+        }
+
+        if cancel_token.is_cancelled() {
+            warn!(
+                session_id,
+                pid = process_info.process_id,
+                "Process canceled; terminating"
+            );
+            process_info
+                .process
+                .terminate(1)
+                .context("failed to terminate canceled process")?;
+            let _ = process_info.process.wait(None);
+            if let Some(handle) = reader {
+                let _ = handle.join();
+            }
+            return Err(anyhow::Error::new(ExecutionCanceled)).context("operation canceled by client request");
+        }
+
+        if Instant::now() >= deadline {
+            warn!(
+                session_id,
+                pid = process_info.process_id,
+                timeout_ms = operation_timeout_ms(),
+                "Process timed out; terminating"
+            );
+            process_info
+                .process
+                .terminate(1)
+                .context("failed to terminate timed-out process")?;
+            let _ = process_info.process.wait(None);
+            bail!(
+                "operation timed out after {} seconds",
+                OperationTracker::operation_timeout().as_secs()
+            );
+        }
     }
 
     let exit_code = process_info

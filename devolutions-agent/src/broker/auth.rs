@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
-use now_policy_api::{ClientContext, PackageRequest, StatusRequest};
+use now_policy_api::{CancelRequest, ClientContext, PackageRequest, StatusRequest};
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
 use widestring::U16CString;
@@ -68,6 +68,15 @@ impl PipeClient {
     pub(crate) fn validate_status_request(
         &self,
         request: &StatusRequest,
+        skip_signature_validation: bool,
+    ) -> anyhow::Result<()> {
+        self.validate_client_context(&request.client)?;
+        self.validate_signature(skip_signature_validation)
+    }
+
+    pub(crate) fn validate_cancel_request(
+        &self,
+        request: &CancelRequest,
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
         self.validate_client_context(&request.client)?;
