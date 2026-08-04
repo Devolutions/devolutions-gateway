@@ -16,9 +16,9 @@
 //! principal. Callers fail closed when this check fails.
 //!
 //! For the policy file, the trusted principals are SYSTEM, `LOCAL SERVICE`, and the
-//! built-in Administrators group. For executables, `NT SERVICE\TrustedInstaller` is
-//! trusted as well, since Windows-protected binaries (`System32`, `Program Files`,
-//! `WindowsApps`) are owned by and writable by that service.
+//! built-in Administrators group. For executables, `LOCAL SERVICE` is not trusted, but
+//! `NT SERVICE\TrustedInstaller` is, since Windows-protected binaries (`System32`,
+//! `Program Files`, `WindowsApps`) are owned by and writable by that service.
 //!
 //! For elevated executables the verification additionally defends against
 //! time-of-check/time-of-use races: the file is opened without write or delete sharing
@@ -97,7 +97,10 @@ const TRUSTED_INSTALLER_SID: &str = "S-1-5-80-956008885-3418522649-1831038044-18
 enum TrustedWriters {
     /// SYSTEM, `LOCAL SERVICE`, and the built-in Administrators group (policy file).
     AdminOnly,
-    /// Additionally trusts `NT SERVICE\TrustedInstaller` (Windows-protected executables).
+    /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`
+    /// (Windows-protected executables). `LOCAL SERVICE` is deliberately not trusted here:
+    /// it is a low-privilege shared service identity, and accepting it for elevated
+    /// executables would open a privilege-escalation path.
     AdminOrTrustedInstaller,
 }
 
@@ -199,9 +202,9 @@ impl VerifiedExecutable {
 /// - The file is opened without write or delete sharing; the open fails if a writer
 ///   already has it open, and the guard prevents modification, deletion, and renaming
 ///   of the verified object until it is dropped.
-/// - The executable's owner and DACL must only allow writes by SYSTEM, `LOCAL SERVICE`,
-///   built-in Administrators, or `NT SERVICE\TrustedInstaller` (see
-///   [`verify_policy_file_security`] for the exact DACL rules).
+/// - The executable's owner and DACL must only allow writes by SYSTEM, built-in
+///   Administrators, or `NT SERVICE\TrustedInstaller` (see [`verify_policy_file_security`]
+///   for the exact DACL rules).
 /// - Every ancestor directory of the final path (resolved from the verified handle) must
 ///   not allow untrusted principals to rename or delete path components, so the name used
 ///   for execution cannot be redirected to a different file.
@@ -649,10 +652,11 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
     }
 
     // The Devolutions Agent installer creates `C:\ProgramData\Devolutions\Agent` with
-    // write access for `LOCAL SERVICE`, which already holds elevated rights on the host,
-    // so trusting it does not extend the attack surface.
+    // write access for `LOCAL SERVICE`, so it must be trusted for the policy file.
+    // It is a low-privilege shared service identity, however, so it is not trusted for
+    // elevated executables, where accepting it would open a privilege-escalation path.
     // SAFETY: Per function contract, `sid` points to a valid SID.
-    if unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool() {
+    if trusted_writers == TrustedWriters::AdminOnly && unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool() {
         return true;
     }
 
@@ -809,11 +813,23 @@ mod tests {
     }
 
     #[test]
-    fn local_service_write_ace_is_accepted() {
+    fn local_service_write_ace_is_accepted_for_policy_file() {
         // The installer creates the Agent ProgramData directory with write access for
-        // LOCAL SERVICE, which is already an elevated principal.
+        // LOCAL SERVICE, so the policy-file check must accept it.
         let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
         sd.verify().expect("LOCAL SERVICE write access must be accepted");
+    }
+
+    #[test]
+    fn local_service_write_ace_is_rejected_for_executables() {
+        // LOCAL SERVICE is a low-privilege shared service identity; a LOCAL
+        // SERVICE-writable executable must not pass elevated-executable verification.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
+        let error = sd.verify_as_executable().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
