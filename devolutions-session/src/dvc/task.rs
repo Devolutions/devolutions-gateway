@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -39,7 +40,7 @@ use windows::core::PCWSTR;
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
-use crate::dvc::io::run_dvc_io;
+use crate::dvc::io::{DvcInitializationProgress, run_dvc_io};
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
@@ -70,6 +71,9 @@ impl Task for DvcIoTask {
 
         let cloned_shutdown_event = io_thread_shutdown_event.clone();
 
+        let init_progress = Arc::new(DvcInitializationProgress::default());
+        let io_thread_progress = Arc::clone(&init_progress);
+
         info!(
             "Starting NowProto DVC v{}.{}",
             NowProtoVersion::CURRENT.major,
@@ -78,7 +82,7 @@ impl Task for DvcIoTask {
 
         // Spawning thread is relatively short operation, so it could be executed synchronously.
         let io_thread = std::thread::spawn(move || {
-            let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event);
+            let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event, &io_thread_progress);
 
             if let Err(error) = io_thread_result {
                 error!(%error, "DVC IO thread failed");
@@ -98,7 +102,7 @@ impl Task for DvcIoTask {
 
         info!("Processing DVC messages...");
 
-        let process_result = process_messages(read_rx, write_tx, shutdown_signal).await;
+        let process_result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
 
         // Send shutdown signal to IO thread to release WTS channel resources.
         info!("Shutting down DVC IO thread");
@@ -114,6 +118,7 @@ async fn process_messages(
     mut read_rx: Receiver<OwnedNowMessage>,
     dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
     mut shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    init_progress: &DvcInitializationProgress,
 ) -> anyhow::Result<()> {
     let (io_notification_tx, mut task_rx) = mpsc::channel(100);
 
@@ -126,6 +131,10 @@ async fn process_messages(
         None => warn!("pwsh executable was not found; pwsh execution capability is disabled"),
     }
 
+    // A channel that never opens is not covered by this deadline: the IO thread drops its sender
+    // when it gives up, which surfaces below as a closed read channel.
+    let negotiation_deadline = init_progress.negotiation_deadline(HANDSHAKE_TIMEOUT);
+
     // Wait for channel negotiation message and send downgraded capabilities back.
     let client_caps = select! {
         message = read_rx.recv() => {
@@ -135,13 +144,28 @@ async fn process_messages(
                     return Err(anyhow::anyhow!("Unexpected negotiation message: {:?}", message));
                 }
                 None => {
+                    error!(
+                        channel_opened = init_progress.channel_opened(),
+                        open_attempts = init_progress.open_attempts(),
+                        "DVC IO thread ended before negotiation"
+                    );
                     return Err(anyhow::anyhow!("read channel has been closed before negotiation"));
                 }
             }
         }
-        _timeout = tokio::time::sleep(HANDSHAKE_TIMEOUT) =>
+        () = negotiation_deadline =>
         {
-            error!("Timeout waiting for DVC negotiation");
+            error!(
+                open_attempts = init_progress.open_attempts(),
+                timeout_ms = HANDSHAKE_TIMEOUT.as_millis(),
+                "Timeout waiting for DVC negotiation"
+            );
+            return Err(anyhow::anyhow!("timeout waiting for DVC negotiation"));
+        }
+        // Without this arm, a shutdown requested while the IO thread is still retrying the open
+        // is not honoured until the retry ladder runs out.
+        _ = shutdown_signal.wait() => {
+            info!("Shutting down before DVC negotiation completed");
             return Ok(());
         }
     };

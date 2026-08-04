@@ -45,6 +45,10 @@ optional = true
 version = "0.4.3"
 features = ["std"]
 
+[dev-dependencies]
+# `rt` and `test-util` are needed to drive the async DVC initialization tests with paused time.
+tokio = { version = "1", features = ["macros", "rt", "sync", "test-util", "time"] }
+
 [target.'cfg(windows)'.dependencies]
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 
