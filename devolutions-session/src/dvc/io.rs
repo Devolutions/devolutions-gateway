@@ -1,7 +1,9 @@
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use now_proto_pdu::NowMessage;
+use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
 use tracing::{debug, error, info, trace, warn};
@@ -61,8 +63,74 @@ impl DvcInitializationError {
         })
     }
 
+    /// Formats the underlying HRESULT for logs.
+    ///
+    /// The OS-provided error message is localized, unlike the numeric code.
+    fn code_for_logs(&self) -> String {
+        self.error
+            .chain()
+            .find_map(|source| source.downcast_ref::<windows::core::Error>())
+            .map_or_else(|| "n/a".to_owned(), |error| format!("{:#010X}", error.code().0))
+    }
+
     fn into_anyhow(self) -> anyhow::Error {
         self.error.context(self.stage.to_string())
+    }
+}
+
+/// Counters and signalling shared between the DVC IO thread and the DVC task.
+///
+/// Beyond diagnostics, this gates the negotiation deadline, which must not start before the
+/// channel is open.
+#[derive(Debug, Default)]
+pub struct DvcInitializationProgress {
+    open_attempts: AtomicU32,
+    channel_opened: AtomicBool,
+    channel_opened_notify: Notify,
+}
+
+impl DvcInitializationProgress {
+    fn record_open_attempt(&self) {
+        self.open_attempts.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn mark_channel_opened(&self) {
+        self.channel_opened.store(true, Ordering::Relaxed);
+        // `notify_one` stores a permit when no waiter is registered yet, so a waiter arriving
+        // after this call still completes immediately.
+        self.channel_opened_notify.notify_one();
+    }
+
+    /// Resolves once the DVC channel has been opened.
+    ///
+    /// Never resolves if the IO thread gives up on opening it; callers are expected to also
+    /// observe the read channel closing, which is how that case terminates.
+    pub async fn wait_for_channel_open(&self) {
+        if self.channel_opened() {
+            return;
+        }
+
+        self.channel_opened_notify.notified().await;
+    }
+
+    /// Resolves once the DVC channel has been open for `timeout`.
+    ///
+    /// The delay deliberately does not start until the channel is open; starting it earlier
+    /// races the open retries and can expire before the client can negotiate. Like
+    /// [`Self::wait_for_channel_open`], this never resolves if the channel is never opened.
+    pub async fn negotiation_deadline(&self, timeout: Duration) {
+        self.wait_for_channel_open().await;
+        tokio::time::sleep(timeout).await;
+    }
+
+    /// Number of `WTSVirtualChannelOpenEx` attempts made so far.
+    pub fn open_attempts(&self) -> u32 {
+        self.open_attempts.load(Ordering::Relaxed)
+    }
+
+    /// Whether the DVC channel was successfully opened at any point.
+    pub fn channel_opened(&self) -> bool {
+        self.channel_opened.load(Ordering::Relaxed)
     }
 }
 
@@ -81,8 +149,9 @@ pub fn run_dvc_io(
     mut write_rx: WinapiSignaledReceiver<NowMessage<'static>>,
     read_tx: Sender<NowMessage<'static>>,
     stop_event: Event,
+    progress: &DvcInitializationProgress,
 ) -> Result<(), anyhow::Error> {
-    let Some(mut context) = initialize_dvc_with_retry(&stop_event)? else {
+    let Some(mut context) = initialize_dvc_with_retry(&stop_event, progress)? else {
         info!("DVC IO thread stopped during initialization");
         return Ok(());
     };
@@ -193,14 +262,25 @@ pub fn run_dvc_io(
     }
 }
 
-fn initialize_dvc_with_retry(stop_event: &Event) -> anyhow::Result<Option<Box<DvcIoContext>>> {
+fn initialize_dvc_with_retry(
+    stop_event: &Event,
+    progress: &DvcInitializationProgress,
+) -> anyhow::Result<Option<Box<DvcIoContext>>> {
     let mut attempt = 1usize;
 
     loop {
+        let started_at = Instant::now();
+        progress.record_open_attempt();
+
         let error = match initialize_dvc() {
             Ok(mut context) => match start_initial_read(&mut context) {
                 Ok(()) => {
-                    info!(attempt, "DVC IO thread is running");
+                    progress.mark_channel_opened();
+                    info!(
+                        attempt,
+                        elapsed_ms = started_at.elapsed().as_millis(),
+                        "DVC IO thread is running"
+                    );
                     return Ok(Some(context));
                 }
                 Err(error) => DvcInitializationError {
@@ -211,9 +291,21 @@ fn initialize_dvc_with_retry(stop_event: &Event) -> anyhow::Result<Option<Box<Dv
             Err(error) => error,
         };
 
+        // A failure returning in a couple of milliseconds was rejected locally by the RDP stack;
+        // one taking a round trip was rejected by the client.
+        let elapsed_ms = started_at.elapsed().as_millis();
+
         match error {
             error if error.is_retryable() => {
                 let Some(delay) = dvc_retry_delay(attempt - 1) else {
+                    error!(
+                        attempts = attempt,
+                        stage = %error.stage,
+                        error_code = %error.code_for_logs(),
+                        elapsed_ms,
+                        "Giving up on DVC initialization; retries exhausted"
+                    );
+
                     return Err(error.into_anyhow());
                 };
 
@@ -221,6 +313,8 @@ fn initialize_dvc_with_retry(stop_event: &Event) -> anyhow::Result<Option<Box<Dv
                     attempt,
                     stage = %error.stage,
                     error = %error.error,
+                    error_code = %error.code_for_logs(),
+                    elapsed_ms,
                     retry_delay_ms = delay.as_millis(),
                     "Transient DVC initialization failure; retrying"
                 );
@@ -231,7 +325,17 @@ fn initialize_dvc_with_retry(stop_event: &Event) -> anyhow::Result<Option<Box<Dv
 
                 attempt += 1;
             }
-            error => return Err(error.into_anyhow()),
+            error => {
+                error!(
+                    attempts = attempt,
+                    stage = %error.stage,
+                    error_code = %error.code_for_logs(),
+                    elapsed_ms,
+                    "DVC initialization failed with a non-retryable error"
+                );
+
+                return Err(error.into_anyhow());
+            }
         }
     }
 }
@@ -351,12 +455,70 @@ impl IoRedirectionPipes {
 mod tests {
     use std::time::Duration;
 
-    use super::dvc_retry_delay;
+    use futures::poll;
+
+    use super::{DVC_RETRY_DELAYS, DvcInitializationProgress, dvc_retry_delay};
 
     #[test]
     fn dvc_retry_delays_are_bounded() {
         assert_eq!(dvc_retry_delay(0), Some(Duration::from_millis(250)));
         assert_eq!(dvc_retry_delay(4), Some(Duration::from_secs(4)));
         assert_eq!(dvc_retry_delay(5), None);
+    }
+
+    /// Pins the intended retry budget: six attempts across 7.75 seconds of backoff.
+    #[test]
+    fn dvc_retry_budget_is_expected() {
+        let attempts = 1 + DVC_RETRY_DELAYS.len();
+        let total: Duration = DVC_RETRY_DELAYS.iter().sum();
+
+        assert_eq!(attempts, 6);
+        assert_eq!(total, Duration::from_millis(7750));
+    }
+
+    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// The deadline must not elapse while the channel is still unopened, however long the open
+    /// takes. Moving the delay ahead of the channel-open wait reintroduces the race where the
+    /// deadline expires before the client is able to negotiate.
+    #[tokio::test(start_paused = true)]
+    async fn negotiation_deadline_does_not_start_before_channel_open() {
+        let progress = DvcInitializationProgress::default();
+        let mut deadline = Box::pin(progress.negotiation_deadline(TEST_TIMEOUT));
+
+        // Register the deadline's interest in the open signal before any time passes.
+        assert!(poll!(deadline.as_mut()).is_pending());
+
+        // Far beyond the timeout, but the channel was never opened.
+        tokio::time::advance(TEST_TIMEOUT * 100).await;
+        assert!(
+            poll!(deadline.as_mut()).is_pending(),
+            "deadline elapsed while the channel was still unopened"
+        );
+
+        // Opening the channel starts the delay; it must not already be over.
+        progress.mark_channel_opened();
+        assert!(
+            poll!(deadline.as_mut()).is_pending(),
+            "deadline elapsed immediately on channel open"
+        );
+
+        tokio::time::advance(TEST_TIMEOUT).await;
+        assert!(poll!(deadline.as_mut()).is_ready());
+    }
+
+    /// A channel opened before the deadline is awaited must still be observed, otherwise the
+    /// notification is lost and the deadline never elapses.
+    #[tokio::test(start_paused = true)]
+    async fn negotiation_deadline_starts_when_channel_is_already_open() {
+        let progress = DvcInitializationProgress::default();
+        progress.mark_channel_opened();
+
+        let mut deadline = Box::pin(progress.negotiation_deadline(TEST_TIMEOUT));
+
+        assert!(poll!(deadline.as_mut()).is_pending());
+
+        tokio::time::advance(TEST_TIMEOUT).await;
+        assert!(poll!(deadline.as_mut()).is_ready());
     }
 }
