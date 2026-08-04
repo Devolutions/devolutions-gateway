@@ -118,6 +118,8 @@ features = [
     "Win32_Security_Cryptography",
     "Win32_Security_Authorization",
     "Win32_System_ApplicationInstallationAndServicing",
+    "Win32_System_Ioctl",
+    "Win32_System_IO",
     "Win32_System_Pipes",
     "Win32_System_RemoteDesktop",
     "Win32_System_Com",

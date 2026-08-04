@@ -17,8 +17,8 @@
 //!
 //! For the policy file, the trusted principals are SYSTEM and the built-in
 //! Administrators group. For executables, `NT SERVICE\TrustedInstaller` is trusted as
-//! well, since Windows-protected binaries (`System32`, `Program Files`, `WindowsApps`)
-//! are owned by and writable by that service.
+//! well, since Windows-protected binaries
+//! (`System32`, `Program Files`, `WindowsApps`) are owned by and writable by that service.
 //!
 //! For elevated executables the verification additionally defends against
 //! time-of-check/time-of-use races: the file is opened without write or delete sharing
@@ -43,9 +43,10 @@ use windows::Win32::Security::{
     OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
-    DELETE, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
-    FILE_WRITE_EA, GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    DELETE, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC,
+    WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -104,6 +105,30 @@ const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 1;
 const SYSTEM_AUDIT_ACE_TYPE: u8 = 2;
 const SYSTEM_ALARM_ACE_TYPE: u8 = 3;
+const ACCESS_ALLOWED_CALLBACK_ACE_TYPE: u8 = 9;
+const ACCESS_DENIED_CALLBACK_ACE_TYPE: u8 = 10;
+
+/// String prefix of SIDs issued by the process trust authority (`SECURITY_PROCESS_TRUST_AUTHORITY`,
+/// e.g. `S-1-19-512-4096` for "ProtectedLight-WinTcb").
+///
+/// These SIDs cannot be assigned to regular tokens; the kernel only grants them to
+/// Windows-signed protected processes, so ACEs held by them are safe to trust.
+const PROCESS_TRUST_SID_PREFIX: &str = "S-1-19-";
+
+/// `IO_REPARSE_TAG_APPEXECLINK`, the reparse tag of Microsoft Store app execution aliases
+/// (e.g. the per-user `winget.exe` under `%LOCALAPPDATA%\Microsoft\WindowsApps`).
+///
+/// From winnt.h (the Win32_System_SystemServices feature is not enabled).
+const IO_REPARSE_TAG_APPEXECLINK: u32 = 0x8000_001B;
+
+/// Maximum size of a reparse point data buffer, from ntifs.h.
+const MAXIMUM_REPARSE_DATA_BUFFER_SIZE: usize = 16 * 1024;
+
+/// Package family name of Microsoft App Installer, the Store package that delivers `winget.exe`.
+///
+/// The publisher-hash suffix is derived from Microsoft's signing certificate, so no other
+/// publisher can install a package under this family.
+const WINGET_PACKAGE_FAMILY: &str = "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe";
 
 /// Security descriptor allocated by `GetSecurityInfo`, freed with `LocalFree` on drop.
 struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
@@ -128,8 +153,10 @@ impl Drop for OwnedSecurityDescriptor {
 /// - The owner must be a trusted principal.
 /// - A DACL must be present (a NULL DACL grants everyone full control).
 /// - Every access-allowed ACE granting write access must have a trusted principal as
-///   the trustee (inherit-only ACEs are skipped, since they do not apply to the object).
-/// - Unsupported (object/callback) access-allowed ACE types are rejected.
+///   the trustee (inherit-only ACEs are skipped, since they do not apply to the object;
+///   callback allow ACEs are treated as unconditional allow ACEs, since their condition
+///   can only narrow the grant).
+/// - Unsupported (object) access-allowed ACE types are rejected.
 pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
     verify_handle_security(file, "policy file", TrustedWriters::AdminOnly, WRITE_ACCESS_MASK)
 }
@@ -186,6 +213,21 @@ pub(crate) fn verify_elevated_executable_security(
 
     let subject = format!("elevated package-manager executable '{}'", path.display());
 
+    // App execution aliases (Microsoft Store shims such as the per-user `winget.exe`)
+    // are reparse points that cannot be opened for read, so they cannot be verified or
+    // pinned directly. `CreateProcess` resolves them internally, but the broker must
+    // verify and execute the real target, which lives under the
+    // TrustedInstaller-protected `WindowsApps` package directory.
+    //
+    // The alias reparse data lives in a user-writable location, so its content is
+    // untrusted: the target is only substituted after `validate_app_exec_alias` has bound
+    // it to the executable and package family expected for the alias (fail closed).
+    let alias_target = match resolve_app_exec_alias(path) {
+        Some(alias) => Some(validate_app_exec_alias(path, alias)?),
+        None => None,
+    };
+    let path = alias_target.as_deref().unwrap_or(path);
+
     // Share only read access: while this handle is alive the file cannot be opened for
     // write or delete (rename), and this open fails if such a handle already exists.
     let file = OpenOptions::new()
@@ -213,6 +255,171 @@ pub(crate) fn verify_elevated_executable_security(
         _file: file,
         path: final_path,
     }))
+}
+
+/// A parsed Microsoft Store app execution alias.
+#[derive(Debug, PartialEq, Eq)]
+struct AppExecAlias {
+    /// Package family name of the app the alias belongs to (e.g.
+    /// `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`).
+    package_family: String,
+    /// Absolute path of the executable the alias points to.
+    target: PathBuf,
+}
+
+/// Resolve a Microsoft Store app execution alias to the executable it points to.
+///
+/// Returns `None` when `path` is not an `IO_REPARSE_TAG_APPEXECLINK` reparse point
+/// (including when it cannot be opened at all; the caller's regular open then reports
+/// the actual error).
+fn resolve_app_exec_alias(path: &Path) -> Option<AppExecAlias> {
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
+
+    let link = OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0 | FILE_FLAG_BACKUP_SEMANTICS.0)
+        .open(path)
+        .ok()?;
+
+    let mut buffer = vec![0u8; MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+    let mut returned = 0u32;
+
+    // SAFETY: `link` is an open file handle, and `buffer` and `returned` are live for
+    // the duration of the call.
+    unsafe {
+        DeviceIoControl(
+            HANDLE(link.as_raw_handle()),
+            FSCTL_GET_REPARSE_POINT,
+            None,
+            0,
+            Some(buffer.as_mut_ptr().cast()),
+            u32::try_from(buffer.len()).expect("reparse buffer size fits in u32"),
+            Some(&mut returned),
+            None,
+        )
+    }
+    // A failure means `path` is not a reparse point (or its data is unreadable): not an alias.
+    .ok()?;
+
+    buffer.truncate(usize::try_from(returned).expect("u32 fits in usize on Windows"));
+    parse_app_exec_alias(&buffer)
+}
+
+/// Validate an app execution alias against the identity expected for the aliased
+/// executable and return its target path.
+///
+/// The alias reparse point lives in a user-writable directory
+/// (`%LOCALAPPDATA%\Microsoft\WindowsApps`), so its content is untrusted: without this
+/// binding, a crafted alias could redirect e.g. `winget.exe` to any other
+/// TrustedInstaller-owned binary, which would then pass the ACL checks and run elevated.
+///
+/// Rules (fail-closed):
+/// - Only `winget.exe` aliases are supported (the only Store-app executable the broker
+///   launches).
+/// - The alias package family must be [`WINGET_PACKAGE_FAMILY`], whose publisher-hash
+///   suffix is bound to Microsoft's signing certificate.
+/// - The target file name must match the alias file name.
+/// - The target must live inside a package directory of that same family (a
+///   `<name>_<version>_<arch>__<publisher-hash>` full-name component).
+fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias) -> anyhow::Result<PathBuf> {
+    let alias_name = alias_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .with_context(|| format!("app execution alias '{}' has no file name", alias_path.display()))?;
+
+    if !alias_name.eq_ignore_ascii_case("winget.exe") {
+        bail!(
+            "app execution alias '{}' is not supported for elevated execution",
+            alias_path.display()
+        );
+    }
+
+    if !alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY) {
+        bail!(
+            "app execution alias '{}' belongs to package family '{}'; expected '{WINGET_PACKAGE_FAMILY}'",
+            alias_path.display(),
+            alias.package_family,
+        );
+    }
+
+    let target_name_matches = alias
+        .target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(alias_name));
+    if !target_name_matches {
+        bail!(
+            "app execution alias '{}' points to '{}', which is not a '{alias_name}' executable",
+            alias_path.display(),
+            alias.target.display(),
+        );
+    }
+
+    if !path_contains_package_full_name(&alias.target, WINGET_PACKAGE_FAMILY) {
+        bail!(
+            "app execution alias '{}' points to '{}', which is outside the '{WINGET_PACKAGE_FAMILY}' package directory",
+            alias_path.display(),
+            alias.target.display(),
+        );
+    }
+
+    Ok(alias.target)
+}
+
+/// Whether `path` contains a directory component that is a package full name
+/// (`<name>_<version>_<arch>__<publisher-hash>`) of the given package family
+/// (`<name>_<publisher-hash>`).
+fn path_contains_package_full_name(path: &Path, package_family: &str) -> bool {
+    let Some((family_name, publisher_hash)) = package_family.rsplit_once('_') else {
+        return false;
+    };
+    let prefix = format!("{family_name}_");
+    let suffix = format!("__{publisher_hash}");
+
+    path.components().any(|component| {
+        component.as_os_str().to_str().is_some_and(|component| {
+            component.len() >= prefix.len() + suffix.len()
+                && component[..prefix.len()].eq_ignore_ascii_case(&prefix)
+                && component[component.len() - suffix.len()..].eq_ignore_ascii_case(&suffix)
+        })
+    })
+}
+
+/// Parse the package family name and target executable path out of an
+/// `IO_REPARSE_TAG_APPEXECLINK` reparse buffer.
+///
+/// Layout: a `REPARSE_DATA_BUFFER` header (tag, data length, reserved), then the
+/// AppExecLink payload: a version field followed by NUL-separated UTF-16 strings —
+/// package family name, application user model id, target executable path, and
+/// application type.
+fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
+    // Header: ReparseTag (4 bytes), ReparseDataLength (2 bytes), Reserved (2 bytes).
+    let header = buffer.get(..8)?;
+    let tag = u32::from_le_bytes(header[..4].try_into().ok()?);
+    if tag != IO_REPARSE_TAG_APPEXECLINK {
+        return None;
+    }
+    let data_length = usize::from(u16::from_le_bytes(header[4..6].try_into().ok()?));
+    let data = buffer.get(8..8 + data_length)?;
+
+    // AppExecLink payload: Version (4 bytes), then NUL-separated UTF-16 strings.
+    let strings = data.get(4..)?;
+    let wide: Vec<u16> = strings
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let mut strings = wide.split(|&c| c == 0);
+    let package_family = strings.next()?;
+    let target = strings.nth(1)?;
+    if package_family.is_empty() || target.is_empty() {
+        return None;
+    }
+
+    let package_family = String::from_utf16(package_family).ok()?;
+    let target = PathBuf::from(OsString::from_wide(target));
+    target.is_absolute().then_some(AppExecAlias { package_family, target })
 }
 
 /// Verify that every ancestor directory of `path` denies untrusted principals the rights
@@ -393,9 +600,16 @@ unsafe fn verify_owner_and_dacl(
 
         match header.AceType {
             // Deny and audit ACEs never grant access.
-            ACCESS_DENIED_ACE_TYPE | SYSTEM_AUDIT_ACE_TYPE | SYSTEM_ALARM_ACE_TYPE => {}
-            ACCESS_ALLOWED_ACE_TYPE => {
-                // SAFETY: The ACE type is ACCESS_ALLOWED_ACE_TYPE, so it has the ACCESS_ALLOWED_ACE layout.
+            ACCESS_DENIED_ACE_TYPE
+            | ACCESS_DENIED_CALLBACK_ACE_TYPE
+            | SYSTEM_AUDIT_ACE_TYPE
+            | SYSTEM_ALARM_ACE_TYPE => {}
+            // A callback (conditional) allow ACE shares the ACCESS_ALLOWED_ACE prefix layout
+            // (header, mask, inline SID); its condition can only narrow the grant, so treating
+            // it as an unconditional allow ACE is the fail-closed interpretation. Store-app
+            // binaries under `Program Files\WindowsApps` carry such ACEs for trust-label SIDs.
+            ACCESS_ALLOWED_ACE_TYPE | ACCESS_ALLOWED_CALLBACK_ACE_TYPE => {
+                // SAFETY: Both matched ACE types start with the ACCESS_ALLOWED_ACE layout.
                 let ace = unsafe { &*ace_ptr.cast::<ACCESS_ALLOWED_ACE>() };
 
                 if ace.Mask & tamper_mask == 0 {
@@ -413,7 +627,7 @@ unsafe fn verify_owner_and_dacl(
                     );
                 }
             }
-            // Fail closed on object/callback and other exotic allow ACE types.
+            // Fail closed on object and other exotic allow ACE types.
             other => bail!("{subject} DACL contains unsupported ACE type {other}"),
         }
     }
@@ -437,9 +651,17 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
         return true;
     }
 
+    if trusted_writers != TrustedWriters::AdminOrTrustedInstaller {
+        return false;
+    }
+
     // SAFETY: Per function contract, `sid` points to a valid SID.
-    trusted_writers == TrustedWriters::AdminOrTrustedInstaller
-        && unsafe { sid_to_string(sid) }.eq_ignore_ascii_case(TRUSTED_INSTALLER_SID)
+    let sid_string = unsafe { sid_to_string(sid) };
+
+    // Windows-protected executables (e.g. Store apps under `Program Files\WindowsApps`)
+    // grant write access to TrustedInstaller and to process trust-label SIDs, which the
+    // kernel only assigns to Windows-signed protected processes.
+    sid_string.eq_ignore_ascii_case(TRUSTED_INSTALLER_SID) || sid_string.starts_with(PROCESS_TRUST_SID_PREFIX)
 }
 
 /// Best-effort conversion of a SID to its string form for diagnostics.
@@ -574,6 +796,170 @@ mod tests {
     fn administrators_owner_is_accepted() {
         let sd = SddlDescriptor::parse("O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)");
         sd.verify().expect("Administrators owner must be accepted");
+    }
+
+    #[test]
+    fn app_exec_alias_reparse_buffer_is_parsed() {
+        // Synthetic AppExecLink buffer: version 3, then package family, entry point,
+        // target path, and application type as NUL-separated UTF-16 strings.
+        let strings: Vec<u16> =
+            "Package_8wekyb3d8bbwe\0Package!App\0C:\\Program Files\\WindowsApps\\Package\\winget.exe\x000\0"
+                .encode_utf16()
+                .collect();
+        let mut data = 3u32.to_le_bytes().to_vec();
+        data.extend(strings.iter().flat_map(|c| c.to_le_bytes()));
+
+        let mut buffer = IO_REPARSE_TAG_APPEXECLINK.to_le_bytes().to_vec();
+        buffer.extend(u16::try_from(data.len()).unwrap().to_le_bytes());
+        buffer.extend([0u8, 0]); // Reserved.
+        buffer.extend(&data);
+
+        let alias = parse_app_exec_alias(&buffer).expect("alias must be parsed");
+        assert_eq!(alias.package_family, "Package_8wekyb3d8bbwe");
+        assert_eq!(
+            alias.target,
+            PathBuf::from("C:\\Program Files\\WindowsApps\\Package\\winget.exe")
+        );
+    }
+
+    #[test]
+    fn non_appexeclink_reparse_buffer_is_ignored() {
+        // A symlink reparse tag (0xA000000C) must not be treated as an alias.
+        let mut buffer = 0xA000_000Cu32.to_le_bytes().to_vec();
+        buffer.extend([0u8; 12]);
+        assert!(parse_app_exec_alias(&buffer).is_none());
+    }
+
+    #[test]
+    fn winget_alias_with_expected_identity_is_validated() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
+            ),
+        };
+        let target = validate_app_exec_alias(alias_path, alias).expect("valid winget alias must be accepted");
+        assert!(target.ends_with("winget.exe"));
+    }
+
+    #[test]
+    fn alias_with_unexpected_package_family_is_rejected() {
+        // A crafted alias claiming another (even Microsoft-published) package family
+        // must not be substituted.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: "Evil.FakeInstaller_0000000000000".to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Evil.FakeInstaller_1.0.0.0_x64__0000000000000\winget.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(
+            error.to_string().contains("package family"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn alias_targeting_different_executable_is_rejected() {
+        // The right family, but the target is redirected to another TrustedInstaller-owned
+        // binary of the package.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\AppInstallerCLI.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(
+            error.to_string().contains("not a 'winget.exe' executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn alias_target_outside_package_directory_is_rejected() {
+        // The right family and file name, but the target escapes the package directory.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(r"C:\Users\user\Downloads\winget.exe"),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(error.to_string().contains("outside"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn non_winget_alias_is_rejected() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\python.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(error.to_string().contains("not supported"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn regular_file_is_not_an_app_exec_alias() {
+        let exe = std::env::current_exe().expect("current exe");
+        assert!(resolve_app_exec_alias(&exe).is_none());
+    }
+
+    #[test]
+    fn winget_app_exec_alias_resolves_to_windowsapps_target() {
+        // Opportunistic: only runs where the per-user winget alias is installed.
+        let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+            return;
+        };
+        let alias_path = PathBuf::from(local_app_data).join("Microsoft\\WindowsApps\\winget.exe");
+        if !alias_path.exists() {
+            return;
+        }
+
+        let alias = resolve_app_exec_alias(&alias_path).expect("winget alias must resolve");
+        assert!(alias.target.is_absolute());
+        assert!(
+            alias
+                .target
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("winget.exe"))
+        );
+        assert!(alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY));
+        assert_ne!(alias.target, alias_path);
+    }
+
+    #[test]
+    fn winget_app_exec_alias_passes_elevated_verification() {
+        // Opportunistic end-to-end check: the alias itself cannot be opened for read,
+        // so verification must transparently target the real WindowsApps binary.
+        let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+            return;
+        };
+        let alias = PathBuf::from(local_app_data).join("Microsoft\\WindowsApps\\winget.exe");
+        if !alias.exists() {
+            return;
+        }
+
+        match verify_elevated_executable_security(&alias, true) {
+            Ok(guard) => {
+                let guard = guard.expect("a guard must be produced for elevated execution");
+                assert_ne!(guard.path(), alias);
+            }
+            // Non-elevated test runs cannot open `Program Files\WindowsApps` ancestors for
+            // READ_CONTROL; the agent service (SYSTEM) can. Everything up to the ancestor
+            // walk — alias resolution and file-level verification — must have succeeded.
+            Err(error) => {
+                assert!(
+                    error.to_string().contains("ancestor directory"),
+                    "unexpected error: {error:#}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -712,12 +1098,32 @@ mod tests {
     }
 
     #[test]
-    fn callback_allow_ace_is_rejected() {
-        // Conditional (callback) allow ACE for a trusted SID: unsupported type, fail closed.
+    fn callback_allow_ace_is_treated_as_unconditional_allow() {
+        // Conditional (callback) allow ACE for a trusted SID: the condition can only
+        // narrow the grant, so it is accepted as if unconditional.
         let sd = SddlDescriptor::parse(r#"O:SYD:(XA;;FA;;;SY;(1==1))"#);
+        sd.verify().unwrap();
+
+        // The same callback ACE for an untrusted SID is still rejected.
+        let sd = SddlDescriptor::parse(r#"O:SYD:(XA;;FA;;;WD;(1==1))"#);
         let error = sd.verify().unwrap_err();
         assert!(
-            error.to_string().contains("unsupported ACE type"),
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn process_trust_label_write_ace_is_accepted_for_executables_only() {
+        // `S-1-19-512-4096` (ProtectedLight-WinTcb) appears on Store-app binaries under
+        // `Program Files\WindowsApps`; only Windows-signed protected processes hold it.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;S-1-19-512-4096)");
+        sd.verify_as_executable().unwrap();
+
+        // For the policy file it remains untrusted.
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
             "unexpected error: {error}"
         );
     }
