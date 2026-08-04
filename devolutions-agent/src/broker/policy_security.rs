@@ -15,10 +15,10 @@
 //! a trusted principal and that its DACL does not grant write access to any other
 //! principal. Callers fail closed when this check fails.
 //!
-//! For the policy file, the trusted principals are SYSTEM and the built-in
-//! Administrators group. For executables, `NT SERVICE\TrustedInstaller` is trusted as
-//! well, since Windows-protected binaries
-//! (`System32`, `Program Files`, `WindowsApps`) are owned by and writable by that service.
+//! For the policy file, the trusted principals are SYSTEM, `LOCAL SERVICE`, and the
+//! built-in Administrators group. For executables, `LOCAL SERVICE` is not trusted, but
+//! `NT SERVICE\TrustedInstaller` is, since Windows-protected binaries (`System32`,
+//! `Program Files`, `WindowsApps`) are owned by and writable by that service.
 //!
 //! For elevated executables the verification additionally defends against
 //! time-of-check/time-of-use races: the file is opened without write or delete sharing
@@ -40,7 +40,8 @@ use windows::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HAND
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, INHERIT_ONLY_ACE, IsWellKnownSid,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalServiceSid,
+    WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
@@ -94,9 +95,12 @@ const TRUSTED_INSTALLER_SID: &str = "S-1-5-80-956008885-3418522649-1831038044-18
 /// Principals trusted to hold write access over a verified file.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TrustedWriters {
-    /// SYSTEM and the built-in Administrators group (policy file).
+    /// SYSTEM, `LOCAL SERVICE`, and the built-in Administrators group (policy file).
     AdminOnly,
-    /// Additionally trusts `NT SERVICE\TrustedInstaller` (Windows-protected executables).
+    /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`
+    /// (Windows-protected executables). `LOCAL SERVICE` is deliberately not trusted here:
+    /// it is a low-privilege shared service identity, and accepting it for elevated
+    /// executables would open a privilege-escalation path.
     AdminOrTrustedInstaller,
 }
 
@@ -143,7 +147,8 @@ impl Drop for OwnedSecurityDescriptor {
     }
 }
 
-/// Verify that the policy file may only be written by SYSTEM or built-in Administrators.
+/// Verify that the policy file may only be written by SYSTEM, `LOCAL SERVICE`, or
+/// built-in Administrators.
 ///
 /// The check is performed on the already-opened file handle so the verified security
 /// descriptor belongs to the very same file that is subsequently read (no TOCTOU window
@@ -646,6 +651,15 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
         return true;
     }
 
+    // The Devolutions Agent installer creates `C:\ProgramData\Devolutions\Agent` with
+    // write access for `LOCAL SERVICE`, so it must be trusted for the policy file.
+    // It is a low-privilege shared service identity, however, so it is not trusted for
+    // elevated executables, where accepting it would open a privilege-escalation path.
+    // SAFETY: Per function contract, `sid` points to a valid SID.
+    if trusted_writers == TrustedWriters::AdminOnly && unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool() {
+        return true;
+    }
+
     // SAFETY: Per function contract, `sid` points to a valid SID.
     if unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) }.as_bool() {
         return true;
@@ -796,6 +810,36 @@ mod tests {
     fn administrators_owner_is_accepted() {
         let sd = SddlDescriptor::parse("O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)");
         sd.verify().expect("Administrators owner must be accepted");
+    }
+
+    #[test]
+    fn local_service_write_ace_is_accepted_for_policy_file() {
+        // The installer creates the Agent ProgramData directory with write access for
+        // LOCAL SERVICE, so the policy-file check must accept it.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
+        sd.verify().expect("LOCAL SERVICE write access must be accepted");
+    }
+
+    #[test]
+    fn local_service_write_ace_is_rejected_for_executables() {
+        // LOCAL SERVICE is a low-privilege shared service identity; a LOCAL
+        // SERVICE-writable executable must not pass elevated-executable verification.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
+        let error = sd.verify_as_executable().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn network_service_write_ace_is_rejected() {
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;NS)");
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
