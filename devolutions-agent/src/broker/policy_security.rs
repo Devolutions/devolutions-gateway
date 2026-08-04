@@ -124,6 +124,12 @@ const IO_REPARSE_TAG_APPEXECLINK: u32 = 0x8000_001B;
 /// Maximum size of a reparse point data buffer, from ntifs.h.
 const MAXIMUM_REPARSE_DATA_BUFFER_SIZE: usize = 16 * 1024;
 
+/// Package family name of Microsoft App Installer, the Store package that delivers `winget.exe`.
+///
+/// The publisher-hash suffix is derived from Microsoft's signing certificate, so no other
+/// publisher can install a package under this family.
+const WINGET_PACKAGE_FAMILY: &str = "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe";
+
 /// Security descriptor allocated by `GetSecurityInfo`, freed with `LocalFree` on drop.
 struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
 
@@ -212,7 +218,14 @@ pub(crate) fn verify_elevated_executable_security(
     // pinned directly. `CreateProcess` resolves them internally, but the broker must
     // verify and execute the real target, which lives under the
     // TrustedInstaller-protected `WindowsApps` package directory.
-    let alias_target = resolve_app_exec_alias(path);
+    //
+    // The alias reparse data lives in a user-writable location, so its content is
+    // untrusted: the target is only substituted after `validate_app_exec_alias` has bound
+    // it to the executable and package family expected for the alias (fail closed).
+    let alias_target = match resolve_app_exec_alias(path) {
+        Some(alias) => Some(validate_app_exec_alias(path, alias)?),
+        None => None,
+    };
     let path = alias_target.as_deref().unwrap_or(path);
 
     // Share only read access: while this handle is alive the file cannot be opened for
@@ -244,12 +257,22 @@ pub(crate) fn verify_elevated_executable_security(
     }))
 }
 
+/// A parsed Microsoft Store app execution alias.
+#[derive(Debug, PartialEq, Eq)]
+struct AppExecAlias {
+    /// Package family name of the app the alias belongs to (e.g.
+    /// `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`).
+    package_family: String,
+    /// Absolute path of the executable the alias points to.
+    target: PathBuf,
+}
+
 /// Resolve a Microsoft Store app execution alias to the executable it points to.
 ///
 /// Returns `None` when `path` is not an `IO_REPARSE_TAG_APPEXECLINK` reparse point
 /// (including when it cannot be opened at all; the caller's regular open then reports
 /// the actual error).
-fn resolve_app_exec_alias(path: &Path) -> Option<PathBuf> {
+fn resolve_app_exec_alias(path: &Path) -> Option<AppExecAlias> {
     use windows::Win32::System::IO::DeviceIoControl;
     use windows::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
 
@@ -281,16 +304,97 @@ fn resolve_app_exec_alias(path: &Path) -> Option<PathBuf> {
     .ok()?;
 
     buffer.truncate(usize::try_from(returned).expect("u32 fits in usize on Windows"));
-    parse_app_exec_alias_target(&buffer)
+    parse_app_exec_alias(&buffer)
 }
 
-/// Parse the target executable path out of an `IO_REPARSE_TAG_APPEXECLINK` reparse buffer.
+/// Validate an app execution alias against the identity expected for the aliased
+/// executable and return its target path.
+///
+/// The alias reparse point lives in a user-writable directory
+/// (`%LOCALAPPDATA%\Microsoft\WindowsApps`), so its content is untrusted: without this
+/// binding, a crafted alias could redirect e.g. `winget.exe` to any other
+/// TrustedInstaller-owned binary, which would then pass the ACL checks and run elevated.
+///
+/// Rules (fail-closed):
+/// - Only `winget.exe` aliases are supported (the only Store-app executable the broker
+///   launches).
+/// - The alias package family must be [`WINGET_PACKAGE_FAMILY`], whose publisher-hash
+///   suffix is bound to Microsoft's signing certificate.
+/// - The target file name must match the alias file name.
+/// - The target must live inside a package directory of that same family (a
+///   `<name>_<version>_<arch>__<publisher-hash>` full-name component).
+fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias) -> anyhow::Result<PathBuf> {
+    let alias_name = alias_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .with_context(|| format!("app execution alias '{}' has no file name", alias_path.display()))?;
+
+    if !alias_name.eq_ignore_ascii_case("winget.exe") {
+        bail!(
+            "app execution alias '{}' is not supported for elevated execution",
+            alias_path.display()
+        );
+    }
+
+    if !alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY) {
+        bail!(
+            "app execution alias '{}' belongs to package family '{}'; expected '{WINGET_PACKAGE_FAMILY}'",
+            alias_path.display(),
+            alias.package_family,
+        );
+    }
+
+    let target_name_matches = alias
+        .target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(alias_name));
+    if !target_name_matches {
+        bail!(
+            "app execution alias '{}' points to '{}', which is not a '{alias_name}' executable",
+            alias_path.display(),
+            alias.target.display(),
+        );
+    }
+
+    if !path_contains_package_full_name(&alias.target, WINGET_PACKAGE_FAMILY) {
+        bail!(
+            "app execution alias '{}' points to '{}', which is outside the '{WINGET_PACKAGE_FAMILY}' package directory",
+            alias_path.display(),
+            alias.target.display(),
+        );
+    }
+
+    Ok(alias.target)
+}
+
+/// Whether `path` contains a directory component that is a package full name
+/// (`<name>_<version>_<arch>__<publisher-hash>`) of the given package family
+/// (`<name>_<publisher-hash>`).
+fn path_contains_package_full_name(path: &Path, package_family: &str) -> bool {
+    let Some((family_name, publisher_hash)) = package_family.rsplit_once('_') else {
+        return false;
+    };
+    let prefix = format!("{family_name}_");
+    let suffix = format!("__{publisher_hash}");
+
+    path.components().any(|component| {
+        component.as_os_str().to_str().is_some_and(|component| {
+            component.len() >= prefix.len() + suffix.len()
+                && component[..prefix.len()].eq_ignore_ascii_case(&prefix)
+                && component[component.len() - suffix.len()..].eq_ignore_ascii_case(&suffix)
+        })
+    })
+}
+
+/// Parse the package family name and target executable path out of an
+/// `IO_REPARSE_TAG_APPEXECLINK` reparse buffer.
 ///
 /// Layout: a `REPARSE_DATA_BUFFER` header (tag, data length, reserved), then the
 /// AppExecLink payload: a version field followed by NUL-separated UTF-16 strings —
 /// package family name, application user model id, target executable path, and
 /// application type.
-fn parse_app_exec_alias_target(buffer: &[u8]) -> Option<PathBuf> {
+fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
     // Header: ReparseTag (4 bytes), ReparseDataLength (2 bytes), Reserved (2 bytes).
     let header = buffer.get(..8)?;
     let tag = u32::from_le_bytes(header[..4].try_into().ok()?);
@@ -306,13 +410,16 @@ fn parse_app_exec_alias_target(buffer: &[u8]) -> Option<PathBuf> {
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
-    let target = wide.split(|&c| c == 0).nth(2)?;
-    if target.is_empty() {
+    let mut strings = wide.split(|&c| c == 0);
+    let package_family = strings.next()?;
+    let target = strings.nth(1)?;
+    if package_family.is_empty() || target.is_empty() {
         return None;
     }
 
+    let package_family = String::from_utf16(package_family).ok()?;
     let target = PathBuf::from(OsString::from_wide(target));
-    target.is_absolute().then_some(target)
+    target.is_absolute().then_some(AppExecAlias { package_family, target })
 }
 
 /// Verify that every ancestor directory of `path` denies untrusted principals the rights
@@ -693,7 +800,7 @@ mod tests {
 
     #[test]
     fn app_exec_alias_reparse_buffer_is_parsed() {
-        // Synthetic AppExecLink buffer: version 3, then package id, entry point,
+        // Synthetic AppExecLink buffer: version 3, then package family, entry point,
         // target path, and application type as NUL-separated UTF-16 strings.
         let strings: Vec<u16> =
             "Package_8wekyb3d8bbwe\0Package!App\0C:\\Program Files\\WindowsApps\\Package\\winget.exe\x000\0"
@@ -707,9 +814,10 @@ mod tests {
         buffer.extend([0u8, 0]); // Reserved.
         buffer.extend(&data);
 
-        let target = parse_app_exec_alias_target(&buffer).expect("target must be parsed");
+        let alias = parse_app_exec_alias(&buffer).expect("alias must be parsed");
+        assert_eq!(alias.package_family, "Package_8wekyb3d8bbwe");
         assert_eq!(
-            target,
+            alias.target,
             PathBuf::from("C:\\Program Files\\WindowsApps\\Package\\winget.exe")
         );
     }
@@ -719,7 +827,81 @@ mod tests {
         // A symlink reparse tag (0xA000000C) must not be treated as an alias.
         let mut buffer = 0xA000_000Cu32.to_le_bytes().to_vec();
         buffer.extend([0u8; 12]);
-        assert!(parse_app_exec_alias_target(&buffer).is_none());
+        assert!(parse_app_exec_alias(&buffer).is_none());
+    }
+
+    #[test]
+    fn winget_alias_with_expected_identity_is_validated() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
+            ),
+        };
+        let target = validate_app_exec_alias(alias_path, alias).expect("valid winget alias must be accepted");
+        assert!(target.ends_with("winget.exe"));
+    }
+
+    #[test]
+    fn alias_with_unexpected_package_family_is_rejected() {
+        // A crafted alias claiming another (even Microsoft-published) package family
+        // must not be substituted.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: "Evil.FakeInstaller_0000000000000".to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Evil.FakeInstaller_1.0.0.0_x64__0000000000000\winget.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(
+            error.to_string().contains("package family"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn alias_targeting_different_executable_is_rejected() {
+        // The right family, but the target is redirected to another TrustedInstaller-owned
+        // binary of the package.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\AppInstallerCLI.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(
+            error.to_string().contains("not a 'winget.exe' executable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn alias_target_outside_package_directory_is_rejected() {
+        // The right family and file name, but the target escapes the package directory.
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(r"C:\Users\user\Downloads\winget.exe"),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(error.to_string().contains("outside"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn non_winget_alias_is_rejected() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\python.exe");
+        let alias = AppExecAlias {
+            package_family: WINGET_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
+            ),
+        };
+        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        assert!(error.to_string().contains("not supported"), "unexpected error: {error}");
     }
 
     #[test]
@@ -734,19 +916,21 @@ mod tests {
         let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
             return;
         };
-        let alias = PathBuf::from(local_app_data).join("Microsoft\\WindowsApps\\winget.exe");
-        if !alias.exists() {
+        let alias_path = PathBuf::from(local_app_data).join("Microsoft\\WindowsApps\\winget.exe");
+        if !alias_path.exists() {
             return;
         }
 
-        let target = resolve_app_exec_alias(&alias).expect("winget alias must resolve");
-        assert!(target.is_absolute());
+        let alias = resolve_app_exec_alias(&alias_path).expect("winget alias must resolve");
+        assert!(alias.target.is_absolute());
         assert!(
-            target
+            alias
+                .target
                 .file_name()
                 .is_some_and(|name| name.eq_ignore_ascii_case("winget.exe"))
         );
-        assert_ne!(target, alias);
+        assert!(alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY));
+        assert_ne!(alias.target, alias_path);
     }
 
     #[test]
