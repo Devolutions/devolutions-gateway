@@ -97,7 +97,6 @@ fn hub_sample() -> Sample {
             ngrok: None,
             verbosity_profile: Some(VerbosityProfile::Tls),
             web_app: None,
-            ai_gateway: None,
             agent_tunnel: None,
             proxy: None,
             debug: None,
@@ -148,7 +147,6 @@ fn legacy_sample() -> Sample {
             ngrok: None,
             verbosity_profile: None,
             web_app: None,
-            ai_gateway: None,
             agent_tunnel: None,
             proxy: None,
             debug: None,
@@ -198,7 +196,6 @@ fn system_store_sample() -> Sample {
             ngrok: None,
             verbosity_profile: None,
             web_app: None,
-            ai_gateway: None,
             agent_tunnel: None,
             proxy: None,
             debug: None,
@@ -280,7 +277,6 @@ fn standalone_custom_auth_sample() -> Sample {
                 users_file: None,
                 static_root_path: None,
             }),
-            ai_gateway: None,
             agent_tunnel: None,
             proxy: None,
             debug: None,
@@ -362,7 +358,6 @@ fn standalone_no_auth_sample() -> Sample {
                 users_file: Some("/path/to/users.txt".into()),
                 static_root_path: Some("/path/to/webapp/static/root".into()),
             }),
-            ai_gateway: None,
             agent_tunnel: None,
             proxy: None,
             debug: None,
@@ -437,7 +432,6 @@ fn proxy_sample() -> Sample {
             ngrok: None,
             verbosity_profile: None,
             web_app: None,
-            ai_gateway: None,
             proxy: Some(ProxyConf {
                 mode: ProxyMode::Manual,
                 http: Some(Url::parse("http://proxy.corp:8080").unwrap()),
@@ -472,4 +466,27 @@ fn sample_parsing(#[case] sample: Sample) {
     let from_struct = serde_json::to_value(&sample.file_conf).unwrap();
 
     assert_eq!(from_json, from_struct);
+}
+
+#[test]
+fn agent_tunnel_listen_address_is_optional() {
+    let config = serde_json::from_str::<ConfFile>(
+        r#"{
+            "Listeners": [],
+            "AgentTunnel": {
+                "Enabled": true,
+                "ListenPort": 4433,
+                "ListenAddress": "127.0.0.1"
+            }
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.agent_tunnel.as_ref().and_then(|tunnel| tunnel.listen_address),
+        Some("127.0.0.1".parse().unwrap())
+    );
+
+    let default_config = serde_json::from_str::<AgentTunnelConf>(r#"{"Enabled": true}"#).unwrap();
+    assert_eq!(default_config.listen_address, None);
 }

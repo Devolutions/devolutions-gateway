@@ -1,4 +1,3 @@
-pub mod ai;
 pub mod config;
 pub mod diagnostics;
 pub mod fwd;
@@ -48,10 +47,6 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
     if state.conf_handle.get_conf().debug.enable_unstable {
         router = router.nest("/jet/tunnel", tunnel::make_router(state.clone()));
         router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
-
-        if state.conf_handle.get_conf().ai_gateway.enabled {
-            router = router.nest("/jet/ai", ai::make_router(state.clone()));
-        }
     }
 
     router.with_state(state)

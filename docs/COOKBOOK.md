@@ -307,7 +307,6 @@ Each log entry is only returned once. After you make this request, the existing 
 Devolutions Gateway and Devolutions Agent support HTTP/HTTPS/SOCKS proxy configuration for outbound requests.
 Proxies are used for requests such as:
 - Subscriber API notifications (Gateway)
-- AI Gateway provider requests (Gateway)
 - Update downloads and version checks (Agent)
 
 The proxy configuration supports three modes:
@@ -629,4 +628,3 @@ curl -X POST "https://gateway.example.com/jet/traffic/ack" \
 - Claimed events are locked for the specified lease duration
 - If not acknowledged before lease expiry, events become available for reclaiming
 - Events are permanently deleted after acknowledgment (no retention)
-

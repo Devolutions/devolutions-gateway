@@ -243,6 +243,15 @@ Stable options are:
     * **StaticRootPath** (_FilePath_): Path to the static files for the standalone web application.
         This is an advanced option which should typically not be changed.
 
+- **AgentTunnel** (_Object_): Unstable QUIC-based agent tunnel configuration.
+
+    * **Enabled** (_Boolean_): Whether the agent tunnel listener is enabled.
+
+    * **ListenPort** (_Integer_): UDP port for the QUIC listener (default is `4433`).
+
+    * **ListenAddress** (_IP address_): IP address for the QUIC listener.
+        Omit this option to listen on all interfaces, or set it to `127.0.0.1` for local-only testing.
+
 - **Proxy** (_Object_): HTTP/SOCKS proxy configuration for outbound requests.
     Supports three modes: Off (never use proxy), System (auto-detect), Manual (explicit configuration).
 

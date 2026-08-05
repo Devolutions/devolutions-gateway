@@ -1,4 +1,5 @@
 use core::fmt;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -21,23 +22,6 @@ impl fmt::Display for VerbosityProfile {
     }
 }
 
-/// Configuration for the AI Gateway feature in tests.
-#[derive(Clone, Default, TypedBuilder)]
-pub struct AiGatewayConfig {
-    /// Whether the AI gateway is enabled.
-    #[builder(default = false)]
-    pub enabled: bool,
-    /// Optional API key for gateway-level authentication.
-    #[builder(default, setter(into))]
-    pub gateway_api_key: Option<String>,
-    /// Custom endpoint for the OpenAI provider (for mock server).
-    #[builder(default, setter(into))]
-    pub openai_endpoint: Option<String>,
-    /// API key for OpenAI provider.
-    #[builder(default, setter(into))]
-    pub openai_api_key: Option<String>,
-}
-
 /// Configuration for the agent tunnel feature in tests.
 #[derive(Clone, TypedBuilder)]
 pub struct AgentTunnelConfig {
@@ -47,6 +31,9 @@ pub struct AgentTunnelConfig {
     /// UDP port for the QUIC listener.
     #[builder(default, setter(into))]
     pub listen_port: Option<u16>,
+    /// IP address for the QUIC listener.
+    #[builder(default = IpAddr::V4(Ipv4Addr::LOCALHOST), setter(into))]
+    pub listen_address: IpAddr,
 }
 
 #[derive(TypedBuilder)]
@@ -59,10 +46,7 @@ pub struct DgwConfig {
     disable_token_validation: bool,
     #[builder(default = VerbosityProfile::DEFAULT)]
     verbosity_profile: VerbosityProfile,
-    /// AI gateway configuration (requires enable_unstable: true to work).
-    #[builder(default, setter(into))]
-    ai_gateway: Option<AiGatewayConfig>,
-    /// Enable unstable features (required for AI gateway).
+    /// Enable unstable features.
     #[builder(default = false)]
     enable_unstable: bool,
     /// Override the recording path in the gateway config.
@@ -103,7 +87,6 @@ impl DgwConfigHandle {
             http_port,
             disable_token_validation,
             verbosity_profile,
-            ai_gateway,
             enable_unstable,
             recording_path,
             agent_tunnel,
@@ -114,50 +97,6 @@ impl DgwConfigHandle {
 
         let tcp_port = tcp_port.unwrap_or_else(find_unused_port);
         let http_port = http_port.unwrap_or_else(find_unused_port);
-
-        // Build AI gateway config JSON if provided.
-        let ai_gateway_json = if let Some(ai_config) = ai_gateway {
-            let gateway_api_key_json = ai_config
-                .gateway_api_key
-                .map(|k| format!(r#""GatewayApiKey": "{k}","#))
-                .unwrap_or_default();
-
-            let openai_provider_json = if ai_config.openai_endpoint.is_some() || ai_config.openai_api_key.is_some() {
-                let endpoint_json = ai_config
-                    .openai_endpoint
-                    .map(|e| format!(r#""Endpoint": "{e}""#))
-                    .unwrap_or_default();
-                let api_key_json = ai_config
-                    .openai_api_key
-                    .map(|k| format!(r#""ApiKey": "{k}""#))
-                    .unwrap_or_default();
-                let comma = if !endpoint_json.is_empty() && !api_key_json.is_empty() {
-                    ","
-                } else {
-                    ""
-                };
-                format!(
-                    r#""Providers": {{
-                        "Openai": {{ {endpoint_json}{comma}{api_key_json} }}
-                    }},"#
-                )
-            } else {
-                String::new()
-            };
-
-            format!(
-                r#",
-    "AiGateway": {{
-        "Enabled": {},
-        {gateway_api_key_json}
-        {openai_provider_json}
-        "RequestTimeoutSecs": 30
-    }}"#,
-                ai_config.enabled
-            )
-        } else {
-            String::new()
-        };
 
         let recording_path_json = if let Some(path) = recording_path {
             // Use forward slashes so the JSON value is valid on all platforms.
@@ -176,9 +115,10 @@ impl DgwConfigHandle {
                 r#",
     "AgentTunnel": {{
         "Enabled": {},
-        "ListenPort": {listen_port}
+        "ListenPort": {listen_port},
+        "ListenAddress": "{}"
     }}"#,
-                at_config.enabled
+                at_config.enabled, at_config.listen_address
             )
         } else {
             String::new()
@@ -203,7 +143,7 @@ impl DgwConfigHandle {
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
         "enable_unstable": {enable_unstable}
-    }}{ai_gateway_json}{recording_path_json}{agent_tunnel_json}
+    }}{recording_path_json}{agent_tunnel_json}
 }}"#
         );
 
