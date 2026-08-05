@@ -23,10 +23,23 @@ try
 	Write-Host "Found package $packageName"
 	Write-Host "Local version is $localVersion"
 
-	$distantInfo = npm view "$packageName" --json | ConvertFrom-Json
-	$distantVersion = $distantInfo.version
+	$viewErrorLog = "$tmpFolder/npm-view-stderr.log"
+	$distantVersion = npm view "$packageName" version --json 2>$viewErrorLog | ConvertFrom-Json
+	$viewError = Get-Content -Raw -Path "$viewErrorLog"
 
-	Write-Host "Latest version on registry is $distantVersion"
+	if ($LASTEXITCODE -Eq 0)
+	{
+		Write-Host "Latest version on registry is $distantVersion"
+	}
+	elseif ($viewError -Match 'E404')
+	{
+		Write-Host "Package is not published on the registry yet."
+	}
+	else
+	{
+		Write-Host "$viewError"
+		throw "npm view failed for $packageName (exit code $LASTEXITCODE)"
+	}
 
 	if ($localVersion -Eq $distantVersion)
 	{
@@ -38,6 +51,11 @@ try
 		# Reset NODE_AUTH_TOKEN to empty is a workaround for https://github.com/actions/setup-node/issues/1440 (OIDC trusted publishing)
 		$env:NODE_AUTH_TOKEN = ""
 		npm publish "$Tarball" "--access=$Access"
+
+		if ($LASTEXITCODE -Ne 0)
+		{
+			throw "npm publish failed for $packageName@$localVersion (exit code $LASTEXITCODE)"
+		}
 	}
 }
 finally
