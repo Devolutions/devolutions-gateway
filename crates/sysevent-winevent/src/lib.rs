@@ -6,7 +6,7 @@ use std::sync::Arc;
 use sysevent::{Entry, Severity, SysEventError, SystemEventSink};
 use windows_sys::Win32::System::EventLog;
 
-type EventLogHandle = windows_sys::Win32::Foundation::HANDLE;
+type EventLogHandle = usize;
 
 /// Windows Event Log backend implementation.
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl WinEvent {
         }
 
         Ok(Self {
-            handle: Arc::new(handle),
+            handle: Arc::new(handle as EventLogHandle),
         })
     }
 
@@ -97,7 +97,7 @@ impl WinEvent {
         // - binary data pointer is null with size 0
         let success = unsafe {
             EventLog::ReportEventW(
-                *self.handle,
+                *self.handle as windows_sys::Win32::Foundation::HANDLE,
                 event_type,
                 0, // category
                 event_id,
@@ -132,10 +132,10 @@ impl SystemEventSink for WinEvent {
 
 impl Drop for WinEvent {
     fn drop(&mut self) {
-        if *self.handle != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        if *self.handle != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE as EventLogHandle {
             // SAFETY: DeregisterEventSource is thread-safe and idempotent.
             unsafe {
-                EventLog::DeregisterEventSource(*self.handle);
+                EventLog::DeregisterEventSource(*self.handle as windows_sys::Win32::Foundation::HANDLE);
             }
         }
     }
