@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use ironrdp_pdu::nego;
-use ironrdp_rdcleanpath::{RDCleanPath, RDCleanPathPdu, RDCleanPathV1, RDCleanPathV2, VERSION_1};
+use ironrdp_rdcleanpath::{RDCleanPath, RDCleanPathPdu, VERSION_1};
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -269,11 +269,11 @@ async fn connect_rdp_server(
     tracing::Span::current().record("target", selected_target.to_string());
 
     let x224_rsp = match cleanpath {
-        RDCleanPath::V1(RDCleanPathV1::Request {
+        RDCleanPath::Request {
             preconnection_blob,
             x224_connection_request,
             ..
-        }) => {
+        } => {
             if let Some(pcb) = preconnection_blob {
                 server_stream.write_all(pcb.as_bytes()).await?;
             }
@@ -287,10 +287,10 @@ async fn connect_rdp_server(
                     .map_err(CleanPathError::BadRequest)?,
             )
         }
-        RDCleanPath::V2(RDCleanPathV2::Request {
+        RDCleanPath::PcbFrontRequest {
             server_preconnection_pdu,
             ..
-        }) => {
+        } => {
             server_stream.write_all(server_preconnection_pdu.as_bytes()).await?;
             None
         }
