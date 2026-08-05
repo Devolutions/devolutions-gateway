@@ -41,6 +41,7 @@ pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
+const JMUX_FLUSH_DELAY: core::time::Duration = core::time::Duration::from_millis(10);
 
 // The JMUX channel will require at most `MAXIMUM_PACKET_SIZE_IN_BYTES × JMUX_MESSAGE_CHANNEL_SIZE` bytes to be kept alive.
 const JMUX_MESSAGE_MPSC_CHANNEL_SIZE: usize = 512;
@@ -384,6 +385,8 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
         let mut jmux_writer = tokio::io::BufWriter::with_capacity(16 * 1024, jmux_writer);
         let mut buf = bytes::BytesMut::new();
         let mut needs_flush = false;
+        let flush_timer = tokio::time::sleep(JMUX_FLUSH_DELAY);
+        tokio::pin!(flush_timer);
 
         loop {
             tokio::select! {
@@ -399,8 +402,9 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 
                     jmux_writer.write_all(&buf).await?;
                     needs_flush = true;
+                    flush_timer.as_mut().reset(tokio::time::Instant::now() + JMUX_FLUSH_DELAY);
                 }
-                _ = tokio::time::sleep(core::time::Duration::from_millis(10)), if needs_flush => {
+                _ = flush_timer.as_mut(), if needs_flush => {
                     jmux_writer.flush().await?;
                     needs_flush = false;
                 }
