@@ -4,8 +4,8 @@ use std::path::Path;
 
 use devolutions_pedm_shared::policy::{Hash, User};
 use digest::Update;
-use sha1::Sha1;
-use sha2::Sha256;
+use sha1::{Digest as _, Sha1};
+use sha2::{Digest as _, Sha256};
 use tracing::info;
 use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
@@ -68,8 +68,8 @@ impl MultiHasher {
     }
 
     pub(crate) fn finalize(self) -> Hash {
-        let sha1 = sha1::Digest::finalize(self.sha1);
-        let sha256 = sha2::Digest::finalize(self.sha256);
+        let sha1 = self.sha1.finalize();
+        let sha256 = self.sha256.finalize();
 
         Hash {
             sha1: base16ct::lower::encode_string(&sha1),
@@ -80,8 +80,8 @@ impl MultiHasher {
 
 impl Update for MultiHasher {
     fn update(&mut self, data: &[u8]) {
-        sha1::Digest::update(&mut self.sha1, data);
-        sha2::Digest::update(&mut self.sha256, data);
+        self.sha1.update(data);
+        Update::update(&mut self.sha256, data);
     }
 }
 
