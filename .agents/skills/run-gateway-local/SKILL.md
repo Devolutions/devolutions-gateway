@@ -22,8 +22,13 @@ and bind its listeners to `127.0.0.1` by default.
 
 2. Use a known-good `config\gateway.json` containing the provisioner key material required by the
    test. If a configuration does not exist yet, initialize it with
-   `cargo run -p devolutions-gateway -- --config-path .\config --config-init-only`, then complete
-   the normal local key setup before starting the service.
+   the following commands, then complete the normal local key setup before starting the service:
+
+   ```powershell
+   $ConfigDir = Join-Path $PWD 'config'
+   New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+   cargo run -p devolutions-gateway -- --config-path $ConfigDir --config-init-only
+   ```
 
 3. Before launching, normalize both `InternalUrl` and `ExternalUrl` hosts in the working copy.
    The following template keeps the configured schemes and ports while replacing wildcard,
@@ -33,6 +38,8 @@ and bind its listeners to `127.0.0.1` by default.
    $BindHost = '127.0.0.1'
    $AllowRemoteBinding = $false
    $LoopbackHosts = @('127.0.0.1', 'localhost', '::1')
+   $BindHost = $BindHost.TrimStart('[').TrimEnd(']')
+   $UrlBindHost = if ($BindHost.Contains(':')) { "[$BindHost]" } else { $BindHost }
 
    if ($BindHost -notin $LoopbackHosts -and -not $AllowRemoteBinding) {
        throw "Refusing non-localhost Gateway binding. Set `$AllowRemoteBinding only for an intentional remote test."
@@ -43,8 +50,8 @@ and bind its listeners to `127.0.0.1` by default.
    $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 
    foreach ($Listener in $Config.Listeners) {
-       $Listener.InternalUrl = $Listener.InternalUrl -replace '(?<=://)(\[[^\]]+\]|[^/:]+)', $BindHost
-       $Listener.ExternalUrl = $Listener.ExternalUrl -replace '(?<=://)(\[[^\]]+\]|[^/:]+)', $BindHost
+       $Listener.InternalUrl = $Listener.InternalUrl -replace '(?<=://)(\[[^\]]+\]|[^/:]+)', $UrlBindHost
+       $Listener.ExternalUrl = $Listener.ExternalUrl -replace '(?<=://)(\[[^\]]+\]|[^/:]+)', $UrlBindHost
    }
 
    $Config | ConvertTo-Json -Depth 20 | Set-Content $ConfigFile
