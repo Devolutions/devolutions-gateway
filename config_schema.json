@@ -104,10 +104,6 @@
       "$ref": "#/definitions/WebAppConf",
       "description": "JSON object describing the standalone web application configuration."
     },
-    "AgentTunnel": {
-      "$ref": "#/definitions/AgentTunnelConf",
-      "description": "Unstable QUIC-based agent tunnel configuration."
-    },
     "Proxy": {
       "$ref": "#/definitions/ProxyConf",
       "description": "HTTP/SOCKS proxy configuration for outbound requests."
@@ -479,26 +475,6 @@
         "None"
       ],
       "description": "The authentication method for accessing the web application."
-    },
-    "AgentTunnelConf": {
-      "type": "object",
-      "properties": {
-        "Enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether the agent tunnel listener is enabled."
-        },
-        "ListenPort": {
-          "type": "integer",
-          "default": 4433,
-          "description": "UDP port for the QUIC listener."
-        },
-        "ListenAddress": {
-          "type": "string",
-          "description": "IP address for the QUIC listener. Omit this to listen on all interfaces."
-        }
-      },
-      "additionalProperties": false
     },
     "ProxyConf": {
       "type": "object",

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use std::{env, fmt};
 
@@ -1362,9 +1361,6 @@ pub mod dto {
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
         pub listen_port: u16,
-        /// IP address for the QUIC listener (default: unspecified, dual-stack)
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub listen_address: Option<IpAddr>,
     }
 
     impl AgentTunnelConf {
@@ -1378,7 +1374,6 @@ pub mod dto {
             Self {
                 enabled: false,
                 listen_port: Self::default_listen_port(),
-                listen_address: None,
             }
         }
     }

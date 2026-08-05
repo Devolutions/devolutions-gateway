@@ -467,26 +467,3 @@ fn sample_parsing(#[case] sample: Sample) {
 
     assert_eq!(from_json, from_struct);
 }
-
-#[test]
-fn agent_tunnel_listen_address_is_optional() {
-    let config = serde_json::from_str::<ConfFile>(
-        r#"{
-            "Listeners": [],
-            "AgentTunnel": {
-                "Enabled": true,
-                "ListenPort": 4433,
-                "ListenAddress": "127.0.0.1"
-            }
-        }"#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.agent_tunnel.as_ref().and_then(|tunnel| tunnel.listen_address),
-        Some("127.0.0.1".parse().unwrap())
-    );
-
-    let default_config = serde_json::from_str::<AgentTunnelConf>(r#"{"Enabled": true}"#).unwrap();
-    assert_eq!(default_config.listen_address, None);
-}

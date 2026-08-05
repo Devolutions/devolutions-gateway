@@ -1,5 +1,4 @@
 use core::fmt;
-use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -31,9 +30,6 @@ pub struct AgentTunnelConfig {
     /// UDP port for the QUIC listener.
     #[builder(default, setter(into))]
     pub listen_port: Option<u16>,
-    /// IP address for the QUIC listener.
-    #[builder(default = IpAddr::V4(Ipv4Addr::LOCALHOST), setter(into))]
-    pub listen_address: IpAddr,
 }
 
 #[derive(TypedBuilder)]
@@ -115,10 +111,9 @@ impl DgwConfigHandle {
                 r#",
     "AgentTunnel": {{
         "Enabled": {},
-        "ListenPort": {listen_port},
-        "ListenAddress": "{}"
+        "ListenPort": {listen_port}
     }}"#,
-                at_config.enabled, at_config.listen_address
+                at_config.enabled
             )
         } else {
             String::new()
