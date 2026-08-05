@@ -5,12 +5,12 @@ use std::path::Path;
 use devolutions_pedm_shared::policy::{Hash, User};
 use digest::Update;
 use sha1::{Digest as _, Sha1};
-use sha2::Sha256;
+use sha2::{Digest as _, Sha256};
 use tracing::info;
 use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::process::{ProcessInformation, StartupInfo, create_process_as_user};
+use win_api_wrappers::process::{Process, Process, create_process_as_user, create_proces};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::CommandLine;
@@ -69,7 +69,7 @@ impl MultiHasher {
 
     pub(crate) fn finalize(self) -> Hash {
         let sha1 = self.sha1.finalize();
-        let sha256 = sha2::Digest::finalize(self.sha256);
+        let sha256 = self.sha256.finalize();
 
         Hash {
             sha1: base16ct::lower::encode_string(&sha1),
