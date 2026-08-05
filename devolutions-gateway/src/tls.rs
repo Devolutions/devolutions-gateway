@@ -335,8 +335,8 @@ pub(crate) fn extract_public_key(cert: &pki_types::CertificateDer<'static>) -> a
     let cert = x509_cert::Certificate::from_der(cert).context("parse X509 certificate")?;
 
     let public_key = cert
-        .tbs_certificate
-        .subject_public_key_info
+        .tbs_certificate()
+        .subject_public_key_info()
         .subject_public_key
         .as_bytes()
         .context("subject public key BIT STRING is not aligned")?
@@ -924,15 +924,16 @@ fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
 
     match x509_cert::Certificate::from_der(cert_der) {
         Ok(cert) => {
-            let subject = cert.tbs_certificate.subject.to_string();
-            let issuer = cert.tbs_certificate.issuer.to_string();
-            let not_before = cert.tbs_certificate.validity.not_before;
-            let not_after = cert.tbs_certificate.validity.not_after;
+            let tbs_certificate = cert.tbs_certificate();
+            let subject = tbs_certificate.subject().to_string();
+            let issuer = tbs_certificate.issuer().to_string();
+            let not_before = tbs_certificate.validity().not_before;
+            let not_after = tbs_certificate.validity().not_after;
 
             let mut sans = String::new();
             let mut first = true;
 
-            if let Some(extensions) = cert.tbs_certificate.extensions {
+            if let Some(extensions) = tbs_certificate.extensions() {
                 for ext in extensions {
                     if let Ok(san) = x509_cert::ext::pkix::SubjectAltName::from_der(ext.extn_value.as_bytes()) {
                         for name in san.0 {
