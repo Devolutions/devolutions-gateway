@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 
 use devolutions_pedm_shared::policy::{Hash, User};
-use digest::Update;
 use sha1::{Digest as _, Sha1};
 use sha2::{Digest as _, Sha256};
 use tracing::info;
@@ -63,7 +62,7 @@ pub(crate) struct MultiHasher {
 impl MultiHasher {
     #[must_use]
     pub(crate) fn chain_update(mut self, data: &[u8]) -> Self {
-        self.update(data);
+        digest::Update::update(&mut self, data);
         self
     }
 
@@ -78,10 +77,10 @@ impl MultiHasher {
     }
 }
 
-impl Update for MultiHasher {
+impl digest::Update for MultiHasher {
     fn update(&mut self, data: &[u8]) {
         self.sha1.update(data);
-        Update::update(&mut self.sha256, data);
+        self.sha256.update(data);
     }
 }
 
