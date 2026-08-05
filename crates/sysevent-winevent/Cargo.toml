@@ -12,7 +12,8 @@ publish = false
 sysevent.path = "../sysevent"
 windows-sys = { version = "0.61", features = [
     "Win32_System_EventLog",
-    "Win32_Foundation"
+    "Win32_Foundation",
+    "Win32_Security",
 ] }
 
 [lints]
