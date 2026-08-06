@@ -9,6 +9,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use win_api_wrappers::identity::sid::Sid;
 
+use crate::broker::event_channel::OperationEventSink;
+
 mod output;
 
 #[cfg(windows)]
@@ -63,6 +65,12 @@ pub struct ExecutionContext {
     /// after a grace period) and reports the Cancellation through an error chain
     /// containing [`OperationCanceled`].
     pub cancel_token: CancellationToken,
+    /// Per-operation event channel sink, when one was opened for this operation.
+    ///
+    /// The executor forwards the main (and pre-operation) command's stdout/stderr
+    /// chunks to the sink when [`ExecutionContext::capture_output`] is true. All
+    /// sink calls are non-blocking and best-effort.
+    pub event_sink: Option<OperationEventSink>,
 }
 
 /// Marker error reported by executors when an operation was terminated because its
@@ -144,6 +152,11 @@ impl CommandExecutor for DryRunExecutor {
             elevation = %ctx.elevation,
             "Dry-run: would execute plan"
         );
+        if ctx.capture_output
+            && let Some(sink) = &ctx.event_sink
+        {
+            sink.stdout(format!("dry-run: would execute {:?}\n", ctx.command).as_bytes());
+        }
         Ok(ExecutionOutput::default())
     }
 }

@@ -10,9 +10,11 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use chrono::{DateTime, Utc};
-use now_policy_api::{OperationStatus, PackageRequest, ResourceId};
+use now_policy_api::{EventChannel, OperationStatus, PackageRequest, ResourceId};
 use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
+
+use crate::broker::event_channel::OperationEventSink;
 
 /// How long completed/failed operation results are retained for status queries.
 const RESULT_RETENTION: Duration = Duration::from_secs(5 * 60); // 5 minutes.
@@ -41,6 +43,12 @@ pub struct TrackedOperation {
     pub expires_at: Option<DateTime<Utc>>,
     /// Fired when Cancellation is requested, observed by the executor.
     pub cancel_token: CancellationToken,
+    /// Per-operation event channel sink used to notify the client of status
+    /// transitions and operation completion.
+    pub event_sink: Option<OperationEventSink>,
+    /// Descriptor of the per-operation event channel, returned to the client
+    /// (also on idempotent request resubmission).
+    pub event_channel: Option<EventChannel>,
 }
 
 /// Thread-safe operation tracker.
@@ -123,9 +131,23 @@ impl OperationTracker {
                 owner_key: owner_key.to_owned(),
                 expires_at: None,
                 cancel_token: CancellationToken::new(),
+                event_sink: None,
+                event_channel: None,
             },
         );
         Ok((operation_id, true))
+    }
+
+    /// Attach the per-operation event channel (sink + client-facing descriptor).
+    ///
+    /// Called right after registration, before the execution task is spawned, so
+    /// every status transition is observed on the channel.
+    pub fn set_event_channel(&self, operation_id: &str, sink: OperationEventSink, descriptor: EventChannel) {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        if let Some(op) = state.operations.get_mut(operation_id) {
+            op.event_sink = Some(sink);
+            op.event_channel = Some(descriptor);
+        }
     }
 
     /// Mark an operation as Running (process launched).
@@ -134,6 +156,9 @@ impl OperationTracker {
         if let Some(op) = state.operations.get_mut(request_id) {
             op.status = OperationStatus::Running;
             op.started_at = Some(started_at);
+            if let Some(sink) = &op.event_sink {
+                sink.status_updated();
+            }
         }
     }
 
@@ -158,6 +183,7 @@ impl OperationTracker {
             op.note = Some(note);
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
+            notify_terminal(op);
         }
     }
 
@@ -170,6 +196,7 @@ impl OperationTracker {
             op.note = Some(note);
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
+            notify_terminal(op);
         }
     }
 
@@ -182,6 +209,7 @@ impl OperationTracker {
             op.note = Some(note);
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
+            notify_terminal(op);
         }
     }
 
@@ -201,6 +229,9 @@ impl OperationTracker {
         if !op.status.is_terminal() {
             op.status = OperationStatus::Canceling;
             op.cancel_token.cancel();
+            if let Some(sink) = &op.event_sink {
+                sink.status_updated();
+            }
         }
 
         Some(op.clone())
@@ -260,4 +291,12 @@ impl OperationTracker {
 fn request_fingerprint(request: &PackageRequest) -> anyhow::Result<String> {
     let bytes = serde_json::to_vec(request).context("failed to serialize package request for idempotency")?;
     Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+/// Notify the event channel that the operation reached a terminal status.
+fn notify_terminal(op: &TrackedOperation) {
+    if let Some(sink) = &op.event_sink {
+        sink.status_updated();
+        sink.finish();
+    }
 }
