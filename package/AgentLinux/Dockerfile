@@ -26,7 +26,6 @@ WORKDIR /opt/devolutions/agent
 
 ENV DAGENT_CONFIG_PATH=/etc/devolutions-agent \
     POWERSHELL_TELEMETRY_OPTOUT=1 \
-    PSU_SERVER_URL=http://host.docker.internal:5006 \
     PSU_AGENT_ID=devolutions-agent-linux \
     PSU_DISPLAY_NAME="Devolutions Agent Linux" \
     PSU_POWERSHELL_EXECUTABLE=/usr/local/bin/pwsh

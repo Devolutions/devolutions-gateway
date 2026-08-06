@@ -7,26 +7,42 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-IFS=',' read -r -a hubs <<< "${PSU_HUBS:-}"
-hubs_json=""
-for hub in "${hubs[@]}"; do
-    hub="${hub#${hub%%[![:space:]]*}}"
-    hub="${hub%${hub##*[![:space:]]}}"
-    if [ -z "${hub}" ]; then
-        continue
-    fi
+if [ -n "${PSU_SERVER_URL:-}" ] && [ -n "${PSU_APP_TOKEN:-}" ]; then
+    IFS=',' read -r -a hubs <<< "${PSU_HUBS:-}"
+    hubs_json=""
+    for hub in "${hubs[@]}"; do
+        hub="${hub#${hub%%[![:space:]]*}}"
+        hub="${hub%${hub##*[![:space:]]}}"
+        if [ -z "${hub}" ]; then
+            continue
+        fi
 
-    if [ -n "${hubs_json}" ]; then
-        hubs_json="${hubs_json}, "
-    fi
-    hubs_json="${hubs_json}\"$(json_escape "${hub}")\""
-done
+        if [ -n "${hubs_json}" ]; then
+            hubs_json="${hubs_json}, "
+        fi
+        hubs_json="${hubs_json}\"$(json_escape "${hub}")\""
+    done
 
-if [ -z "${PSU_APP_TOKEN:-}" ]; then
-    echo "PSU_APP_TOKEN is required" >&2
+    psu_agent_config=$(cat <<EOF
+  "PsuAgent": {
+    "Enabled": true,
+    "ServerUrl": "$(json_escape "${PSU_SERVER_URL}")",
+    "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",
+    "DisplayName": "$(json_escape "${PSU_DISPLAY_NAME:-Devolutions Agent Linux}")",
+    "AppToken": "$(json_escape "${PSU_APP_TOKEN}")",
+    "Hubs": [ ${hubs_json} ],
+    "PowerShell": {
+      "ExecutablePath": "$(json_escape "${PSU_POWERSHELL_EXECUTABLE:-${POWERSHELL_EXECUTABLE:-pwsh}}")"
+    }
+  }
+EOF
+)
+elif [ -n "${PSU_SERVER_URL:-}" ] || [ -n "${PSU_APP_TOKEN:-}" ]; then
+    echo "PSU_SERVER_URL and PSU_APP_TOKEN must both be set to enable the PSU agent" >&2
     exit 1
+else
+    psu_agent_config='  "PsuAgent": { "Enabled": false }'
 fi
-app_token_property="    \"AppToken\": \"$(json_escape "${PSU_APP_TOKEN}")\","
 
 cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
 {
@@ -36,17 +52,7 @@ cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
   "Session": {
     "Enabled": false
   },
-  "PsuAgent": {
-    "Enabled": true,
-    "ServerUrl": "$(json_escape "${PSU_SERVER_URL:-http://host.docker.internal:5006}")",
-    "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",
-    "DisplayName": "$(json_escape "${PSU_DISPLAY_NAME:-Devolutions Agent Linux}")",
-${app_token_property}
-    "Hubs": [ ${hubs_json} ],
-    "PowerShell": {
-      "ExecutablePath": "$(json_escape "${PSU_POWERSHELL_EXECUTABLE:-${POWERSHELL_EXECUTABLE:-pwsh}}")"
-    }
-  }
+${psu_agent_config}
 }
 EOF
 

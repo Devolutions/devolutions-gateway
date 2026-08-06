@@ -1,21 +1,31 @@
 # Devolutions Agent container
 
-The container enables the PowerShell Universal agent by default.
-It includes `multi-pwsh`, installs its stable PowerShell channel at image build time, and configures the PSU agent to use the managed `/usr/local/bin/pwsh` alias.
+The container includes `multi-pwsh` and installs its stable PowerShell channel at image build time.
+PowerShell Universal is disabled by default and becomes available when both `PSU_SERVER_URL` and `PSU_APP_TOKEN` are specified.
+When enabled, PSU uses the managed `/usr/local/bin/pwsh` alias.
 
-`PSU_APP_TOKEN` is required when starting the container.
-The other PSU settings can be overridden with environment variables.
+Start the Agent without PowerShell Universal:
 
 ```powershell
 docker run --rm `
   --add-host host.docker.internal:host-gateway `
+  devolutions/devolutions-agent:latest
+```
+
+Enable PowerShell Universal by supplying both settings:
+
+```powershell
+docker run --rm `
+  --add-host host.docker.internal:host-gateway `
+  --env PSU_SERVER_URL='http://host.docker.internal:5006' `
   --env PSU_APP_TOKEN='<application-token>' `
   devolutions/devolutions-agent:latest
 ```
 
 | Environment variable | Default |
 | --- | --- |
-| `PSU_SERVER_URL` | `http://host.docker.internal:5006` |
+| `PSU_SERVER_URL` | Empty |
+| `PSU_APP_TOKEN` | Empty |
 | `PSU_AGENT_ID` | `devolutions-agent-linux` |
 | `PSU_DISPLAY_NAME` | `Devolutions Agent Linux` |
 | `PSU_HUBS` | Empty |
