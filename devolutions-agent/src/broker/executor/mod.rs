@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, ManagerName, Scope};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use win_api_wrappers::identity::sid::Sid;
 
@@ -52,7 +53,34 @@ pub struct ExecutionContext {
     /// Installation scope (machine scope requires elevation).
     pub scope: Option<Scope>,
     /// When true, capture the main command's combined stdout+stderr.
+    ///
+    /// Since API v0.3 this only controls whether output frames are pushed on the
+    /// per-operation event channel; output is no longer returned in status responses.
     pub capture_output: bool,
+    /// Fired when the client requests cancelation of the operation.
+    ///
+    /// The executor terminates the in-flight process (gracefully first, forcefully
+    /// after a grace period) and reports the cancelation through an error chain
+    /// containing [`OperationCanceled`].
+    pub cancel_token: CancellationToken,
+}
+
+/// Marker error reported by executors when an operation was terminated because its
+/// cancelation was requested through [`ExecutionContext::cancel_token`].
+#[derive(Debug)]
+pub struct OperationCanceled;
+
+impl core::fmt::Display for OperationCanceled {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "operation was canceled at the client's request")
+    }
+}
+
+impl core::error::Error for OperationCanceled {}
+
+/// Whether an executor error chain denotes a client-requested cancelation.
+pub fn is_canceled_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<OperationCanceled>())
 }
 
 pub type ProcessStartedCallback = std::sync::Arc<dyn Fn(DateTime<Utc>) + Send + Sync>;

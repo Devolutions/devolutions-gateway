@@ -35,12 +35,12 @@ pub struct TrackedOperation {
     pub exit_code: Option<i32>,
     /// Human-readable note.
     pub note: Option<String>,
-    /// Captured combined stdout+stderr (tail-truncated), when the request opted in.
-    pub stdout: Option<String>,
     /// Authenticated operation owner.
     pub owner_key: String,
     /// When this entry should be evicted (set upon completion/failure).
     pub expires_at: Option<DateTime<Utc>>,
+    /// Fired when cancelation is requested, observed by the executor.
+    pub cancel_token: CancellationToken,
 }
 
 /// Thread-safe operation tracker.
@@ -120,9 +120,9 @@ impl OperationTracker {
                 completed_at: None,
                 exit_code: None,
                 note: None,
-                stdout: None,
                 owner_key: owner_key.to_owned(),
                 expires_at: None,
+                cancel_token: CancellationToken::new(),
             },
         );
         Ok((operation_id, true))
@@ -137,16 +137,9 @@ impl OperationTracker {
         }
     }
 
-    /// Mark an operation as finished with an exit code, a status note (success message or
-    /// short error summary), and optionally captured output.
-    pub fn mark_completed(
-        &self,
-        request_id: &str,
-        exit_code: i32,
-        note: String,
-        stdout: Option<String>,
-        started_at: Option<DateTime<Utc>>,
-    ) {
+    /// Mark an operation as finished with an exit code and a status note (success message or
+    /// short error summary).
+    pub fn mark_completed(&self, request_id: &str, exit_code: i32, note: String, started_at: Option<DateTime<Utc>>) {
         let mut state = self.state.lock().expect("tracker lock poisoned");
         if let Some(op) = state.operations.get_mut(request_id) {
             let now = Utc::now();
@@ -163,23 +156,54 @@ impl OperationTracker {
             };
             op.exit_code = Some(exit_code);
             op.note = Some(note);
-            op.stdout = stdout;
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
         }
     }
 
     /// Mark an operation as Failed without a process exit code (launch failure or timeout).
-    pub fn mark_failed(&self, request_id: &str, note: String, stdout: Option<String>) {
+    pub fn mark_failed(&self, request_id: &str, note: String) {
         let mut state = self.state.lock().expect("tracker lock poisoned");
         if let Some(op) = state.operations.get_mut(request_id) {
             let now = Utc::now();
             op.status = OperationStatus::Failed;
             op.note = Some(note);
-            op.stdout = stdout;
             op.completed_at = Some(now);
             op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
         }
+    }
+
+    /// Mark an operation as Canceled (the executor terminated the process on request).
+    pub fn mark_canceled(&self, request_id: &str, note: String) {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        if let Some(op) = state.operations.get_mut(request_id) {
+            let now = Utc::now();
+            op.status = OperationStatus::Canceled;
+            op.note = Some(note);
+            op.completed_at = Some(now);
+            op.expires_at = Some(now + chrono::Duration::from_std(RESULT_RETENTION).expect("valid duration"));
+        }
+    }
+
+    /// Request cancelation of an operation owned by the authenticated client.
+    ///
+    /// Idempotent and asynchronous: a non-terminal operation is moved to `Canceling` and its
+    /// cancel token is fired; the executor terminates the process and the operation later
+    /// transitions to a terminal status. An already-terminal operation is returned unchanged.
+    /// Returns `None` when the operation is unknown or not owned by the client.
+    pub fn request_cancel(&self, request_id: &str, owner_key: &str) -> Option<TrackedOperation> {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        let op = state
+            .operations
+            .get_mut(request_id)
+            .filter(|operation| owner_key.is_empty() || operation.owner_key == owner_key)?;
+
+        if !op.status.is_terminal() {
+            op.status = OperationStatus::Canceling;
+            op.cancel_token.cancel();
+        }
+
+        Some(op.clone())
     }
 
     /// Query the current state of an operation.

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use now_policy_api::ResourceId;
 use tracing::{error, info};
 
-use crate::broker::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback};
+use crate::broker::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback, is_canceled_error};
 use crate::broker::operation_tracker::OperationTracker;
 
 pub(super) fn spawn_execution(
@@ -25,7 +25,6 @@ pub(super) fn spawn_execution(
         });
         match executor.execute(&context, Some(process_started)).await {
             Ok(output) => {
-                let stdout = (!output.stdout.is_empty()).then_some(output.stdout);
                 let note = if output.exit_code == 0 {
                     "process exited successfully".to_owned()
                 } else {
@@ -44,12 +43,19 @@ pub(super) fn spawn_execution(
                     exit_code = output.exit_code,
                     "Background execution completed"
                 );
-                tracker.mark_completed(&operation_id_string, output.exit_code, note, stdout, output.started_at);
+                tracker.mark_completed(&operation_id_string, output.exit_code, note, output.started_at);
+            }
+            Err(error) if is_canceled_error(&error) => {
+                info!(operation_id = %operation_id_string, "Background execution canceled");
+                tracker.mark_canceled(
+                    &operation_id_string,
+                    "operation was canceled at the client's request".to_owned(),
+                );
             }
             Err(error) => {
                 let note = format!("{error:#}");
                 error!(operation_id = %operation_id_string, %error, "Background execution failed");
-                tracker.mark_failed(&operation_id_string, note, None);
+                tracker.mark_failed(&operation_id_string, note);
             }
         }
     });

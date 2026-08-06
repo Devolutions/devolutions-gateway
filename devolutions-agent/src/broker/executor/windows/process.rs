@@ -2,9 +2,12 @@
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use chrono::Utc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use win_api_wrappers::process::{self, StartupInfo};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
@@ -12,13 +15,22 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{self, CommandLine, Pipe, WideString};
 use windows::Win32::Foundation::WAIT_TIMEOUT;
 use windows::Win32::System::Threading::{
-    CREATE_NEW_CONSOLE, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
+    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use crate::broker::executor::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, ProcessStartedCallback, tail_utf8};
+use crate::broker::executor::{
+    ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, OperationCanceled, ProcessStartedCallback, tail_utf8,
+};
 use crate::broker::operation_tracker::OperationTracker;
 use crate::broker::policy_security;
+
+/// How long a canceled process is given to exit after the graceful console
+/// ctrl event before it is forcefully terminated.
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(60);
+
+/// Granularity of the wait loop used to observe cancelation requests.
+const WAIT_SLICE_MS: u32 = 500;
 
 /// Create a process under the given token and wait for exit.
 ///
@@ -29,6 +41,10 @@ use crate::broker::policy_security;
 /// [`crate::broker::executor::MAX_CAPTURED_OUTPUT_BYTES`]); otherwise no output is captured.
 ///
 /// Returns the process exit code and (when captured) its output.
+///
+/// When `cancel` is provided and fires while the process is running, the process is
+/// stopped (gracefully first, forcefully after [`CANCEL_GRACE_PERIOD`]) and an error
+/// chain containing [`OperationCanceled`] is returned.
 #[allow(clippy::cast_possible_wrap)]
 pub(super) fn create_process(
     token: &Token,
@@ -37,6 +53,7 @@ pub(super) fn create_process(
     capture: bool,
     requires_elevation: bool,
     process_started: Option<ProcessStartedCallback>,
+    cancel: Option<&CancellationToken>,
 ) -> anyhow::Result<ExecutionOutput> {
     let cmd_line = CommandLine::new(command.to_vec());
 
@@ -93,7 +110,9 @@ pub(super) fn create_process(
         (None, None, None)
     };
 
-    let creation_flags = CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS;
+    // `CREATE_NEW_PROCESS_GROUP` makes the child's PID a process group ID so a
+    // console ctrl event can later target the whole group for graceful cancelation.
+    let creation_flags = CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP | NORMAL_PRIORITY_CLASS;
 
     debug!("Calling process::create_process_as_user");
 
@@ -166,28 +185,40 @@ pub(super) fn create_process(
         })
     });
 
-    let timeout_ms = operation_timeout_ms();
-    if process_info
-        .process
-        .wait(Some(timeout_ms))
-        .context("failed to wait for process")?
-        == WAIT_TIMEOUT
-    {
-        warn!(
-            session_id,
-            pid = process_info.process_id,
-            timeout_ms,
-            "Process timed out; terminating"
-        );
-        process_info
+    let deadline = Instant::now() + OperationTracker::operation_timeout();
+    loop {
+        if let Some(cancel) = cancel
+            && cancel.is_cancelled()
+        {
+            stop_canceled_process(&process_info, session_id)?;
+            return Err(anyhow::Error::new(OperationCanceled));
+        }
+
+        if process_info
             .process
-            .terminate(1)
-            .context("failed to terminate timed-out process")?;
-        let _ = process_info.process.wait(None);
-        bail!(
-            "operation timed out after {} seconds",
-            OperationTracker::operation_timeout().as_secs()
-        );
+            .wait(Some(WAIT_SLICE_MS))
+            .context("failed to wait for process")?
+            != WAIT_TIMEOUT
+        {
+            break;
+        }
+
+        if Instant::now() >= deadline {
+            warn!(
+                session_id,
+                pid = process_info.process_id,
+                "Process timed out; terminating"
+            );
+            process_info
+                .process
+                .terminate(1)
+                .context("failed to terminate timed-out process")?;
+            let _ = process_info.process.wait(None);
+            bail!(
+                "operation timed out after {} seconds",
+                OperationTracker::operation_timeout().as_secs()
+            );
+        }
     }
 
     let exit_code = process_info
@@ -278,8 +309,83 @@ fn resolve_executable(
     bail!("trusted executable '{exe_name}' not found in target user PATH");
 }
 
-fn operation_timeout_ms() -> u32 {
-    u32::try_from(OperationTracker::operation_timeout().as_millis()).unwrap_or(u32::MAX)
+/// Stop a process whose operation was canceled.
+///
+/// Attempts a graceful stop first by delivering a `CTRL_BREAK_EVENT` to the child's
+/// process group, then waits up to [`CANCEL_GRACE_PERIOD`] for the process to exit.
+/// If the event cannot be delivered or the grace period elapses, the root process is
+/// forcefully terminated.
+fn stop_canceled_process(process_info: &process::ProcessInformation, session_id: u32) -> anyhow::Result<()> {
+    let pid = process_info.process_id;
+    info!(session_id, pid, "Cancelation requested; stopping process");
+
+    match send_ctrl_break(pid) {
+        Ok(()) => {
+            let grace_ms = u32::try_from(CANCEL_GRACE_PERIOD.as_millis()).expect("grace period fits into u32");
+            if process_info
+                .process
+                .wait(Some(grace_ms))
+                .context("failed to wait for canceled process")?
+                != WAIT_TIMEOUT
+            {
+                info!(session_id, pid, "Canceled process exited after ctrl event");
+                return Ok(());
+            }
+            warn!(session_id, pid, "Canceled process ignored ctrl event; terminating");
+        }
+        Err(error) => {
+            warn!(
+                session_id,
+                pid,
+                error = format!("{error:#}"),
+                "Failed to deliver ctrl event to canceled process; terminating"
+            );
+        }
+    }
+
+    process_info
+        .process
+        .terminate(1)
+        .context("failed to terminate canceled process")?;
+    let _ = process_info.process.wait(None);
+    info!(session_id, pid, "Canceled process terminated");
+
+    Ok(())
+}
+
+/// Deliver a `CTRL_BREAK_EVENT` to the process group identified by `pid`.
+///
+/// Console attachment is per-process state, so concurrent deliveries are serialized.
+/// The broker temporarily attaches to the child's console; the event only targets the
+/// child's process group (the broker is not part of it), so the broker is unaffected.
+fn send_ctrl_break(pid: u32) -> anyhow::Result<()> {
+    use windows::Win32::System::Console::{AttachConsole, CTRL_BREAK_EVENT, FreeConsole, GenerateConsoleCtrlEvent};
+
+    static CONSOLE_LOCK: Mutex<()> = Mutex::new(());
+
+    let _guard = CONSOLE_LOCK.lock().expect("console lock poisoned");
+
+    // SAFETY: FFI call with no outstanding preconditions; detaching from a console we
+    // are not attached to simply fails and is ignored.
+    unsafe {
+        let _ = FreeConsole();
+    }
+
+    // SAFETY: FFI call with no outstanding preconditions; `pid` identifies the target
+    // process whose console we attach to, failure is reported as an error.
+    unsafe { AttachConsole(pid) }.context("AttachConsole failed")?;
+
+    // SAFETY: FFI call with no outstanding preconditions; the calling process is
+    // attached to the target console and `pid` is a process group ID because the child
+    // was created with `CREATE_NEW_PROCESS_GROUP`.
+    let result = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) }.context("GenerateConsoleCtrlEvent failed");
+
+    // SAFETY: FFI call with no outstanding preconditions; detach from the child's console.
+    unsafe {
+        let _ = FreeConsole();
+    }
+
+    result
 }
 
 fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<String, String>) -> bool {
