@@ -7,7 +7,7 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-IFS=',' read -r -a hubs <<< "${PSU_HUBS:-default}"
+IFS=',' read -r -a hubs <<< "${PSU_HUBS:-}"
 hubs_json=""
 for hub in "${hubs[@]}"; do
     hub="${hub#${hub%%[![:space:]]*}}"
@@ -21,10 +21,6 @@ for hub in "${hubs[@]}"; do
     fi
     hubs_json="${hubs_json}\"$(json_escape "${hub}")\""
 done
-
-if [ -z "${hubs_json}" ]; then
-    hubs_json='"default"'
-fi
 
 if [ -z "${PSU_APP_TOKEN:-}" ]; then
     echo "PSU_APP_TOKEN is required" >&2
@@ -48,7 +44,7 @@ cat > "${DAGENT_CONFIG_PATH}/agent.json" <<EOF
 ${app_token_property}
     "Hubs": [ ${hubs_json} ],
     "PowerShell": {
-      "ExecutablePath": "$(json_escape "${POWERSHELL_EXECUTABLE:-pwsh}")"
+      "ExecutablePath": "$(json_escape "${PSU_POWERSHELL_EXECUTABLE:-${POWERSHELL_EXECUTABLE:-pwsh}}")"
     }
   }
 }

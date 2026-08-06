@@ -120,7 +120,8 @@ jobs:
     steps:
       - name: Download artifacts
         run: |
-          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n webapp-player -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n webapp-player -n docker -n devolutions-agent-signed -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          Move-Item -Path devolutions-agent-signed -Destination devolutions-agent
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
         shell: pwsh
         env:
@@ -158,6 +159,15 @@ jobs:
 
             Copy-Item -Path docker/Linux/Dockerfile     -Destination $PkgDir
             Copy-Item -Path docker/Linux/entrypoint.ps1 -Destination $PkgDir
+
+            $AgentPkgDir = Join-Path docker agent $Arch.Docker
+            New-Item -ItemType Directory -Path $AgentPkgDir -Force | Out-Null
+            echo "agent-package-path-$($Arch.Docker)=$AgentPkgDir" >> $Env:GITHUB_OUTPUT
+
+            Copy-Item -Path (Join-Path devolutions-agent linux $Arch.Ci devolutions-agent) -Destination $AgentPkgDir
+            chmod +x (Join-Path $AgentPkgDir devolutions-agent)
+            Copy-Item -Path docker/AgentLinux/Dockerfile -Destination $AgentPkgDir
+            Copy-Item -Path docker/devolutions-agent/docker/devolutions-agent-entrypoint.sh -Destination $AgentPkgDir
           }
         shell: pwsh
 
@@ -206,6 +216,8 @@ jobs:
 
           $Amd64Context = "${{ steps.prepare-artifacts.outputs.package-path-amd64 }}"
           $Arm64Context = "${{ steps.prepare-artifacts.outputs.package-path-arm64 }}"
+          $AgentAmd64Context = "${{ steps.prepare-artifacts.outputs.agent-package-path-amd64 }}"
+          $AgentArm64Context = "${{ steps.prepare-artifacts.outputs.agent-package-path-arm64 }}"
 
           foreach ($P in @(@{Platform='linux/amd64'; Tag='amd64'; Context=$Amd64Context}, @{Platform='linux/arm64'; Tag='arm64'; Context=$Arm64Context})) {
             $Args = @('buildx', 'build', "--platform=$($P.Platform)", "--tag=${ImageName}:${Version}-$($P.Tag)", $P.Context)
@@ -213,12 +225,21 @@ jobs:
             docker @Args
           }
 
+          $AgentImageName = "devolutions/devolutions-agent"
+          foreach ($P in @(@{Platform='linux/amd64'; Tag='amd64'; Context=$AgentAmd64Context}, @{Platform='linux/arm64'; Tag='arm64'; Context=$AgentArm64Context})) {
+            $Args = @('buildx', 'build', "--platform=$($P.Platform)", "--tag=${AgentImageName}:${Version}-$($P.Tag)", $P.Context)
+            if (-Not $DryRun) { $Args += '--push' }
+            docker @Args
+          }
+
           if (-Not $DryRun) {
-            foreach ($Tag in @($Version, 'latest')) {
-              docker buildx imagetools create `
-                --tag "${ImageName}:${Tag}" `
-                "${ImageName}:${Version}-amd64" `
-                "${ImageName}:${Version}-arm64"
+            foreach ($Image in @($ImageName, $AgentImageName)) {
+              foreach ($Tag in @($Version, 'latest')) {
+                docker buildx imagetools create `
+                  --tag "${Image}:${Tag}" `
+                  "${Image}:${Version}-amd64" `
+                  "${Image}:${Version}-arm64"
+              }
             }
           } else {
             Write-Host "Dry run: skipping manifest creation and push"
@@ -226,6 +247,8 @@ jobs:
 
           echo "image-name=${ImageName}:${Version}" >> $Env:GITHUB_OUTPUT
           echo "latest-image-name=${ImageName}:latest" >> $Env:GITHUB_OUTPUT
+          echo "agent-image-name=${AgentImageName}:${Version}" >> $Env:GITHUB_OUTPUT
+          echo "agent-latest-image-name=${AgentImageName}:latest" >> $Env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Install Cosign
@@ -237,6 +260,8 @@ jobs:
         run: |
           cosign sign --yes --recursive ${{ steps.build-container.outputs.image-name }}
           cosign sign --yes --recursive ${{ steps.build-container.outputs.latest-image-name }}
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.agent-image-name }}
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.agent-latest-image-name }}
 
   github-release:
     name: GitHub release
