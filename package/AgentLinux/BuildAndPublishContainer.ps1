@@ -20,6 +20,10 @@ param(
 
     [string] $MultiPwshVersion = 'v0.17.0',
 
+    [string] $MultiPwshX64Sha256 = 'a0da12c5ac8bdbc72ce307d04e46768f7193830fb83d089473c3460ecd0ccbbb',
+
+    [string] $MultiPwshArm64Sha256 = 'bb232561f8beb2e8f3e7abc607497e15a2205c9865e0ec676496909b3320df3d',
+
     [switch] $Push,
 
     [bool] $TagLatest = $true
@@ -39,6 +43,12 @@ if ([string]::IsNullOrWhiteSpace($MultiPwshVersion)) {
     throw 'MultiPwshVersion must not be empty'
 }
 
+foreach ($Checksum in @($MultiPwshX64Sha256, $MultiPwshArm64Sha256)) {
+    if ($Checksum -notmatch '^[a-fA-F0-9]{64}$') {
+        throw 'Multi-pwsh checksums must be SHA-256 hashes'
+    }
+}
+
 if (-not $Push -and $Platform.Count -ne 1) {
     throw 'Specify exactly one Platform when building locally, or use -Push to publish a multi-platform image'
 }
@@ -54,6 +64,8 @@ $buildArgs = @(
     '--platform', ($Platform -join ','),
     '--build-arg', 'BUILD_TARGET=local',
     '--build-arg', "MULTI_PWSH_VERSION=$MultiPwshVersion",
+    '--build-arg', "MULTI_PWSH_X64_SHA256=$MultiPwshX64Sha256",
+    '--build-arg', "MULTI_PWSH_ARM64_SHA256=$MultiPwshArm64Sha256",
     '--tag', $versionedImage
 )
 

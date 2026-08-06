@@ -18,6 +18,8 @@ RUN rm -f rust-toolchain.toml \
 FROM debian:trixie-slim AS runtime-base
 
 ARG MULTI_PWSH_VERSION=v0.17.0
+ARG MULTI_PWSH_X64_SHA256=a0da12c5ac8bdbc72ce307d04e46768f7193830fb83d089473c3460ecd0ccbbb
+ARG MULTI_PWSH_ARM64_SHA256=bb232561f8beb2e8f3e7abc607497e15a2205c9865e0ec676496909b3320df3d
 ARG TARGETARCH
 
 LABEL maintainer="Devolutions Inc."
@@ -33,13 +35,14 @@ ENV DAGENT_CONFIG_PATH=/etc/devolutions-agent \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl libicu76 unzip \
     && case "${TARGETARCH}" in \
-        amd64) multi_pwsh_arch=x64 ;; \
-        arm64) multi_pwsh_arch=arm64 ;; \
+        amd64) multi_pwsh_arch=x64; multi_pwsh_sha256="${MULTI_PWSH_X64_SHA256}" ;; \
+        arm64) multi_pwsh_arch=arm64; multi_pwsh_sha256="${MULTI_PWSH_ARM64_SHA256}" ;; \
         *) echo "unsupported Docker architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
     && curl --fail --location --silent --show-error \
         "https://github.com/Devolutions/multi-pwsh/releases/download/${MULTI_PWSH_VERSION}/multi-pwsh-linux-${multi_pwsh_arch}.zip" \
         --output /tmp/multi-pwsh.zip \
+    && echo "${multi_pwsh_sha256}  /tmp/multi-pwsh.zip" | sha256sum --check --status \
     && unzip -q /tmp/multi-pwsh.zip -d /tmp/multi-pwsh \
     && install -m 0755 /tmp/multi-pwsh/multi-pwsh /usr/local/bin/multi-pwsh \
     && multi-pwsh install stable --scope machine \
