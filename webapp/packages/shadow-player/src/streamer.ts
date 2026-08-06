@@ -19,6 +19,9 @@ export type ShadowPlayerError =
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
 
+const LIVE_EDGE_THRESHOLD_SECONDS = 5;
+const LIVE_EDGE_SAFETY_MARGIN_SECONDS = 0.25;
+
 export class ShadowPlayer extends HTMLElement {
   shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
@@ -165,9 +168,14 @@ export class ShadowPlayer extends HTMLElement {
       }
       if (ev.type === 'metadata') {
         const codec = ev.codec;
-        reactiveSourceBuffer = new ReactiveSourceBuffer(mediaSource, codec, () => {
-          this.websocket?.send({ type: 'pull' });
-        });
+        reactiveSourceBuffer = new ReactiveSourceBuffer(
+          mediaSource,
+          codec,
+          () => {
+            this.websocket?.send({ type: 'pull' });
+          },
+          () => this.catchUpToLiveEdge()
+        );
         this._buffer = reactiveSourceBuffer;
       }
 
@@ -190,13 +198,6 @@ export class ShadowPlayer extends HTMLElement {
           console.log(
             `[shadow-player] chunk appended: duration=${v.duration.toFixed(2)} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} readyState=${v.readyState}`
           );
-        }
-
-        if (
-          this._videoElement.buffered.length > 0 &&
-          this._videoElement.buffered.end(0) - this._videoElement.currentTime > 5
-        ) {
-          this._videoElement.currentTime = this._videoElement.buffered.end(0);
         }
       }
 
@@ -285,6 +286,29 @@ export class ShadowPlayer extends HTMLElement {
   private showReplayButton() {
     if (this._replayButton) {
       this._replayButton.classList.add('visible');
+    }
+  }
+
+  private catchUpToLiveEdge() {
+    const video = this._videoElement;
+    if (!video || video.buffered.length === 0) {
+      return;
+    }
+
+    const latestRangeIndex = video.buffered.length - 1;
+    const latestRangeStart = video.buffered.start(latestRangeIndex);
+    const latestRangeEnd = video.buffered.end(latestRangeIndex);
+    const isOutsideLatestRange =
+      video.currentTime < latestRangeStart || video.currentTime >= latestRangeEnd;
+
+    if (
+      isOutsideLatestRange ||
+      latestRangeEnd - video.currentTime > LIVE_EDGE_THRESHOLD_SECONDS
+    ) {
+      video.currentTime = Math.max(
+        latestRangeStart,
+        latestRangeEnd - LIVE_EDGE_SAFETY_MARGIN_SECONDS
+      );
     }
   }
 
