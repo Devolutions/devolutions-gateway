@@ -19,6 +19,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
+use crate::broker::event_channel::{OperationEventSink, OutputStream};
 use crate::broker::executor::{
     ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, OperationCanceled, ProcessStartedCallback, tail_utf8,
 };
@@ -32,12 +33,39 @@ const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(60);
 /// Granularity of the wait loop used to observe Cancellation requests.
 const WAIT_SLICE_MS: u32 = 500;
 
+/// Output capture configuration for [`create_process`].
+#[derive(Clone, Copy)]
+pub(super) struct OutputCapture<'a> {
+    /// Whether the child's stdout/stderr are redirected and captured at all.
+    pub(super) enabled: bool,
+    /// Event sink receiving raw output chunks as they arrive (when capturing).
+    pub(super) event_sink: Option<&'a OperationEventSink>,
+}
+
+impl<'a> OutputCapture<'a> {
+    pub(super) fn disabled() -> Self {
+        Self {
+            enabled: false,
+            event_sink: None,
+        }
+    }
+
+    pub(super) fn new(enabled: bool, event_sink: Option<&'a OperationEventSink>) -> Self {
+        Self {
+            enabled,
+            event_sink: if enabled { event_sink } else { None },
+        }
+    }
+}
+
 /// Create a process under the given token and wait for exit.
 ///
 /// This is the unified process-creation path used by both SYSTEM and current-user modes.
 /// The process always runs with no visible window (`STARTF_USESHOWWINDOW` + `SW_HIDE`, the
 /// same approach `devolutions-session` uses). When `capture` is true, the child's
-/// stdout+stderr are redirected into a single pipe and returned (tail-truncated to
+/// stdout and stderr are redirected into two separate pipes; raw chunks are forwarded to
+/// `event_sink` (when present) as they arrive, and a tail-truncated combined copy is
+/// returned in [`ExecutionOutput`] (limited to
 /// [`crate::broker::executor::MAX_CAPTURED_OUTPUT_BYTES`]); otherwise no output is captured.
 ///
 /// Returns the process exit code and (when captured) its output.
@@ -50,11 +78,13 @@ pub(super) fn create_process(
     token: &Token,
     command: &[String],
     session_id: u32,
-    capture: bool,
+    capture: OutputCapture<'_>,
     requires_elevation: bool,
     process_started: Option<ProcessStartedCallback>,
     cancel: Option<&CancellationToken>,
 ) -> anyhow::Result<ExecutionOutput> {
+    let event_sink = capture.event_sink;
+    let capture = capture.enabled;
     let cmd_line = CommandLine::new(command.to_vec());
 
     debug!(session_id, capture, "Building process creation parameters");
@@ -93,9 +123,11 @@ pub(super) fn create_process(
         ..Default::default()
     }
     .init();
-    let (output_read, held_output_write, held_stdin_read) = if capture {
+    let (stdout_read, stderr_read, held_write_ends, held_stdin_read) = if capture {
         let (out_read, out_write) =
-            Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create output capture pipe")?;
+            Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stdout capture pipe")?;
+        let (err_read, err_write) =
+            Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stderr capture pipe")?;
         // Empty stdin (write end closed immediately so the child reads EOF).
         let (in_read, in_write) = Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stdin pipe")?;
         drop(in_write);
@@ -103,11 +135,16 @@ pub(super) fn create_process(
         startup_info.flags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
         startup_info.std_input = in_read.handle.raw();
         startup_info.std_output = out_write.handle.raw();
-        startup_info.std_error = out_write.handle.raw();
+        startup_info.std_error = err_write.handle.raw();
 
-        (Some(out_read), Some(out_write), Some(in_read))
+        (
+            Some(out_read),
+            Some(err_read),
+            Some((out_write, err_write)),
+            Some(in_read),
+        )
     } else {
-        (None, None, None)
+        (None, None, None, None)
     };
 
     // `CREATE_NEW_PROCESS_GROUP` makes the child's PID a process group ID so a
@@ -151,8 +188,8 @@ pub(super) fn create_process(
         process_started(started_at);
     }
 
-    // Close our copies of the child's handles so the read end observes EOF on exit.
-    drop(held_output_write);
+    // Close our copies of the child's handles so the read ends observe EOF on exit.
+    drop(held_write_ends);
     drop(held_stdin_read);
 
     info!(
@@ -162,28 +199,11 @@ pub(super) fn create_process(
         "Process spawned, waiting for exit"
     );
 
-    // Drain the pipe on a separate thread so a child producing more output than the pipe
-    // buffer can hold does not deadlock against our wait-for-exit.
-    let reader = output_read.map(|mut pipe| {
-        std::thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let mut chunk = [0u8; 8192];
-            loop {
-                match pipe.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        buffer.extend_from_slice(&chunk[..read]);
-                        if buffer.len() > MAX_CAPTURED_OUTPUT_BYTES {
-                            let excess = buffer.len() - MAX_CAPTURED_OUTPUT_BYTES;
-                            buffer.drain(..excess);
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            buffer
-        })
-    });
+    // Drain each pipe on a separate thread so a child producing more output than a pipe
+    // buffer can hold does not deadlock against our wait-for-exit. Chunks are forwarded
+    // to the event sink as they arrive; a bounded tail is kept for diagnostics.
+    let stdout_reader = stdout_read.map(|pipe| spawn_output_reader(pipe, event_sink.cloned(), OutputStream::Stdout));
+    let stderr_reader = stderr_read.map(|pipe| spawn_output_reader(pipe, event_sink.cloned(), OutputStream::Stderr));
 
     let deadline = Instant::now() + OperationTracker::operation_timeout();
     // INVARIANT: whenever the loop breaks, the process has exited (or was terminated),
@@ -220,11 +240,10 @@ pub(super) fn create_process(
         }
     };
 
-    // Join the reader thread on every outcome so it is never left detached.
-    let stdout = match reader {
-        Some(handle) => tail_utf8(&handle.join().unwrap_or_default()),
-        None => String::new(),
-    };
+    // Join the reader threads on every outcome so they are never left detached.
+    let stdout_tail = stdout_reader.map(|handle| handle.join().unwrap_or_default());
+    let stderr_tail = stderr_reader.map(|handle| handle.join().unwrap_or_default());
+    let stdout = combined_output_tail(stdout_tail, stderr_tail);
 
     match outcome {
         WaitOutcome::Canceled => Err(anyhow::Error::new(OperationCanceled)),
@@ -255,6 +274,60 @@ enum WaitOutcome {
     Canceled,
     /// The operation timeout elapsed and the process was terminated.
     TimedOut,
+}
+
+/// Spawn a thread draining one output pipe until EOF.
+///
+/// Raw chunks are forwarded to the event sink (when present) as they arrive; the
+/// thread returns a tail-bounded copy of the stream for diagnostics.
+fn spawn_output_reader(
+    mut pipe: Pipe,
+    sink: Option<OperationEventSink>,
+    stream: OutputStream,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if let Some(sink) = &sink {
+                        match stream {
+                            OutputStream::Stdout => sink.stdout(&chunk[..read]),
+                            OutputStream::Stderr => sink.stderr(&chunk[..read]),
+                        }
+                    }
+                    buffer.extend_from_slice(&chunk[..read]);
+                    if buffer.len() > MAX_CAPTURED_OUTPUT_BYTES {
+                        let excess = buffer.len() - MAX_CAPTURED_OUTPUT_BYTES;
+                        buffer.drain(..excess);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        buffer
+    })
+}
+
+/// Combine the captured stdout and stderr tails into the single diagnostic string
+/// kept in [`ExecutionOutput::stdout`] (used e.g. for pre-command failure notes).
+fn combined_output_tail(stdout_tail: Option<Vec<u8>>, stderr_tail: Option<Vec<u8>>) -> String {
+    let mut combined = stdout_tail.unwrap_or_default();
+    if let Some(stderr_tail) = stderr_tail
+        && !stderr_tail.is_empty()
+    {
+        if !combined.is_empty() && !combined.ends_with(b"\n") {
+            combined.push(b'\n');
+        }
+        combined.extend_from_slice(&stderr_tail);
+    }
+    if combined.is_empty() {
+        String::new()
+    } else {
+        tail_utf8(&combined)
+    }
 }
 
 /// Resolve an executable name to its full path using the given environment's PATH.

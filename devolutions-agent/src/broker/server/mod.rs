@@ -253,6 +253,7 @@ impl BrokerState {
                 scope: request.options.scope,
                 capture_output: request.capture_output,
                 cancel_token: tokio_util::sync::CancellationToken::new(),
+                event_sink: None,
             };
 
             let owner_key = request.client_owner_key();
@@ -260,12 +261,45 @@ impl BrokerState {
                 .tracker
                 .register(&owner_key, &request, generated_operation_id)
                 .map_err(|error| error_response(ErrorCode::Conflict, format!("{error:#}")))?;
+            // On idempotent resubmission, return the originally created channel descriptor.
+            #[cfg_attr(
+                not(windows),
+                expect(unused_mut, reason = "only mutated on Windows where event channels exist")
+            )]
+            let mut event_channel = self
+                .tracker
+                .get(&operation_id)
+                .and_then(|operation| operation.event_channel);
             if is_new_operation {
                 // The executor observes the tracked operation's cancel token so a later
                 // cancel request can terminate the spawned process.
                 if let Some(tracked) = self.tracker.get(&operation_id) {
                     context.cancel_token = tracked.cancel_token;
                 }
+
+                // Open the per-operation event channel before returning the response so
+                // the advertised pipe is immediately connectable. Best-effort: the
+                // operation proceeds without a channel if creation fails.
+                #[cfg(windows)]
+                {
+                    let operation_key = operation_id.to_string();
+                    match crate::broker::event_channel::open_operation_channel(&operation_key, user_sid) {
+                        Ok((sink, descriptor)) => {
+                            self.tracker
+                                .set_event_channel(&operation_key, sink.clone(), descriptor.clone());
+                            context.event_sink = Some(sink);
+                            event_channel = Some(descriptor);
+                        }
+                        Err(error) => {
+                            warn!(
+                                operation_id = %operation_key,
+                                error = format!("{error:#}"),
+                                "Failed to open per-operation event channel; continuing without it"
+                            );
+                        }
+                    }
+                }
+
                 execution::spawn_execution(
                     Arc::clone(&self.executor),
                     self.tracker.clone(),
@@ -283,8 +317,7 @@ impl BrokerState {
                 operation_id,
                 status,
                 submitted_at,
-                // The per-operation event channel is not implemented yet.
-                event_channel: None,
+                event_channel,
             })
         } else {
             None
@@ -820,8 +853,16 @@ mod tests {
     }
 
     async fn submit_operation(state: &BrokerState, request: &PackageRequest) -> OperationSubmission {
+        // Use the real test-process user SID: the per-operation event pipe ACL only
+        // admits the requesting client user (plus SYSTEM/Administrators).
+        let user_sid = win_api_wrappers::process::Process::current_process()
+            .token(windows::Win32::Security::TOKEN_QUERY)
+            .expect("open current process token")
+            .sid_and_attributes()
+            .expect("query token user SID")
+            .sid;
         let response = state
-            .execute(request.clone(), &test_sid())
+            .execute(request.clone(), &user_sid)
             .await
             .expect("execute request accepted");
         response.operation.expect("operation submitted")
@@ -954,5 +995,144 @@ mod tests {
             .await
             .expect_err("foreign operation is rejected");
         assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    // ─── Event channel ───────────────────────────────────────────────────────
+
+    use now_policy_api::event_channel::{
+        EVENT_CHANNEL_VERSION_MAJOR, EVENT_CHANNEL_VERSION_MINOR, EventFrame, EventFrameDecoder,
+    };
+
+    /// Executor that emits output through the operation's event sink, honoring `capture_output`.
+    struct StreamingExecutor;
+
+    #[async_trait]
+    impl CommandExecutor for StreamingExecutor {
+        async fn execute(
+            &self,
+            ctx: &ExecutionContext,
+            process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            if let Some(process_started) = process_started {
+                process_started(Utc::now());
+            }
+            if ctx.capture_output
+                && let Some(sink) = &ctx.event_sink
+            {
+                sink.stdout("installing π...\n".as_bytes());
+                sink.stderr(b"warning: low disk space\n");
+            }
+            Ok(ExecutionOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                started_at: Some(Utc::now()),
+            })
+        }
+    }
+
+    /// Connect to an operation's event pipe (bare name) and read frames until `Finish`.
+    async fn read_channel_frames(pipe_name: &str) -> Vec<EventFrame> {
+        use tokio::io::AsyncReadExt as _;
+
+        let path = format!(r"\\.\pipe\{pipe_name}");
+        let mut client = tokio::net::windows::named_pipe::ClientOptions::new()
+            .write(false)
+            .open(&path)
+            .expect("connect to event channel pipe");
+
+        let mut decoder = EventFrameDecoder::new();
+        let mut frames = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = match client.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(_) => break,
+            };
+            decoder.extend(&buffer[..read]);
+            while let Some(frame) = decoder.next_frame().expect("valid frame stream") {
+                let finish = frame == EventFrame::Finish;
+                frames.push(frame);
+                if finish {
+                    return frames;
+                }
+            }
+        }
+        panic!("event channel stream ended without a Finish frame");
+    }
+
+    #[tokio::test]
+    async fn execute_returns_connectable_event_channel_with_status_frames_only() {
+        let state = state_with_executor(Arc::new(InstantExecutor));
+        let request = request(); // capture_output: false.
+        let operation = submit_operation(&state, &request).await;
+
+        let channel = operation.event_channel.expect("event channel advertised");
+        assert_eq!(channel.kind, api::EventChannelKind::LocalPipe);
+        assert_eq!(
+            channel.path,
+            format!("Devolutions.Now.PackageBroker.Operation.{}", operation.operation_id)
+        );
+
+        wait_for_status(&state, &request, &operation.operation_id).await;
+
+        let frames = read_channel_frames(&channel.path).await;
+        assert_eq!(
+            frames.first(),
+            Some(&EventFrame::Hello {
+                version_major: EVENT_CHANNEL_VERSION_MAJOR,
+                version_minor: EVENT_CHANNEL_VERSION_MINOR,
+            })
+        );
+        assert_eq!(frames.last(), Some(&EventFrame::Finish));
+        assert!(
+            frames[1..frames.len() - 1]
+                .iter()
+                .all(|frame| *frame == EventFrame::StatusUpdated),
+            "CaptureOutput=false must yield status frames only: {frames:?}"
+        );
+        assert!(
+            frames[1..].contains(&EventFrame::StatusUpdated),
+            "at least the terminal transition must be signalled"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_streams_captured_output_over_event_channel() {
+        let state = state_with_executor(Arc::new(StreamingExecutor));
+        let mut request = request();
+        request.capture_output = true;
+        let operation = submit_operation(&state, &request).await;
+        let channel = operation.event_channel.expect("event channel advertised");
+
+        wait_for_status(&state, &request, &operation.operation_id).await;
+
+        let frames = read_channel_frames(&channel.path).await;
+        assert_eq!(
+            frames,
+            [
+                EventFrame::Hello {
+                    version_major: EVENT_CHANNEL_VERSION_MAJOR,
+                    version_minor: EVENT_CHANNEL_VERSION_MINOR,
+                },
+                EventFrame::StatusUpdated, // Running.
+                EventFrame::Stdout("installing π...\n".to_owned()),
+                EventFrame::Stderr("warning: low disk space\n".to_owned()),
+                EventFrame::StatusUpdated, // Completed.
+                EventFrame::Finish,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn resubmitted_request_reuses_the_same_event_channel() {
+        let state = state_with_executor(Arc::new(StuckExecutor));
+        let request = request();
+        let first = submit_operation(&state, &request).await;
+        let second = submit_operation(&state, &request).await;
+
+        assert_eq!(second.operation_id, first.operation_id);
+        assert_eq!(second.event_channel, first.event_channel);
+        assert!(first.event_channel.is_some());
     }
 }

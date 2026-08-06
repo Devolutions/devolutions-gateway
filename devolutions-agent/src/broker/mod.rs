@@ -6,6 +6,7 @@
 pub(crate) mod auth;
 pub mod command_builder;
 pub mod evaluator;
+pub mod event_channel;
 pub mod executor;
 pub mod operation_tracker;
 pub mod pipe;

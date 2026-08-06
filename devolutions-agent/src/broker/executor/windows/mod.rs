@@ -29,7 +29,7 @@ mod process;
 mod token;
 
 use privileges::SharedPrivileges;
-use process::create_process;
+use process::{OutputCapture, create_process};
 use token::{detect_running_as_system, find_user_session, get_elevated_token};
 
 /// Windows command executor using `win-api-wrappers` safe abstractions.
@@ -362,7 +362,15 @@ fn run_plan(
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false, requires_elevation, None, None) {
+        match create_process(
+            token,
+            &kill_cmd,
+            session_id,
+            OutputCapture::disabled(),
+            requires_elevation,
+            None,
+            None,
+        ) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
@@ -376,7 +384,7 @@ fn run_plan(
             token,
             command.args(),
             session_id,
-            ctx.capture_output,
+            OutputCapture::new(ctx.capture_output, ctx.event_sink.as_ref()),
             requires_elevation,
             None,
             Some(&ctx.cancel_token),
@@ -397,7 +405,7 @@ fn run_plan(
         token,
         command.args(),
         session_id,
-        ctx.capture_output,
+        OutputCapture::new(ctx.capture_output, ctx.event_sink.as_ref()),
         requires_elevation,
         process_started,
         Some(&ctx.cancel_token),
@@ -417,7 +425,7 @@ fn run_plan(
                         token,
                         command.args(),
                         session_id,
-                        false,
+                        OutputCapture::disabled(),
                         requires_elevation,
                         None,
                         Some(&ctx.cancel_token),
@@ -1943,6 +1951,7 @@ mod tests {
             scope: Some(Scope::User),
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
         };
 
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("elevated vcpkg should fail");
@@ -1967,6 +1976,7 @@ mod tests {
             scope: Some(Scope::User),
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
         };
 
         let executor = WindowsExecutor { is_system: true };
@@ -1995,6 +2005,7 @@ mod tests {
             scope: Some(Scope::User),
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
         };
 
         let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");
