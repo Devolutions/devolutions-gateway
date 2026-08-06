@@ -1,6 +1,7 @@
 # Devolutions Agent container
 
-The container includes `multi-pwsh` and installs its stable PowerShell channel at image build time.
+The container includes `multi-pwsh` and installs PowerShell 7.6.4 for the `devolutions-agent` user at image build time.
+Its `pwsh` alias resolves to that managed version for `multi-pwsh host` commands.
 PowerShell Universal is disabled by default and becomes available when both `PSU_SERVER_URL` and `PSU_APP_TOKEN` are specified.
 When enabled, PSU uses the managed `/usr/local/bin/pwsh` alias.
 
@@ -29,7 +30,7 @@ docker run --rm `
 | `PSU_AGENT_ID` | `devolutions-agent-linux` |
 | `PSU_DISPLAY_NAME` | `Devolutions Agent Linux` |
 | `PSU_HUBS` | Empty |
-| `PSU_POWERSHELL_EXECUTABLE` | `/usr/local/bin/pwsh` |
+| `PSU_POWERSHELL_EXECUTABLE` | `/var/lib/devolutions-agent/.pwsh/bin/pwsh` |
 
 Build one image locally:
 

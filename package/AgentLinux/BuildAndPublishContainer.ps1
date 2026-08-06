@@ -24,6 +24,8 @@ param(
 
     [string] $MultiPwshArm64Sha256 = 'bb232561f8beb2e8f3e7abc607497e15a2205c9865e0ec676496909b3320df3d',
 
+    [string] $MultiPwshPowerShellVersion = '7.6.4',
+
     [switch] $Push,
 
     [bool] $TagLatest = $true
@@ -41,6 +43,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 if ([string]::IsNullOrWhiteSpace($MultiPwshVersion)) {
     throw 'MultiPwshVersion must not be empty'
+}
+
+if ([string]::IsNullOrWhiteSpace($MultiPwshPowerShellVersion)) {
+    throw 'MultiPwshPowerShellVersion must not be empty'
 }
 
 foreach ($Checksum in @($MultiPwshX64Sha256, $MultiPwshArm64Sha256)) {
@@ -66,6 +72,7 @@ $buildArgs = @(
     '--build-arg', "MULTI_PWSH_VERSION=$MultiPwshVersion",
     '--build-arg', "MULTI_PWSH_X64_SHA256=$MultiPwshX64Sha256",
     '--build-arg', "MULTI_PWSH_ARM64_SHA256=$MultiPwshArm64Sha256",
+    '--build-arg', "MULTI_PWSH_POWERSHELL_VERSION=$MultiPwshPowerShellVersion",
     '--tag', $versionedImage
 )
 
