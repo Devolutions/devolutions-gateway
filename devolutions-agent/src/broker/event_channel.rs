@@ -386,9 +386,13 @@ mod windows_channel {
         // `SECURITY_ATTRIBUTES` living across the call. `security_attributes` owns the
         // structure and its descriptor and outlives the call; `CreateNamedPipeW` copies
         // the descriptor and does not retain the pointer.
+        //
+        // The pipe is created duplex even though the protocol is one-way (server to
+        // client): the DACL grants the client read access only, so nothing can be
+        // written back, while the server end keeps read access so the post-`Finish`
+        // drain wait below can block until the client closes its end.
         let server = unsafe {
             ServerOptions::new()
-                .access_inbound(false)
                 .first_pipe_instance(true)
                 .max_instances(1)
                 .create_with_security_attributes_raw(&pipe_path, security_attributes.as_mut_ptr().cast())
@@ -451,7 +455,9 @@ mod windows_channel {
 
         // All frames (ending with `Finish`) were handed to the pipe; give the
         // client a bounded amount of time to drain and close its end so buffered
-        // data is not discarded by our handle closing first.
+        // data is not discarded by our handle closing first. The client is
+        // restricted to read access by the DACL, so this read only ever completes
+        // when the client closes the pipe.
         let _ = tokio::time::timeout(CLIENT_DRAIN_TIMEOUT, async {
             let mut scratch = [0u8; 16];
             loop {
@@ -467,8 +473,9 @@ mod windows_channel {
 
     async fn write_frame(server: &mut NamedPipeServer, frame: &EventFrame) -> anyhow::Result<()> {
         let bytes = frame.encode().context("failed to encode event frame")?;
+        // No explicit flush: named pipe writes go straight to the kernel pipe
+        // buffer, and tokio's named pipe `flush` is a no-op anyway.
         server.write_all(&bytes).await.context("failed to write event frame")?;
-        server.flush().await.context("failed to flush event frame")?;
         Ok(())
     }
 

@@ -294,8 +294,12 @@ fn request_fingerprint(request: &PackageRequest) -> anyhow::Result<String> {
 }
 
 /// Notify the event channel that the operation reached a terminal status.
-fn notify_terminal(op: &TrackedOperation) {
-    if let Some(sink) = &op.event_sink {
+///
+/// The sink is taken out of the tracked operation: terminal statuses are final, so no further
+/// frames will ever be emitted, and dropping the tracker's handle lets the queued frames be
+/// released as soon as the pipe writer task is done instead of living until eviction.
+fn notify_terminal(op: &mut TrackedOperation) {
+    if let Some(sink) = op.event_sink.take() {
         sink.status_updated();
         sink.finish();
     }
