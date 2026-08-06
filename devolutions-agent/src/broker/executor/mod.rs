@@ -57,16 +57,16 @@ pub struct ExecutionContext {
     /// Since API v0.3 this only controls whether output frames are pushed on the
     /// per-operation event channel; output is no longer returned in status responses.
     pub capture_output: bool,
-    /// Fired when the client requests cancelation of the operation.
+    /// Fired when the client requests Cancellation of the operation.
     ///
     /// The executor terminates the in-flight process (gracefully first, forcefully
-    /// after a grace period) and reports the cancelation through an error chain
+    /// after a grace period) and reports the Cancellation through an error chain
     /// containing [`OperationCanceled`].
     pub cancel_token: CancellationToken,
 }
 
 /// Marker error reported by executors when an operation was terminated because its
-/// cancelation was requested through [`ExecutionContext::cancel_token`].
+/// Cancellation was requested through [`ExecutionContext::cancel_token`].
 #[derive(Debug)]
 pub struct OperationCanceled;
 
@@ -78,7 +78,7 @@ impl core::fmt::Display for OperationCanceled {
 
 impl core::error::Error for OperationCanceled {}
 
-/// Whether an executor error chain denotes a client-requested cancelation.
+/// Whether an executor error chain denotes a client-requested Cancellation.
 pub fn is_canceled_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| cause.is::<OperationCanceled>())
 }

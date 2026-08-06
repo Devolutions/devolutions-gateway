@@ -260,12 +260,11 @@ impl BrokerState {
                 .tracker
                 .register(&owner_key, &request, generated_operation_id)
                 .map_err(|error| error_response(ErrorCode::Conflict, format!("{error:#}")))?;
-            let tracked = self.tracker.get(&operation_id);
             if is_new_operation {
                 // The executor observes the tracked operation's cancel token so a later
                 // cancel request can terminate the spawned process.
-                if let Some(tracked) = &tracked {
-                    context.cancel_token = tracked.cancel_token.clone();
+                if let Some(tracked) = self.tracker.get(&operation_id) {
+                    context.cancel_token = tracked.cancel_token;
                 }
                 execution::spawn_execution(
                     Arc::clone(&self.executor),
@@ -274,7 +273,11 @@ impl BrokerState {
                     context,
                 );
             }
-            let status = tracked.map_or(OperationStatus::Starting, |operation| operation.status);
+            // Query the status after spawning so fast executions are reflected in the response.
+            let status = self
+                .tracker
+                .get(&operation_id)
+                .map_or(OperationStatus::Starting, |operation| operation.status);
 
             Some(OperationSubmission {
                 operation_id,
@@ -341,8 +344,8 @@ impl BrokerState {
         };
 
         let message = if operation.status == OperationStatus::Canceling {
-            info!(operation_id = %request.operation_id, "Cancelation requested for operation");
-            "cancelation requested; poll the status endpoint until a terminal status is reached".to_owned()
+            info!(operation_id = %request.operation_id, "Cancellation requested for operation");
+            "Cancellation requested; poll the status endpoint until a terminal status is reached".to_owned()
         } else {
             format!("operation already reached terminal status {:?}", operation.status)
         };
@@ -740,7 +743,7 @@ mod tests {
 
     // ─── Cancellation ────────────────────────────────────────────────────────
 
-    /// Executor that blocks until the operation's cancel token fires, then reports cancelation.
+    /// Executor that blocks until the operation's cancel token fires, then reports Cancellation.
     struct CancelableExecutor;
 
     #[async_trait]

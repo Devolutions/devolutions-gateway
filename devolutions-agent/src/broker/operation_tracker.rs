@@ -39,7 +39,7 @@ pub struct TrackedOperation {
     pub owner_key: String,
     /// When this entry should be evicted (set upon completion/failure).
     pub expires_at: Option<DateTime<Utc>>,
-    /// Fired when cancelation is requested, observed by the executor.
+    /// Fired when Cancellation is requested, observed by the executor.
     pub cancel_token: CancellationToken,
 }
 
@@ -185,7 +185,7 @@ impl OperationTracker {
         }
     }
 
-    /// Request cancelation of an operation owned by the authenticated client.
+    /// Request Cancellation of an operation owned by the authenticated client.
     ///
     /// Idempotent and asynchronous: a non-terminal operation is moved to `Canceling` and its
     /// cancel token is fired; the executor terminates the process and the operation later
@@ -196,7 +196,7 @@ impl OperationTracker {
         let op = state
             .operations
             .get_mut(request_id)
-            .filter(|operation| owner_key.is_empty() || operation.owner_key == owner_key)?;
+            .filter(|operation| operation.owner_key == owner_key)?;
 
         if !op.status.is_terminal() {
             op.status = OperationStatus::Canceling;

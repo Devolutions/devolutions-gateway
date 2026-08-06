@@ -29,7 +29,7 @@ use crate::broker::policy_security;
 /// ctrl event before it is forcefully terminated.
 const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(60);
 
-/// Granularity of the wait loop used to observe cancelation requests.
+/// Granularity of the wait loop used to observe Cancellation requests.
 const WAIT_SLICE_MS: u32 = 500;
 
 /// Create a process under the given token and wait for exit.
@@ -111,7 +111,7 @@ pub(super) fn create_process(
     };
 
     // `CREATE_NEW_PROCESS_GROUP` makes the child's PID a process group ID so a
-    // console ctrl event can later target the whole group for graceful cancelation.
+    // console ctrl event can later target the whole group for graceful Cancellation.
     let creation_flags = CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP | NORMAL_PRIORITY_CLASS;
 
     debug!("Calling process::create_process_as_user");
@@ -186,12 +186,14 @@ pub(super) fn create_process(
     });
 
     let deadline = Instant::now() + OperationTracker::operation_timeout();
-    loop {
+    // INVARIANT: whenever the loop breaks, the process has exited (or was terminated),
+    // so the capture reader below observes EOF and joining it cannot block.
+    let outcome = loop {
         if let Some(cancel) = cancel
             && cancel.is_cancelled()
         {
             stop_canceled_process(&process_info, session_id)?;
-            return Err(anyhow::Error::new(OperationCanceled));
+            break WaitOutcome::Canceled;
         }
 
         if process_info
@@ -200,7 +202,7 @@ pub(super) fn create_process(
             .context("failed to wait for process")?
             != WAIT_TIMEOUT
         {
-            break;
+            break WaitOutcome::Exited;
         }
 
         if Instant::now() >= deadline {
@@ -214,28 +216,45 @@ pub(super) fn create_process(
                 .terminate(1)
                 .context("failed to terminate timed-out process")?;
             let _ = process_info.process.wait(None);
-            bail!(
-                "operation timed out after {} seconds",
-                OperationTracker::operation_timeout().as_secs()
-            );
+            break WaitOutcome::TimedOut;
         }
-    }
+    };
 
-    let exit_code = process_info
-        .process
-        .exit_code()
-        .context("failed to get process exit code")?;
-
+    // Join the reader thread on every outcome so it is never left detached.
     let stdout = match reader {
         Some(handle) => tail_utf8(&handle.join().unwrap_or_default()),
         None => String::new(),
     };
 
-    Ok(ExecutionOutput {
-        exit_code: exit_code as i32,
-        stdout,
-        started_at: Some(started_at),
-    })
+    match outcome {
+        WaitOutcome::Canceled => Err(anyhow::Error::new(OperationCanceled)),
+        WaitOutcome::TimedOut => bail!(
+            "operation timed out after {} seconds",
+            OperationTracker::operation_timeout().as_secs()
+        ),
+        WaitOutcome::Exited => {
+            let exit_code = process_info
+                .process
+                .exit_code()
+                .context("failed to get process exit code")?;
+
+            Ok(ExecutionOutput {
+                exit_code: exit_code as i32,
+                stdout,
+                started_at: Some(started_at),
+            })
+        }
+    }
+}
+
+/// How the wait loop in [`create_process`] concluded.
+enum WaitOutcome {
+    /// The process exited on its own.
+    Exited,
+    /// The operation was canceled and the process was stopped.
+    Canceled,
+    /// The operation timeout elapsed and the process was terminated.
+    TimedOut,
 }
 
 /// Resolve an executable name to its full path using the given environment's PATH.
@@ -317,7 +336,7 @@ fn resolve_executable(
 /// forcefully terminated.
 fn stop_canceled_process(process_info: &process::ProcessInformation, session_id: u32) -> anyhow::Result<()> {
     let pid = process_info.process_id;
-    info!(session_id, pid, "Cancelation requested; stopping process");
+    info!(session_id, pid, "Cancellation requested; stopping process");
 
     match send_ctrl_break(pid) {
         Ok(()) => {

@@ -405,17 +405,30 @@ fn run_plan(
 
     // 4. Post-operation command — runs after the main command; failures are logged only
     //    so a completed main operation is never reported as failed by its post-hook.
+    //    Skipped when cancellation was requested, and cancellable while it runs.
     if let Some(post) = &ctx.post_command {
-        info!("Running post-operation command");
-        match prepare_shell_command(token, post) {
-            Ok(command) => {
-                match create_process(token, command.args(), session_id, false, requires_elevation, None, None) {
-                    Ok(out) if out.exit_code == 0 => {}
-                    Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
-                    Err(error) => warn!(%error, "Post-operation command failed"),
+        if ctx.cancel_token.is_cancelled() {
+            info!("Skipping post-operation command: operation was canceled");
+        } else {
+            info!("Running post-operation command");
+            match prepare_shell_command(token, post) {
+                Ok(command) => {
+                    match create_process(
+                        token,
+                        command.args(),
+                        session_id,
+                        false,
+                        requires_elevation,
+                        None,
+                        Some(&ctx.cancel_token),
+                    ) {
+                        Ok(out) if out.exit_code == 0 => {}
+                        Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
+                        Err(error) => warn!(%error, "Post-operation command failed"),
+                    }
                 }
+                Err(error) => warn!(%error, "Failed to prepare post-operation command"),
             }
-            Err(error) => warn!(%error, "Failed to prepare post-operation command"),
         }
     }
 
