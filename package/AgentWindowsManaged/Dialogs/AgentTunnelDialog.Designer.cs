@@ -39,6 +39,10 @@ namespace WixSharpSetup.Dialogs
             this.advertiseSubnets = new System.Windows.Forms.TextBox();
             this.labelSubnetsHint = new System.Windows.Forms.Label();
             this.labelDomains = new System.Windows.Forms.Label();
+            this.detectedDomainOptionPanel = new System.Windows.Forms.Panel();
+            this.includeDetectedDomain = new System.Windows.Forms.CheckBox();
+            this.detectedDomainOption = new System.Windows.Forms.Label();
+            this.detectedDomainStatus = new System.Windows.Forms.Label();
             this.advertiseDomains = new System.Windows.Forms.TextBox();
             this.labelDomainsHint = new System.Windows.Forms.Label();
             this.topBorder = new System.Windows.Forms.Panel();
@@ -54,6 +58,7 @@ namespace WixSharpSetup.Dialogs
             this.border1 = new System.Windows.Forms.Panel();
             this.middlePanel.SuspendLayout();
             this.tableLayoutPanel2.SuspendLayout();
+            this.detectedDomainOptionPanel.SuspendLayout();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -82,14 +87,17 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.Controls.Add(this.advertiseSubnets, 0, 3);
             this.tableLayoutPanel2.Controls.Add(this.labelSubnetsHint, 0, 4);
             this.tableLayoutPanel2.Controls.Add(this.labelDomains, 0, 5);
-            this.tableLayoutPanel2.Controls.Add(this.advertiseDomains, 0, 6);
-            this.tableLayoutPanel2.Controls.Add(this.labelDomainsHint, 0, 7);
+            this.tableLayoutPanel2.Controls.Add(this.detectedDomainOptionPanel, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.detectedDomainStatus, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.advertiseDomains, 0, 7);
+            this.tableLayoutPanel2.Controls.Add(this.labelDomainsHint, 0, 8);
             this.tableLayoutPanel2.AutoSize = true;
             this.tableLayoutPanel2.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 8;
+            this.tableLayoutPanel2.RowCount = 9;
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -120,7 +128,7 @@ namespace WixSharpSetup.Dialogs
             this.enrollmentString.Multiline = true;
             this.enrollmentString.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
             this.enrollmentString.Name = "enrollmentString";
-            this.enrollmentString.Size = new System.Drawing.Size(443, 60);
+            this.enrollmentString.Size = new System.Drawing.Size(443, 45);
             this.enrollmentString.TabIndex = 1;
             // labelSubnets
             //
@@ -165,25 +173,72 @@ namespace WixSharpSetup.Dialogs
             this.labelDomains.TabIndex = 5;
             this.labelDomains.Text = "[AgentTunnelDlgDomainsLabel]";
             //
+            // detectedDomainOptionPanel
+            //
+            this.detectedDomainOptionPanel.AutoSize = true;
+            this.detectedDomainOptionPanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.detectedDomainOptionPanel.Controls.Add(this.detectedDomainOption);
+            this.detectedDomainOptionPanel.Controls.Add(this.includeDetectedDomain);
+            this.detectedDomainOptionPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.detectedDomainOptionPanel.Location = new System.Drawing.Point(3, 181);
+            this.detectedDomainOptionPanel.Margin = new System.Windows.Forms.Padding(3);
+            this.detectedDomainOptionPanel.Name = "detectedDomainOptionPanel";
+            this.detectedDomainOptionPanel.Size = new System.Drawing.Size(443, 32);
+            this.detectedDomainOptionPanel.TabIndex = 6;
+            //
+            // includeDetectedDomain
+            //
+            this.includeDetectedDomain.AutoSize = true;
+            this.includeDetectedDomain.Location = new System.Drawing.Point(0, 1);
+            this.includeDetectedDomain.Margin = new System.Windows.Forms.Padding(0);
+            this.includeDetectedDomain.Name = "includeDetectedDomain";
+            this.includeDetectedDomain.Size = new System.Drawing.Size(15, 14);
+            this.includeDetectedDomain.TabIndex = 0;
+            this.includeDetectedDomain.UseVisualStyleBackColor = true;
+            //
+            // detectedDomainOption
+            //
+            this.detectedDomainOption.AutoSize = true;
+            this.detectedDomainOption.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.detectedDomainOption.Location = new System.Drawing.Point(21, 1);
+            this.detectedDomainOption.Margin = new System.Windows.Forms.Padding(3);
+            this.detectedDomainOption.MaximumSize = new System.Drawing.Size(415, 0);
+            this.detectedDomainOption.Name = "detectedDomainOption";
+            this.detectedDomainOption.Size = new System.Drawing.Size(300, 13);
+            this.detectedDomainOption.TabIndex = 1;
+            this.detectedDomainOption.Text = "[AgentTunnelDlgDetectedDomainOption]";
+            //
+            // detectedDomainStatus
+            //
+            this.detectedDomainStatus.AutoSize = true;
+            this.detectedDomainStatus.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.detectedDomainStatus.Location = new System.Drawing.Point(3, 181);
+            this.detectedDomainStatus.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.detectedDomainStatus.MaximumSize = new System.Drawing.Size(440, 0);
+            this.detectedDomainStatus.Name = "detectedDomainStatus";
+            this.detectedDomainStatus.Size = new System.Drawing.Size(300, 13);
+            this.detectedDomainStatus.TabIndex = 7;
+            this.detectedDomainStatus.Text = "[AgentTunnelDlgNoDetectedDomain]";
+            //
             // advertiseDomains
             //
             this.advertiseDomains.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.advertiseDomains.Location = new System.Drawing.Point(3, 181);
+            this.advertiseDomains.Location = new System.Drawing.Point(3, 204);
             this.advertiseDomains.Name = "advertiseDomains";
             this.advertiseDomains.Size = new System.Drawing.Size(443, 20);
-            this.advertiseDomains.TabIndex = 6;
+            this.advertiseDomains.TabIndex = 8;
             //
             // labelDomainsHint
             //
             this.labelDomainsHint.AutoSize = true;
             this.labelDomainsHint.BackColor = System.Drawing.Color.Transparent;
             this.labelDomainsHint.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.labelDomainsHint.Location = new System.Drawing.Point(3, 207);
+            this.labelDomainsHint.Location = new System.Drawing.Point(3, 230);
             this.labelDomainsHint.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
             this.labelDomainsHint.Name = "labelDomainsHint";
             this.labelDomainsHint.Size = new System.Drawing.Size(300, 13);
-            this.labelDomainsHint.TabIndex = 7;
+            this.labelDomainsHint.TabIndex = 9;
             this.labelDomainsHint.Text = "[AgentTunnelDlgDomainsHint]";
             //
             // topBorder
@@ -334,6 +389,8 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.ResumeLayout(false);
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
+            this.detectedDomainOptionPanel.ResumeLayout(false);
+            this.detectedDomainOptionPanel.PerformLayout();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -364,6 +421,10 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TextBox advertiseSubnets;
         private System.Windows.Forms.Label labelSubnetsHint;
         private System.Windows.Forms.Label labelDomains;
+        private System.Windows.Forms.Panel detectedDomainOptionPanel;
+        private System.Windows.Forms.CheckBox includeDetectedDomain;
+        private System.Windows.Forms.Label detectedDomainOption;
+        private System.Windows.Forms.Label detectedDomainStatus;
         private System.Windows.Forms.TextBox advertiseDomains;
         private System.Windows.Forms.Label labelDomainsHint;
     }

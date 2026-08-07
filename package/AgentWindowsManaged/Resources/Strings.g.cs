@@ -221,6 +221,18 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string AgentTunnelDlgDomainsHint = "AgentTunnelDlgDomainsHint";		
 		/// <summary>
+		/// The domain {0} was detected. Advertise it too?
+		/// </summary>
+		public const string AgentTunnelDlgDetectedDomainOption = "AgentTunnelDlgDetectedDomainOption";
+		/// <summary>
+		/// No DNS domain was detected. Enter domains below if needed.
+		/// </summary>
+		public const string AgentTunnelDlgNoDetectedDomain = "AgentTunnelDlgNoDetectedDomain";
+		/// <summary>
+		/// The detected domain {0} is already included.
+		/// </summary>
+		public const string AgentTunnelDlgDetectedDomainAlreadyIncluded = "AgentTunnelDlgDetectedDomainAlreadyIncluded";
+		/// <summary>
 		/// PowerShell Universal Agent
 		/// </summary>
 		public const string PsuDlgTitle = "PsuDlgTitle";		

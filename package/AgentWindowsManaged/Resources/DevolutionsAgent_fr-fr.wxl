@@ -58,6 +58,9 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- dialogs.agentTunnel -->
                 <String Id="AgentTunnelDlgDescription">Connectez cet agent à une passerelle Devolutions.</String>
                 <String Id="AgentTunnelDlgDomainsHint">Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com.</String>
+                <String Id="AgentTunnelDlgDetectedDomainOption">Le domaine {0} a été détecté. Voulez-vous également l'annoncer ?</String>
+                <String Id="AgentTunnelDlgNoDetectedDomain">Aucun domaine DNS n'a été détecté. Entrez les domaines ci-dessous au besoin.</String>
+                <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">Le domaine détecté {0} est déjà inclus.</String>
                 <String Id="AgentTunnelDlgDomainsLabel">Domaines annoncés :</String>
                 <String Id="AgentTunnelDlgEnrollmentStringLabel">Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement.</String>

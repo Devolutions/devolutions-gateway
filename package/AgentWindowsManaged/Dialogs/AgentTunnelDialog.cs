@@ -1,7 +1,10 @@
 using DevolutionsAgent.Dialogs;
+using DevolutionsAgent.Helpers;
 using DevolutionsAgent.Properties;
+using DevolutionsAgent.Resources;
 
 using System;
+using System.Linq;
 using System.Windows.Forms;
 
 using WixSharp;
@@ -10,11 +13,23 @@ namespace WixSharpSetup.Dialogs;
 
 public partial class AgentTunnelDialog : AgentDialog
 {
+    private string detectedDomain = string.Empty;
+    private bool loadingDomains;
+
     public AgentTunnelDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
+        advertiseDomains.TextChanged += (_, _) =>
+        {
+            if (!loadingDomains)
+            {
+                Runtime.Session[AgentProperties.AgentTunnelDomainsUiState] = AgentProperties.DomainsUiEdited;
+            }
+            UpdateDetectedDomainState();
+        };
+        detectedDomainOption.Click += (_, _) => includeDetectedDomain.Checked = !includeDetectedDomain.Checked;
     }
 
     public override bool ToProperties()
@@ -22,6 +37,7 @@ public partial class AgentTunnelDialog : AgentDialog
         Runtime.Session[AgentProperties.AgentTunnelEnrollmentString] = enrollmentString.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseSubnets] = advertiseSubnets.Text.Trim();
         Runtime.Session[AgentProperties.AgentTunnelAdvertiseDomains] = advertiseDomains.Text.Trim();
+        Runtime.Session[AgentProperties.AgentTunnelIncludeDetectedDomain] = includeDetectedDomain.Checked ? "1" : "0";
 
         return true;
     }
@@ -32,9 +48,68 @@ public partial class AgentTunnelDialog : AgentDialog
 
         enrollmentString.Text = Runtime.Session.Property(AgentProperties.AgentTunnelEnrollmentString);
         advertiseSubnets.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseSubnets);
-        advertiseDomains.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
+
+        detectedDomain = DomainDetection.Detect();
+        Runtime.Session[AgentProperties.AgentTunnelDetectedDomain] = detectedDomain;
+
+        string domainsUiState = Runtime.Session.Property(AgentProperties.AgentTunnelDomainsUiState);
+        string requestedDomains = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
+        bool firstVisit = domainsUiState == AgentProperties.DomainsUiNotShown;
+        if (firstVisit && string.IsNullOrWhiteSpace(requestedDomains))
+        {
+            try
+            {
+                requestedDomains = AgentTunnelConfiguration.LoadAdvertiseDomains();
+            }
+            catch
+            {
+                // Enrollment validates the existing configuration before writing anything.
+                // Keep the dialog usable so that validation can report the authoritative error.
+            }
+        }
+        loadingDomains = true;
+        advertiseDomains.Text = requestedDomains;
+        loadingDomains = false;
+        if (firstVisit)
+        {
+            Runtime.Session[AgentProperties.AgentTunnelDomainsUiState] = AgentProperties.DomainsUiUnchanged;
+        }
+        includeDetectedDomain.Checked =
+            Runtime.Session.Property(AgentProperties.AgentTunnelIncludeDetectedDomain) == "1";
+        UpdateDetectedDomainState();
 
         base.OnLoad(sender, e);
+    }
+
+    private void UpdateDetectedDomainState()
+    {
+        if (detectedDomain.Length == 0)
+        {
+            includeDetectedDomain.Checked = false;
+            detectedDomainOptionPanel.Visible = false;
+            detectedDomainStatus.Text = I18n(Strings.AgentTunnelDlgNoDetectedDomain);
+            detectedDomainStatus.Visible = true;
+            return;
+        }
+
+        bool alreadyIncluded = advertiseDomains.Text
+            .Split(',')
+            .Select(domain => domain.Trim())
+            .Any(domain => string.Equals(domain, detectedDomain, StringComparison.OrdinalIgnoreCase));
+
+        if (alreadyIncluded)
+        {
+            includeDetectedDomain.Checked = false;
+            detectedDomainOptionPanel.Visible = false;
+            detectedDomainStatus.Text =
+                string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainAlreadyIncluded), detectedDomain);
+            detectedDomainStatus.Visible = true;
+            return;
+        }
+
+        detectedDomainStatus.Visible = false;
+        detectedDomainOption.Text = string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainOption), detectedDomain);
+        detectedDomainOptionPanel.Visible = true;
     }
 
     public override bool DoValidate()

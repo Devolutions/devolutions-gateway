@@ -302,13 +302,17 @@ internal static class AgentActions
     {
         Execute = Execute.deferred,
         Impersonate = false,
+        AttributesDefinition = "HideTarget=yes",
         // Deferred CAs only see properties bubbled through CustomActionData. The Set_<CA>_Props
         // immediate action expands [PROP] for each entry below before the deferred CA runs.
         UsesProperties = string.Join(";", new[]
         {
-            AgentProperties.AgentTunnelEnrollmentString,
-            AgentProperties.AgentTunnelAdvertiseSubnets,
-            AgentProperties.AgentTunnelAdvertiseDomains,
+            AgentProperties.AgentTunnelEnrollmentStringEncoded,
+            AgentProperties.AgentTunnelAdvertiseSubnetsEncoded,
+            AgentProperties.AgentTunnelAdvertiseDomainsEncoded,
+            AgentProperties.AgentTunnelIncludeDetectedDomainEncoded,
+            AgentProperties.AgentTunnelDetectedDomainEncoded,
+            AgentProperties.AgentTunnelDomainsUiStateEncoded,
             AgentProperties.InstallDir,
             // installId is a typed WixProperty<Guid>, so reference its string Id; the rollback CA
             // reads it to locate the per-install tunnel rollback marker.

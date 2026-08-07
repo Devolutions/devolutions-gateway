@@ -191,36 +191,32 @@ fn resolve_advertise_domains(
     auto_detect_enabled: bool,
     detected: Option<String>,
 ) -> Vec<DomainAdvertisement> {
-    if !configured.is_empty() {
-        if let Some(detected) = detected {
-            debug!(
-                %detected,
-                "Ignoring auto-detected domain because advertise_domains is set explicitly"
-            );
+    match (configured, auto_detect_enabled, detected) {
+        (configured @ [_, ..], _, detected) => {
+            if let Some(detected) = detected {
+                debug!(
+                    %detected,
+                    "Ignoring auto-detected domain because advertise_domains is set explicitly"
+                );
+            }
+
+            configured
+                .iter()
+                .map(|domain| DomainAdvertisement {
+                    domain: DomainName::new(domain),
+                    auto_detected: false,
+                })
+                .collect()
         }
-
-        return configured
-            .iter()
-            .map(|d| DomainAdvertisement {
-                domain: DomainName::new(d),
-                auto_detected: false,
-            })
-            .collect();
-    }
-
-    if !auto_detect_enabled {
-        return Vec::new();
-    }
-
-    match detected {
-        Some(detected) => {
+        ([], false, _) => Vec::new(),
+        ([], true, Some(detected)) => {
             info!(domain = %detected, "Auto-detected DNS domain");
             vec![DomainAdvertisement {
                 domain: DomainName::new(detected),
                 auto_detected: true,
             }]
         }
-        None => {
+        ([], true, None) => {
             warn!(
                 "No advertise_domains configured and domain auto-detection found nothing. \
                  Set advertise_domains in agent config."

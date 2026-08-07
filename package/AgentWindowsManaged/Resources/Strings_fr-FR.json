@@ -217,6 +217,18 @@
           {
             "id": "AgentTunnelDlgDomainsHint",
             "text": "Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainOption",
+            "text": "Le domaine {0} a été détecté. Voulez-vous également l'annoncer ?"
+          },
+          {
+            "id": "AgentTunnelDlgNoDetectedDomain",
+            "text": "Aucun domaine DNS n'a été détecté. Entrez les domaines ci-dessous au besoin."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainAlreadyIncluded",
+            "text": "Le domaine détecté {0} est déjà inclus."
           }
         ],
         "psu": [

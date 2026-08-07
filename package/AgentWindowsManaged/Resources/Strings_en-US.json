@@ -241,6 +241,18 @@
           {
             "id": "AgentTunnelDlgDomainsHint",
             "text": "Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainOption",
+            "text": "The domain {0} was detected. Advertise it too?"
+          },
+          {
+            "id": "AgentTunnelDlgNoDetectedDomain",
+            "text": "No DNS domain was detected. Enter domains below if needed."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainAlreadyIncluded",
+            "text": "The detected domain {0} is already included."
           }
         ],
         "psu": [
