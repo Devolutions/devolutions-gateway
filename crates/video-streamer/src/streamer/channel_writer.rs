@@ -15,6 +15,28 @@ impl std::fmt::Display for ChannelWriterError {
 
 impl std::error::Error for ChannelWriterError {}
 
+impl ChannelWriterError {
+    /// Returns `true` if any error in `err`'s chain is a closed-channel error.
+    ///
+    /// The destination channel closes when the consumer (the sending task / client) goes
+    /// away. Every write site treats this as a normal shutdown rather than a hard failure,
+    /// so they share this single classifier instead of re-deriving the downcast chain
+    /// (`TagWriterError::WriteError` -> `io::Error` -> `ChannelWriterError`) inline.
+    pub(crate) fn is_in_chain(err: &anyhow::Error) -> bool {
+        err.chain().any(|cause| {
+            // Either the chain link is the error itself, or it is the `io::Error` that wraps
+            // it. The latter case needs `get_ref()`: `io::Error::source()` exposes the inner
+            // error's *source* (here, nothing), not the inner error itself, so a plain chain
+            // walk never yields the `ChannelWriterError`.
+            cause.downcast_ref::<ChannelWriterError>().is_some()
+                || cause
+                    .downcast_ref::<io::Error>()
+                    .and_then(io::Error::get_ref)
+                    .is_some_and(|inner| inner.downcast_ref::<ChannelWriterError>().is_some())
+        })
+    }
+}
+
 pub(crate) struct ChannelWriter {
     writer: tokio::sync::mpsc::Sender<Vec<u8>>,
     #[cfg(feature = "perf-diagnostics")]
