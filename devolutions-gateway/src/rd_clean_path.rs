@@ -229,14 +229,14 @@ struct ConnectedRdpServer {
     tls_stream: tokio_rustls::client::TlsStream<UpstreamLeg>,
     server_addr: SocketAddr,
     selected_target: TargetAddr,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
-/// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
+/// Establish a connection to the RDP server and perform the requested front sequence.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
 /// the WebSocket forwarders in [`crate::upstream`]; here we just do the RDP-specific
-/// PCB + X224 + TLS upgrade on top of whatever leg that returns.
+/// PCB + optional X224 + TLS upgrade on top of whatever leg that returns.
 async fn connect_rdp_server(
     claims: &AssociationTokenClaims,
     cleanpath_pdu: RDCleanPathPdu,
@@ -267,24 +267,30 @@ async fn connect_rdp_server(
     debug!(%selected_target, "Connected to destination server");
     tracing::Span::current().record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable.
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
+    if cleanpath_pdu.x224_connection_pdu.is_none() && cleanpath_pdu.preconnection_blob.is_none() {
+        return anyhow::Error::msg("RDCleanPath request is missing both X.224 and PCB")
+            .pipe(CleanPathError::BadRequest)
+            .pipe(Err);
+    }
+
+    if let Some(pcb) = &cleanpath_pdu.preconnection_blob {
         server_stream.write_all(pcb.as_bytes()).await?;
     }
 
-    // Send X224 connection request.
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
+    let x224_rsp = if let Some(x224_req) = cleanpath_pdu.x224_connection_pdu {
+        server_stream.write_all(x224_req.as_bytes()).await?;
 
-    trace!("Receiving X224 response");
+        trace!("Receiving X224 response");
 
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
+        Some(
+            read_x224_response(&mut server_stream)
+                .await
+                .with_context(|| format!("read X224 response from {selected_target}"))
+                .map_err(CleanPathError::BadRequest)?,
+        )
+    } else {
+        None
+    };
 
     trace!("Establishing TLS connection with server");
 
@@ -371,6 +377,7 @@ async fn handle_with_credential_injection(
     } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
         .await
         .context("RDCleanPath connection failed")?;
+    let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
 
     // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
@@ -616,8 +623,12 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .context("build RDCleanPath response")?;
+    let rdcleanpath_rsp = if let Some(x224_rsp) = x224_rsp {
+        RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
+    } else {
+        RDCleanPathPdu::new_response_with_pcb(server_addr.to_string(), x509_chain)
+    }
+    .context("build RDCleanPath response")?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 

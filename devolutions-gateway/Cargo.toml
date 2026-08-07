@@ -38,7 +38,7 @@ sysevent-codes.path = "../crates/sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel" }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
 ironrdp-core = { version = "0.2", features = ["std"] }
-ironrdp-rdcleanpath = "0.2"
+ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP.git", rev = "d1b4b26c07c94e6f2b65b5c189542e308f25c43d" }
 ironrdp-tokio = "0.10"
 ironrdp-connector = "0.10"
 ironrdp-acceptor = "0.10"
