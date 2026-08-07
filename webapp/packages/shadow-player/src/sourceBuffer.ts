@@ -19,8 +19,11 @@ export class ReactiveSourceBuffer {
     this.onUpdateEnd = onUpdateEnd ?? (() => {});
 
     this.sourceBuffer.addEventListener('updateend', () => {
-      this.onUpdateEnd();
-      this.tryAppendBuffer();
+      try {
+        this.onUpdateEnd();
+      } finally {
+        this.tryAppendBuffer();
+      }
     });
 
     // Handle errors and trigger download of the file
