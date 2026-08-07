@@ -236,11 +236,23 @@
           },
           {
             "id": "AgentTunnelDlgDomainsLabel",
-            "text": "Advertise Domains:"
+            "text": "Advertise DNS Routes:"
           },
           {
             "id": "AgentTunnelDlgDomainsHint",
-            "text": "Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com."
+            "text": "Optional. Exact names match only themselves. Use an explicit wildcard such as *.example.com to match subdomains."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainOption",
+            "text": "The DNS domain {0} was detected. Advertise its subdomains as {1}?"
+          },
+          {
+            "id": "AgentTunnelDlgNoDetectedDomain",
+            "text": "No DNS domain was detected. Enter exact names or explicit wildcard routes below if needed."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainAlreadyIncluded",
+            "text": "The suggested DNS route {0} is already included."
           }
         ],
         "psu": [

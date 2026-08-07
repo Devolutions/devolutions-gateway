@@ -367,6 +367,13 @@ internal class Program
         projectProperties.Add(new Property(AgentProperties.AgentTunnelEnrollmentString, "") { Hidden = true, Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseSubnets, "") { Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomains, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelIncludeDetectedDomain, "0") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelDetectedDomain, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelEnrollmentStringEncoded, "") { Hidden = true, Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseSubnetsEncoded, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomainsEncoded, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelIncludeDetectedDomainEncoded, "") { Secure = true });
+        projectProperties.Add(new Property(AgentProperties.AgentTunnelDetectedDomainEncoded, "") { Secure = true });
 
         project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();

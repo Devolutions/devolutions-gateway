@@ -63,8 +63,11 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
                     <!-- dialogs.agentTunnel -->
                 <String Id="AgentTunnelDlgDescription">Connect this agent to a Devolutions Gateway.</String>
-                <String Id="AgentTunnelDlgDomainsHint">Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.</String>
-                <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>
+                <String Id="AgentTunnelDlgDomainsHint">Optional. Exact names match only themselves. Use an explicit wildcard such as *.example.com to match subdomains.</String>
+                <String Id="AgentTunnelDlgDetectedDomainOption">The DNS domain {0} was detected. Advertise its subdomains as {1}?</String>
+                <String Id="AgentTunnelDlgNoDetectedDomain">No DNS domain was detected. Enter exact names or explicit wildcard routes below if needed.</String>
+                <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">The suggested DNS route {0} is already included.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Advertise DNS Routes:</String>
                 <String Id="AgentTunnelDlgEnrollmentStringLabel">Enrollment String (provided by your gateway operator):</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Optional. Comma-separated CIDR ranges, e.g. 10.10.0.0/24, 192.168.1.0/24. If left blank, the agent's local subnets are detected automatically.</String>
                 <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>

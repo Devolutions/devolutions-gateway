@@ -87,6 +87,16 @@ pub struct PersistedEnrollment {
     pub quic_endpoint: String,
 }
 
+fn resolve_domain_config(existing: Option<(&[String], bool)>, requested_domains: Vec<String>) -> (Vec<String>, bool) {
+    if requested_domains.is_empty() {
+        existing
+            .map(|(domains, auto_detect)| (domains.to_vec(), auto_detect))
+            .unwrap_or_default()
+    } else {
+        (requested_domains, false)
+    }
+}
+
 /// Enroll an agent with the Gateway and save the configuration.
 ///
 /// # Arguments
@@ -95,10 +105,13 @@ pub struct PersistedEnrollment {
 ///   claim is also used by `up --enrollment-string` when no explicit gateway
 ///   URL is provided. The signed `jet_agent_name` claim is the enrollment name.
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
+/// * `advertise_domains` - Explicit DNS routes to advertise (e.g.,
+///   ["server.example.com", "*.example.com"]). An empty list preserves an existing configuration.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
 ) -> Result<PersistedEnrollment> {
     let EnrollmentJwtClaims {
         jet_agent_name: agent_name,
@@ -109,7 +122,13 @@ pub async fn enroll_agent(
     let (key_pem, csr_pem) = generate_key_and_csr(&agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, &csr_pem).await?;
-    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
+    persist_enrollment_response(
+        agent_name,
+        advertise_subnets,
+        advertise_domains,
+        enroll_response,
+        &key_pem,
+    )
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -160,6 +179,7 @@ async fn request_enrollment(gateway_url: &str, enrollment_token: &str, csr_pem: 
 fn persist_enrollment_response(
     agent_name: String,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
     EnrollResponse {
         agent_id,
         client_cert_pem,
@@ -229,8 +249,10 @@ fn persist_enrollment_response(
             }
         }
 
-        // Preserve existing domain config from previous enrollment/manual configuration.
         let existing_tunnel = conf_file.tunnel.as_ref();
+        let existing_domain_config =
+            existing_tunnel.map(|tunnel| (tunnel.advertise_domains.as_slice(), tunnel.auto_detect_domain));
+        let (advertise_domains, auto_detect_domain) = resolve_domain_config(existing_domain_config, advertise_domains);
 
         let tunnel_conf = config::dto::TunnelConf {
             enabled: true,
@@ -239,8 +261,8 @@ fn persist_enrollment_response(
             client_key_path: Some(client_key_path.clone()),
             gateway_ca_cert_path: Some(gateway_ca_path.clone()),
             advertise_subnets,
-            advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
-            auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
+            advertise_domains,
+            auto_detect_domain,
             heartbeat_interval_secs: Some(60),
             route_advertise_interval_secs: Some(30),
             server_spki_sha256: Some(server_spki_sha256),
@@ -398,5 +420,30 @@ mod tests {
             "jet_gw_url": "https://gw.example.com",
         }));
         assert!(parse_enrollment_jwt(&jwt).is_err());
+    }
+
+    #[test]
+    fn fresh_enrollment_does_not_auto_detect_domains() {
+        assert_eq!(resolve_domain_config(None, Vec::new()), (Vec::new(), false));
+    }
+
+    #[test]
+    fn explicit_domains_disable_auto_detection() {
+        let requested = vec!["test.example.com".to_owned()];
+
+        assert_eq!(
+            resolve_domain_config(Some((&["old.example.com".to_owned()], true)), requested),
+            (vec!["test.example.com".to_owned()], false)
+        );
+    }
+
+    #[test]
+    fn re_enrollment_without_domains_preserves_existing_policy() {
+        let existing = ["example.com".to_owned()];
+
+        assert_eq!(
+            resolve_domain_config(Some((&existing, true)), Vec::new()),
+            (vec!["example.com".to_owned()], true)
+        );
     }
 }

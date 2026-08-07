@@ -39,7 +39,7 @@ impl RouteAdvertisementState {
     ///
     /// Returns a specificity score if matched, or `None` if no match.
     /// IP subnet matches return `usize::MAX` (always highest priority).
-    /// Domain matches return the matched domain length (longer = more specific).
+    /// DNS-route matches return the matched route length.
     pub fn matches_target(&self, target: &RouteTarget) -> Option<usize> {
         use std::net::IpAddr;
 
@@ -55,7 +55,13 @@ impl RouteAdvertisementState {
                 .domains
                 .iter()
                 .filter(|adv| adv.domain.matches_hostname(hostname.as_str()))
-                .map(|adv| adv.domain.as_str().len())
+                .map(|adv| {
+                    if adv.domain.is_wildcard() {
+                        adv.domain.as_str().len()
+                    } else {
+                        usize::MAX
+                    }
+                })
                 .max(),
         }
     }
@@ -287,7 +293,7 @@ impl AgentRegistry {
     /// Find all online agents that can route to the given parsed target host.
     ///
     /// For IP targets: matches against advertised subnets.
-    /// For domain targets: uses longest suffix match (more specific domain wins).
+    /// For DNS-name targets: matches exact names or explicit wildcard routes.
     ///
     /// Results with equal specificity are sorted by `received_at` descending (most recent first).
     pub async fn find_agents_for(&self, target: &RouteTarget) -> Vec<Arc<AgentPeer>> {
@@ -509,6 +515,60 @@ mod tests {
             domain: agent_tunnel_proto::DomainName::new(name),
             auto_detected: auto,
         }
+    }
+
+    #[test]
+    fn domain_route_matches_exact_name_only() {
+        let state = RouteAdvertisementState {
+            domains: vec![domain("example.com", false)],
+            ..RouteAdvertisementState::default()
+        };
+
+        assert!(state.matches_target(&RouteTarget::hostname("example.com")).is_some());
+        assert!(
+            state
+                .matches_target(&RouteTarget::hostname("child.example.com"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn wildcard_domain_route_matches_subdomains_only() {
+        let state = RouteAdvertisementState {
+            domains: vec![domain("*.example.com", false)],
+            ..RouteAdvertisementState::default()
+        };
+
+        assert!(
+            state
+                .matches_target(&RouteTarget::hostname("child.example.com"))
+                .is_some()
+        );
+        assert!(
+            state
+                .matches_target(&RouteTarget::hostname("deep.child.example.com"))
+                .is_some()
+        );
+        assert!(state.matches_target(&RouteTarget::hostname("example.com")).is_none());
+    }
+
+    #[tokio::test]
+    async fn exact_route_takes_priority_over_wildcard_route() {
+        let registry = AgentRegistry::new();
+        let wildcard_agent = make_peer("wildcard-agent");
+        wildcard_agent.update_routes(1, Vec::new(), vec![domain("*.example.com", false)]);
+        registry.register(wildcard_agent).await;
+
+        let exact_agent = make_peer("exact-agent");
+        exact_agent.update_routes(1, Vec::new(), vec![domain("host.example.com", false)]);
+        registry.register(Arc::clone(&exact_agent)).await;
+
+        let matches = registry
+            .find_agents_for(&RouteTarget::hostname("host.example.com"))
+            .await;
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].agent_id, exact_agent.agent_id);
     }
 
     #[test]
