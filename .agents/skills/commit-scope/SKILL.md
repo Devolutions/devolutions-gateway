@@ -23,7 +23,7 @@ Choose scopes by affected deliverable, not file location or internal component.
 
 A shared component receives each product scope whose behavior changes. Merely bundling an updated runtime does not add `installer` or `agent-installer`; add those scopes only when installation or packaging behavior changes. Do not use internal component names such as `jmux` or `pedm`: JMUX changes commonly affect `dgw,jetsocat`; PEDM changes commonly affect `agent` and sometimes `agent-installer`.
 
-For included commits, use only product scopes. Scopes containing `openapi`, `deps`, `npm`, `nuget`, `dotnet-*`, or `ts-*` cause git-cliff to suppress the entry.
+For included commits, use only product scopes. Scopes containing `openapi`, `npm`, `nuget`, `dotnet-*`, or `ts-*` cause git-cliff to suppress the entry. The `deps` scope suppresses only exact `chore(deps)` and `build(deps)` subjects; do not use it with other included types or as part of a broader scope.
 
 Scopes are more flexible when git-cliff excludes the commit, whether by type, scope, or `Changelog: ignore`. Keep the semantic type: an npm package feature may use `feat(npm): ...` because the scope suppresses it. For `chore`, `ci`, `style`, `refactor`, and `test`, use a concise target when useful, such as `openapi`, `deps`, `toolchain`, `package`, `skills`, `dependabot`, `miri`, `tokengen`, or `dotnet-utils`; omit the scope if none helps. Prefer a precise current name over generic `tools` or `dotnet`.
 
