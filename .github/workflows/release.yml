@@ -157,8 +157,8 @@ jobs:
 
             tar -xf $PowerShellArchive.FullName -C $PkgDir
 
-            Copy-Item -Path docker/Linux/Dockerfile     -Destination $PkgDir
-            Copy-Item -Path docker/Linux/entrypoint.ps1 -Destination $PkgDir
+            Copy-Item -Path docker/package/Linux/Dockerfile     -Destination $PkgDir
+            Copy-Item -Path docker/package/Linux/entrypoint.ps1 -Destination $PkgDir
 
             $AgentPkgDir = Join-Path docker agent $Arch.Docker
             New-Item -ItemType Directory -Path $AgentPkgDir -Force | Out-Null
@@ -166,7 +166,7 @@ jobs:
 
             Copy-Item -Path (Join-Path devolutions-agent linux $Arch.Ci devolutions-agent) -Destination $AgentPkgDir
             chmod +x (Join-Path $AgentPkgDir devolutions-agent)
-            Copy-Item -Path docker/AgentLinux/Dockerfile -Destination $AgentPkgDir
+            Copy-Item -Path docker/package/AgentLinux/Dockerfile -Destination $AgentPkgDir
             Copy-Item -Path docker/devolutions-agent/docker/devolutions-agent-entrypoint.sh -Destination $AgentPkgDir
           }
         shell: pwsh
