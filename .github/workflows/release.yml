@@ -120,7 +120,8 @@ jobs:
     steps:
       - name: Download artifacts
         run: |
-          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n webapp-player -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n webapp-player -n docker -n devolutions-agent-signed -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          Move-Item -Path devolutions-agent-signed -Destination devolutions-agent
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
         shell: pwsh
         env:
@@ -156,8 +157,17 @@ jobs:
 
             tar -xf $PowerShellArchive.FullName -C $PkgDir
 
-            Copy-Item -Path docker/Linux/Dockerfile     -Destination $PkgDir
-            Copy-Item -Path docker/Linux/entrypoint.ps1 -Destination $PkgDir
+            Copy-Item -Path docker/package/Linux/Dockerfile     -Destination $PkgDir
+            Copy-Item -Path docker/package/Linux/entrypoint.ps1 -Destination $PkgDir
+
+            $AgentPkgDir = Join-Path docker agent $Arch.Docker
+            New-Item -ItemType Directory -Path $AgentPkgDir -Force | Out-Null
+            echo "agent-package-path-$($Arch.Docker)=$AgentPkgDir" >> $Env:GITHUB_OUTPUT
+
+            Copy-Item -Path (Join-Path devolutions-agent linux $Arch.Ci devolutions-agent) -Destination $AgentPkgDir
+            chmod +x (Join-Path $AgentPkgDir devolutions-agent)
+            Copy-Item -Path docker/package/AgentLinux/Dockerfile -Destination $AgentPkgDir
+            Copy-Item -Path docker/devolutions-agent/docker/devolutions-agent-entrypoint.sh -Destination $AgentPkgDir
           }
         shell: pwsh
 
@@ -203,22 +213,55 @@ jobs:
           $Version = "${{ needs.preflight.outputs.version }}"
           $ImageName = "devolutions/devolutions-gateway"
           $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
+          $MultiPwshVersion = 'v0.17.0'
+          $MultiPwshX64Sha256 = 'a0da12c5ac8bdbc72ce307d04e46768f7193830fb83d089473c3460ecd0ccbbb'
+          $MultiPwshArm64Sha256 = 'bb232561f8beb2e8f3e7abc607497e15a2205c9865e0ec676496909b3320df3d'
+          $MultiPwshPowerShellVersion = '7.6.4'
 
           $Amd64Context = "${{ steps.prepare-artifacts.outputs.package-path-amd64 }}"
           $Arm64Context = "${{ steps.prepare-artifacts.outputs.package-path-arm64 }}"
+          $AgentAmd64Context = "${{ steps.prepare-artifacts.outputs.agent-package-path-amd64 }}"
+          $AgentArm64Context = "${{ steps.prepare-artifacts.outputs.agent-package-path-arm64 }}"
 
           foreach ($P in @(@{Platform='linux/amd64'; Tag='amd64'; Context=$Amd64Context}, @{Platform='linux/arm64'; Tag='arm64'; Context=$Arm64Context})) {
             $Args = @('buildx', 'build', "--platform=$($P.Platform)", "--tag=${ImageName}:${Version}-$($P.Tag)", $P.Context)
             if (-Not $DryRun) { $Args += '--push' }
             docker @Args
+            if ($LASTEXITCODE -ne 0) {
+              throw "Docker image build failed for $($P.Platform)"
+            }
+          }
+
+          $AgentImageName = "devolutions/devolutions-agent"
+          foreach ($P in @(@{Platform='linux/amd64'; Tag='amd64'; Context=$AgentAmd64Context}, @{Platform='linux/arm64'; Tag='arm64'; Context=$AgentArm64Context})) {
+            $Args = @(
+              'buildx', 'build',
+              "--platform=$($P.Platform)",
+              "--build-arg=MULTI_PWSH_VERSION=$MultiPwshVersion",
+              "--build-arg=MULTI_PWSH_X64_SHA256=$MultiPwshX64Sha256",
+              "--build-arg=MULTI_PWSH_ARM64_SHA256=$MultiPwshArm64Sha256",
+              "--build-arg=MULTI_PWSH_POWERSHELL_VERSION=$MultiPwshPowerShellVersion",
+              "--tag=${AgentImageName}:${Version}-$($P.Tag)",
+              $P.Context
+            )
+            if (-Not $DryRun) { $Args += '--push' }
+            docker @Args
+            if ($LASTEXITCODE -ne 0) {
+              throw "Docker image build failed for $($P.Platform)"
+            }
           }
 
           if (-Not $DryRun) {
-            foreach ($Tag in @($Version, 'latest')) {
-              docker buildx imagetools create `
-                --tag "${ImageName}:${Tag}" `
-                "${ImageName}:${Version}-amd64" `
-                "${ImageName}:${Version}-arm64"
+            foreach ($Image in @($ImageName, $AgentImageName)) {
+              foreach ($Tag in @($Version, 'latest')) {
+                docker buildx imagetools create `
+                  --tag "${Image}:${Tag}" `
+                  "${Image}:${Version}-amd64" `
+                  "${Image}:${Version}-arm64"
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Docker manifest creation failed for ${Image}:${Tag}"
+                }
+              }
             }
           } else {
             Write-Host "Dry run: skipping manifest creation and push"
@@ -226,6 +269,8 @@ jobs:
 
           echo "image-name=${ImageName}:${Version}" >> $Env:GITHUB_OUTPUT
           echo "latest-image-name=${ImageName}:latest" >> $Env:GITHUB_OUTPUT
+          echo "agent-image-name=${AgentImageName}:${Version}" >> $Env:GITHUB_OUTPUT
+          echo "agent-latest-image-name=${AgentImageName}:latest" >> $Env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Install Cosign
@@ -237,6 +282,8 @@ jobs:
         run: |
           cosign sign --yes --recursive ${{ steps.build-container.outputs.image-name }}
           cosign sign --yes --recursive ${{ steps.build-container.outputs.latest-image-name }}
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.agent-image-name }}
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.agent-latest-image-name }}
 
   github-release:
     name: GitHub release

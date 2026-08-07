@@ -119,6 +119,7 @@ jobs:
             package/Linux/Dockerfile
             package/Linux/entrypoint.ps1
             package/AgentLinux/Dockerfile
+            devolutions-agent/docker/devolutions-agent-entrypoint.sh
 
       - name: Upload changelog artifacts
         uses: actions/upload-artifact@v7
