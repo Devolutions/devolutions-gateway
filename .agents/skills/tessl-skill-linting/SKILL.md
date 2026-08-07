@@ -10,7 +10,8 @@ Keep repository-local agent skills correct, focused, and inexpensive to load.
 ## Workflow
 
 1. Identify the relevant skill directories under `.agents\skills`.
-   Read each target `SKILL.md` before changing it and preserve its intended behavior and scope.
+   For an existing skill, read its `SKILL.md` before editing and preserve its intended behavior and scope.
+   For a new skill, inspect neighboring skills for conventions, then create the target directory and initial `SKILL.md` from the requested scope.
 2. Inspect the frontmatter and instructions for valid structure, clear trigger conditions, focused scope, missing prerequisites, accurate and safe tooling steps, ambiguity, brittleness, redundancy, and likely failure cases.
 3. Run local structural validation for every relevant skill:
 

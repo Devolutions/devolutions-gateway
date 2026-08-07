@@ -10,6 +10,12 @@ $Tessl = (Get-Command tessl -ErrorAction Stop).Source
 $Failed = $false
 
 foreach ($Directory in $SkillDirectory) {
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        Write-Error "Skill directory not found: $Directory" -ErrorAction Continue
+        $Failed = $true
+        continue
+    }
+
     $ResolvedDirectory = (Resolve-Path -LiteralPath $Directory).Path
     $SkillFile = Join-Path $ResolvedDirectory 'SKILL.md'
     if (-not (Test-Path -LiteralPath $SkillFile -PathType Leaf)) {
