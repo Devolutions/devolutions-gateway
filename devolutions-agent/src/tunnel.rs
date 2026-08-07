@@ -186,7 +186,11 @@ impl Task for TunnelTask {
 /// they asked for: `machine.example.com` is one host and its subdomains, while
 /// `example.com` is every host in the domain at any depth. Asking for the narrow one and
 /// silently getting the wide one is the kind of surprise that widens a network boundary.
-fn resolve_advertise_domains(configured: &[String], detected: Option<String>) -> Vec<DomainAdvertisement> {
+fn resolve_advertise_domains(
+    configured: &[String],
+    auto_detect_enabled: bool,
+    detected: Option<String>,
+) -> Vec<DomainAdvertisement> {
     if !configured.is_empty() {
         if let Some(detected) = detected {
             debug!(
@@ -202,6 +206,10 @@ fn resolve_advertise_domains(configured: &[String], detected: Option<String>) ->
                 auto_detected: false,
             })
             .collect();
+    }
+
+    if !auto_detect_enabled {
+        return Vec::new();
     }
 
     match detected {
@@ -261,13 +269,17 @@ async fn run_single_connection(
         warn!("No subnets configured to advertise");
     }
 
-    let detected_domain = if tunnel_conf.auto_detect_domain {
+    let detected_domain = if tunnel_conf.auto_detect_domain && tunnel_conf.advertise_domains.is_empty() {
         crate::domain_detect::detect_domain()
     } else {
         None
     };
 
-    let advertise_domains = resolve_advertise_domains(&tunnel_conf.advertise_domains, detected_domain);
+    let advertise_domains = resolve_advertise_domains(
+        &tunnel_conf.advertise_domains,
+        tunnel_conf.auto_detect_domain,
+        detected_domain,
+    );
 
     info!(
         subnet_count = advertise_subnets.len(),
@@ -857,21 +869,26 @@ mod tests {
     // whole parent domain, which covers every host in it.
     #[test]
     fn explicit_domains_suppress_auto_detection() {
-        let advertised = resolve_advertise_domains(&["machine.example.com".to_owned()], Some("example.com".to_owned()));
+        let advertised = resolve_advertise_domains(
+            &["machine.example.com".to_owned()],
+            true,
+            Some("example.com".to_owned()),
+        );
 
         assert_eq!(domains_of(&advertised), vec![("machine.example.com", false)]);
     }
 
     #[test]
     fn auto_detection_fills_in_when_nothing_is_configured() {
-        let advertised = resolve_advertise_domains(&[], Some("example.com".to_owned()));
+        let advertised = resolve_advertise_domains(&[], true, Some("example.com".to_owned()));
 
         assert_eq!(domains_of(&advertised), vec![("example.com", true)]);
     }
 
     #[test]
     fn all_configured_domains_are_kept() {
-        let advertised = resolve_advertise_domains(&["a.example.com".to_owned(), "b.example.com".to_owned()], None);
+        let advertised =
+            resolve_advertise_domains(&["a.example.com".to_owned(), "b.example.com".to_owned()], false, None);
 
         assert_eq!(
             domains_of(&advertised),
@@ -881,6 +898,11 @@ mod tests {
 
     #[test]
     fn nothing_configured_and_nothing_detected_advertises_no_domains() {
-        assert!(resolve_advertise_domains(&[], None).is_empty());
+        assert!(resolve_advertise_domains(&[], true, None).is_empty());
+    }
+
+    #[test]
+    fn disabled_auto_detection_advertises_no_domains() {
+        assert!(resolve_advertise_domains(&[], false, None).is_empty());
     }
 }

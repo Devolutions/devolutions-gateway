@@ -567,7 +567,8 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub advertise_domains: Vec<String>,
 
-        /// Whether to auto-detect the machine's DNS domain and add it to advertise_domains (default: true)
+        /// Whether to auto-detect the machine's DNS domain as a fallback when
+        /// `advertise_domains` is empty (default: true).
         #[serde(default = "default_true")]
         pub auto_detect_domain: bool,
 
