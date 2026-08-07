@@ -6,12 +6,24 @@ export class ReactiveSourceBuffer {
   allBuffers: Blob[] = []; // Store all buffers for file creation
   debug = false;
 
-  constructor(mediaSource: MediaSource, codec: string, next: () => void) {
+  private readonly onUpdateEnd: () => void;
+
+  constructor(
+    mediaSource: MediaSource,
+    codec: string,
+    next: () => void,
+    onUpdateEnd?: () => void
+  ) {
     this.sourceBuffer = mediaSource.addSourceBuffer(`video/webm; codecs="${codec}"`);
     this.next = next;
+    this.onUpdateEnd = onUpdateEnd ?? (() => {});
 
     this.sourceBuffer.addEventListener('updateend', () => {
-      this.tryAppendBuffer();
+      try {
+        this.onUpdateEnd();
+      } finally {
+        this.tryAppendBuffer();
+      }
     });
 
     // Handle errors and trigger download of the file
