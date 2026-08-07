@@ -240,7 +240,23 @@ jobs:
         shell: pwsh
 
       - name: Update Artifactory Cache
-        run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
+        run: |
+          Set-PSDebug -Trace 1
+
+          $Files = Get-ChildItem -Recurse npm-packages/*.tgz
+
+          foreach ($File in $Files) {
+            $Manifest = (tar -xzOf "$File" package/package.json | Out-String) | ConvertFrom-Json
+            $PackageName = $Manifest.name -Replace '^@devolutions/', ''
+
+            Write-Host "Updating Artifactory cache for $($Manifest.name)..."
+            gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="$PackageName"
+
+            if ($LastExitCode -Ne 0) {
+              throw "Failed to trigger the Artifactory cache update for $($Manifest.name)"
+            }
+          }
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
 
