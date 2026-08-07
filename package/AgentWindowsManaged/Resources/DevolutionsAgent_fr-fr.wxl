@@ -57,11 +57,11 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
                     <!-- dialogs.agentTunnel -->
                 <String Id="AgentTunnelDlgDescription">Connectez cet agent à une passerelle Devolutions.</String>
-                <String Id="AgentTunnelDlgDomainsHint">Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com.</String>
-                <String Id="AgentTunnelDlgDetectedDomainOption">Le domaine {0} a été détecté. Voulez-vous également l'annoncer ?</String>
-                <String Id="AgentTunnelDlgNoDetectedDomain">Aucun domaine DNS n'a été détecté. Entrez les domaines ci-dessous au besoin.</String>
-                <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">Le domaine détecté {0} est déjà inclus.</String>
-                <String Id="AgentTunnelDlgDomainsLabel">Domaines annoncés :</String>
+                <String Id="AgentTunnelDlgDomainsHint">Facultatif. Un nom exact ne correspond qu'à lui-même. Utilisez un caractère générique explicite comme *.example.com pour les sous-domaines.</String>
+                <String Id="AgentTunnelDlgDetectedDomainOption">Le domaine DNS {0} a été détecté. Annoncer ses sous-domaines avec {1} ?</String>
+                <String Id="AgentTunnelDlgNoDetectedDomain">Aucun domaine DNS n'a été détecté. Entrez des noms exacts ou des routes génériques explicites ci-dessous au besoin.</String>
+                <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">La route DNS suggérée {0} est déjà incluse.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Routes DNS annoncées :</String>
                 <String Id="AgentTunnelDlgEnrollmentStringLabel">Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement.</String>
                 <String Id="AgentTunnelDlgSubnetsLabel">Sous-réseaux annoncés :</String>

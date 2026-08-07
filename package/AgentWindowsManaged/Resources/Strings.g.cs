@@ -213,23 +213,23 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string AgentTunnelDlgSubnetsHint = "AgentTunnelDlgSubnetsHint";		
 		/// <summary>
-		/// Advertise Domains:
+		/// Advertise DNS Routes:
 		/// </summary>
 		public const string AgentTunnelDlgDomainsLabel = "AgentTunnelDlgDomainsLabel";		
 		/// <summary>
-		/// Optional. Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com.
+		/// Optional. Exact names match only themselves. Use an explicit wildcard such as *.example.com to match subdomains.
 		/// </summary>
 		public const string AgentTunnelDlgDomainsHint = "AgentTunnelDlgDomainsHint";		
 		/// <summary>
-		/// The domain {0} was detected. Advertise it too?
+		/// The DNS domain {0} was detected. Advertise its subdomains as {1}?
 		/// </summary>
 		public const string AgentTunnelDlgDetectedDomainOption = "AgentTunnelDlgDetectedDomainOption";
 		/// <summary>
-		/// No DNS domain was detected. Enter domains below if needed.
+		/// No DNS domain was detected. Enter exact names or explicit wildcard routes below if needed.
 		/// </summary>
 		public const string AgentTunnelDlgNoDetectedDomain = "AgentTunnelDlgNoDetectedDomain";
 		/// <summary>
-		/// The detected domain {0} is already included.
+		/// The suggested DNS route {0} is already included.
 		/// </summary>
 		public const string AgentTunnelDlgDetectedDomainAlreadyIncluded = "AgentTunnelDlgDetectedDomainAlreadyIncluded";
 		/// <summary>

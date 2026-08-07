@@ -23,4 +23,9 @@ internal static class DomainDetection
             ? domain
             : string.Empty;
     }
+
+    public static string ToWildcardRoute(string domain) =>
+        string.IsNullOrEmpty(domain) || domain.StartsWith("*.", StringComparison.Ordinal)
+            ? domain
+            : $"*.{domain}";
 }

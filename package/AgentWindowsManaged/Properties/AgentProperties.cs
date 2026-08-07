@@ -27,12 +27,12 @@ namespace DevolutionsAgent.Properties
         public static string AgentTunnelAdvertiseSubnets = "AGENT_TUNNEL_ADVERTISE_SUBNETS";
 
         /// <summary>
-        /// Comma-separated DNS domains to advertise (e.g., "corp.example.com, lab.example.com")
+        /// Comma-separated exact DNS names or wildcard routes to advertise
         /// </summary>
         public static string AgentTunnelAdvertiseDomains = "AGENT_TUNNEL_ADVERTISE_DOMAINS";
 
         /// <summary>
-        /// Whether the machine's detected DNS domain should be explicitly advertised
+        /// Whether the machine's detected DNS domain should be advertised as a wildcard route
         /// </summary>
         public static string AgentTunnelIncludeDetectedDomain = "AGENT_TUNNEL_INCLUDE_DETECTED_DOMAIN";
 

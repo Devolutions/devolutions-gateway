@@ -181,11 +181,9 @@ impl Task for TunnelTask {
 /// Decide which domains to advertise, given what the operator configured and what
 /// auto-detection found.
 ///
-/// Auto-detection is a **fallback**, not an addition. Once someone has named domains
-/// explicitly, tacking the machine's own domain on top would quietly claim far more than
-/// they asked for: `machine.example.com` is one host and its subdomains, while
-/// `example.com` is every host in the domain at any depth. Asking for the narrow one and
-/// silently getting the wide one is the kind of surprise that widens a network boundary.
+/// Auto-detection is a **fallback**, not an addition. Once someone has named DNS routes
+/// explicitly, adding another route that was inferred from machine state would violate the
+/// explicit routing policy.
 fn resolve_advertise_domains(
     configured: &[String],
     auto_detect_enabled: bool,
@@ -203,7 +201,7 @@ fn resolve_advertise_domains(
             configured
                 .iter()
                 .map(|domain| DomainAdvertisement {
-                    domain: DomainName::new(domain.strip_prefix("*.").unwrap_or(domain)),
+                    domain: DomainName::new(domain),
                     auto_detected: false,
                 })
                 .collect()
@@ -212,7 +210,7 @@ fn resolve_advertise_domains(
         ([], true, Some(detected)) => {
             info!(domain = %detected, "Auto-detected DNS domain");
             vec![DomainAdvertisement {
-                domain: DomainName::new(detected),
+                domain: DomainName::new(format!("*.{detected}")),
                 auto_detected: true,
             }]
         }
@@ -878,7 +876,7 @@ mod tests {
     fn auto_detection_fills_in_when_nothing_is_configured() {
         let advertised = resolve_advertise_domains(&[], true, Some("example.com".to_owned()));
 
-        assert_eq!(domains_of(&advertised), vec![("example.com", true)]);
+        assert_eq!(domains_of(&advertised), vec![("*.example.com", true)]);
     }
 
     #[test]
@@ -890,13 +888,6 @@ mod tests {
             domains_of(&advertised),
             vec![("a.example.com", false), ("b.example.com", false)]
         );
-    }
-
-    #[test]
-    fn legacy_wildcard_prefix_is_normalized_to_domain_suffix() {
-        let advertised = resolve_advertise_domains(&["*.example.com".to_owned()], false, None);
-
-        assert_eq!(domains_of(&advertised), vec![("example.com", false)]);
     }
 
     #[test]

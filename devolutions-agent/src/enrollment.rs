@@ -105,8 +105,8 @@ fn resolve_domain_config(existing: Option<(&[String], bool)>, requested_domains:
 ///   claim is also used by `up --enrollment-string` when no explicit gateway
 ///   URL is provided. The signed `jet_agent_name` claim is the enrollment name.
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
-/// * `advertise_domains` - Explicit DNS domains to advertise (e.g.,
-///   ["corp.example.com"]). An empty list preserves an existing configuration.
+/// * `advertise_domains` - Explicit DNS routes to advertise (e.g.,
+///   ["server.example.com", "*.example.com"]). An empty list preserves an existing configuration.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,

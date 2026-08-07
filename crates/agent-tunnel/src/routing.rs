@@ -60,7 +60,7 @@ pub enum RoutingDecision {
 ///
 /// Pipeline (in order of priority):
 /// 1. Explicit agent_id (from JWT) → route to that agent
-/// 2. Target match (IP subnet or domain suffix) → best match wins
+/// 2. Target match (IP subnet, exact DNS name, or explicit wildcard route) → best match wins
 /// 3. No match → direct connection
 pub async fn resolve_route(
     registry: &AgentRegistry,
@@ -75,7 +75,7 @@ pub async fn resolve_route(
         };
     }
 
-    // Step 2: Match target against all agents (IP subnet or domain suffix)
+    // Step 2: Match target against all agents (IP subnet or explicit DNS route).
     let agents = registry.find_agents_for(target).await;
 
     if agents.is_empty() {

@@ -423,8 +423,8 @@ namespace DevolutionsAgent.Actions
                         return Fail("The installer was asked to advertise the detected DNS domain, but no DNS domain could be detected on this machine.");
                     }
 
-                    detectedDomainToInclude = detectedDomain;
-                    session.Log($"Adding detected DNS domain '{detectedDomain}' to the explicit tunnel advertisements");
+                    detectedDomainToInclude = DomainDetection.ToWildcardRoute(detectedDomain);
+                    session.Log($"Adding detected DNS wildcard route '{detectedDomainToInclude}' to the explicit tunnel advertisements");
                 }
 
                 // Hand the enrollment string through verbatim. The agent's
@@ -730,7 +730,7 @@ namespace DevolutionsAgent.Actions
 
         /// <summary>
         /// Patch the freshly-written agent.json's <c>Tunnel</c> section with the operator's
-        /// advertised subnets and DNS suffixes. Domain detection is only a suggestion made by
+        /// advertised subnets and exact DNS names. Domain detection is only a suggestion made by
         /// the installer; the persisted configuration contains the resulting explicit list.
         /// </summary>
         private static void WriteTunnelAdvertisementsToConfig(

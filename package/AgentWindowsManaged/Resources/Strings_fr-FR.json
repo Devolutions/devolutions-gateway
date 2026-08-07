@@ -212,23 +212,23 @@
           },
           {
             "id": "AgentTunnelDlgDomainsLabel",
-            "text": "Domaines annoncés :"
+            "text": "Routes DNS annoncées :"
           },
           {
             "id": "AgentTunnelDlgDomainsHint",
-            "text": "Facultatif. Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com."
+            "text": "Facultatif. Un nom exact ne correspond qu'à lui-même. Utilisez un caractère générique explicite comme *.example.com pour les sous-domaines."
           },
           {
             "id": "AgentTunnelDlgDetectedDomainOption",
-            "text": "Le domaine {0} a été détecté. Voulez-vous également l'annoncer ?"
+            "text": "Le domaine DNS {0} a été détecté. Annoncer ses sous-domaines avec {1} ?"
           },
           {
             "id": "AgentTunnelDlgNoDetectedDomain",
-            "text": "Aucun domaine DNS n'a été détecté. Entrez les domaines ci-dessous au besoin."
+            "text": "Aucun domaine DNS n'a été détecté. Entrez des noms exacts ou des routes génériques explicites ci-dessous au besoin."
           },
           {
             "id": "AgentTunnelDlgDetectedDomainAlreadyIncluded",
-            "text": "Le domaine détecté {0} est déjà inclus."
+            "text": "La route DNS suggérée {0} est déjà incluse."
           }
         ],
         "psu": [

@@ -34,10 +34,10 @@ impl Target {
 
 /// Resolve a target to candidate socket addresses the agent is willing to reach.
 ///
-/// A hostname matching an advertised domain is allowed on its own: the Gateway routes
-/// hostnames on the domain advertisement alone, so advertising domains and no subnets has
+/// A hostname matching an advertised explicit DNS route is allowed on its own: the Gateway routes
+/// hostnames on the DNS advertisement alone, so advertising names and no subnets has
 /// to work. Anything else has to land in an advertised subnet, and only IPv4 subnets
-/// travel on the wire, so an IPv6 address only ever gets through on a domain match.
+/// travel on the wire, so an IPv6 address only ever gets through on a DNS-route match.
 pub(crate) async fn resolve_target(
     target: &Target,
     advertise_subnets: &[Ipv4Network],
@@ -117,15 +117,15 @@ mod tests {
             .collect()
     }
 
-    // The Gateway routes a hostname on the domain advertisement alone, so an agent
-    // advertising domains and no subnets still has to honour the request.
+    // The Gateway routes a matching DNS advertisement alone, so an agent advertising
+    // DNS routes and no subnets still has to honour the request.
     #[tokio::test]
     async fn domain_target_matching_advertised_domain_needs_no_subnet() {
         let target = Target::parse("localhost:3389").expect("parse target");
 
         let resolved = resolve_target(&target, &[], &domains(&["localhost"]))
             .await
-            .expect("hostname matches an advertised domain");
+            .expect("hostname matches an advertised DNS route");
 
         assert!(!resolved.is_empty(), "expected at least one resolved address");
     }

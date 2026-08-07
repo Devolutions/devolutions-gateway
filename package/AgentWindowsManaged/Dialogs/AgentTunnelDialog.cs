@@ -63,23 +63,25 @@ public partial class AgentTunnelDialog : AgentDialog
             return;
         }
 
+        string suggestedRoute = DomainDetection.ToWildcardRoute(detectedDomain);
         bool alreadyIncluded = advertiseDomains.Text
             .Split(',')
             .Select(domain => domain.Trim())
-            .Any(domain => string.Equals(domain, detectedDomain, StringComparison.OrdinalIgnoreCase));
+            .Any(domain => string.Equals(domain, suggestedRoute, StringComparison.OrdinalIgnoreCase));
 
         if (alreadyIncluded)
         {
             includeDetectedDomain.Checked = false;
             detectedDomainOptionPanel.Visible = false;
             detectedDomainStatus.Text =
-                string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainAlreadyIncluded), detectedDomain);
+                string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainAlreadyIncluded), suggestedRoute);
             detectedDomainStatus.Visible = true;
             return;
         }
 
         detectedDomainStatus.Visible = false;
-        detectedDomainOption.Text = string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainOption), detectedDomain);
+        detectedDomainOption.Text =
+            string.Format(I18n(Strings.AgentTunnelDlgDetectedDomainOption), detectedDomain, suggestedRoute);
         detectedDomainOptionPanel.Visible = true;
     }
 

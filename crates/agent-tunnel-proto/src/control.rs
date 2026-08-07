@@ -24,15 +24,24 @@ impl DomainName {
         &self.0
     }
 
-    /// Returns `true` if `hostname` matches this domain via DNS suffix matching.
+    pub fn is_wildcard(&self) -> bool {
+        self.0.starts_with("*.")
+    }
+
+    /// Returns `true` if `hostname` matches this explicit DNS route.
     ///
-    /// Matches if `hostname == domain` (exact) or `hostname` ends with `.domain`.
+    /// A plain name matches only itself. A `*.` prefix matches one or more
+    /// subdomain labels, but not the bare parent domain.
     pub fn matches_hostname(&self, hostname: &str) -> bool {
         let hostname = hostname.to_ascii_lowercase();
-        hostname == self.0
-            || (hostname.len() > self.0.len()
-                && hostname.as_bytes()[hostname.len() - self.0.len() - 1] == b'.'
-                && hostname.ends_with(&self.0))
+        match self.0.strip_prefix("*.") {
+            Some(parent) => {
+                hostname.len() > parent.len() + 1
+                    && hostname.as_bytes()[hostname.len() - parent.len() - 1] == b'.'
+                    && hostname.ends_with(parent)
+            }
+            None => hostname == self.0,
+        }
     }
 }
 
@@ -46,7 +55,7 @@ impl std::fmt::Display for DomainName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DomainAdvertisement {
-    /// The DNS domain (e.g., "contoso.local").
+    /// An exact DNS name or explicit wildcard route (e.g., "server.contoso.local" or "*.contoso.local").
     pub domain: DomainName,
     /// Whether this domain was auto-detected (`true`) or explicitly configured (`false`).
     pub auto_detected: bool,
