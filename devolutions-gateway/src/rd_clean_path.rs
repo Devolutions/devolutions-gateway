@@ -237,7 +237,7 @@ struct ConnectedRdpServer {
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
 /// the WebSocket forwarders in [`crate::upstream`].
-/// Version 1 performs PCB + X.224 + TLS; version 2 performs the opaque server PCB + TLS.
+/// An X.224 request selects the ordinary front; its absence selects PCB + TLS.
 async fn connect_rdp_server(
     claims: &AssociationTokenClaims,
     cleanpath: RDCleanPath,
@@ -287,11 +287,8 @@ async fn connect_rdp_server(
                     .map_err(CleanPathError::BadRequest)?,
             )
         }
-        RDCleanPath::PcbFrontRequest {
-            server_preconnection_pdu,
-            ..
-        } => {
-            server_stream.write_all(server_preconnection_pdu.as_bytes()).await?;
+        RDCleanPath::PcbFrontRequest { preconnection_blob, .. } => {
+            server_stream.write_all(preconnection_blob.as_bytes()).await?;
             None
         }
         _ => {
@@ -385,13 +382,11 @@ async fn handle_with_credential_injection(
         x224_rsp,
     } = connect_rdp_server(
         &claims,
-        cleanpath_pdu
-            .into_enum()
-            .context("invalid RDCleanPath version 1 PDU")?,
+        cleanpath_pdu.into_enum().context("invalid RDCleanPath version 1 PDU")?,
         agent_tunnel_handle.as_ref(),
     )
-        .await
-        .context("RDCleanPath connection failed")?;
+    .await
+    .context("RDCleanPath connection failed")?;
     let x224_rsp = x224_rsp.context("RDCleanPath version 1 response is missing X.224")?;
 
     // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
@@ -643,7 +638,7 @@ pub async fn handle(
     let rdcleanpath_rsp = if let Some(x224_rsp) = x224_rsp {
         RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
     } else {
-        RDCleanPathPdu::new_v2_response(server_addr.to_string(), x509_chain)
+        RDCleanPathPdu::new_pcb_front_response(server_addr.to_string(), x509_chain)
     }
     .context("build RDCleanPath response")?;
 
