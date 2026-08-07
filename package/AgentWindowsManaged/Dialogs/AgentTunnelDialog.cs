@@ -14,21 +14,13 @@ namespace WixSharpSetup.Dialogs;
 public partial class AgentTunnelDialog : AgentDialog
 {
     private string detectedDomain = string.Empty;
-    private bool loadingDomains;
 
     public AgentTunnelDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-        advertiseDomains.TextChanged += (_, _) =>
-        {
-            if (!loadingDomains)
-            {
-                Runtime.Session[AgentProperties.AgentTunnelDomainsUiState] = AgentProperties.DomainsUiEdited;
-            }
-            UpdateDetectedDomainState();
-        };
+        advertiseDomains.TextChanged += (_, _) => UpdateDetectedDomainState();
         detectedDomainOption.Click += (_, _) => includeDetectedDomain.Checked = !includeDetectedDomain.Checked;
     }
 
@@ -52,28 +44,7 @@ public partial class AgentTunnelDialog : AgentDialog
         detectedDomain = DomainDetection.Detect();
         Runtime.Session[AgentProperties.AgentTunnelDetectedDomain] = detectedDomain;
 
-        string domainsUiState = Runtime.Session.Property(AgentProperties.AgentTunnelDomainsUiState);
-        string requestedDomains = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
-        bool firstVisit = domainsUiState == AgentProperties.DomainsUiNotShown;
-        if (firstVisit && string.IsNullOrWhiteSpace(requestedDomains))
-        {
-            try
-            {
-                requestedDomains = AgentTunnelConfiguration.LoadAdvertiseDomains();
-            }
-            catch
-            {
-                // Enrollment validates the existing configuration before writing anything.
-                // Keep the dialog usable so that validation can report the authoritative error.
-            }
-        }
-        loadingDomains = true;
-        advertiseDomains.Text = requestedDomains;
-        loadingDomains = false;
-        if (firstVisit)
-        {
-            Runtime.Session[AgentProperties.AgentTunnelDomainsUiState] = AgentProperties.DomainsUiUnchanged;
-        }
+        advertiseDomains.Text = Runtime.Session.Property(AgentProperties.AgentTunnelAdvertiseDomains);
         includeDetectedDomain.Checked =
             Runtime.Session.Property(AgentProperties.AgentTunnelIncludeDetectedDomain) == "1";
         UpdateDetectedDomainState();

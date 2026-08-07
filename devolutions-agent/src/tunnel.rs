@@ -203,7 +203,7 @@ fn resolve_advertise_domains(
             configured
                 .iter()
                 .map(|domain| DomainAdvertisement {
-                    domain: DomainName::new(domain),
+                    domain: DomainName::new(domain.strip_prefix("*.").unwrap_or(domain)),
                     auto_detected: false,
                 })
                 .collect()
@@ -890,6 +890,13 @@ mod tests {
             domains_of(&advertised),
             vec![("a.example.com", false), ("b.example.com", false)]
         );
+    }
+
+    #[test]
+    fn legacy_wildcard_prefix_is_normalized_to_domain_suffix() {
+        let advertised = resolve_advertise_domains(&["*.example.com".to_owned()], false, None);
+
+        assert_eq!(domains_of(&advertised), vec![("example.com", false)]);
     }
 
     #[test]

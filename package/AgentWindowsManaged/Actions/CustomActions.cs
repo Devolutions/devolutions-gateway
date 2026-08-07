@@ -394,8 +394,6 @@ namespace DevolutionsAgent.Actions
                 DecodePropertyData(session, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded).Trim(),
                 "1",
                 StringComparison.OrdinalIgnoreCase);
-            string domainsUiState =
-                DecodePropertyData(session, AgentProperties.AgentTunnelDomainsUiStateEncoded).Trim();
             ActionResult Fail(string msg)
             {
                 session.Log(msg);
@@ -482,15 +480,9 @@ namespace DevolutionsAgent.Actions
 
                 if (detectedDomainToInclude != null)
                 {
-                    IEnumerable<string> existingDomains =
-                        originalTunnel?["AdvertiseDomains"] is JArray persistedDomains
-                            ? persistedDomains.Values<string>()
-                            : Enumerable.Empty<string>();
-
                     domainsArg = string.Join(
                         ",",
-                        existingDomains
-                            .Concat(SplitCsv(domainsArg))
+                        SplitCsv(domainsArg)
                             .Concat(new[] { detectedDomainToInclude })
                             .Where(domain => !string.IsNullOrWhiteSpace(domain))
                             .Distinct(StringComparer.OrdinalIgnoreCase));
@@ -610,15 +602,9 @@ namespace DevolutionsAgent.Actions
                     return Fail("Failed to record the agent tunnel rollback marker; the enrollment was rolled back.");
                 }
 
-                // Fresh installer enrollments are explicit-only and never enable runtime detection.
-                // Re-enrollment preserves an existing domain policy unless the operator selected
-                // explicit domains in this install.
-                bool replaceDomainPolicy =
-                    originalTunnel == null
-                    || detectedDomainToInclude != null
-                    || domainsUiState == AgentProperties.DomainsUiEdited
-                    || (domainsUiState == AgentProperties.DomainsUiNotShown && domainsArg.Length != 0);
-                WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg, replaceDomainPolicy);
+                // The current installer invocation is the source of truth for domain advertisements.
+                // Existing agent.json values are never imported into the wizard or merged implicitly.
+                WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
 
                 // Enrollment only proved the HTTPS/TCP path, but the tunnel runs over QUIC/UDP
                 // (4433). Probe that path as a distinct step so a blocked UDP port fails the install
@@ -750,8 +736,7 @@ namespace DevolutionsAgent.Actions
         private static void WriteTunnelAdvertisementsToConfig(
             Session session,
             string subnetsCsv,
-            string domainsCsv,
-            bool replaceDomainPolicy)
+            string domainsCsv)
         {
             string[] subnets = SplitCsv(subnetsCsv);
             string[] domains = SplitCsv(domainsCsv);
@@ -782,11 +767,8 @@ namespace DevolutionsAgent.Actions
             {
                 tunnel["AdvertiseSubnets"] = new JArray(subnets);
             }
-            if (replaceDomainPolicy)
-            {
-                tunnel["AdvertiseDomains"] = new JArray(domains);
-                tunnel["AutoDetectDomain"] = false;
-            }
+            tunnel["AdvertiseDomains"] = new JArray(domains);
+            tunnel["AutoDetectDomain"] = false;
 
             // Let genuine IO/parse errors propagate too: swallowing them would also lose the
             // operator's data while falsely reporting success. Write atomically so a mid-write
@@ -796,10 +778,7 @@ namespace DevolutionsAgent.Actions
             // Newtonsoft.Json 13.0.4+ and crashes with MissingMethodException against an older 13.x in the GAC.
             // See the detailed note in ToggleAgentFeature and Newtonsoft.Json issue #3084.
             WriteFileAtomic(configPath, root.ToString(Formatting.Indented, Array.Empty<JsonConverter>()));
-            session.Log(
-                !replaceDomainPolicy
-                    ? $"Wrote {subnets.Length} advertise_subnets entries and preserved the existing domain policy in agent.json"
-                    : $"Wrote {subnets.Length} advertise_subnets and {domains.Length} explicit advertise_domains entries to agent.json; runtime domain detection disabled");
+            session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} explicit advertise_domains entries to agent.json; runtime domain detection disabled");
         }
 
         /// <summary>
@@ -1700,7 +1679,6 @@ namespace DevolutionsAgent.Actions
                 (AgentProperties.AgentTunnelAdvertiseDomains, AgentProperties.AgentTunnelAdvertiseDomainsEncoded),
                 (AgentProperties.AgentTunnelIncludeDetectedDomain, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded),
                 (AgentProperties.AgentTunnelDetectedDomain, AgentProperties.AgentTunnelDetectedDomainEncoded),
-                (AgentProperties.AgentTunnelDomainsUiState, AgentProperties.AgentTunnelDomainsUiStateEncoded),
             })
             {
                 string value = session.Property(source) ?? string.Empty;

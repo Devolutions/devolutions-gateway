@@ -312,7 +312,6 @@ internal static class AgentActions
             AgentProperties.AgentTunnelAdvertiseDomainsEncoded,
             AgentProperties.AgentTunnelIncludeDetectedDomainEncoded,
             AgentProperties.AgentTunnelDetectedDomainEncoded,
-            AgentProperties.AgentTunnelDomainsUiStateEncoded,
             AgentProperties.InstallDir,
             // installId is a typed WixProperty<Guid>, so reference its string Id; the rollback CA
             // reads it to locate the per-install tunnel rollback marker.
