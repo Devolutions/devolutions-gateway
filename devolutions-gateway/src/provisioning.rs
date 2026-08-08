@@ -44,8 +44,6 @@ pub struct ProvisioningEntry {
     pub(crate) connection_options: Option<TargetConnectionOptions>,
 }
 
-pub type ArcProvisioningEntry = Arc<ProvisioningEntry>;
-
 #[derive(Debug, Clone)]
 struct CredentialsEntry {
     token: String,
@@ -131,40 +129,54 @@ impl ProvisioningStore {
         self.connection_options.lock().insert(jti, entry).is_some()
     }
 
-    /// Assemble the provisioned view for a session.
+    /// True when the credentials half is live and carries an injection mapping.
     ///
-    /// Returns `None` unless the credentials half (token and/or mapping) is present and live.
-    /// Folds in connection options when that half is also present and live.
-    pub(crate) fn get(&self, jti: Uuid) -> Option<ArcProvisioningEntry> {
+    /// Does not consume the entry — use before auth when deciding whether to take the
+    /// credential-injection path.
+    pub(crate) fn has_mapping(&self, jti: Uuid) -> bool {
+        let now = time::OffsetDateTime::now_utc();
+        let entries = self.credentials.lock();
+        match entries.get(&jti) {
+            Some(entry) if now < entry.expires_at => entry.mapping.is_some(),
+            _ => false,
+        }
+    }
+
+    /// Take the provisioned view for a session (one-shot).
+    ///
+    /// Removes the credentials half (required) and any live connection-options half for `jti`.
+    /// Returns `None` if credentials are missing or expired. A second `take` for the same JTI
+    /// fails until preflight inserts again.
+    pub(crate) fn take(&self, jti: Uuid) -> Option<ProvisioningEntry> {
         let now = time::OffsetDateTime::now_utc();
 
         let (token, mapping) = {
-            let entries = self.credentials.lock();
-            let entry = entries.get(&jti)?;
+            let mut entries = self.credentials.lock();
+            let entry = entries.remove(&jti)?;
             if now >= entry.expires_at {
                 warn!(%jti, "Provisioned credentials expired before the connection arrived");
                 return None;
             }
-            (entry.token.clone(), entry.mapping.clone())
+            (entry.token, entry.mapping)
         };
 
-        let connection_options = self.get_live_connection_options(jti, now);
+        let connection_options = {
+            let mut entries = self.connection_options.lock();
+            match entries.remove(&jti) {
+                Some(entry) if now < entry.expires_at => Some(entry.connection_options),
+                Some(_) => {
+                    warn!(%jti, "Provisioned connection options expired before the connection arrived");
+                    None
+                }
+                None => None,
+            }
+        };
 
-        Some(Arc::new(ProvisioningEntry {
+        Some(ProvisioningEntry {
             token,
             mapping,
             connection_options,
-        }))
-    }
-
-    fn get_live_connection_options(&self, jti: Uuid, now: time::OffsetDateTime) -> Option<TargetConnectionOptions> {
-        let entries = self.connection_options.lock();
-        let entry = entries.get(&jti)?;
-        if now >= entry.expires_at {
-            warn!(%jti, "Provisioned connection options expired before the connection arrived");
-            return None;
-        }
-        Some(entry.connection_options.clone())
+        })
     }
 }
 
@@ -252,49 +264,54 @@ mod tests {
     }
 
     #[test]
-    fn get_returns_token_only_entry() {
+    fn take_returns_token_only_entry() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
             .insert_credentials(association_token(jti), None, time::Duration::minutes(5))
             .expect("insert");
-        let entry = store.get(jti).expect("live entry");
+        let entry = store.take(jti).expect("live entry");
         assert!(entry.mapping.is_none());
         assert!(entry.connection_options.is_none());
+        assert!(store.take(jti).is_none(), "second take is empty");
     }
 
     #[test]
-    fn get_returns_live_credentials_without_options() {
+    fn take_returns_live_credentials_without_options() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
             .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("insert");
-        let entry = store.get(jti).expect("live entry");
+        let entry = store.take(jti).expect("live entry");
         assert!(entry.mapping.is_some());
         assert!(entry.connection_options.is_none());
     }
 
     #[test]
-    fn get_folds_in_live_connection_options() {
+    fn take_folds_in_and_consumes_connection_options() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
             .insert_credentials(association_token(jti), Some(mapping()), time::Duration::minutes(5))
             .expect("insert credentials");
         assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
-        let entry = store.get(jti).expect("live entry");
+        let entry = store.take(jti).expect("live entry");
         assert!(entry.connection_options.is_some());
+        assert!(store.take(jti).is_none());
+        // options half was removed with take; re-insert options alone does not revive credentials
+        assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
+        assert!(store.take(jti).is_none());
     }
 
     #[test]
-    fn get_treats_expired_credentials_as_absent() {
+    fn take_treats_expired_credentials_as_absent() {
         let store = ProvisioningStore::new();
         let jti = Uuid::new_v4();
         store
             .insert_credentials(association_token(jti), Some(mapping()), time::Duration::seconds(-1))
             .expect("insert");
-        assert!(store.get(jti).is_none());
+        assert!(store.take(jti).is_none());
     }
 
     #[test]
