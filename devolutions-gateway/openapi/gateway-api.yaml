@@ -1772,6 +1772,10 @@ components:
       - id
       - kind
       properties:
+        connection_options:
+          allOf:
+          - $ref: '#/components/schemas/TargetConnectionOptions'
+          nullable: true
         host_to_resolve:
           type: string
           description: |-
@@ -1799,7 +1803,8 @@ components:
           description: |-
             Minimum persistence duration in seconds for the data provisioned via this operation.
 
-            Optional parameter for "provision-token" and "provision-credentials" kinds.
+            Optional parameter for "provision-token", "provision-credentials", and
+            "provision-connection-options" kinds.
           nullable: true
           minimum: 0
         token:
@@ -1807,7 +1812,8 @@ components:
           description: |-
             The token to be stored on the proxy-side.
 
-            Required for "provision-token" and "provision-credentials" kinds.
+            Required for "provision-token", "provision-credentials", and
+            "provision-connection-options" kinds.
           nullable: true
     PreflightOperationKind:
       type: string
@@ -1819,6 +1825,7 @@ components:
       - provision-token
       - provision-credentials
       - resolve-host
+      - provision-connection-options
     PreflightOutput:
       type: object
       required:
@@ -1991,7 +1998,7 @@ components:
           nullable: true
         krb_kdc:
           type: string
-          description: |-
+          description: Kerberos KDC address (`<scheme>://<host>:<port>`; port required). Supported schemes: tcp, udp.
             Kerberos KDC address.
 
             E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`.
@@ -2105,6 +2112,16 @@ components:
         Url:
           type: string
           description: HTTP URL where notification messages are to be sent
+    TargetConnectionOptions:
+      type: object
+      properties:
+        krb_kdc:
+          type: string
+          description: Kerberos KDC address (`<scheme>://<host>:<port>`; port required). Supported schemes: tcp, udp.
+            Kerberos KDC address for the target-side CredSSP connection.
+
+            Supported schemes are `tcp` and `udp`.
+          nullable: true
     TrafficEventResponse:
       type: object
       required:
