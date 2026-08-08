@@ -394,12 +394,14 @@ pub(crate) fn credential_injection_kerberos_configs(
         });
     }
 
+    let krb_kdc = credential_injection_kdc
+        .krb_kdc()
+        .context("kerberos credential injection requires the krb_kdc target connection option")?;
+
     Ok(CredentialInjectionKerberosConfigs {
         server: Some(credential_injection_kdc.server_kerberos_config(client_addr)?),
         client: Some(ironrdp_connector::credssp::KerberosConfig {
-            // TODO: Provision the target KDC through connection options after the store is generalized.
-            // See https://github.com/Devolutions/devolutions-gateway/pull/1862#pullrequestreview-4774565673.
-            kdc_proxy_url: None,
+            kdc_proxy_url: Some(url::Url::try_from(krb_kdc).context("convert target kdc address to url")?),
             hostname: gateway_hostname.to_owned(),
         }),
     })
