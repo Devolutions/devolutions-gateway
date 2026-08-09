@@ -19,7 +19,7 @@ Review applicable surfaces:
 Identify the governing source before judging the implementation.
 Prefer normative standards and vendor specifications for standardized behavior, and checked-in schemas or explicitly canonical repository documentation for Gateway-defined contracts.
 Treat generated files and existing implementation behavior as evidence, not authority, unless the repository declares them canonical.
-Use the `windows-protocols` skill when Microsoft Open Specifications govern the changed behavior.
+When Microsoft Open Specifications govern the changed behavior, use the `windows-protocols` skill if available; otherwise consult the specification directly.
 When no authoritative source is available, state the evidence gap instead of inventing a requirement.
 
 Map each contract-relevant change to its governing requirement and attempt to falsify compliance.
