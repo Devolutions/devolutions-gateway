@@ -18,8 +18,8 @@ Treat the PR title and initial body as the exact commit message that squash-and-
 - Add applicable Conventional Commit footers and `Co-authored-by: Name <email>` trailers for collaborators.
 - Choose the type by the affected surface, not by whether the change fixes a defect.
 - Use `ci` for CI, workflow, and automation changes, including fixes to that automation, and reserve `fix` for product or runtime bugs.
-- Use `feat` for features, `build` for build or dependencies, `chore` for non-product tools or configuration, `docs` for documentation only, `style` for non-semantic edits, `refactor` for non-breaking restructuring, `test` for tests, and `perf` for performance.
-- Use `fix`, not `refactor`, for breaking restructuring and mark the change with `!` or a `BREAKING CHANGE` footer.
+- Use `feat` for features, `build` for build or dependencies, `chore` for non-product tools or configuration, `docs` for documentation only, `style` for non-semantic edits, `refactor` for restructuring, `test` for tests, and `perf` for performance.
+- Mark breaking changes with `!` or a `BREAKING CHANGE` footer without changing an otherwise accurate type.
 - Keep every non-squashed development commit coherent and conventional.
 
 ```text
