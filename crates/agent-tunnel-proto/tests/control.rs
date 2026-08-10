@@ -43,6 +43,20 @@ fn wildcard_rejects_partial_parent_label() {
 }
 
 #[test]
+fn route_validation_rejects_ambiguous_wildcards() {
+    for route in ["", "*.", "*.*", "foo.*", ".example.com", "example..com"] {
+        assert!(!DomainName::is_valid_route(route), "route should be invalid: {route}");
+    }
+}
+
+#[test]
+fn route_validation_accepts_exact_and_explicit_wildcard_routes() {
+    for route in ["localhost", "example.com", "*.example.com"] {
+        assert!(DomainName::is_valid_route(route), "route should be valid: {route}");
+    }
+}
+
+#[test]
 fn matches_hostname_rejects_partial_label() {
     let d = DomainName::new("contoso.local");
     assert!(!d.matches_hostname("fakecontoso.local"));

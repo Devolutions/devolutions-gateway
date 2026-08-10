@@ -209,15 +209,20 @@ fn resolve_advertise_domains(
         ([], false, _) => Vec::new(),
         ([], true, Some(detected)) => {
             info!(domain = %detected, "Auto-detected DNS domain");
+            let route = format!("*.{detected}");
+            if !DomainName::is_valid_route(&route) {
+                warn!(%detected, "Ignoring invalid auto-detected DNS domain");
+                return Vec::new();
+            }
             vec![DomainAdvertisement {
-                domain: DomainName::new(format!("*.{detected}")),
+                domain: DomainName::new(route),
                 auto_detected: true,
             }]
         }
         ([], true, None) => {
             warn!(
-                "No advertise_domains configured and domain auto-detection found nothing. \
-                 Set advertise_domains in agent config."
+                "No advertise_domains configured and domain auto-detection found nothing; \
+                 set advertise_domains in agent config"
             );
             Vec::new()
         }
@@ -261,6 +266,14 @@ async fn run_single_connection(
 
     if advertise_subnets.is_empty() {
         warn!("No subnets configured to advertise");
+    }
+
+    if let Some(route) = tunnel_conf
+        .advertise_domains
+        .iter()
+        .find(|route| !DomainName::is_valid_route(route))
+    {
+        bail!("invalid advertise domain route: {route}");
     }
 
     let detected_domain = if tunnel_conf.auto_detect_domain && tunnel_conf.advertise_domains.is_empty() {
@@ -877,6 +890,13 @@ mod tests {
         let advertised = resolve_advertise_domains(&[], true, Some("example.com".to_owned()));
 
         assert_eq!(domains_of(&advertised), vec![("*.example.com", true)]);
+    }
+
+    #[test]
+    fn invalid_auto_detected_domain_is_not_advertised() {
+        let advertised = resolve_advertise_domains(&[], true, Some("foo.bar..baz".to_owned()));
+
+        assert!(advertised.is_empty());
     }
 
     #[test]

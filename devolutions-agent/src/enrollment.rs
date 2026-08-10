@@ -113,6 +113,13 @@ pub async fn enroll_agent(
     advertise_subnets: Vec<String>,
     advertise_domains: Vec<String>,
 ) -> Result<PersistedEnrollment> {
+    if let Some(route) = advertise_domains
+        .iter()
+        .find(|route| !agent_tunnel_proto::DomainName::is_valid_route(route))
+    {
+        bail!("invalid advertise domain route: {route}");
+    }
+
     let EnrollmentJwtClaims {
         jet_agent_name: agent_name,
         ..

@@ -21,8 +21,8 @@ fn is_plausible_domain(domain: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    let mut parts = trimmed.split('.');
-    parts.next().is_some_and(|l| !l.is_empty()) && parts.next().is_some_and(|l| !l.is_empty())
+    let labels: Vec<&str> = trimmed.split('.').collect();
+    labels.len() >= 2 && labels.iter().all(|label| !label.is_empty())
 }
 
 #[cfg(target_os = "windows")]
@@ -105,6 +105,7 @@ mod tests {
         assert!(!is_plausible_domain("com"));
         assert!(!is_plausible_domain("."));
         assert!(!is_plausible_domain(".."));
+        assert!(!is_plausible_domain("foo.bar..baz"));
     }
 
     #[test]

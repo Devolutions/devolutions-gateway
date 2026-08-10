@@ -39,7 +39,7 @@ impl RouteAdvertisementState {
     ///
     /// Returns a specificity score if matched, or `None` if no match.
     /// IP subnet matches return `usize::MAX` (always highest priority).
-    /// DNS-route matches return the matched route length.
+    /// Exact DNS matches return `usize::MAX`; wildcard matches return the route length.
     pub fn matches_target(&self, target: &RouteTarget) -> Option<usize> {
         use std::net::IpAddr;
 

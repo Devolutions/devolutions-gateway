@@ -75,7 +75,6 @@ pub async fn resolve_route(
         };
     }
 
-    // Step 2: Match target against all agents (IP subnet or explicit DNS route).
     let agents = registry.find_agents_for(target).await;
 
     if agents.is_empty() {

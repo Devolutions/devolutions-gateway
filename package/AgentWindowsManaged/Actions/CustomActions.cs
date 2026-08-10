@@ -427,10 +427,12 @@ namespace DevolutionsAgent.Actions
                     session.Log($"Adding detected DNS wildcard route '{detectedDomainToInclude}' to the explicit tunnel advertisements");
                 }
 
-                // Hand the enrollment string through verbatim. The agent's
-                // `up --enrollment-string` parses the gateway URL and agent name out of it.
-                // MSI advertisements are patched into agent.json after enrollment so their
-                // arbitrary values never need command-line quoting.
+                string invalidRoute = SplitCsv(domainsArg).FirstOrDefault(route => !DomainDetection.IsValidRoute(route));
+                if (invalidRoute != null)
+                {
+                    return Fail($"Invalid advertised DNS route: {invalidRoute}");
+                }
+
                 string installDir = session.Property(AgentProperties.InstallDir);
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
 
@@ -488,12 +490,8 @@ namespace DevolutionsAgent.Actions
                             .Distinct(StringComparer.OrdinalIgnoreCase));
                 }
 
-                // The signed jet_agent_name claim is authoritative for the CSR, certificate CN,
-                // and persisted config. Advertisements are patched into agent.json after enrollment
-                // so arbitrary MSI property values never need command-line quoting.
-                //
-                // The JWT is passed via stdin (sentinel `-`) to avoid exposing it in the process
-                // command line (visible to any local process via WMI / Process Explorer / ETW).
+                // The signed jet_agent_name claim is authoritative for the CSR, certificate CN, and persisted config.
+                // The JWT uses stdin so it is not exposed through WMI, Process Explorer, or ETW command-line capture.
                 string arguments = "up --enrollment-string -";
                 string Redact(string s) => s.Replace(enrollmentString, "***");
                 session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
@@ -730,7 +728,7 @@ namespace DevolutionsAgent.Actions
 
         /// <summary>
         /// Patch the freshly-written agent.json's <c>Tunnel</c> section with the operator's
-        /// advertised subnets and exact DNS names. Domain detection is only a suggestion made by
+        /// advertised subnets and explicit DNS routes. Domain detection is only a suggestion made by
         /// the installer; the persisted configuration contains the resulting explicit list.
         /// </summary>
         private static void WriteTunnelAdvertisementsToConfig(

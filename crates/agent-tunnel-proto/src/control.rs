@@ -28,6 +28,11 @@ impl DomainName {
         self.0.starts_with("*.")
     }
 
+    pub fn is_valid_route(route: &str) -> bool {
+        let name = route.strip_prefix("*.").unwrap_or(route);
+        !name.is_empty() && !name.contains('*') && name.split('.').all(|label| !label.is_empty())
+    }
+
     /// Returns `true` if `hostname` matches this explicit DNS route.
     ///
     /// A plain name matches only itself. A `*.` prefix matches one or more

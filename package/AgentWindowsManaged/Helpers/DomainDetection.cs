@@ -28,4 +28,14 @@ internal static class DomainDetection
         string.IsNullOrEmpty(domain) || domain.StartsWith("*.", StringComparison.Ordinal)
             ? domain
             : $"*.{domain}";
+
+    public static bool IsValidRoute(string route)
+    {
+        string name = route?.StartsWith("*.", StringComparison.Ordinal) == true
+            ? route.Substring(2)
+            : route;
+        return !string.IsNullOrEmpty(name)
+            && !name.Contains("*")
+            && name.Split('.').All(label => label.Length != 0);
+    }
 }
