@@ -12,7 +12,8 @@
 //! Producers push into a bounded in-memory queue; when the per-stream byte budget
 //! is exhausted, the oldest queued data is dropped and accounted for with
 //! `StdoutOverflow` / `StderrOverflow` frames marking the gap. When the client
-//! disconnects, the queue is abandoned and producers become no-ops.
+//! disconnects or stops reading, the queue is abandoned and producers become
+//! no-ops.
 
 use std::collections::VecDeque;
 use std::mem;
@@ -139,6 +140,12 @@ struct StreamState {
     chunker: Utf8StreamChunker,
     /// Bytes of queued (not yet consumed) data frames for this stream.
     queued_bytes: usize,
+    /// Bytes dropped by evictions that were not yet reported to the client.
+    ///
+    /// Emitted lazily as a single overflow frame right before the next data
+    /// frame of this stream (or before `Finish`), so evictions never grow the
+    /// queue and consecutive gaps coalesce regardless of stream interleaving.
+    pending_overflow: u64,
 }
 
 #[derive(Debug)]
@@ -274,16 +281,17 @@ impl OperationEventSink {
     ///
     /// When the chunk does not fit, the *oldest* queued data frames of the same
     /// stream are evicted to make room, so a slow client always receives the most
-    /// recent output. Each gap is marked in place with an overflow frame carrying
-    /// the number of skipped bytes.
+    /// recent output. Dropped bytes accumulate in the stream's `pending_overflow`
+    /// counter and are reported lazily by `next_frame`, so evictions strictly
+    /// shrink the queue.
     fn enqueue_chunk(state: &mut QueueState, stream: OutputStream, chunk: String) {
         // INVARIANT: chunk.len() <= MAX_EVENT_FRAME_BODY_BYTES <= PER_STREAM_BUDGET_BYTES,
         // so evicting queued data always frees enough room.
         while state.stream_mut(stream).queued_bytes + chunk.len() > PER_STREAM_BUDGET_BYTES {
             if !Self::evict_oldest_data_frame(state, stream) {
                 // Defensive: nothing left to evict; drop the new chunk instead.
-                let bytes_skipped = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
-                state.items.push_back(overflow_frame(stream, bytes_skipped));
+                let stream_state = state.stream_mut(stream);
+                stream_state.pending_overflow = stream_state.pending_overflow.saturating_add(chunk.len() as u64);
                 return;
             }
         }
@@ -291,8 +299,8 @@ impl OperationEventSink {
         state.items.push_back(data_frame(stream, chunk));
     }
 
-    /// Evict the oldest queued data frame of `stream`, marking the gap with an
-    /// overflow frame (merged with an immediately preceding one when present).
+    /// Evict the oldest queued data frame of `stream`, accounting the dropped
+    /// bytes in the stream's `pending_overflow` counter.
     ///
     /// Returns false when no data frame of that stream is queued.
     fn evict_oldest_data_frame(state: &mut QueueState, stream: OutputStream) -> bool {
@@ -314,23 +322,21 @@ impl OperationEventSink {
             // INVARIANT: `position` was found by matching a data frame of `stream`.
             _ => unreachable!("evicted frame is a data frame"),
         };
-        state.stream_mut(stream).queued_bytes -= evicted_len;
-        let skipped = u32::try_from(evicted_len).unwrap_or(u32::MAX);
-
-        // Merge into an overflow frame already sitting at the gap, if any.
-        let merged = position > 0
-            && match (stream, state.items.get_mut(position - 1)) {
-                (OutputStream::Stdout, Some(EventFrame::StdoutOverflow { bytes_skipped }))
-                | (OutputStream::Stderr, Some(EventFrame::StderrOverflow { bytes_skipped })) => {
-                    *bytes_skipped = bytes_skipped.saturating_add(skipped);
-                    true
-                }
-                _ => false,
-            };
-        if !merged {
-            state.items.insert(position, overflow_frame(stream, skipped));
-        }
+        let stream_state = state.stream_mut(stream);
+        stream_state.queued_bytes -= evicted_len;
+        stream_state.pending_overflow = stream_state.pending_overflow.saturating_add(evicted_len as u64);
         true
+    }
+
+    /// Take the pending overflow of `stream` as a protocol frame, if any.
+    fn take_pending_overflow(state: &mut QueueState, stream: OutputStream) -> Option<EventFrame> {
+        let stream_state = state.stream_mut(stream);
+        if stream_state.pending_overflow == 0 {
+            return None;
+        }
+        let bytes_skipped = u32::try_from(stream_state.pending_overflow).unwrap_or(u32::MAX);
+        stream_state.pending_overflow = stream_state.pending_overflow.saturating_sub(u64::from(bytes_skipped));
+        Some(overflow_frame(stream, bytes_skipped))
     }
 
     /// Wait for and take the next queued frame; `None` once the queue is closed
@@ -340,6 +346,20 @@ impl OperationEventSink {
             let notified = self.queue.notify.notified();
             {
                 let mut state = self.queue.state.lock().expect("event queue lock poisoned");
+                // Report accumulated gaps right before the data they precede
+                // (or before `Finish`, when no data of that stream survived).
+                let overflow = match state.items.front() {
+                    Some(EventFrame::Stdout(_)) => Self::take_pending_overflow(&mut state, OutputStream::Stdout),
+                    Some(EventFrame::Stderr(_)) => Self::take_pending_overflow(&mut state, OutputStream::Stderr),
+                    Some(EventFrame::Finish) => Self::take_pending_overflow(&mut state, OutputStream::Stdout)
+                        .or_else(|| Self::take_pending_overflow(&mut state, OutputStream::Stderr)),
+                    _ => None,
+                };
+                if let Some(frame) = overflow {
+                    // The frame at the queue front is left in place for the next call.
+                    self.queue.notify.notify_one();
+                    return Some(frame);
+                }
                 if let Some(frame) = state.items.pop_front() {
                     match &frame {
                         EventFrame::Stdout(data) => state.stdout.queued_bytes -= data.len(),
@@ -410,6 +430,11 @@ mod windows_channel {
     /// After the final `Finish` frame is written, how long the writer waits for the
     /// client to drain the pipe and close its end before tearing the pipe down.
     const CLIENT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// How long a single frame write may remain pending before the client is
+    /// considered stalled and the channel is abandoned. Writes only block once
+    /// the kernel pipe buffer is full, i.e. the client stopped reading.
+    const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
     /// Create the event channel for an operation.
     ///
@@ -491,7 +516,7 @@ mod windows_channel {
             debug!(
                 operation_id,
                 %error,
-                "Event channel client disconnected, continuing without streaming"
+                "Event channel client disconnected or stalled, continuing without streaming"
             );
             return;
         }
@@ -505,7 +530,7 @@ mod windows_channel {
                 debug!(
                     operation_id,
                     %error,
-                    "Event channel client disconnected, continuing without streaming"
+                    "Event channel client disconnected or stalled, continuing without streaming"
                 );
                 return;
             }
@@ -529,11 +554,19 @@ mod windows_channel {
         debug!(operation_id, "Event channel closed");
     }
 
+    /// Write one frame with a bounded deadline.
+    ///
+    /// A connected client that stops reading would otherwise leave the write
+    /// pending forever once the kernel pipe buffer fills, retaining the writer
+    /// task, pipe handle, and queued data indefinitely.
     async fn write_frame(server: &mut NamedPipeServer, frame: &EventFrame) -> anyhow::Result<()> {
         let bytes = frame.encode().context("failed to encode event frame")?;
         // No explicit flush: named pipe writes go straight to the kernel pipe
         // buffer, and tokio's named pipe `flush` is a no-op anyway.
-        server.write_all(&bytes).await.context("failed to write event frame")?;
+        tokio::time::timeout(WRITE_STALL_TIMEOUT, server.write_all(&bytes))
+            .await
+            .map_err(|_| anyhow::anyhow!("client stopped reading (write pending for {WRITE_STALL_TIMEOUT:?})"))?
+            .context("failed to write event frame")?;
         Ok(())
     }
 
@@ -755,7 +788,8 @@ mod tests {
         let sink = OperationEventSink::new();
         let frame_len = 64 * 1024;
         sink.stdout(&vec![b'o'; PER_STREAM_BUDGET_BYTES]);
-        // Two more chunks evict two oldest frames; the gap marker must merge.
+        // Two more chunks evict two oldest frames; the gaps must coalesce into a
+        // single overflow report.
         sink.stdout(&vec![b'n'; frame_len]);
         sink.stdout(&vec![b'n'; frame_len]);
         sink.finish();
@@ -770,6 +804,45 @@ mod tests {
         }
         assert_eq!(overflow_frames, 1, "consecutive gaps must merge into one frame");
         assert_eq!(skipped, 2 * frame_len as u64);
+    }
+
+    #[tokio::test]
+    async fn sink_bounds_overflow_frames_with_interleaved_streams() {
+        let sink = OperationEventSink::new();
+        let frame_len = 64 * 1024;
+        // Fill both stream budgets, then keep alternating: every push evicts, and
+        // the queue must not grow by an overflow frame per eviction.
+        let evictions_per_stream = 32;
+        sink.stdout(&vec![b'a'; PER_STREAM_BUDGET_BYTES]);
+        sink.stderr(&vec![b'b'; PER_STREAM_BUDGET_BYTES]);
+        for _ in 0..evictions_per_stream {
+            sink.stdout(&vec![b'a'; frame_len]);
+            sink.stderr(&vec![b'b'; frame_len]);
+        }
+        sink.finish();
+
+        let mut stdout_overflow_frames = 0u32;
+        let mut stderr_overflow_frames = 0u32;
+        let mut stdout_skipped = 0u64;
+        let mut stderr_skipped = 0u64;
+        while let Some(frame) = sink.next_frame().await {
+            match frame {
+                EventFrame::StdoutOverflow { bytes_skipped } => {
+                    stdout_overflow_frames += 1;
+                    stdout_skipped += u64::from(bytes_skipped);
+                }
+                EventFrame::StderrOverflow { bytes_skipped } => {
+                    stderr_overflow_frames += 1;
+                    stderr_skipped += u64::from(bytes_skipped);
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(stdout_overflow_frames, 1, "interleaved gaps must still coalesce");
+        assert_eq!(stderr_overflow_frames, 1, "interleaved gaps must still coalesce");
+        assert_eq!(stdout_skipped, (evictions_per_stream * frame_len) as u64);
+        assert_eq!(stderr_skipped, (evictions_per_stream * frame_len) as u64);
     }
 
     #[tokio::test]
