@@ -29,7 +29,7 @@ use crate::broker::policy_security;
 /// ctrl event before it is forcefully terminated.
 const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(60);
 
-/// Granularity of the wait loop used to observe Cancellation requests.
+/// Granularity of the wait loop used to observe cancellation requests.
 const WAIT_SLICE_MS: u32 = 500;
 
 /// Create a process under the given token and wait for exit.
@@ -55,6 +55,15 @@ pub(super) fn create_process(
     process_started: Option<ProcessStartedCallback>,
     cancel: Option<&CancellationToken>,
 ) -> anyhow::Result<ExecutionOutput> {
+    // Reject an already-canceled token before any setup or spawn so a cancellation
+    // arriving between plan stages never launches the next command. Races with a
+    // cancellation arriving after this check are handled by the wait loop below.
+    if let Some(cancel) = cancel
+        && cancel.is_cancelled()
+    {
+        return Err(anyhow::Error::new(OperationCanceled));
+    }
+
     let cmd_line = CommandLine::new(command.to_vec());
 
     debug!(session_id, capture, "Building process creation parameters");
@@ -111,7 +120,7 @@ pub(super) fn create_process(
     };
 
     // `CREATE_NEW_PROCESS_GROUP` makes the child's PID a process group ID so a
-    // console ctrl event can later target the whole group for graceful Cancellation.
+    // console ctrl event can later target the whole group for graceful cancellation.
     let creation_flags = CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP | NORMAL_PRIORITY_CLASS;
 
     debug!("Calling process::create_process_as_user");
@@ -334,6 +343,12 @@ fn resolve_executable(
 /// process group, then waits up to [`CANCEL_GRACE_PERIOD`] for the process to exit.
 /// If the event cannot be delivered or the grace period elapses, the root process is
 /// forcefully terminated.
+///
+/// Only the root process is terminated on fallback — deliberately. Package managers
+/// spawn installer children (e.g. `msiexec`), and forcefully killing an MSI install
+/// mid-way can corrupt the system; letting an in-flight installer finish is preferred
+/// over guaranteeing the whole tree dies (job-object based tree termination was
+/// considered and rejected for this reason).
 fn stop_canceled_process(process_info: &process::ProcessInformation, session_id: u32) -> anyhow::Result<()> {
     let pid = process_info.process_id;
     info!(session_id, pid, "Cancellation requested; stopping process");

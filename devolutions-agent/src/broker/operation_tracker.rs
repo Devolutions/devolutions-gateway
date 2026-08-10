@@ -39,7 +39,7 @@ pub struct TrackedOperation {
     pub owner_key: String,
     /// When this entry should be evicted (set upon completion/failure).
     pub expires_at: Option<DateTime<Utc>>,
-    /// Fired when Cancellation is requested, observed by the executor.
+    /// Fired when cancellation is requested, observed by the executor.
     pub cancel_token: CancellationToken,
 }
 
@@ -185,7 +185,7 @@ impl OperationTracker {
         }
     }
 
-    /// Request Cancellation of an operation owned by the authenticated client.
+    /// Request cancellation of an operation owned by the authenticated client.
     ///
     /// Idempotent and asynchronous: a non-terminal operation is moved to `Canceling` and its
     /// cancel token is fired; the executor terminates the process and the operation later

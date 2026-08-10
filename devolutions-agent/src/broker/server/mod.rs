@@ -345,7 +345,7 @@ impl BrokerState {
 
         let message = if operation.status == OperationStatus::Canceling {
             info!(operation_id = %request.operation_id, "Cancellation requested for operation");
-            "Cancellation requested; poll the status endpoint until a terminal status is reached".to_owned()
+            "cancellation requested; poll the status endpoint until a terminal status is reached".to_owned()
         } else {
             format!("operation already reached terminal status {:?}", operation.status)
         };
@@ -743,7 +743,7 @@ mod tests {
 
     // ─── Cancellation ────────────────────────────────────────────────────────
 
-    /// Executor that blocks until the operation's cancel token fires, then reports Cancellation.
+    /// Executor that blocks until the operation's cancel token fires, then reports cancellation.
     struct CancelableExecutor;
 
     #[async_trait]

@@ -20,7 +20,7 @@ use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
 use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
-    ProcessStartedCallback,
+    ProcessStartedCallback, is_canceled_error,
 };
 use crate::broker::policy_security;
 
@@ -354,7 +354,8 @@ fn run_plan(
         }
     }
 
-    // 1. Kill requested processes (best-effort; a missing process is not an error).
+    // 1. Kill requested processes (best-effort; a missing process is not an error,
+    //    but a cancellation request must still be honored).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
             trusted_system32_executable("taskkill.exe"),
@@ -362,8 +363,17 @@ fn run_plan(
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false, requires_elevation, None, None) {
+        match create_process(
+            token,
+            &kill_cmd,
+            session_id,
+            false,
+            requires_elevation,
+            None,
+            Some(&ctx.cancel_token),
+        ) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
+            Err(error) if is_canceled_error(&error) => return Err(error),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
     }
