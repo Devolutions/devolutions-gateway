@@ -18,7 +18,10 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
-use super::{BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, ProcessStartedCallback};
+use super::{
+    BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
+    ProcessStartedCallback, is_canceled_error,
+};
 use crate::broker::policy_security;
 
 mod privileges;
@@ -328,6 +331,10 @@ fn run_plan(
     session_id: u32,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
+    if ctx.cancel_token.is_cancelled() {
+        return Err(anyhow::Error::new(OperationCanceled));
+    }
+
     let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
     if requires_elevation && command_is_bun(&ctx.command) {
         bail!("elevated Bun package operations are not supported by the broker");
@@ -347,7 +354,8 @@ fn run_plan(
         }
     }
 
-    // 1. Kill requested processes (best-effort; a missing process is not an error).
+    // 1. Kill requested processes (best-effort; a missing process is not an error,
+    //    but a cancellation request must still be honored).
     for process_name in &ctx.kill_processes {
         let kill_cmd = vec![
             trusted_system32_executable("taskkill.exe"),
@@ -355,8 +363,17 @@ fn run_plan(
             "/IM".to_owned(),
             process_name.clone(),
         ];
-        match create_process(token, &kill_cmd, session_id, false, requires_elevation, None) {
+        match create_process(
+            token,
+            &kill_cmd,
+            session_id,
+            false,
+            requires_elevation,
+            None,
+            Some(&ctx.cancel_token),
+        ) {
             Ok(out) => info!(%process_name, exit_code = out.exit_code, "Kill-before-operation completed"),
+            Err(error) if is_canceled_error(&error) => return Err(error),
             Err(error) => warn!(%process_name, %error, "Kill-before-operation failed (ignored)"),
         }
     }
@@ -372,6 +389,7 @@ fn run_plan(
             ctx.capture_output,
             requires_elevation,
             None,
+            Some(&ctx.cancel_token),
         )
         .context("failed to run pre-operation command")?;
         if out.exit_code != 0 {
@@ -392,19 +410,35 @@ fn run_plan(
         ctx.capture_output,
         requires_elevation,
         process_started,
+        Some(&ctx.cancel_token),
     )?;
 
     // 4. Post-operation command — runs after the main command; failures are logged only
     //    so a completed main operation is never reported as failed by its post-hook.
+    //    Skipped when cancellation was requested, and cancellable while it runs.
     if let Some(post) = &ctx.post_command {
-        info!("Running post-operation command");
-        match prepare_shell_command(token, post) {
-            Ok(command) => match create_process(token, command.args(), session_id, false, requires_elevation, None) {
-                Ok(out) if out.exit_code == 0 => {}
-                Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
-                Err(error) => warn!(%error, "Post-operation command failed"),
-            },
-            Err(error) => warn!(%error, "Failed to prepare post-operation command"),
+        if ctx.cancel_token.is_cancelled() {
+            info!("Skipping post-operation command: operation was canceled");
+        } else {
+            info!("Running post-operation command");
+            match prepare_shell_command(token, post) {
+                Ok(command) => {
+                    match create_process(
+                        token,
+                        command.args(),
+                        session_id,
+                        false,
+                        requires_elevation,
+                        None,
+                        Some(&ctx.cancel_token),
+                    ) {
+                        Ok(out) if out.exit_code == 0 => {}
+                        Ok(out) => warn!(exit_code = out.exit_code, "Post-operation command exited non-zero"),
+                        Err(error) => warn!(%error, "Post-operation command failed"),
+                    }
+                }
+                Err(error) => warn!(%error, "Failed to prepare post-operation command"),
+            }
         }
     }
 
@@ -1918,6 +1952,7 @@ mod tests {
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
         };
 
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("elevated vcpkg should fail");
@@ -1941,6 +1976,7 @@ mod tests {
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
         };
 
         let executor = WindowsExecutor { is_system: true };
@@ -1968,6 +2004,7 @@ mod tests {
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
             capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
         };
 
         let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");

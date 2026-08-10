@@ -5,14 +5,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
-    Base64Utf8Data, CapabilitiesResponse, CapabilitiesResponseKind, Decision, DecisionInfo, Elevation, ErrorCode,
-    ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse, ExecutionResponseKind,
-    HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName, OperationStatus,
-    OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
+    CancelRequest, CancelResponse, CancelResponseKind, CapabilitiesResponse, CapabilitiesResponseKind, Decision,
+    DecisionInfo, Elevation, ErrorCode, ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse,
+    ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName,
+    OperationStatus, OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse, StatusResponseKind,
+    Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -148,6 +148,18 @@ impl PackageBrokerServer for BrokerConnection {
         let owner_key = request.client.owner_key();
         self.state.status_for_client(request, owner_key).await
     }
+
+    async fn cancel(&self, request: CancelRequest) -> Result<CancelResponse, ErrorResponse> {
+        self.client
+            .validate_cancel_request(&request, self.state.skip_signature_validation)
+            .map_err(|error| {
+                warn!(error = format!("{error:#}"), "Rejected package broker cancel request");
+                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
+            })?;
+
+        let owner_key = request.client.owner_key();
+        self.state.cancel_for_client(request, owner_key).await
+    }
 }
 
 impl BrokerState {
@@ -225,7 +237,7 @@ impl BrokerState {
         let operation = if evaluated.would_execute {
             let generated_operation_id = new_operation_id()?;
             let submitted_at = Utc::now();
-            let context = ExecutionContext {
+            let mut context = ExecutionContext {
                 kill_processes: request
                     .options
                     .kill_before_operation
@@ -240,6 +252,7 @@ impl BrokerState {
                 elevation: request.client.requested_elevation,
                 scope: request.options.scope,
                 capture_output: request.capture_output,
+                cancel_token: tokio_util::sync::CancellationToken::new(),
             };
 
             let owner_key = request.client_owner_key();
@@ -248,6 +261,11 @@ impl BrokerState {
                 .register(&owner_key, &request, generated_operation_id)
                 .map_err(|error| error_response(ErrorCode::Conflict, format!("{error:#}")))?;
             if is_new_operation {
+                // The executor observes the tracked operation's cancel token so a later
+                // cancel request can terminate the spawned process.
+                if let Some(tracked) = self.tracker.get(&operation_id) {
+                    context.cancel_token = tracked.cancel_token;
+                }
                 execution::spawn_execution(
                     Arc::clone(&self.executor),
                     self.tracker.clone(),
@@ -255,6 +273,7 @@ impl BrokerState {
                     context,
                 );
             }
+            // Query the status after spawning so fast executions are reflected in the response.
             let status = self
                 .tracker
                 .get(&operation_id)
@@ -264,6 +283,8 @@ impl BrokerState {
                 operation_id,
                 status,
                 submitted_at,
+                // The per-operation event channel is not implemented yet.
+                event_channel: None,
             })
         } else {
             None
@@ -310,9 +331,33 @@ impl BrokerState {
             exit_code: operation.exit_code,
             message: operation.note,
             details: None,
-            stdout: operation
-                .stdout
-                .map(|stdout| Base64Utf8Data(base64::engine::general_purpose::STANDARD.encode(stdout))),
+        })
+    }
+
+    async fn cancel_for_client(
+        &self,
+        request: CancelRequest,
+        owner_key: String,
+    ) -> Result<CancelResponse, ErrorResponse> {
+        let Some(operation) = self.tracker.request_cancel(&request.operation_id, &owner_key) else {
+            return Err(error_response(ErrorCode::NotFound, "operation not found"));
+        };
+
+        let message = if operation.status == OperationStatus::Canceling {
+            info!(operation_id = %request.operation_id, "Cancellation requested for operation");
+            "cancellation requested; poll the status endpoint until a terminal status is reached".to_owned()
+        } else {
+            format!("operation already reached terminal status {:?}", operation.status)
+        };
+
+        Ok(CancelResponse {
+            response_kind: CancelResponseKind,
+            response_version: api_version(),
+            server: server_context(),
+            operation_id: request.operation_id,
+            request_id: operation.request_id,
+            status: operation.status,
+            message: Some(message),
         })
     }
 
@@ -451,7 +496,7 @@ mod tests {
     use now_policy_api as api;
 
     use super::*;
-    use crate::broker::executor::{ExecutionOutput, ProcessStartedCallback};
+    use crate::broker::executor::{ExecutionOutput, OperationCanceled, ProcessStartedCallback};
 
     struct NoopExecutor;
 
@@ -694,5 +739,220 @@ mod tests {
         state.capabilities(&sid).await;
 
         assert_eq!(executor.probe_count.load(Ordering::SeqCst), 2);
+    }
+
+    // ─── Cancellation ────────────────────────────────────────────────────────
+
+    /// Executor that blocks until the operation's cancel token fires, then reports cancellation.
+    struct CancelableExecutor;
+
+    #[async_trait]
+    impl CommandExecutor for CancelableExecutor {
+        async fn execute(
+            &self,
+            ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            ctx.cancel_token.cancelled().await;
+            Err(anyhow::Error::new(OperationCanceled))
+        }
+    }
+
+    /// Executor that never finishes, even when canceled (keeps operations in Canceling).
+    struct StuckExecutor;
+
+    #[async_trait]
+    impl CommandExecutor for StuckExecutor {
+        async fn execute(
+            &self,
+            _ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            std::future::pending().await
+        }
+    }
+
+    /// Executor that completes instantly with exit code 0.
+    struct InstantExecutor;
+
+    #[async_trait]
+    impl CommandExecutor for InstantExecutor {
+        async fn execute(
+            &self,
+            _ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            Ok(ExecutionOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                started_at: Some(Utc::now()),
+            })
+        }
+    }
+
+    fn state_with_executor(executor: Arc<dyn CommandExecutor>) -> BrokerState {
+        BrokerState {
+            policy: RwLock::new(Some(Arc::new(permissive_policy()))),
+            executor,
+            pipe_name: "test-pipe".to_owned(),
+            tracker: OperationTracker::new(),
+            skip_signature_validation: true,
+            manager_probe_cache: Default::default(),
+        }
+    }
+
+    fn cancel_request(operation_id: &api::ResourceId, client: &api::ClientContext) -> CancelRequest {
+        CancelRequest {
+            request_kind: api::CancelRequestKind,
+            request_version: api::API_VERSION_STR.into(),
+            operation_id: operation_id.clone(),
+            client: client.clone(),
+        }
+    }
+
+    fn status_request(operation_id: &api::ResourceId, client: &api::ClientContext) -> StatusRequest {
+        StatusRequest {
+            request_kind: api::StatusRequestKind,
+            request_version: api::API_VERSION_STR.into(),
+            operation_id: operation_id.clone(),
+            client: client.clone(),
+        }
+    }
+
+    async fn submit_operation(state: &BrokerState, request: &PackageRequest) -> OperationSubmission {
+        let response = state
+            .execute(request.clone(), &test_sid())
+            .await
+            .expect("execute request accepted");
+        response.operation.expect("operation submitted")
+    }
+
+    async fn wait_for_status(
+        state: &BrokerState,
+        request: &PackageRequest,
+        operation_id: &api::ResourceId,
+    ) -> StatusResponse {
+        for _ in 0..100 {
+            let status = state
+                .status_for_client(
+                    status_request(operation_id, &request.client),
+                    request.client_owner_key(),
+                )
+                .await
+                .expect("status query succeeds");
+            if status.status.is_terminal() {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("operation did not reach a terminal status in time");
+    }
+
+    #[tokio::test]
+    async fn cancel_of_running_operation_reports_canceling_then_canceled() {
+        let state = state_with_executor(Arc::new(CancelableExecutor));
+        let request = request();
+        let operation = submit_operation(&state, &request).await;
+
+        let response = state
+            .cancel_for_client(
+                cancel_request(&operation.operation_id, &request.client),
+                request.client_owner_key(),
+            )
+            .await
+            .expect("cancel accepted");
+
+        assert_eq!(response.status, OperationStatus::Canceling);
+        assert_eq!(response.request_id, request.request_id);
+
+        let status = wait_for_status(&state, &request, &operation.operation_id).await;
+        assert_eq!(status.status, OperationStatus::Canceled);
+    }
+
+    #[tokio::test]
+    async fn cancel_is_idempotent_while_canceling() {
+        let state = state_with_executor(Arc::new(StuckExecutor));
+        let request = request();
+        let operation = submit_operation(&state, &request).await;
+
+        for _ in 0..2 {
+            let response = state
+                .cancel_for_client(
+                    cancel_request(&operation.operation_id, &request.client),
+                    request.client_owner_key(),
+                )
+                .await
+                .expect("cancel accepted");
+            assert_eq!(response.status, OperationStatus::Canceling);
+        }
+
+        let status = state
+            .status_for_client(
+                status_request(&operation.operation_id, &request.client),
+                request.client_owner_key(),
+            )
+            .await
+            .expect("status query succeeds");
+        assert_eq!(status.status, OperationStatus::Canceling);
+    }
+
+    #[tokio::test]
+    async fn cancel_of_completed_operation_returns_terminal_status() {
+        let state = state_with_executor(Arc::new(InstantExecutor));
+        let request = request();
+        let operation = submit_operation(&state, &request).await;
+
+        let terminal = wait_for_status(&state, &request, &operation.operation_id).await;
+        assert_eq!(terminal.status, OperationStatus::Completed);
+
+        let response = state
+            .cancel_for_client(
+                cancel_request(&operation.operation_id, &request.client),
+                request.client_owner_key(),
+            )
+            .await
+            .expect("cancel of terminal operation is idempotent");
+        assert_eq!(response.status, OperationStatus::Completed);
+
+        // The operation stays Completed after the cancel attempt.
+        let status = state
+            .status_for_client(
+                status_request(&operation.operation_id, &request.client),
+                request.client_owner_key(),
+            )
+            .await
+            .expect("status query succeeds");
+        assert_eq!(status.status, OperationStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn cancel_of_unknown_operation_is_not_found() {
+        let state = state_with_executor(Arc::new(StuckExecutor));
+        let request = request();
+
+        let error = state
+            .cancel_for_client(
+                cancel_request(&api::ResourceId::from("does-not-exist"), &request.client),
+                request.client_owner_key(),
+            )
+            .await
+            .expect_err("unknown operation is rejected");
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn cancel_by_different_owner_is_not_found() {
+        let state = state_with_executor(Arc::new(StuckExecutor));
+        let request = request();
+        let operation = submit_operation(&state, &request).await;
+
+        let error = state
+            .cancel_for_client(
+                cancel_request(&operation.operation_id, &request.client),
+                "someone|else".to_owned(),
+            )
+            .await
+            .expect_err("foreign operation is rejected");
+        assert_eq!(error.code, ErrorCode::NotFound);
     }
 }
