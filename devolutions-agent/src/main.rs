@@ -61,6 +61,7 @@ struct UpCommand {
     gateway_url: String,
     enrollment_token: String,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
 }
 
 fn agent_service_main(
@@ -139,11 +140,11 @@ fn parse_required_value(args: &[String], index: &mut usize, flag: &str) -> Resul
         .with_context(|| format!("missing value for {flag}"))
 }
 
-fn parse_advertise_subnets(value: &str) -> Vec<String> {
+fn parse_comma_separated(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(str::trim)
-        .filter(|subnet| !subnet.is_empty())
+        .filter(|item| !item.is_empty())
         .map(ToOwned::to_owned)
         .collect()
 }
@@ -156,6 +157,7 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
     let mut gateway_url = None;
     let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
+    let mut advertise_domains = Vec::new();
 
     let mut index = 0;
     while index < args.len() {
@@ -165,7 +167,10 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
             "--gateway" => gateway_url = Some(parse_required_value(args, &mut index, "--gateway")?),
             "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
             "--advertise-routes" | "--advertise-subnets" => {
-                advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
+                advertise_subnets.extend(parse_comma_separated(&parse_required_value(args, &mut index, arg)?))
+            }
+            "--advertise-domains" => {
+                advertise_domains.extend(parse_comma_separated(&parse_required_value(args, &mut index, arg)?))
             }
             unexpected => bail!("unknown argument for up: {unexpected}"),
         }
@@ -197,6 +202,7 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
         gateway_url: gateway_url.context("missing required --gateway")?,
         enrollment_token,
         advertise_subnets,
+        advertise_domains,
     })
 }
 
@@ -248,18 +254,20 @@ fn main() {
                     .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
                 let enrollment_token = env::args().nth(3).expect("missing enrollment string");
                 let subnets_arg = env::args().nth(4).unwrap_or_default();
+                let domains_arg = env::args().nth(5).unwrap_or_default();
 
-                let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
-                    Vec::new()
-                } else {
-                    subnets_arg.split(',').map(|s| s.trim().to_owned()).collect()
-                };
+                let advertise_subnets = parse_comma_separated(&subnets_arg);
+                let advertise_domains = parse_comma_separated(&domains_arg);
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async {
-                    if let Err(e) =
-                        devolutions_agent::enrollment::enroll_agent(&gateway_url, &enrollment_token, advertise_subnets)
-                            .await
+                    if let Err(e) = devolutions_agent::enrollment::enroll_agent(
+                        &gateway_url,
+                        &enrollment_token,
+                        advertise_subnets,
+                        advertise_domains,
+                    )
+                    .await
                     {
                         eprintln!("[ERROR] Enrollment failed: {e:#}");
                         std::process::exit(1);
@@ -281,6 +289,7 @@ fn main() {
                     &command.gateway_url,
                     &command.enrollment_token,
                     command.advertise_subnets,
+                    command.advertise_domains,
                 ));
 
                 if let Err(error) = result {
@@ -342,6 +351,7 @@ mod tests {
                 gateway_url: "https://gateway.example.com:7171".to_owned(),
                 enrollment_token: jwt,
                 advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+                advertise_domains: Vec::new(),
             }
         );
     }
@@ -366,6 +376,29 @@ mod tests {
         let parsed = parse_up_command_args(&args).expect("parse up args");
 
         assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
+    }
+
+    #[test]
+    fn parse_up_command_args_accepts_advertise_domains() {
+        let jwt = make_jwt(serde_json::json!({
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
+        let args = vec![
+            "--enrollment-string".to_owned(),
+            jwt,
+            "--advertise-domains".to_owned(),
+            "test.example.com, lab.example.com".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(
+            parsed.advertise_domains,
+            vec!["test.example.com".to_owned(), "lab.example.com".to_owned()]
+        );
     }
 
     /// Build a JWT with the given payload. The header and signature are placeholders —

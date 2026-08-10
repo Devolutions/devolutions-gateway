@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_tunnel_proto::{
-    ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, FramedRecv, SessionStream, current_time_millis,
+    ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, DomainName, FramedRecv, SessionStream,
+    current_time_millis,
 };
 use anyhow::{Context as _, anyhow, bail};
 use async_trait::async_trait;
@@ -177,6 +178,57 @@ impl Task for TunnelTask {
     }
 }
 
+/// Decide which domains to advertise, given what the operator configured and what
+/// auto-detection found.
+///
+/// Auto-detection is a **fallback**, not an addition. Once someone has named DNS routes
+/// explicitly, adding another route that was inferred from machine state would violate the
+/// explicit routing policy.
+fn resolve_advertise_domains(
+    configured: &[String],
+    auto_detect_enabled: bool,
+    detected: Option<String>,
+) -> Vec<DomainAdvertisement> {
+    match (configured, auto_detect_enabled, detected) {
+        (configured @ [_, ..], _, detected) => {
+            if let Some(detected) = detected {
+                debug!(
+                    %detected,
+                    "Ignoring auto-detected domain because advertise_domains is set explicitly"
+                );
+            }
+
+            configured
+                .iter()
+                .map(|domain| DomainAdvertisement {
+                    domain: DomainName::new(domain),
+                    auto_detected: false,
+                })
+                .collect()
+        }
+        ([], false, _) => Vec::new(),
+        ([], true, Some(detected)) => {
+            info!(domain = %detected, "Auto-detected DNS domain");
+            let route = format!("*.{detected}");
+            if !DomainName::is_valid_route(&route) {
+                warn!(%detected, "Ignoring invalid auto-detected DNS domain");
+                return Vec::new();
+            }
+            vec![DomainAdvertisement {
+                domain: DomainName::new(route),
+                auto_detected: true,
+            }]
+        }
+        ([], true, None) => {
+            warn!(
+                "No advertise_domains configured and domain auto-detection found nothing; \
+                 set advertise_domains in agent config"
+            );
+            Vec::new()
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Single connection lifetime
 // ---------------------------------------------------------------------------
@@ -216,35 +268,25 @@ async fn run_single_connection(
         warn!("No subnets configured to advertise");
     }
 
-    // Build domain advertisement list: explicit config + auto-detection.
-    let mut advertise_domains: Vec<DomainAdvertisement> = tunnel_conf
+    if let Some(route) = tunnel_conf
         .advertise_domains
         .iter()
-        .map(|d| DomainAdvertisement {
-            domain: agent_tunnel_proto::DomainName::new(d),
-            auto_detected: false,
-        })
-        .collect();
-
-    if tunnel_conf.auto_detect_domain {
-        if let Some(detected) = crate::domain_detect::detect_domain() {
-            if !advertise_domains
-                .iter()
-                .any(|d| d.domain.as_str().eq_ignore_ascii_case(&detected))
-            {
-                info!(domain = %detected, "Auto-detected DNS domain");
-                advertise_domains.push(DomainAdvertisement {
-                    domain: agent_tunnel_proto::DomainName::new(detected),
-                    auto_detected: true,
-                });
-            }
-        } else if tunnel_conf.advertise_domains.is_empty() {
-            warn!(
-                "Domain auto-detection found nothing and no advertise_domains configured. \
-                 Set advertise_domains in agent config."
-            );
-        }
+        .find(|route| !DomainName::is_valid_route(route))
+    {
+        bail!("invalid advertise domain route: {route}");
     }
+
+    let detected_domain = if tunnel_conf.auto_detect_domain && tunnel_conf.advertise_domains.is_empty() {
+        crate::domain_detect::detect_domain()
+    } else {
+        None
+    };
+
+    let advertise_domains = resolve_advertise_domains(
+        &tunnel_conf.advertise_domains,
+        tunnel_conf.auto_detect_domain,
+        detected_domain,
+    );
 
     info!(
         subnet_count = advertise_subnets.len(),
@@ -821,5 +863,60 @@ mod tests {
         // so it catches a "probe hangs instead of timing out" regression without flaking on a loaded
         // runner where the timer fires late.
         assert!(started.elapsed() < Duration::from_secs(5), "probe must fail fast");
+    }
+
+    fn domains_of(advertisements: &[DomainAdvertisement]) -> Vec<(&str, bool)> {
+        advertisements
+            .iter()
+            .map(|d| (d.domain.as_str(), d.auto_detected))
+            .collect()
+    }
+
+    // The regression this guards: an operator asking for one host used to also get the machine's
+    // whole parent domain, which covers every host in it.
+    #[test]
+    fn explicit_domains_suppress_auto_detection() {
+        let advertised = resolve_advertise_domains(
+            &["machine.example.com".to_owned()],
+            true,
+            Some("example.com".to_owned()),
+        );
+
+        assert_eq!(domains_of(&advertised), vec![("machine.example.com", false)]);
+    }
+
+    #[test]
+    fn auto_detection_fills_in_when_nothing_is_configured() {
+        let advertised = resolve_advertise_domains(&[], true, Some("example.com".to_owned()));
+
+        assert_eq!(domains_of(&advertised), vec![("*.example.com", true)]);
+    }
+
+    #[test]
+    fn invalid_auto_detected_domain_is_not_advertised() {
+        let advertised = resolve_advertise_domains(&[], true, Some("foo.bar..baz".to_owned()));
+
+        assert!(advertised.is_empty());
+    }
+
+    #[test]
+    fn all_configured_domains_are_kept() {
+        let advertised =
+            resolve_advertise_domains(&["a.example.com".to_owned(), "b.example.com".to_owned()], false, None);
+
+        assert_eq!(
+            domains_of(&advertised),
+            vec![("a.example.com", false), ("b.example.com", false)]
+        );
+    }
+
+    #[test]
+    fn nothing_configured_and_nothing_detected_advertises_no_domains() {
+        assert!(resolve_advertise_domains(&[], true, None).is_empty());
+    }
+
+    #[test]
+    fn disabled_auto_detection_advertises_no_domains() {
+        assert!(resolve_advertise_domains(&[], false, None).is_empty());
     }
 }

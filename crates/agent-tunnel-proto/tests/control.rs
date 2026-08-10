@@ -21,16 +21,43 @@ fn matches_hostname_is_case_insensitive() {
 }
 
 #[test]
-fn matches_hostname_suffix_match() {
+fn matches_hostname_rejects_subdomains() {
     let d = DomainName::new("contoso.local");
+    assert!(!d.matches_hostname("dc01.contoso.local"));
+    assert!(!d.matches_hostname("finance.branch.contoso.local"));
+}
+
+#[test]
+fn wildcard_matches_subdomains_but_not_parent() {
+    let d = DomainName::new("*.contoso.local");
     assert!(d.matches_hostname("dc01.contoso.local"));
     assert!(d.matches_hostname("finance.branch.contoso.local"));
+    assert!(!d.matches_hostname("contoso.local"));
+    assert!(!d.matches_hostname(".contoso.local"));
+}
+
+#[test]
+fn wildcard_rejects_partial_parent_label() {
+    let d = DomainName::new("*.contoso.local");
+    assert!(!d.matches_hostname("fakecontoso.local"));
+}
+
+#[test]
+fn route_validation_rejects_ambiguous_wildcards() {
+    for route in ["", "*.", "*.*", "foo.*", ".example.com", "example..com"] {
+        assert!(!DomainName::is_valid_route(route), "route should be invalid: {route}");
+    }
+}
+
+#[test]
+fn route_validation_accepts_exact_and_explicit_wildcard_routes() {
+    for route in ["localhost", "example.com", "*.example.com"] {
+        assert!(DomainName::is_valid_route(route), "route should be valid: {route}");
+    }
 }
 
 #[test]
 fn matches_hostname_rejects_partial_label() {
-    // "fakecontoso.local" ends with "contoso.local" as a string, but the
-    // preceding character isn't '.', so it's a different domain.
     let d = DomainName::new("contoso.local");
     assert!(!d.matches_hostname("fakecontoso.local"));
 }

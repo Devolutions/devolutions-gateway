@@ -563,11 +563,12 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub advertise_subnets: Vec<String>,
 
-        /// DNS domains to advertise (e.g., ["contoso.local"]). Auto-detected if omitted.
+        /// Explicit DNS routes to advertise (e.g., ["server.contoso.local", "*.contoso.local"]).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub advertise_domains: Vec<String>,
 
-        /// Whether to auto-detect the machine's DNS domain and add it to advertise_domains (default: true)
+        /// Whether to auto-detect the machine's DNS domain and advertise its explicit wildcard route when
+        /// `advertise_domains` is empty (default: true).
         #[serde(default = "default_true")]
         pub auto_detect_domain: bool,
 

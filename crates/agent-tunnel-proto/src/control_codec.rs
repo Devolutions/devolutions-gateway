@@ -199,6 +199,12 @@ fn decode_domains(buf: &mut Bytes) -> Result<Vec<DomainAdvertisement>, ProtoErro
 
     for _ in 0..count {
         let domain_str = codec::get_string(buf)?;
+        if !DomainName::is_valid_route(&domain_str) {
+            return Err(ProtoError::InvalidField {
+                field: "domain",
+                reason: "expected an exact DNS name or a single leading *. wildcard",
+            });
+        }
         codec::ensure_remaining(buf.remaining(), 1, "auto_detected flag")?;
         let auto_detected = buf.get_u8() != 0;
         domains.push(DomainAdvertisement {

@@ -1,4 +1,5 @@
-﻿using DevolutionsAgent.Properties;
+﻿using DevolutionsAgent.Helpers;
+using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
@@ -386,9 +387,13 @@ namespace DevolutionsAgent.Actions
         [CustomAction]
         public static ActionResult EnrollAgentTunnel(Session session)
         {
-            string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
-            string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
-            string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
+            string enrollmentString = DecodePropertyData(session, AgentProperties.AgentTunnelEnrollmentStringEncoded).Trim();
+            string subnetsArg = DecodePropertyData(session, AgentProperties.AgentTunnelAdvertiseSubnetsEncoded).Trim();
+            string domainsArg = DecodePropertyData(session, AgentProperties.AgentTunnelAdvertiseDomainsEncoded).Trim();
+            bool includeDetectedDomain = string.Equals(
+                DecodePropertyData(session, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded).Trim(),
+                "1",
+                StringComparison.OrdinalIgnoreCase);
             ActionResult Fail(string msg)
             {
                 session.Log(msg);
@@ -404,10 +409,30 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                // Hand the enrollment string through verbatim. The agent's
-                // `up --enrollment-string` parses the gateway URL and agent name out of it.
-                // Advertise domains aren't a CLI flag — agent.json carries them — so we patch
-                // that after enrollment succeeds.
+                string detectedDomainToInclude = null;
+                if (includeDetectedDomain)
+                {
+                    string detectedDomain =
+                        DecodePropertyData(session, AgentProperties.AgentTunnelDetectedDomainEncoded).Trim();
+                    if (string.IsNullOrEmpty(detectedDomain))
+                    {
+                        detectedDomain = DomainDetection.Detect();
+                    }
+                    if (string.IsNullOrEmpty(detectedDomain))
+                    {
+                        return Fail("The installer was asked to advertise the detected DNS domain, but no DNS domain could be detected on this machine.");
+                    }
+
+                    detectedDomainToInclude = DomainDetection.ToWildcardRoute(detectedDomain);
+                    session.Log($"Adding detected DNS wildcard route '{detectedDomainToInclude}' to the explicit tunnel advertisements");
+                }
+
+                string invalidRoute = SplitCsv(domainsArg).FirstOrDefault(route => !DomainDetection.IsValidRoute(route));
+                if (invalidRoute != null)
+                {
+                    return Fail($"Invalid advertised DNS route: {invalidRoute}");
+                }
+
                 string installDir = session.Property(AgentProperties.InstallDir);
                 string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
 
@@ -455,14 +480,18 @@ namespace DevolutionsAgent.Actions
                     session.Log($"failed to snapshot pre-enrollment tunnel state (rollback will not restore): {e}");
                 }
 
-                // Only `--enrollment-string` is mandatory at enroll time. The signed
-                // jet_agent_name claim is authoritative for the CSR, certificate CN, and
-                // persisted config. Everything else (advertise subnets, advertise domains) is
-                // patched into agent.json *after* enrollment, so we don't accumulate parallel CLI
-                // surfaces for what is ultimately configuration data.
-                //
-                // The JWT is passed via stdin (sentinel `-`) to avoid exposing it in the process
-                // command line (visible to any local process via WMI / Process Explorer / ETW).
+                if (detectedDomainToInclude != null)
+                {
+                    domainsArg = string.Join(
+                        ",",
+                        SplitCsv(domainsArg)
+                            .Concat(new[] { detectedDomainToInclude })
+                            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                            .Distinct(StringComparer.OrdinalIgnoreCase));
+                }
+
+                // The signed jet_agent_name claim is authoritative for the CSR, certificate CN, and persisted config.
+                // The JWT uses stdin so it is not exposed through WMI, Process Explorer, or ETW command-line capture.
                 string arguments = "up --enrollment-string -";
                 string Redact(string s) => s.Replace(enrollmentString, "***");
                 session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
@@ -571,13 +600,9 @@ namespace DevolutionsAgent.Actions
                     return Fail("Failed to record the agent tunnel rollback marker; the enrollment was rolled back.");
                 }
 
-                if (subnetsArg.Length != 0 || domainsArg.Length != 0)
-                {
-                    // Throws on a missing Tunnel section or write failure; the surrounding
-                    // catch converts that into Fail(...) so we never report success while
-                    // silently discarding operator-supplied subnets/domains.
-                    WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
-                }
+                // The current installer invocation is the source of truth for domain advertisements.
+                // Existing agent.json values are never imported into the wizard or merged implicitly.
+                WriteTunnelAdvertisementsToConfig(session, subnetsArg, domainsArg);
 
                 // Enrollment only proved the HTTPS/TCP path, but the tunnel runs over QUIC/UDP
                 // (4433). Probe that path as a distinct step so a blocked UDP port fails the install
@@ -703,21 +728,16 @@ namespace DevolutionsAgent.Actions
 
         /// <summary>
         /// Patch the freshly-written agent.json's <c>Tunnel</c> section with the operator's
-        /// advertised subnets and DNS suffixes from the wizard. Keeping this out of the
-        /// <c>agent.exe up</c> command line means we only carry mandatory enroll inputs on the
-        /// CLI; everything else flows through the same configuration file the agent reads at
-        /// runtime.
+        /// advertised subnets and explicit DNS routes. Domain detection is only a suggestion made by
+        /// the installer; the persisted configuration contains the resulting explicit list.
         /// </summary>
-        private static void WriteTunnelAdvertisementsToConfig(Session session, string subnetsCsv, string domainsCsv)
+        private static void WriteTunnelAdvertisementsToConfig(
+            Session session,
+            string subnetsCsv,
+            string domainsCsv)
         {
             string[] subnets = SplitCsv(subnetsCsv);
             string[] domains = SplitCsv(domainsCsv);
-
-            // Nothing operator-supplied to persist: stay a no-op. This path must never fail.
-            if (subnets.Length == 0 && domains.Length == 0)
-            {
-                return;
-            }
 
             string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
             if (!File.Exists(configPath))
@@ -745,10 +765,8 @@ namespace DevolutionsAgent.Actions
             {
                 tunnel["AdvertiseSubnets"] = new JArray(subnets);
             }
-            if (domains.Length != 0)
-            {
-                tunnel["AdvertiseDomains"] = new JArray(domains);
-            }
+            tunnel["AdvertiseDomains"] = new JArray(domains);
+            tunnel["AutoDetectDomain"] = false;
 
             // Let genuine IO/parse errors propagate too: swallowing them would also lose the
             // operator's data while falsely reporting success. Write atomically so a mid-write
@@ -758,7 +776,7 @@ namespace DevolutionsAgent.Actions
             // Newtonsoft.Json 13.0.4+ and crashes with MissingMethodException against an older 13.x in the GAC.
             // See the detailed note in ToggleAgentFeature and Newtonsoft.Json issue #3084.
             WriteFileAtomic(configPath, root.ToString(Formatting.Indented, Array.Empty<JsonConverter>()));
-            session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} advertise_domains entries to agent.json");
+            session.Log($"Wrote {subnets.Length} advertise_subnets and {domains.Length} explicit advertise_domains entries to agent.json; runtime domain detection disabled");
         }
 
         /// <summary>
@@ -830,6 +848,17 @@ namespace DevolutionsAgent.Actions
                 .Select(s => s.Trim())
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToArray();
+
+        private static string DecodePropertyData(Session session, string encodedProperty)
+        {
+            string encoded = session.Property(encodedProperty);
+            if (string.IsNullOrEmpty(encoded))
+            {
+                return string.Empty;
+            }
+
+            return Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+        }
 
         /// <summary>
         /// Encrypt the PSU rollback marker with machine-scoped DPAPI so a snapshotted plaintext
@@ -1639,6 +1668,19 @@ namespace DevolutionsAgent.Actions
 
                 session.Log($"encoding property {property.Id}");
                 WixProperties.Encode(session, stringProperty);
+            }
+
+            foreach ((string source, string destination) in new[]
+            {
+                (AgentProperties.AgentTunnelEnrollmentString, AgentProperties.AgentTunnelEnrollmentStringEncoded),
+                (AgentProperties.AgentTunnelAdvertiseSubnets, AgentProperties.AgentTunnelAdvertiseSubnetsEncoded),
+                (AgentProperties.AgentTunnelAdvertiseDomains, AgentProperties.AgentTunnelAdvertiseDomainsEncoded),
+                (AgentProperties.AgentTunnelIncludeDetectedDomain, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded),
+                (AgentProperties.AgentTunnelDetectedDomain, AgentProperties.AgentTunnelDetectedDomainEncoded),
+            })
+            {
+                string value = session.Property(source) ?? string.Empty;
+                session[destination] = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
             }
 
             return ActionResult.Success;

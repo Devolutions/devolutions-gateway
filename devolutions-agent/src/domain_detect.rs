@@ -1,4 +1,4 @@
-//! Auto-detection of the machine's DNS domain for agent tunnel domain advertisement.
+//! Auto-detection of the machine's DNS domain for agent tunnel advertisement.
 
 /// Attempts to detect the DNS domain this machine belongs to.
 ///
@@ -21,20 +21,20 @@ fn is_plausible_domain(domain: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    let mut parts = trimmed.split('.');
-    parts.next().is_some_and(|l| !l.is_empty()) && parts.next().is_some_and(|l| !l.is_empty())
+    let labels: Vec<&str> = trimmed.split('.').collect();
+    labels.len() >= 2 && labels.iter().all(|label| !label.is_empty())
 }
 
 #[cfg(target_os = "windows")]
 fn detect_domain_raw() -> Option<String> {
-    // Try USERDNSDOMAIN first (available in user logon sessions)
+    // Try USERDNSDOMAIN first (available in user logon sessions).
     if let Ok(domain) = std::env::var("USERDNSDOMAIN")
         && !domain.is_empty()
     {
         return Some(domain);
     }
 
-    // Fallback: GetComputerNameExW(ComputerNameDnsDomain)
+    // Fallback: GetComputerNameExW(ComputerNameDnsDomain).
     // This works in SYSTEM service context where USERDNSDOMAIN is empty.
     detect_domain_via_computer_name()
 }
@@ -55,7 +55,8 @@ fn detect_domain_via_computer_name() -> Option<String> {
         return None;
     }
 
-    let mut buf = vec![0u16; size as usize];
+    let capacity = usize::try_from(size).ok()?;
+    let mut buf = vec![0u16; capacity];
 
     // SAFETY: `buf` is allocated with `size` elements. GetComputerNameExW writes at most
     // `size` wide chars and updates `size` to the actual length (excluding null terminator).
@@ -65,7 +66,8 @@ fn detect_domain_via_computer_name() -> Option<String> {
         return None;
     }
 
-    let domain = String::from_utf16_lossy(&buf[..size as usize]);
+    let length = usize::try_from(size).ok()?;
+    let domain = String::from_utf16_lossy(&buf[..length]);
 
     if domain.is_empty() { None } else { Some(domain) }
 }
@@ -103,6 +105,7 @@ mod tests {
         assert!(!is_plausible_domain("com"));
         assert!(!is_plausible_domain("."));
         assert!(!is_plausible_domain(".."));
+        assert!(!is_plausible_domain("foo.bar..baz"));
     }
 
     #[test]
