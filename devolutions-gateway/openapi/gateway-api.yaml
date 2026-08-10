@@ -261,9 +261,8 @@ paths:
       - Jrec
       summary: Downloads an entire recorded session as a ZIP archive
       description: |-
-        The archive always contains `recording.json` and every clip listed in that
-        manifest that is present on disk. A single-clip session is still returned as a ZIP
-        so callers can use one download contract for every recording.
+        The archive always contains `recording.json` and every clip listed in that manifest that is present on disk.
+        A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
       operationId: PullRecordingSession
       parameters:
       - name: id
