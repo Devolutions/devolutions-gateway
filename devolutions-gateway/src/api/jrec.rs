@@ -1,11 +1,12 @@
+use std::fs;
+use std::io::{self, Seek as _, Write as _};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use std::{fs, io};
 
 use anyhow::Context as _;
-use async_zip::tokio::write::ZipFileWriter;
-use async_zip::{Compression, ZipEntryBuilder};
 use axum::body::Body;
 use axum::extract::ws::{CloseFrame, WebSocket};
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
@@ -19,10 +20,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::ShutdownSignal;
 use futures::stream;
 use hyper::StatusCode;
-use tokio::io::{AsyncReadExt as _, DuplexStream};
-use tokio::sync::oneshot;
+use tokio::io::AsyncReadExt as _;
 use tracing::Instrument as _;
 use uuid::Uuid;
+use zip::CompressionMethod;
+use zip::write::SimpleFileOptions;
 
 use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
@@ -31,7 +33,7 @@ use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::{PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
-/// Read/write chunk size for session ZIP streaming (duplex buffer and file copy).
+/// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Maximum files in a session ZIP (`recording.json` + clips).
@@ -530,21 +532,11 @@ pub(crate) async fn pull_recording_session(
         return Err(HttpError::not_found().msg("requested recording does not exist"));
     }
 
-    let entries = match list_recording_zip_entries(&recording_dir).await {
-        Ok(entries) => entries,
-        Err(ListRecordingZipError::NotFound) => {
-            return Err(HttpError::not_found().msg("requested recording does not exist"));
-        }
-        Err(ListRecordingZipError::Other(error)) => {
-            return Err(HttpError::internal()
-                .with_msg("failed to read recording manifest")
-                .build(error));
-        }
-    };
+    // Snapshot membership once so a reconnect cannot widen the package after we start packaging.
+    let plan = snapshot_recording_zip_plan(&recording_dir).await?;
+    enforce_recording_zip_limits(&recording_dir, &plan).await?;
 
-    enforce_recording_zip_limits(&recording_dir, &entries).await?;
-
-    let body = recording_zip_body(recording_dir, entries, id, shutdown_signal);
+    let body = recording_zip_body(recording_dir, plan, id, shutdown_signal).await?;
     let mut response = Response::new(body);
 
     response
@@ -644,50 +636,50 @@ struct RecordingZipManifestFile {
     file_name: String,
 }
 
-#[derive(Debug)]
-enum ListRecordingZipError {
-    /// Session directory has no usable `recording.json`.
-    NotFound,
-    /// Unexpected I/O failure while reading the manifest.
-    Other(anyhow::Error),
-}
-
 fn is_safe_recording_file_name(file_name: &str) -> bool {
     !file_name.is_empty() && !file_name.contains("..") && !file_name.contains('/') && !file_name.contains('\\')
 }
 
-/// Builds the ordered list of files to put in a session ZIP.
+/// Immutable package membership for one download attempt.
 ///
-/// Always starts with `recording.json`, then appends every manifest entry that exists on disk and uses a safe relative file name.
-async fn list_recording_zip_entries(recording_dir: &Utf8Path) -> Result<Vec<String>, ListRecordingZipError> {
-    let manifest_path = recording_dir.join("recording.json");
-    if !manifest_path.is_file() {
-        return Err(ListRecordingZipError::NotFound);
-    }
+/// `manifest_bytes` are the exact `recording.json` contents used to derive `clip_names`,
+/// so the archived manifest cannot drift from the clips included in the ZIP.
+#[derive(Debug, Clone)]
+struct RecordingZipPlan {
+    manifest_bytes: Vec<u8>,
+    clip_names: Vec<String>,
+}
 
-    let manifest_json = tokio::fs::read(&manifest_path).await.map_err(|error| {
+impl RecordingZipPlan {
+    fn entry_count(&self) -> usize {
+        1 /* recording.json */ + self.clip_names.len()
+    }
+}
+
+/// Snapshots `recording.json` and the clip files it references at call time.
+async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<RecordingZipPlan, HttpError> {
+    let manifest_path = recording_dir.join("recording.json");
+    let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
-            ListRecordingZipError::NotFound
+            HttpError::not_found().msg("requested recording does not exist")
         } else {
-            ListRecordingZipError::Other(
-                anyhow::Error::new(error).context(format!("read recording manifest at {manifest_path}")),
-            )
+            HttpError::internal()
+                .with_msg("failed to read recording manifest")
+                .build(anyhow::Error::new(error).context(format!("read recording manifest at {manifest_path}")))
         }
     })?;
 
-    let manifest: RecordingZipManifest = serde_json::from_slice(&manifest_json).map_err(|error| {
+    let manifest: RecordingZipManifest = serde_json::from_slice(&manifest_bytes).map_err(|error| {
         // Corrupt/incomplete package: treat as missing recording for the pull contract.
         debug!(
             error = format!("{error:#}"),
             path = %manifest_path,
             "Invalid recording manifest"
         );
-        ListRecordingZipError::NotFound
+        HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut entries = Vec::with_capacity(manifest.files.len() + 1);
-    entries.push("recording.json".to_owned());
-
+    let mut clip_names = Vec::with_capacity(manifest.files.len());
     for file in manifest.files {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
@@ -699,7 +691,7 @@ async fn list_recording_zip_entries(recording_dir: &Utf8Path) -> Result<Vec<Stri
 
         let path = recording_dir.join(&file.file_name);
         if path.is_file() {
-            entries.push(file.file_name);
+            clip_names.push(file.file_name);
         } else {
             warn!(
                 file_name = %file.file_name,
@@ -709,10 +701,13 @@ async fn list_recording_zip_entries(recording_dir: &Utf8Path) -> Result<Vec<Stri
         }
     }
 
-    Ok(entries)
+    Ok(RecordingZipPlan {
+        manifest_bytes,
+        clip_names,
+    })
 }
 
-/// Returns whether a package exceeds the fixed session-ZIP safety bounds.
+/// Identifies which fixed session-ZIP safety bound a package exceeds, if any.
 fn recording_zip_limits_exceeded(file_count: usize, total_bytes: u64) -> Option<RecordingZipLimitKind> {
     if file_count > MAX_RECORDING_ZIP_FILES {
         Some(RecordingZipLimitKind::FileCount)
@@ -742,9 +737,9 @@ impl RecordingZipLimitKind {
 ///
 /// Limits are evaluated up front from directory metadata so the client gets a clear HTTP error
 /// instead of a multi-gigabyte transfer that may time out or pressure the host.
-async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, entries: &[String]) -> Result<(), HttpError> {
-    let mut total_bytes = 0u64;
-    for file_name in entries {
+async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, plan: &RecordingZipPlan) -> Result<(), HttpError> {
+    let mut total_bytes = u64::try_from(plan.manifest_bytes.len()).unwrap_or(u64::MAX);
+    for file_name in &plan.clip_names {
         let path = recording_dir.join(file_name);
         let metadata = tokio::fs::metadata(&path).await.map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
@@ -758,12 +753,12 @@ async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, entries: &[Strin
         total_bytes = total_bytes.saturating_add(metadata.len());
     }
 
-    match recording_zip_limits_exceeded(entries.len(), total_bytes) {
+    match recording_zip_limits_exceeded(plan.entry_count(), total_bytes) {
         None => Ok(()),
         Some(kind) => {
             warn!(
                 ?kind,
-                file_count = entries.len(),
+                file_count = plan.entry_count(),
                 total_bytes,
                 file_limit = MAX_RECORDING_ZIP_FILES,
                 byte_limit = MAX_RECORDING_ZIP_BYTES,
@@ -775,51 +770,118 @@ async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, entries: &[Strin
     }
 }
 
-/// Streams a ZIP body that fails the HTTP transfer if packaging aborts mid-stream.
+/// Builds a complete, interoperable ZIP then streams it.
 ///
-/// A clean EOF is only produced after a successful archive finish.
-/// Writer errors and shutdown yield a stream `Err` so the client does not treat a truncated ZIP as success.
-fn recording_zip_body(
+/// Packaging uses the standard `zip` crate with known entry sizes/CRC so common OS unzippers accept the archive.
+/// The snapshotted manifest bytes are written as-is (not re-read), keeping membership consistent.
+async fn recording_zip_body(
     recording_dir: Utf8PathBuf,
-    entries: Vec<String>,
+    plan: RecordingZipPlan,
     session_id: Uuid,
     mut shutdown_signal: ShutdownSignal,
-) -> Body {
-    let (zip_writer, zip_reader) = tokio::io::duplex(ZIP_CHUNK_SIZE);
-    let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();
-
+) -> Result<Body, HttpError> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_shutdown = Arc::clone(&cancel);
     tokio::spawn(async move {
-        let result = tokio::select! {
-            result = write_recording_zip(zip_writer, &recording_dir, &entries) => {
-                result.map_err(|error| format!("{error:#}"))
-            }
-            _ = shutdown_signal.wait() => {
-                Err("gateway shutdown while streaming recording ZIP".to_owned())
-            }
-        };
-
-        if let Err(error) = &result {
-            warn!(
-                error,
-                session.id = %session_id,
-                "Failed to stream recording ZIP archive"
-            );
-        }
-
-        let _ = result_tx.send(result);
+        shutdown_signal.wait().await;
+        cancel_for_shutdown.store(true, Ordering::Relaxed);
     });
 
-    Body::from_stream(zip_body_stream(zip_reader, result_rx))
+    let recording_dir_for_build = PathBuf::from(recording_dir.as_std_path());
+    let plan_for_build = plan;
+    let built = tokio::task::spawn_blocking(move || {
+        build_recording_zip_archive(&recording_dir_for_build, &plan_for_build, &cancel)
+    })
+    .await
+    .map_err(|error| {
+        HttpError::internal()
+            .with_msg("recording ZIP worker failed")
+            .build(error)
+    })?
+    .map_err(|error| {
+        if error.root_cause().downcast_ref::<RecordingZipCancelled>().is_some() {
+            HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("recording download cancelled")
+        } else {
+            warn!(
+                error = format!("{error:#}"),
+                session.id = %session_id,
+                "Failed to build recording ZIP archive"
+            );
+            HttpError::internal()
+                .with_msg("failed to build recording ZIP archive")
+                .build(error)
+        }
+    })?;
+
+    let (std_file, temp_path) = built.into_parts();
+    let file = tokio::fs::File::from_std(std_file);
+    Ok(Body::from_stream(zip_file_body_stream(file, temp_path)))
 }
 
-fn zip_body_stream(
-    reader: DuplexStream,
-    result_rx: oneshot::Receiver<Result<(), String>>,
+#[derive(Debug)]
+struct RecordingZipCancelled;
+
+impl std::fmt::Display for RecordingZipCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("recording ZIP build cancelled")
+    }
+}
+
+impl std::error::Error for RecordingZipCancelled {}
+
+/// Writes a STORED ZIP with valid local-file headers to a temporary file.
+fn build_recording_zip_archive(
+    recording_dir: &Path,
+    plan: &RecordingZipPlan,
+    cancel: &AtomicBool,
+) -> anyhow::Result<tempfile::NamedTempFile> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(anyhow::Error::new(RecordingZipCancelled));
+    }
+
+    let mut tmp = tempfile::NamedTempFile::new().context("create temp file for recording ZIP")?;
+    {
+        let mut zip = zip::ZipWriter::new(tmp.as_file_mut());
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+
+        zip.start_file("recording.json", options)
+            .context("start recording.json ZIP entry")?;
+        zip.write_all(&plan.manifest_bytes)
+            .context("write recording.json ZIP entry")?;
+
+        for file_name in &plan.clip_names {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(anyhow::Error::new(RecordingZipCancelled));
+            }
+
+            let path = recording_dir.join(file_name);
+            let mut file =
+                fs::File::open(&path).with_context(|| format!("open recording file at {}", path.display()))?;
+
+            zip.start_file(file_name.as_str(), options)
+                .with_context(|| format!("start ZIP entry for {file_name}"))?;
+            io::copy(&mut file, &mut zip).with_context(|| format!("write ZIP entry for {file_name}"))?;
+        }
+
+        zip.finish().context("finish ZIP archive")?;
+    }
+
+    tmp.as_file_mut().sync_all().context("sync recording ZIP temp file")?;
+    tmp.as_file_mut()
+        .seek(io::SeekFrom::Start(0))
+        .context("rewind recording ZIP temp file")?;
+    Ok(tmp)
+}
+
+fn zip_file_body_stream(
+    file: tokio::fs::File,
+    temp_path: tempfile::TempPath,
 ) -> impl stream::Stream<Item = Result<Bytes, io::Error>> {
     stream::unfold(
-        ZipBodyState {
-            reader,
-            result_rx: Some(result_rx),
+        ZipFileBodyState {
+            file,
+            // Keep the temp path alive until the response body is fully consumed or dropped.
+            _temp_path: temp_path,
             buffer: vec![0u8; ZIP_CHUNK_SIZE],
             finished: false,
         },
@@ -828,19 +890,10 @@ fn zip_body_stream(
                 return None;
             }
 
-            match state.reader.read(&mut state.buffer).await {
+            match state.file.read(&mut state.buffer).await {
                 Ok(0) => {
-                    let outcome = match state.result_rx.take() {
-                        Some(result_rx) => result_rx
-                            .await
-                            .unwrap_or_else(|_| Err("recording ZIP task ended unexpectedly".to_owned())),
-                        None => Ok(()),
-                    };
                     state.finished = true;
-                    match outcome {
-                        Ok(()) => None,
-                        Err(message) => Some((Err(io::Error::other(message)), state)),
-                    }
+                    None
                 }
                 Ok(n) => {
                     let chunk = Bytes::copy_from_slice(&state.buffer[..n]);
@@ -855,85 +908,11 @@ fn zip_body_stream(
     )
 }
 
-struct ZipBodyState {
-    reader: DuplexStream,
-    result_rx: Option<oneshot::Receiver<Result<(), String>>>,
+struct ZipFileBodyState {
+    file: tokio::fs::File,
+    _temp_path: tempfile::TempPath,
     buffer: Vec<u8>,
     finished: bool,
-}
-
-/// Streams a ZIP archive for the given recording files into `writer`.
-///
-/// Entries use the STORED method: recording payloads are already compressed (WebM, etc.), so deflate would mainly burn CPU for little size gain.
-async fn write_recording_zip(writer: DuplexStream, recording_dir: &Utf8Path, entries: &[String]) -> anyhow::Result<()> {
-    use futures::AsyncWriteExt as _;
-
-    let mut zip_writer = ZipFileWriter::with_tokio(writer);
-    // Reused across entries to avoid per-file allocation for large multi-clip downloads.
-    let mut buffer = vec![0u8; ZIP_CHUNK_SIZE];
-
-    for file_name in entries {
-        let path = recording_dir.join(file_name);
-        let mut file = tokio::fs::File::open(&path)
-            .await
-            .with_context(|| format!("open recording file at {path}"))?;
-
-        let builder = ZipEntryBuilder::new(file_name.clone().into(), Compression::Stored);
-        let mut entry_writer = zip_writer
-            .write_entry_stream(builder)
-            .await
-            .with_context(|| format!("start ZIP entry for {file_name}"))?;
-
-        loop {
-            let n = file
-                .read(&mut buffer)
-                .await
-                .with_context(|| format!("read recording file at {path}"))?;
-            if n == 0 {
-                break;
-            }
-
-            entry_writer
-                .write_all(&buffer[..n])
-                .await
-                .with_context(|| format!("write ZIP entry for {file_name}"))?;
-        }
-
-        entry_writer
-            .close()
-            .await
-            .with_context(|| format!("finish ZIP entry for {file_name}"))?;
-    }
-
-    zip_writer.close().await.context("finish ZIP archive")?;
-    Ok(())
-}
-
-/// Collects a streamed ZIP into memory (tests / small fixtures only).
-#[cfg(test)]
-async fn collect_recording_zip(recording_dir: &Utf8Path, entries: &[String]) -> anyhow::Result<Vec<u8>> {
-    use futures::StreamExt as _;
-
-    let (writer, reader) = tokio::io::duplex(ZIP_CHUNK_SIZE);
-    let (result_tx, result_rx) = oneshot::channel();
-    let dir = recording_dir.to_owned();
-    let entries = entries.to_owned();
-
-    let writer_task = tokio::spawn(async move {
-        let result = write_recording_zip(writer, &dir, &entries)
-            .await
-            .map_err(|error| format!("{error:#}"));
-        let _ = result_tx.send(result);
-    });
-
-    let mut bytes = Vec::new();
-    let mut stream = std::pin::pin!(zip_body_stream(reader, result_rx));
-    while let Some(chunk) = stream.next().await {
-        bytes.extend_from_slice(&chunk.context("read ZIP body chunk")?);
-    }
-
-    writer_task.await.context("zip writer task join")?;
-    Ok(bytes)
 }
 
 async fn get_player<ReqBody>(
@@ -1020,7 +999,10 @@ async fn shadow_recording(
 
 #[cfg(test)]
 mod tests {
-    use async_zip::base::read::mem::ZipFileReader;
+    use std::io::Read as _;
+
+    use http_body_util::BodyExt as _;
+    use zip::ZipArchive;
 
     use super::*;
 
@@ -1035,7 +1017,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lists_manifest_files_for_zip() {
+    async fn snapshots_manifest_files_for_zip() {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
@@ -1050,8 +1032,9 @@ mod tests {
                 { "fileName": "../escape.webm", "startTime": 12, "duration": 1 }
             ]
         });
+        let manifest_bytes = manifest.to_string().into_bytes();
 
-        tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
+        tokio::fs::write(dir_path.join("recording.json"), &manifest_bytes)
             .await
             .expect("write manifest");
         tokio::fs::write(dir_path.join("recording-0.webm"), b"clip-zero")
@@ -1061,19 +1044,78 @@ mod tests {
             .await
             .expect("write clip 1");
 
-        let entries = list_recording_zip_entries(&dir_path).await.expect("list entries");
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+        assert_eq!(plan.manifest_bytes, manifest_bytes);
         assert_eq!(
-            entries,
-            vec![
-                "recording.json".to_owned(),
-                "recording-0.webm".to_owned(),
-                "recording-1.webm".to_owned(),
-            ]
+            plan.clip_names,
+            vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()]
         );
     }
 
     #[tokio::test]
-    async fn streams_zip_with_all_listed_clips() {
+    async fn zip_keeps_snapshotted_manifest_when_disk_manifest_changes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+
+        let original = serde_json::json!({
+            "sessionId": "22222222-2222-2222-2222-222222222222",
+            "startTime": 1,
+            "duration": 2,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 2 }
+            ]
+        })
+        .to_string()
+        .into_bytes();
+
+        tokio::fs::write(dir_path.join("recording.json"), &original)
+            .await
+            .expect("write original manifest");
+        tokio::fs::write(dir_path.join("recording-0.webm"), b"clip-zero")
+            .await
+            .expect("write clip 0");
+
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+
+        // Simulate a reconnect rewriting the live manifest after the download snapshot.
+        let updated = serde_json::json!({
+            "sessionId": "22222222-2222-2222-2222-222222222222",
+            "startTime": 1,
+            "duration": 4,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 2 },
+                { "fileName": "recording-1.webm", "startTime": 3, "duration": 2 }
+            ]
+        })
+        .to_string()
+        .into_bytes();
+        tokio::fs::write(dir_path.join("recording.json"), &updated)
+            .await
+            .expect("rewrite manifest");
+        tokio::fs::write(dir_path.join("recording-1.webm"), b"clip-one")
+            .await
+            .expect("write clip 1");
+
+        let archive =
+            build_recording_zip_archive(dir_path.as_std_path(), &plan, &AtomicBool::new(false)).expect("build zip");
+        let mut zip = ZipArchive::new(archive.reopen().expect("reopen zip")).expect("open zip");
+        assert_eq!(zip.len(), 2);
+
+        let mut manifest_entry = zip.by_name("recording.json").expect("manifest entry");
+        let mut archived_manifest = Vec::new();
+        manifest_entry
+            .read_to_end(&mut archived_manifest)
+            .expect("read archived manifest");
+        assert_eq!(archived_manifest, original);
+        assert_ne!(archived_manifest, updated);
+    }
+
+    #[tokio::test]
+    async fn streams_interoperable_zip_with_all_listed_clips() {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
@@ -1098,43 +1140,34 @@ mod tests {
             .await
             .expect("write clip 1");
 
-        let entries = list_recording_zip_entries(&dir_path).await.expect("list entries");
-        let zip_bytes = collect_recording_zip(&dir_path, &entries).await.expect("build zip");
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let body = recording_zip_body(dir_path.clone(), plan, Uuid::nil(), shutdown_signal)
+            .await
+            .unwrap_or_else(|error| panic!("build body: {error}"));
+        let zip_bytes = body.collect().await.expect("collect ZIP body").to_bytes().to_vec();
+        drop(shutdown_handle);
 
         assert_eq!(&zip_bytes[..2], b"PK");
 
-        let reader = ZipFileReader::new(zip_bytes).await.expect("parse zip");
-        let names: Vec<_> = reader
-            .file()
-            .entries()
-            .iter()
-            .map(|entry| entry.filename().as_str().expect("utf8 name").to_owned())
-            .collect();
+        // Interop: standard zip crate reader (same class of local-header expectations as OS tools).
+        let cursor = io::Cursor::new(zip_bytes);
+        let mut archive = ZipArchive::new(cursor).expect("parse zip with standard reader");
+        assert_eq!(archive.len(), 3);
 
-        assert_eq!(
-            names,
-            vec![
-                "recording.json".to_owned(),
-                "recording-0.webm".to_owned(),
-                "recording-1.webm".to_owned(),
-            ]
-        );
-
-        for (index, expected) in [
-            manifest_bytes.as_slice(),
-            b"first-clip".as_slice(),
-            b"second-clip".as_slice(),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut entry_reader = reader.reader_with_entry(index).await.expect("entry reader");
+        let expected = [
+            ("recording.json", manifest_bytes.as_slice()),
+            ("recording-0.webm", b"first-clip".as_slice()),
+            ("recording-1.webm", b"second-clip".as_slice()),
+        ];
+        for (name, payload) in expected {
+            let mut entry = archive.by_name(name).unwrap_or_else(|_| panic!("missing {name}"));
             let mut content = Vec::new();
-            entry_reader
-                .read_to_end_checked(&mut content)
-                .await
-                .expect("read entry");
-            assert_eq!(content, expected);
+            entry.read_to_end(&mut content).expect("read entry");
+            assert_eq!(content, payload, "payload mismatch for {name}");
+            assert_eq!(entry.compression(), CompressionMethod::Stored);
         }
     }
 
@@ -1143,10 +1176,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
-        let error = list_recording_zip_entries(&dir_path)
+        let error = snapshot_recording_zip_plan(&dir_path)
             .await
             .expect_err("missing manifest");
-        assert!(matches!(error, ListRecordingZipError::NotFound));
+        assert_eq!(error.code, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1158,45 +1191,47 @@ mod tests {
             .await
             .expect("write corrupt manifest");
 
-        let error = list_recording_zip_entries(&dir_path)
+        let error = snapshot_recording_zip_plan(&dir_path)
             .await
             .expect_err("corrupt manifest");
-        assert!(matches!(error, ListRecordingZipError::NotFound));
+        assert_eq!(error.code, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
-    async fn mid_stream_open_failure_errors_the_body() {
+    async fn manifest_read_failure_is_internal_error_with_context() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+        tokio::fs::create_dir(dir_path.join("recording.json"))
+            .await
+            .expect("create manifest directory");
+
+        let error = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .expect_err("manifest read should fail");
+        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            error
+                .source
+                .as_deref()
+                .is_some_and(|source| source.to_string().contains("read recording manifest at")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_clip_during_build_fails_before_body() {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
-        let manifest = serde_json::json!({
-            "sessionId": "33333333-3333-3333-3333-333333333333",
-            "startTime": 1,
-            "duration": 2,
-            "files": [
-                { "fileName": "recording-0.webm", "startTime": 1, "duration": 2 }
-            ]
-        });
-
-        tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
+        let plan = RecordingZipPlan {
+            manifest_bytes: b"{}".to_vec(),
+            clip_names: vec!["missing-clip.webm".to_owned()],
+        };
+        let (_shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let error = recording_zip_body(dir_path, plan, Uuid::nil(), shutdown_signal)
             .await
-            .expect("write manifest");
-        tokio::fs::write(dir_path.join("recording-0.webm"), b"clip")
-            .await
-            .expect("write clip");
-
-        // Pass a listed path that does not exist so packaging fails after headers would be sent.
-        let entries = vec!["recording.json".to_owned(), "missing-clip.webm".to_owned()];
-        let error = collect_recording_zip(&dir_path, &entries)
-            .await
-            .expect_err("zip body should fail");
-        assert!(
-            error.to_string().contains("read ZIP body chunk")
-                || error
-                    .downcast_ref::<io::Error>()
-                    .is_some_and(|io_error| io_error.kind() == io::ErrorKind::Other),
-            "unexpected error: {error:#}"
-        );
+            .expect_err("missing clip should fail packaging");
+        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
@@ -1226,14 +1261,18 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
-        let mut entries = Vec::with_capacity(MAX_RECORDING_ZIP_FILES + 1);
-        for index in 0..=MAX_RECORDING_ZIP_FILES {
+        let mut clip_names = Vec::with_capacity(MAX_RECORDING_ZIP_FILES);
+        for index in 0..MAX_RECORDING_ZIP_FILES {
             let name = format!("f-{index}.bin");
             tokio::fs::write(dir_path.join(&name), b"x").await.expect("write file");
-            entries.push(name);
+            clip_names.push(name);
         }
 
-        let error = enforce_recording_zip_limits(&dir_path, &entries)
+        let plan = RecordingZipPlan {
+            manifest_bytes: b"{}".to_vec(),
+            clip_names,
+        };
+        let error = enforce_recording_zip_limits(&dir_path, &plan)
             .await
             .expect_err("too many files");
         assert_eq!(error.code, StatusCode::PAYLOAD_TOO_LARGE);
