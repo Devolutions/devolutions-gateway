@@ -22,6 +22,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::jrec_delete,
         crate::api::jrec::jrec_delete_many,
         crate::api::jrec::list_recordings,
+        crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,

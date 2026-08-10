@@ -255,6 +255,42 @@ paths:
       security:
       - scope_token:
         - gateway.recordings.read
+  /jet/jrec/pull/{id}:
+    get:
+      tags:
+      - Jrec
+      summary: Downloads an entire recorded session as a ZIP archive
+      description: |-
+        The archive always contains `recording.json` and every clip listed in that manifest that is present on disk.
+        A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+      operationId: PullRecordingSession
+      parameters:
+      - name: id
+        in: path
+        description: Recorded session ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ZIP archive containing the recording session
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Recording not found
+        '413':
+          description: Recording package exceeds download size or file-count limits
+      security:
+      - jrec_token:
+        - pull
   /jet/jrec/pull/{id}/{filename}:
     get:
       tags:

@@ -105,6 +105,27 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="filename">Name of recording file to retrieve</param>
         /// <returns>ApiResponse of FileParameter</returns>
         ApiResponse<FileParameter> PullRecordingFileWithHttpInfo(Guid id, string filename);
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive
+        /// </summary>
+        /// <remarks>
+        /// The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <returns>FileParameter</returns>
+        FileParameter PullRecordingSession(Guid id);
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive
+        /// </summary>
+        /// <remarks>
+        /// The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <returns>ApiResponse of FileParameter</returns>
+        ApiResponse<FileParameter> PullRecordingSessionWithHttpInfo(Guid id);
         #endregion Synchronous Operations
     }
 
@@ -208,6 +229,29 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (FileParameter)</returns>
         System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingFileWithHttpInfoAsync(Guid id, string filename, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive
+        /// </summary>
+        /// <remarks>
+        /// The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of FileParameter</returns>
+        System.Threading.Tasks.Task<FileParameter> PullRecordingSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive
+        /// </summary>
+        /// <remarks>
+        /// The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (FileParameter)</returns>
+        System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -911,6 +955,125 @@ namespace Devolutions.Gateway.Client.Api
             if (this.ExceptionFactory != null)
             {
                 Exception _exception = this.ExceptionFactory("PullRecordingFile", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <returns>FileParameter</returns>
+        public FileParameter PullRecordingSession(Guid id)
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<FileParameter> localVarResponse = PullRecordingSessionWithHttpInfo(id);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <returns>ApiResponse of FileParameter</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<FileParameter> PullRecordingSessionWithHttpInfo(Guid id)
+        {
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/zip"
+            };
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(id)); // path parameter
+
+            // authentication (jrec_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Get<FileParameter>("/jet/jrec/pull/{id}", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("PullRecordingSession", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of FileParameter</returns>
+        public async System.Threading.Tasks.Task<FileParameter> PullRecordingSessionAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<FileParameter> localVarResponse = await PullRecordingSessionWithHttpInfoAsync(id, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Downloads an entire recorded session as a ZIP archive The archive always contains &#x60;recording.json&#x60; and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="id">Recorded session ID</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (FileParameter)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<FileParameter>> PullRecordingSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/zip"
+            };
+
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(id)); // path parameter
+
+            // authentication (jrec_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.GetAsync<FileParameter>("/jet/jrec/pull/{id}", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("PullRecordingSession", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 

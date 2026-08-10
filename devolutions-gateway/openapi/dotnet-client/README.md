@@ -151,6 +151,7 @@ Class | Method | HTTP request | Description
 *JrecApi* | [**DeleteRecording**](docs/JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Deletes a recording stored on this instance
 *JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
+*JrecApi* | [**PullRecordingSession**](docs/JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *NetApi* | [**GetNetConfig**](docs/NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces

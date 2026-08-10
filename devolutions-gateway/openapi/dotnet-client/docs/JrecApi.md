@@ -8,6 +8,7 @@ All URIs are relative to *http://localhost*
 | [**DeleteRecording**](JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Deletes a recording stored on this instance |
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
+| [**PullRecordingSession**](JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive |
 
 <a id="deletemanyrecordings"></a>
 # **DeleteManyRecordings**
@@ -407,6 +408,107 @@ catch (ApiException e)
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **404** | File not found |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="pullrecordingsession"></a>
+# **PullRecordingSession**
+> FileParameter PullRecordingSession (Guid id)
+
+Downloads an entire recorded session as a ZIP archive
+
+The archive always contains `recording.json` and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class PullRecordingSessionExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: jrec_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var id = "id_example";  // Guid | Recorded session ID
+
+            try
+            {
+                // Downloads an entire recorded session as a ZIP archive
+                FileParameter result = apiInstance.PullRecordingSession(id);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling JrecApi.PullRecordingSession: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the PullRecordingSessionWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Downloads an entire recorded session as a ZIP archive
+    ApiResponse<FileParameter> response = apiInstance.PullRecordingSessionWithHttpInfo(id);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling JrecApi.PullRecordingSessionWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **id** | **Guid** | Recorded session ID |  |
+
+### Return type
+
+[**FileParameter**](FileParameter.md)
+
+### Authorization
+
+[jrec_token](../README.md#jrec_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/zip
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | ZIP archive containing the recording session |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **404** | Recording not found |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
