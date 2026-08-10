@@ -107,6 +107,7 @@ tungstenite = "0.29" # Should be the same version as `axum` (we perform error do
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] } # Should use the same version of tungstenite as `axum`
 http-body-util = "0.1"
 tokio-retry = "0.3"
+async_zip = { version = "0.0.18", default-features = false, features = ["tokio"] }
 
 # OpenAPI generator
 utoipa = { version = "4.2", default-features = false, features = ["uuid", "time"], optional = true }
