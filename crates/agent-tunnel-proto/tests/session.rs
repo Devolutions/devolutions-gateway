@@ -57,7 +57,7 @@ async fn connect_request_wire_format_is_stable() {
     let expected: &[u8] = &[
         0x00, 0x00, 0x00, 0x1E,                         // outer length = 30
         0x01,                                           // TAG_REQUEST_TCP
-        0x00, 0x02,                                     // protocol_version = 2
+        0x00, 0x01,                                     // protocol_version = 1
         // session_id (16 bytes)
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
         0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
@@ -79,7 +79,7 @@ async fn connect_response_success_wire_format_is_stable() {
     let expected: &[u8] = &[
         0x00, 0x00, 0x00, 0x03, // outer length = 3
         0x00,                   // TAG_RESPONSE_SUCCESS
-        0x00, 0x02,             // protocol_version = 2
+        0x00, 0x01,             // protocol_version = 1
     ];
     assert_eq!(buf, expected);
 }

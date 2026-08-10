@@ -1,11 +1,11 @@
 /// ALPN protocol identifier for the QUIC agent tunnel, including version suffix.
-pub const ALPN_PROTOCOL: &[u8] = b"gw-agent-tunnel/2";
+pub const ALPN_PROTOCOL: &[u8] = b"gw-agent-tunnel/1";
 
 /// Current protocol version.
-pub const CURRENT_PROTOCOL_VERSION: u16 = 2;
+pub const CURRENT_PROTOCOL_VERSION: u16 = 1;
 
 /// Minimum protocol version that is still accepted.
-pub const MIN_SUPPORTED_VERSION: u16 = 2;
+pub const MIN_SUPPORTED_VERSION: u16 = 1;
 
 /// Validate that a received protocol version is within the supported range.
 pub fn validate_protocol_version(version: u16) -> Result<(), crate::error::ProtoError> {
@@ -31,11 +31,6 @@ mod tests {
     #[test]
     fn reject_zero_version() {
         assert!(validate_protocol_version(0).is_err());
-    }
-
-    #[test]
-    fn reject_version_one_with_implicit_suffix_semantics() {
-        assert!(validate_protocol_version(1).is_err());
     }
 
     #[test]

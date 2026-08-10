@@ -209,7 +209,7 @@ async fn heartbeat_wire_format_is_stable() {
     let expected: &[u8] = &[
         0x00, 0x00, 0x00, 0x0F,                         // outer length = 15
         0x02,                                           // TAG_HEARTBEAT
-        0x00, 0x02,                                     // protocol_version = 2
+        0x00, 0x01,                                     // protocol_version = 1
         0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, // timestamp_ms
         0x00, 0x00, 0x00, 0x2A,                         // active_stream_count = 42
     ];
@@ -224,7 +224,7 @@ async fn heartbeat_ack_wire_format_is_stable() {
     let expected: &[u8] = &[
         0x00, 0x00, 0x00, 0x0B,                         // outer length = 11
         0x03,                                           // TAG_HEARTBEAT_ACK
-        0x00, 0x02,                                     // protocol_version = 2
+        0x00, 0x01,                                     // protocol_version = 1
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // timestamp_ms
     ];
     assert_eq!(bytes, expected);
