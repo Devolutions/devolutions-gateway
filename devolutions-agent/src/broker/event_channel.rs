@@ -10,8 +10,9 @@
 //! Writing is strictly best-effort: a client that never connects, connects late,
 //! reads too slowly, or disconnects early must never stall or fail the operation.
 //! Producers push into a bounded in-memory queue; when the per-stream byte budget
-//! is exhausted, data is dropped and accounted for with `StdoutOverflow` /
-//! `StderrOverflow` frames.
+//! is exhausted, the oldest queued data is dropped and accounted for with
+//! `StdoutOverflow` / `StderrOverflow` frames marking the gap. When the client
+//! disconnects, the queue is abandoned and producers become no-ops.
 
 use std::collections::VecDeque;
 use std::mem;
@@ -26,9 +27,10 @@ pub const OPERATION_PIPE_PREFIX: &str = "Devolutions.Now.PackageBroker.Operation
 
 /// Maximum bytes of not-yet-written output buffered per stream (stdout / stderr).
 ///
-/// When the budget is exhausted (client absent or reading too slowly), further
-/// output is dropped and reported through overflow frames.
-const PER_STREAM_BUDGET_BYTES: usize = 256 * 1024;
+/// When the budget is exhausted (client absent or reading too slowly), the oldest
+/// queued data is dropped and reported through overflow frames, so a client always
+/// receives the most recent output.
+const PER_STREAM_BUDGET_BYTES: usize = 1024 * 1024;
 
 /// Bare pipe name for an operation's event channel, as returned to clients in the
 /// `EventChannel` descriptor (no `\\.\pipe\` prefix, matching the protocol samples).
@@ -137,8 +139,6 @@ struct StreamState {
     chunker: Utf8StreamChunker,
     /// Bytes of queued (not yet consumed) data frames for this stream.
     queued_bytes: usize,
-    /// Bytes dropped since the last overflow frame was queued.
-    skipped_bytes: u32,
 }
 
 #[derive(Debug)]
@@ -146,8 +146,18 @@ struct QueueState {
     items: VecDeque<EventFrame>,
     stdout: StreamState,
     stderr: StreamState,
-    /// Set once `finish` was queued; no further items are accepted.
+    /// Set once `finish` was queued (or the channel was abandoned); no further
+    /// items are accepted.
     closed: bool,
+}
+
+impl QueueState {
+    fn stream_mut(&mut self, stream: OutputStream) -> &mut StreamState {
+        match stream {
+            OutputStream::Stdout => &mut self.stdout,
+            OutputStream::Stderr => &mut self.stderr,
+        }
+    }
 }
 
 /// Shared bounded event queue between producers (executor, tracker) and the
@@ -210,32 +220,33 @@ impl OperationEventSink {
 
     /// Queue the final `Finish` frame and close the queue.
     ///
-    /// Flushes buffered incomplete UTF-8 sequences and pending overflow
-    /// accounting first, so `Finish` is always the last frame.
+    /// Flushes buffered incomplete UTF-8 sequences first, so `Finish` is always
+    /// the last frame.
     pub fn finish(&self) {
         let mut state = self.queue.state.lock().expect("event queue lock poisoned");
         if state.closed {
             return;
         }
         for stream in [OutputStream::Stdout, OutputStream::Stderr] {
-            let stream_state = match stream {
-                OutputStream::Stdout => &mut state.stdout,
-                OutputStream::Stderr => &mut state.stderr,
-            };
-            let tail = stream_state.chunker.flush();
+            let tail = state.stream_mut(stream).chunker.flush();
             if let Some(tail) = tail {
                 Self::enqueue_chunk(&mut state, stream, tail);
             }
-            let stream_state = match stream {
-                OutputStream::Stdout => &mut state.stdout,
-                OutputStream::Stderr => &mut state.stderr,
-            };
-            let skipped = mem::take(&mut stream_state.skipped_bytes);
-            if skipped > 0 {
-                state.items.push_back(overflow_frame(stream, skipped));
-            }
         }
         state.items.push_back(EventFrame::Finish);
+        state.closed = true;
+        drop(state);
+        self.queue.finished.cancel();
+        self.queue.notify.notify_one();
+    }
+
+    /// Abandon the queue: the client is gone, so buffered frames are released and
+    /// all further producer calls become no-ops.
+    fn abandon(&self) {
+        let mut state = self.queue.state.lock().expect("event queue lock poisoned");
+        state.items.clear();
+        state.stdout = StreamState::default();
+        state.stderr = StreamState::default();
         state.closed = true;
         drop(state);
         self.queue.finished.cancel();
@@ -247,11 +258,7 @@ impl OperationEventSink {
         if state.closed {
             return;
         }
-        let stream_state = match stream {
-            OutputStream::Stdout => &mut state.stdout,
-            OutputStream::Stderr => &mut state.stderr,
-        };
-        let chunks = stream_state.chunker.push(bytes);
+        let chunks = state.stream_mut(stream).chunker.push(bytes);
         let mut queued_any = false;
         for chunk in chunks {
             Self::enqueue_chunk(&mut state, stream, chunk);
@@ -265,25 +272,65 @@ impl OperationEventSink {
 
     /// Queue one data chunk, respecting the per-stream byte budget.
     ///
-    /// A chunk that does not fit is dropped in full and accounted in the skipped
-    /// counter; once room is available again, an overflow frame is queued before
-    /// the next data frame so the client learns how many bytes it missed.
+    /// When the chunk does not fit, the *oldest* queued data frames of the same
+    /// stream are evicted to make room, so a slow client always receives the most
+    /// recent output. Each gap is marked in place with an overflow frame carrying
+    /// the number of skipped bytes.
     fn enqueue_chunk(state: &mut QueueState, stream: OutputStream, chunk: String) {
-        let stream_state = match stream {
-            OutputStream::Stdout => &mut state.stdout,
-            OutputStream::Stderr => &mut state.stderr,
-        };
-        if stream_state.queued_bytes + chunk.len() > PER_STREAM_BUDGET_BYTES {
-            let len = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
-            stream_state.skipped_bytes = stream_state.skipped_bytes.saturating_add(len);
-            return;
+        // INVARIANT: chunk.len() <= MAX_EVENT_FRAME_BODY_BYTES <= PER_STREAM_BUDGET_BYTES,
+        // so evicting queued data always frees enough room.
+        while state.stream_mut(stream).queued_bytes + chunk.len() > PER_STREAM_BUDGET_BYTES {
+            if !Self::evict_oldest_data_frame(state, stream) {
+                // Defensive: nothing left to evict; drop the new chunk instead.
+                let bytes_skipped = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
+                state.items.push_back(overflow_frame(stream, bytes_skipped));
+                return;
+            }
         }
-        let skipped = mem::take(&mut stream_state.skipped_bytes);
-        stream_state.queued_bytes += chunk.len();
-        if skipped > 0 {
-            state.items.push_back(overflow_frame(stream, skipped));
-        }
+        state.stream_mut(stream).queued_bytes += chunk.len();
         state.items.push_back(data_frame(stream, chunk));
+    }
+
+    /// Evict the oldest queued data frame of `stream`, marking the gap with an
+    /// overflow frame (merged with an immediately preceding one when present).
+    ///
+    /// Returns false when no data frame of that stream is queued.
+    fn evict_oldest_data_frame(state: &mut QueueState, stream: OutputStream) -> bool {
+        let position = state.items.iter().position(|frame| {
+            matches!(
+                (stream, frame),
+                (OutputStream::Stdout, EventFrame::Stdout(_)) | (OutputStream::Stderr, EventFrame::Stderr(_))
+            )
+        });
+        let Some(position) = position else {
+            return false;
+        };
+
+        let Some(evicted) = state.items.remove(position) else {
+            return false;
+        };
+        let evicted_len = match &evicted {
+            EventFrame::Stdout(data) | EventFrame::Stderr(data) => data.len(),
+            // INVARIANT: `position` was found by matching a data frame of `stream`.
+            _ => unreachable!("evicted frame is a data frame"),
+        };
+        state.stream_mut(stream).queued_bytes -= evicted_len;
+        let skipped = u32::try_from(evicted_len).unwrap_or(u32::MAX);
+
+        // Merge into an overflow frame already sitting at the gap, if any.
+        let merged = position > 0
+            && match (stream, state.items.get_mut(position - 1)) {
+                (OutputStream::Stdout, Some(EventFrame::StdoutOverflow { bytes_skipped }))
+                | (OutputStream::Stderr, Some(EventFrame::StderrOverflow { bytes_skipped })) => {
+                    *bytes_skipped = bytes_skipped.saturating_add(skipped);
+                    true
+                }
+                _ => false,
+            };
+        if !merged {
+            state.items.insert(position, overflow_frame(stream, skipped));
+        }
+        true
     }
 
     /// Wait for and take the next queued frame; `None` once the queue is closed
@@ -345,7 +392,7 @@ mod windows_channel {
     use now_policy_api::{EventChannel, EventChannelKind};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-    use tracing::{debug, warn};
+    use tracing::debug;
     use win_api_wrappers::identity::sid::Sid;
     use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
     use win_api_wrappers::security::attributes::SecurityAttributesInit;
@@ -440,15 +487,26 @@ mod windows_channel {
             version_minor: EVENT_CHANNEL_VERSION_MINOR,
         };
         if let Err(error) = write_frame(&mut server, &hello).await {
-            warn!(operation_id, %error, "Failed to write event channel hello frame");
+            sink.abandon();
+            debug!(
+                operation_id,
+                %error,
+                "Event channel client disconnected, continuing without streaming"
+            );
             return;
         }
 
         while let Some(frame) = sink.next_frame().await {
             if let Err(error) = write_frame(&mut server, &frame).await {
-                // Best-effort: the client disconnected or stopped reading; the
-                // operation itself is unaffected.
-                debug!(operation_id, %error, "Stopped writing event channel frames");
+                // Best-effort: an abrupt client disconnect is the normal teardown
+                // path (clients close the pipe on cancel/completion); release the
+                // queue and let the operation run to completion unaffected.
+                sink.abandon();
+                debug!(
+                    operation_id,
+                    %error,
+                    "Event channel client disconnected, continuing without streaming"
+                );
                 return;
             }
         }
@@ -633,7 +691,7 @@ mod tests {
     async fn sink_accounts_overflow_when_budget_is_exhausted() {
         let sink = OperationEventSink::new();
         let chunk = vec![b'a'; 64 * 1024];
-        let pushes = 64; // 4 MiB total, way over the 256 KiB budget.
+        let pushes = 64; // 4 MiB total, way over the 1 MiB budget.
         for _ in 0..pushes {
             sink.stdout(&chunk);
         }
@@ -658,35 +716,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sink_emits_overflow_frame_before_next_data_frame() {
+    async fn sink_drops_oldest_data_and_keeps_most_recent() {
         let sink = OperationEventSink::new();
-        let big = vec![b'a'; PER_STREAM_BUDGET_BYTES]; // Fills the budget exactly (4 frames).
-        sink.stdout(&big);
-        sink.stdout(b"dropped");
-
-        // Drain the queued data to free budget, then push more data.
-        let mut drained = 0;
-        while drained < PER_STREAM_BUDGET_BYTES {
-            match sink.next_frame().await {
-                Some(EventFrame::Stdout(data)) => drained += data.len(),
-                other => panic!("unexpected frame: {other:?}"),
-            }
-        }
-        sink.stdout(b"fresh");
+        let frame_len = 64 * 1024;
+        // Fill the budget exactly, then push one more chunk of a distinct byte.
+        let old = vec![b'o'; PER_STREAM_BUDGET_BYTES];
+        sink.stdout(&old);
+        sink.stdout(&vec![b'n'; frame_len]);
         sink.finish();
 
+        let mut frames = Vec::new();
+        while let Some(frame) = sink.next_frame().await {
+            frames.push(frame);
+        }
+
+        // The oldest frame was evicted: overflow first, then the surviving data.
         assert_eq!(
-            sink.next_frame().await,
-            Some(EventFrame::StdoutOverflow { bytes_skipped: 7 })
+            frames.first(),
+            Some(&EventFrame::StdoutOverflow {
+                bytes_skipped: u32::try_from(frame_len).expect("frame length fits in u32"),
+            })
         );
-        assert_eq!(sink.next_frame().await, Some(EventFrame::Stdout("fresh".to_owned())));
-        assert_eq!(sink.next_frame().await, Some(EventFrame::Finish));
+        match frames.get(1) {
+            Some(EventFrame::Stdout(data)) => assert!(data.bytes().all(|b| b == b'o')),
+            other => panic!("unexpected frame: {other:?}"),
+        }
+        match frames.iter().rev().nth(1) {
+            Some(EventFrame::Stdout(data)) => {
+                assert!(data.bytes().all(|b| b == b'n'), "newest data must survive");
+            }
+            other => panic!("unexpected frame: {other:?}"),
+        }
+        assert_eq!(frames.last(), Some(&EventFrame::Finish));
+    }
+
+    #[tokio::test]
+    async fn sink_merges_consecutive_overflow_frames() {
+        let sink = OperationEventSink::new();
+        let frame_len = 64 * 1024;
+        sink.stdout(&vec![b'o'; PER_STREAM_BUDGET_BYTES]);
+        // Two more chunks evict two oldest frames; the gap marker must merge.
+        sink.stdout(&vec![b'n'; frame_len]);
+        sink.stdout(&vec![b'n'; frame_len]);
+        sink.finish();
+
+        let mut overflow_frames = 0;
+        let mut skipped = 0u64;
+        while let Some(frame) = sink.next_frame().await {
+            if let EventFrame::StdoutOverflow { bytes_skipped } = frame {
+                overflow_frames += 1;
+                skipped += u64::from(bytes_skipped);
+            }
+        }
+        assert_eq!(overflow_frames, 1, "consecutive gaps must merge into one frame");
+        assert_eq!(skipped, 2 * frame_len as u64);
+    }
+
+    #[tokio::test]
+    async fn sink_ignores_events_after_abandon() {
+        let sink = OperationEventSink::new();
+        sink.stdout(b"buffered");
+        sink.abandon();
+        sink.stdout(b"late");
+        sink.status_updated();
+        sink.finish();
+
         assert_eq!(sink.next_frame().await, None);
     }
 }
 
 #[cfg(all(test, windows))]
 mod pipe_tests {
+    use std::time::Duration;
+
     use now_policy_api::EventChannelKind;
     use now_policy_api::event_channel::{
         EVENT_CHANNEL_VERSION_MAJOR, EVENT_CHANNEL_VERSION_MINOR, EventFrame, EventFrameDecoder,
@@ -817,6 +919,37 @@ mod pipe_tests {
                 EventFrame::Finish,
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn abrupt_client_disconnect_does_not_affect_producers() {
+        let operation_id = test_operation_id("disconnect");
+        let (sink, descriptor) = open_operation_channel(&operation_id, &current_user_sid()).expect("open channel");
+
+        // Connect, read a little, then abruptly drop the pipe mid-stream (the
+        // normal client teardown on cancel/completion).
+        let path = format!(r"\\.\pipe\{}", descriptor.path);
+        let mut client = tokio::net::windows::named_pipe::ClientOptions::new()
+            .write(false)
+            .open(&path)
+            .expect("connect to event channel pipe");
+        sink.stdout(b"first");
+        let mut buffer = [0u8; 256];
+        let read = client.read(&mut buffer).await.expect("read some frames");
+        assert!(read > 0);
+        drop(client);
+
+        // Producers must keep working as silent no-ops; nothing may panic or block.
+        for _ in 0..64 {
+            sink.stdout(&vec![b'x'; 64 * 1024]);
+            sink.status_updated();
+        }
+        sink.finish();
+
+        // The writer task abandons the queue once the broken pipe is observed.
+        tokio::time::timeout(Duration::from_secs(10), sink.finished())
+            .await
+            .expect("sink must be closed after finish");
     }
 
     #[tokio::test]
