@@ -34,6 +34,17 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 /// Read/write chunk size for session ZIP streaming (duplex buffer and file copy).
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
+/// Maximum files in a session ZIP (`recording.json` + clips).
+///
+/// Reconnect windows only mint a small number of clips per session in practice;
+/// this bound blocks pathological manifests without rejecting normal multi-clip packages.
+const MAX_RECORDING_ZIP_FILES: usize = 128;
+
+/// Maximum total uncompressed payload (bytes) for a session ZIP download.
+///
+/// Chosen to cover multi-hour WebM packages with headroom while limiting concurrent bulk pulls.
+const MAX_RECORDING_ZIP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/push/{id}", get(jrec_push))
@@ -492,6 +503,7 @@ pub(crate) async fn list_recordings(
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Recording not found"),
+        (status = 413, description = "Recording package exceeds download size or file-count limits"),
     ),
     security(("jrec_token" = ["pull"])),
 ))]
@@ -529,6 +541,8 @@ pub(crate) async fn pull_recording_session(
                 .build(error));
         }
     };
+
+    enforce_recording_zip_limits(&recording_dir, &entries).await?;
 
     let body = recording_zip_body(recording_dir, entries, id, shutdown_signal);
     let mut response = Response::new(body);
@@ -696,6 +710,69 @@ async fn list_recording_zip_entries(recording_dir: &Utf8Path) -> Result<Vec<Stri
     }
 
     Ok(entries)
+}
+
+/// Returns whether a package exceeds the fixed session-ZIP safety bounds.
+fn recording_zip_limits_exceeded(file_count: usize, total_bytes: u64) -> Option<RecordingZipLimitKind> {
+    if file_count > MAX_RECORDING_ZIP_FILES {
+        Some(RecordingZipLimitKind::FileCount)
+    } else if total_bytes > MAX_RECORDING_ZIP_BYTES {
+        Some(RecordingZipLimitKind::TotalBytes)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordingZipLimitKind {
+    FileCount,
+    TotalBytes,
+}
+
+impl RecordingZipLimitKind {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::FileCount => "recording package exceeds maximum file count for download",
+            Self::TotalBytes => "recording package exceeds maximum size for download",
+        }
+    }
+}
+
+/// Rejects session packages that are too large to stream safely through this endpoint.
+///
+/// Limits are evaluated up front from directory metadata so the client gets a clear HTTP error
+/// instead of a multi-gigabyte transfer that may time out or pressure the host.
+async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, entries: &[String]) -> Result<(), HttpError> {
+    let mut total_bytes = 0u64;
+    for file_name in entries {
+        let path = recording_dir.join(file_name);
+        let metadata = tokio::fs::metadata(&path).await.map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                HttpError::not_found().msg("requested recording does not exist")
+            } else {
+                HttpError::internal()
+                    .with_msg("failed to stat recording file for download limits")
+                    .build(error)
+            }
+        })?;
+        total_bytes = total_bytes.saturating_add(metadata.len());
+    }
+
+    match recording_zip_limits_exceeded(entries.len(), total_bytes) {
+        None => Ok(()),
+        Some(kind) => {
+            warn!(
+                ?kind,
+                file_count = entries.len(),
+                total_bytes,
+                file_limit = MAX_RECORDING_ZIP_FILES,
+                byte_limit = MAX_RECORDING_ZIP_BYTES,
+                path = %recording_dir,
+                "Refusing recording ZIP download: package exceeds safety limits"
+            );
+            Err(HttpErrorBuilder::new(StatusCode::PAYLOAD_TOO_LARGE).msg(kind.message()))
+        }
+    }
 }
 
 /// Streams a ZIP body that fails the HTTP transfer if packaging aborts mid-stream.
@@ -1120,5 +1197,45 @@ mod tests {
                     .is_some_and(|io_error| io_error.kind() == io::ErrorKind::Other),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn zip_limits_allow_typical_packages() {
+        assert_eq!(recording_zip_limits_exceeded(1, 0), None);
+        assert_eq!(recording_zip_limits_exceeded(2, 200 * 1024 * 1024), None);
+        assert_eq!(
+            recording_zip_limits_exceeded(MAX_RECORDING_ZIP_FILES, MAX_RECORDING_ZIP_BYTES),
+            None
+        );
+    }
+
+    #[test]
+    fn zip_limits_reject_pathological_packages() {
+        assert_eq!(
+            recording_zip_limits_exceeded(MAX_RECORDING_ZIP_FILES + 1, 1),
+            Some(RecordingZipLimitKind::FileCount)
+        );
+        assert_eq!(
+            recording_zip_limits_exceeded(1, MAX_RECORDING_ZIP_BYTES + 1),
+            Some(RecordingZipLimitKind::TotalBytes)
+        );
+    }
+
+    #[tokio::test]
+    async fn enforce_limits_rejects_too_many_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+
+        let mut entries = Vec::with_capacity(MAX_RECORDING_ZIP_FILES + 1);
+        for index in 0..=MAX_RECORDING_ZIP_FILES {
+            let name = format!("f-{index}.bin");
+            tokio::fs::write(dir_path.join(&name), b"x").await.expect("write file");
+            entries.push(name);
+        }
+
+        let error = enforce_recording_zip_limits(&dir_path, &entries)
+            .await
+            .expect_err("too many files");
+        assert_eq!(error.code, StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

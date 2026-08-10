@@ -286,6 +286,8 @@ paths:
           description: Insufficient permissions
         '404':
           description: Recording not found
+        '413':
+          description: Recording package exceeds download size or file-count limits
       security:
       - jrec_token:
         - pull
