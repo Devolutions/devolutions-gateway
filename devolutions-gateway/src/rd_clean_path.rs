@@ -1,6 +1,7 @@
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use ironrdp_pdu::nego;
@@ -10,6 +11,9 @@ use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
+
+/// MS-RDPEPS upper bound for transmitting the complete Preconnection Blob after TCP connect.
+const PCB_TRANSMIT_DEADLINE: Duration = Duration::from_secs(10);
 
 use crate::config::Conf;
 use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialService};
@@ -233,6 +237,50 @@ struct ConnectedRdpServer {
     x224_rsp: Option<Vec<u8>>,
 }
 
+/// Explicit VMConnect request: no X.224 and a non-empty Unicode PCB V2 payload.
+///
+/// Matches IronRDP `RDCleanPathMessage::VmConnectRequest` / `new_vmconnect_request`.
+fn is_vmconnect_request(cleanpath_pdu: &RDCleanPathPdu) -> bool {
+    cleanpath_pdu.x224_connection_pdu.is_none()
+        && cleanpath_pdu
+            .preconnection_blob
+            .as_ref()
+            .is_some_and(|pcb| !pcb.trim().is_empty())
+}
+
+/// Encode the Hyper-V PCB V2 that the proxy writes before TLS.
+///
+/// `payload` is the opaque Unicode string from RDCleanPath (`GUID` or `GUID;EnhancedMode=1`).
+fn encode_vmconnect_pcb_v2(payload: String) -> anyhow::Result<Vec<u8>> {
+    let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+        id: 0,
+        version: ironrdp_pdu::pcb::PcbVersion::V2,
+        v2_payload: Some(payload),
+    };
+    ironrdp_core::encode_vec(&pcb).context("encode VMConnect preconnection blob")
+}
+
+/// Cert-chain-only success response after VMConnect PCB + TLS (no X.224).
+///
+/// Wire-compatible with IronRDP `RDCleanPathMessage::VmConnectResponse`.
+fn build_vmconnect_response(
+    server_addr: String,
+    x509_chain: impl IntoIterator<Item = Vec<u8>>,
+) -> anyhow::Result<RDCleanPathPdu> {
+    Ok(RDCleanPathPdu {
+        version: ironrdp_rdcleanpath::VERSION_1,
+        server_cert_chain: Some(
+            x509_chain
+                .into_iter()
+                .map(OctetString::new)
+                .collect::<Result<_, _>>()
+                .context("build VMConnect RDCleanPath cert chain")?,
+        ),
+        server_addr: Some(server_addr),
+        ..RDCleanPathPdu::default()
+    })
+}
+
 /// Establish a connection to the RDP server and perform the requested front sequence.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
@@ -271,40 +319,54 @@ async fn connect_rdp_server(
     debug!(%selected_target, "Connected to destination server");
     tracing::Span::current().record("target", selected_target.to_string());
 
-    let is_vmconnect = cleanpath_pdu.x224_connection_pdu.is_none()
-        && cleanpath_pdu
-            .preconnection_blob
-            .as_ref()
-            .is_some_and(|pcb| !pcb.trim().is_empty());
+    // MS-RDPEPS: complete the PCB write within 10s of TCP connect. Bound the front write(s)
+    // from this point so a stalled tunnel/target cannot hold the PCB open indefinitely.
+    let front_deadline = tokio::time::Instant::now() + PCB_TRANSMIT_DEADLINE;
 
-    let x224_rsp = if is_vmconnect {
+    let x224_rsp = if is_vmconnect_request(&cleanpath_pdu) {
         // Client sent Unicode PCB payload only; proxy encodes binary PCB V2 and skips X.224.
         let pcb_payload = cleanpath_pdu
             .preconnection_blob
             .context("VMConnect request missing preconnection_blob")
             .map_err(CleanPathError::BadRequest)?;
-        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
-            id: 0,
-            version: ironrdp_pdu::pcb::PcbVersion::V2,
-            v2_payload: Some(pcb_payload),
-        };
-        let pcb = ironrdp_core::encode_vec(&pcb)
-            .context("encode VMConnect preconnection blob")
-            .map_err(CleanPathError::BadRequest)?;
+        let pcb = encode_vmconnect_pcb_v2(pcb_payload).map_err(CleanPathError::BadRequest)?;
         debug!(pcb_len = pcb.len(), "Writing encoded VMConnect PCB before TLS");
-        server_stream.write_all(&pcb).await?;
+        tokio::time::timeout_at(front_deadline, async {
+            server_stream.write_all(&pcb).await?;
+            // Ensure the Hyper-V listener sees the PCB before ClientHello is queued
+            // (especially on agent-tunnel legs that may buffer).
+            server_stream.flush().await
+        })
+        .await
+        .map_err(|_| {
+            CleanPathError::Io(io::Error::new(
+                ErrorKind::TimedOut,
+                "timed out writing VMConnect preconnection blob",
+            ))
+        })??;
         None
     } else {
         // Ordinary: optional legacy complete PCB bytes, then X.224 CR/CC, then TLS.
-        if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-            server_stream.write_all(pcb.as_bytes()).await?;
-        }
+        tokio::time::timeout_at(front_deadline, async {
+            if let Some(pcb) = cleanpath_pdu.preconnection_blob {
+                server_stream.write_all(pcb.as_bytes()).await?;
+            }
 
-        let x224_req = cleanpath_pdu
-            .x224_connection_pdu
-            .context("request is missing X224 connection PDU")
-            .map_err(CleanPathError::BadRequest)?;
-        server_stream.write_all(x224_req.as_bytes()).await?;
+            let x224_req = cleanpath_pdu
+                .x224_connection_pdu
+                .context("request is missing X224 connection PDU")
+                .map_err(CleanPathError::BadRequest)?;
+            server_stream.write_all(x224_req.as_bytes()).await?;
+            server_stream.flush().await?;
+            Ok::<_, CleanPathError>(())
+        })
+        .await
+        .map_err(|_| {
+            CleanPathError::Io(io::Error::new(
+                ErrorKind::TimedOut,
+                "timed out writing RDCleanPath front sequence",
+            ))
+        })??;
 
         trace!("Receiving X224 response");
 
@@ -575,6 +637,14 @@ pub async fn handle(
         && let Some(entry) = credentials.get(jti)
         && entry.mapping.is_some()
     {
+        // VMConnect needs pre-X.224 CredSSP against the Hyper-V host cert on the client.
+        // Proxy CredSSP MITM is X.224-first and is not supported for this ordering.
+        if is_vmconnect_request(&cleanpath_pdu) {
+            let response = RDCleanPathPdu::new_http_error(400);
+            send_clean_path_response(&mut client_stream, &response).await?;
+            anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
+        }
+
         let credential_injection_kdc = credentials.kdc_for(jti)?;
         anyhow::ensure!(token == credential_injection_kdc.raw_token(), "token mismatch");
         debug!(
@@ -653,17 +723,7 @@ pub async fn handle(
         RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
             .context("build RDCleanPath response")?
     } else {
-        RDCleanPathPdu {
-            version: ironrdp_rdcleanpath::VERSION_1,
-            server_cert_chain: Some(
-                x509_chain
-                    .map(OctetString::new)
-                    .collect::<Result<_, _>>()
-                    .context("build VMConnect RDCleanPath cert chain")?,
-            ),
-            server_addr: Some(server_addr.to_string()),
-            ..RDCleanPathPdu::default()
-        }
+        build_vmconnect_response(server_addr.to_string(), x509_chain).context("build VMConnect RDCleanPath response")?
     };
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
@@ -861,5 +921,85 @@ impl From<&io::Error> for WsaError {
             // ErrorKind::StaleNetworkFileHandle => WsaError::WSAESTALE,
             _ => WsaError::WSA_QOS_GENERIC_ERROR,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_x224() -> OctetString {
+        OctetString::new(vec![0x03, 0x00, 0x00, 0x13]).expect("static X.224 bytes")
+    }
+
+    #[test]
+    fn detects_vmconnect_when_pcb_payload_present_without_x224() {
+        let pdu = RDCleanPathPdu {
+            version: ironrdp_rdcleanpath::VERSION_1,
+            destination: Some("10.10.0.3:2179".to_owned()),
+            proxy_auth: Some("token".to_owned()),
+            preconnection_blob: Some("21c82e1f-2368-43d5-9cb6-a7c99c449bba;EnhancedMode=1".to_owned()),
+            ..RDCleanPathPdu::default()
+        };
+        assert!(is_vmconnect_request(&pdu));
+    }
+
+    #[test]
+    fn ordinary_request_with_x224_is_not_vmconnect() {
+        let pdu = RDCleanPathPdu {
+            version: ironrdp_rdcleanpath::VERSION_1,
+            destination: Some("10.10.0.3:3389".to_owned()),
+            proxy_auth: Some("token".to_owned()),
+            preconnection_blob: Some("legacy-pcb-bytes".to_owned()),
+            x224_connection_pdu: Some(empty_x224()),
+            ..RDCleanPathPdu::default()
+        };
+        assert!(!is_vmconnect_request(&pdu));
+    }
+
+    #[test]
+    fn empty_or_whitespace_pcb_without_x224_is_not_vmconnect() {
+        for pcb in [None, Some(String::new()), Some("   ".to_owned())] {
+            let pdu = RDCleanPathPdu {
+                version: ironrdp_rdcleanpath::VERSION_1,
+                destination: Some("10.10.0.3:2179".to_owned()),
+                proxy_auth: Some("token".to_owned()),
+                preconnection_blob: pcb,
+                ..RDCleanPathPdu::default()
+            };
+            assert!(!is_vmconnect_request(&pdu));
+        }
+    }
+
+    #[test]
+    fn encodes_enhanced_pcb_v2_matching_lab_size() {
+        // Lab GUID with EnhancedMode; IronRDP observed 122-byte PCB on the wire.
+        let payload = "21c82e1f-2368-43d5-9cb6-a7c99c449bba;EnhancedMode=1".to_owned();
+        let bytes = encode_vmconnect_pcb_v2(payload.clone()).expect("encode");
+        assert_eq!(bytes.len(), 122);
+
+        let decoded: ironrdp_pdu::pcb::PreconnectionBlob = ironrdp_core::decode(&bytes).expect("decode round-trip");
+        assert_eq!(decoded.id, 0);
+        assert_eq!(decoded.version, ironrdp_pdu::pcb::PcbVersion::V2);
+        assert_eq!(decoded.v2_payload.as_deref(), Some(payload.as_str()));
+    }
+
+    #[test]
+    fn encodes_basic_pcb_v2_matching_lab_size() {
+        let payload = "21c82e1f-2368-43d5-9cb6-a7c99c449bba".to_owned();
+        let bytes = encode_vmconnect_pcb_v2(payload).expect("encode");
+        assert_eq!(bytes.len(), 92);
+    }
+
+    #[test]
+    fn vmconnect_response_has_cert_chain_without_x224() {
+        let rsp = build_vmconnect_response("10.10.0.3:2179".to_owned(), [vec![0xDE, 0xAD], vec![0xBE, 0xEF]])
+            .expect("build response");
+
+        assert_eq!(rsp.version, ironrdp_rdcleanpath::VERSION_1);
+        assert_eq!(rsp.server_addr.as_deref(), Some("10.10.0.3:2179"));
+        assert!(rsp.x224_connection_pdu.is_none());
+        assert_eq!(rsp.server_cert_chain.as_ref().map(|c| c.len()).unwrap_or(0), 2);
+        assert!(rsp.error.is_none());
     }
 }

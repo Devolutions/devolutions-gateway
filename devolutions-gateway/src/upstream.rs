@@ -10,8 +10,9 @@
 //! 2. On the first successful connection, optionally wrap in client TLS.
 //!
 //! The two consumer patterns differ only in whether they want the TLS wrap
-//! applied here (fwd.rs) or manage their own TLS upgrade (rd_clean_path.rs does
-//! X224 first, then TLS). Both share `UpstreamLeg` and [`connect_upstream`].
+//! applied here (fwd.rs) or manage their own TLS upgrade in `rd_clean_path.rs`
+//! (ordinary: optional PCB + X.224 then TLS; VMConnect: PCB then TLS, no X.224
+//! on the proxy). Both share `UpstreamLeg` and [`connect_upstream`].
 
 use std::net::SocketAddr;
 use std::pin::Pin;
