@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
+use devolutions_agent_shared::windows::code_signing::validate_devolutions_authenticode_signature;
 use now_policy_api::{CancelRequest, ClientContext, PackageRequest, StatusRequest};
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
@@ -13,8 +14,6 @@ use win_api_wrappers::process::Process;
 use windows::Win32::Security::TOKEN_QUERY;
 use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
-
-use crate::code_signing::validate_devolutions_authenticode_signature;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PipeClient {

@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use win_api_wrappers::identity::sid::Sid;
 
-use crate::broker::event_channel::OperationEventSink;
+use crate::event_channel::OperationEventSink;
 
 mod output;
 

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use now_policy_api::ResourceId;
 use tracing::{error, info};
 
-use crate::broker::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback, is_canceled_error};
-use crate::broker::operation_tracker::OperationTracker;
+use crate::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback, is_canceled_error};
+use crate::operation_tracker::OperationTracker;
 
 pub(super) fn spawn_execution(
     executor: Arc<dyn CommandExecutor>,
@@ -30,7 +30,7 @@ pub(super) fn spawn_execution(
                 } else {
                     #[allow(clippy::cast_sign_loss)]
                     let unsigned = output.exit_code as u32;
-                    match crate::broker::executor::describe_exit_code(output.exit_code) {
+                    match crate::executor::describe_exit_code(output.exit_code) {
                         Some(description) => format!(
                             "{exe_name} exited with code {} (0x{unsigned:08X}): {description}",
                             output.exit_code

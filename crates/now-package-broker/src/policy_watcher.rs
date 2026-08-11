@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::broker::policy_loader;
+use crate::policy_loader;
 
 /// State of the policy: either loaded and active, or unavailable.
 #[derive(Debug, Clone)]
