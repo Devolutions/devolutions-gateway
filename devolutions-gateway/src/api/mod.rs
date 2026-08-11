@@ -6,6 +6,7 @@ pub mod health;
 pub mod heartbeat;
 pub mod jmux;
 pub mod jrec;
+mod jrec_capture;
 pub mod jrl;
 pub mod kdc_proxy;
 pub mod monitoring;

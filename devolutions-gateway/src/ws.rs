@@ -1,4 +1,5 @@
 use core::{future, time};
+use std::sync::Arc;
 
 use axum::extract::ws::{self, CloseFrame, WebSocket};
 use bytes::Bytes;
@@ -8,6 +9,8 @@ use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct KeepAliveShutdownSignal(pub ShutdownSignal);
+
+pub type MessageObserver = Arc<dyn Fn(&ws::Message) + Send + Sync + 'static>;
 
 impl transport::KeepAliveShutdown for KeepAliveShutdownSignal {
     fn wait(&mut self) -> impl Future<Output = ()> + Send + '_ {
@@ -20,6 +23,18 @@ pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
+) -> (
+    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    transport::CloseWebSocketHandle,
+) {
+    handle_with_observer(ws, shutdown_signal, keep_alive_interval, None)
+}
+
+pub fn handle_with_observer(
+    ws: WebSocket,
+    shutdown_signal: impl transport::KeepAliveShutdown,
+    keep_alive_interval: time::Duration,
+    observer: Option<MessageObserver>,
 ) -> (
     impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     transport::CloseWebSocketHandle,
@@ -40,12 +55,19 @@ pub fn handle(
         keep_alive_interval,
     );
 
-    (websocket_compat(ws), close_handle)
+    (websocket_compat(ws, observer), close_handle)
 }
 
-fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
+fn websocket_compat(
+    ws: transport::Shared<WebSocket>,
+    observer: Option<MessageObserver>,
+) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
     let ws_compat = ws
-        .filter_map(|item| {
+        .filter_map(move |item| {
+            if let (Some(observer), Ok(message)) = (&observer, &item) {
+                observer(message);
+            }
+
             item.map(|msg| match msg {
                 ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
                 ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),

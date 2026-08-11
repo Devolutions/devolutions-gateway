@@ -17,6 +17,7 @@ use hyper::StatusCode;
 use tracing::Instrument as _;
 use uuid::Uuid;
 
+use super::jrec_capture::{CaptureOutcome, JrecCapture};
 use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
@@ -134,10 +135,19 @@ async fn handle_jrec_push(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let (stream, close_handle) = crate::ws::handle(
+    let capture = match JrecCapture::start(session_id, file_type, source_addr).await {
+        Ok(capture) => capture,
+        Err(error) => {
+            error!(%session_id, %error, "Failed to start JREC push capture");
+            None
+        }
+    };
+    let observer = capture.as_ref().map(JrecCapture::observer);
+    let (stream, close_handle) = crate::ws::handle_with_observer(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal.clone()),
         keep_alive_interval,
+        observer,
     );
 
     let result = crate::recording::ClientPush::builder()
@@ -151,6 +161,15 @@ async fn handle_jrec_push(
         .run()
         .instrument(info_span!("jrec", client = %source_addr, %session_id))
         .await;
+
+    if let Some(capture) = capture {
+        let outcome = match &result {
+            Ok(PushOutcome::Done) => CaptureOutcome::Done,
+            Ok(PushOutcome::StorageFull) => CaptureOutcome::StorageFull,
+            Err(_) => CaptureOutcome::Error,
+        };
+        capture.finish(outcome).await;
+    }
 
     match result {
         Ok(PushOutcome::Done) => close_handle.normal_close().await,
