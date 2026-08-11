@@ -25,7 +25,10 @@ macro_rules! perf_debug {
 
 pub mod config;
 pub mod debug;
+mod normalizer;
+mod protocol;
 pub mod reopenable;
+mod session;
 pub(crate) mod streamer;
 
 #[macro_use]
@@ -39,6 +42,8 @@ pub use streamer::reopenable_file::ReOpenableFile;
 pub use streamer::signal_writer::SignalWriter;
 #[rustfmt::skip]
 pub use streamer::webm_stream;
+#[rustfmt::skip]
+pub use session::{RecordingEvent, SessionConfig, StartAt, stream_session};
 
 #[cfg(feature = "bench")]
 pub mod bench_support;

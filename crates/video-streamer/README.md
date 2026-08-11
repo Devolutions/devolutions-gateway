@@ -1,58 +1,74 @@
 # video-streamer
 
-This crate takes an unseekable WebM recording (typically from Chrome CaptureStream) and rewrites it into a “fresh” WebM stream that can start playing immediately.
-It does this by parsing the incoming WebM, finding the correct cut point, and re-encoding frames.
-The output stream begins with a keyframe and valid headers.
+`video-streamer` converts one logical recording session into a pull-driven stream of independent VP8 WebM segments.
+
+The input may contain several append-only clips.
+Each clip may contain VP8 or VP9 and may change resolution.
+The output keeps one transport connection, always uses VP8, and starts a new fixed-size WebM segment at every clip or resolution boundary.
+
+## Interface
+
+Call `stream_session` with a `Stream<Item = anyhow::Result<RecordingEvent>>` and an asynchronous duplex transport.
+
+```rust
+stream_session(recording_events, transport, SessionConfig::default()).await?;
+```
+
+The input must follow this grammar:
+
+```text
+(ClipStarted Bytes* CaughtUp Bytes* ClipEnded)* SessionEnded
+```
+
+Use `StartAt::LiveEdge` for the clip that was already growing when a consumer joined.
+The streamer retains only that clip's latest group of pictures until `CaughtUp` arrives.
+Use `StartAt::Beginning` for clips that start after the consumer joins.
+
+The incremental decoder owns incomplete EBML bytes between `Bytes` events.
+The caller never seeks, rolls back, or retries an incomplete element.
+
+## Wire protocol
+
+Each transport write is one protocol message.
+The first byte is its type code.
+
+Client messages:
+
+| Code | Message | Payload |
+| ---: | --- | --- |
+| `0` | Start | Empty |
+| `1` | Pull | Empty |
+
+Server messages:
+
+| Code | Message | Payload |
+| ---: | --- | --- |
+| `0` | Chunk | WebM bytes |
+| `1` | Segment started | `{"codec":"vp8","sequence":N,"width":W,"height":H}` |
+| `2` | Error | `{"error":"UnexpectedError"}` |
+| `3` | Stream ended | Empty |
+
+`Start` requests the first `Segment started` message.
+Each `Pull` requests exactly one later server message.
+The next `Segment started` message ends the previous segment implicitly.
+`Stream ended` ends the final segment and the session.
+
+Every segment has its own EBML and Tracks headers.
+Every segment begins with a keyframe and keeps one resolution.
 
 ## Prerequisites
 
-This crate relies on `cadeau` and its XMF backend for VP8/VP9 decode+encode.
-To override which XMF implementation is used at runtime, set `DGATEWAY_LIB_XMF_PATH` to an `xmf.dll` path before running tests or benches.
+This crate uses `cadeau` and its XMF backend for VP8 and VP9 decoding and VP8 encoding.
+Set `DGATEWAY_LIB_XMF_PATH` when the default XMF library is unavailable.
 
-Example:
+```powershell
+$env:DGATEWAY_LIB_XMF_PATH = 'D:\library\cadeau\xmf.dll'
+```
 
-`$env:DGATEWAY_LIB_XMF_PATH = 'D:\library\cadeau\xmf.dll'`
+## Checks
 
-## Tests
-
-Run all tests:
-
-`cargo test -p video-streamer`
-
-Run the WebM streaming correctness suite:
-
-`cargo test -p video-streamer --test webm_stream_correctness -- --nocapture`
-
-Some tests are marked `#[ignore]` because they require large local assets or are intended for local investigation.
-Run ignored tests with:
-
-`cargo test -p video-streamer -- --ignored --nocapture`
-
-Test assets live under `testing-assets\`.
-
-## Logging and diagnostics
-
-Most detailed diagnostics are compiled out by default to keep production logs clean.
-To include extra diagnostics, build with `perf-diagnostics`:
-
-`cargo test -p video-streamer --features perf-diagnostics -- --nocapture`
-
-Then set `RUST_LOG` as needed.
-Example:
-
-`$env:RUST_LOG = 'video_streamer=trace'`
-
-## Benchmarks
-
-The main benchmark is `benches\vpx_reencode.rs`.
-Run it with:
-
-`cargo bench -p video-streamer --bench vpx_reencode --features bench -- --nocapture`
-
-Benchmark output is intentionally quiet by default.
-To print detailed per-run results, set `VIDEO_STREAMER_BENCH_VERBOSE`:
-
-`$env:VIDEO_STREAMER_BENCH_VERBOSE = '1'`
-
-To correlate benchmark results with internal timing, also enable `perf-diagnostics` (the `bench` feature enables it).
-This is intentionally a build-time gate so production logs stay clean.
+```powershell
+cargo +nightly fmt --all
+cargo check -p video-streamer --tests
+cargo clippy -p video-streamer --tests -- -D warnings
+```
