@@ -7,6 +7,7 @@ import {
   OnInit,
   Output,
   SimpleChanges,
+  ViewChild,
 } from '@angular/core';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
@@ -21,6 +22,7 @@ import { DefaultLdapPort, DefaultLdapsPort } from '@shared/services/web-client.s
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import type { ToastMessageOptions } from 'primeng/api';
+import { AutoComplete } from 'primeng/autocomplete';
 import { EMPTY, forkJoin, Observable, of } from 'rxjs';
 import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
 
@@ -38,6 +40,8 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
+
+  @ViewChild(AutoComplete) hostnameAutoComplete?: AutoComplete;
 
   connectSessionForm: FormGroup = this.fb.group({});
 
@@ -86,6 +90,8 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   }
 
   onConnectSession(): void {
+    this.closeHostnameSuggestions();
+
     this.webSessionService
       .createWebSession(
         this.connectSessionForm,
@@ -107,6 +113,26 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   isHostnamesExists(): boolean {
     return this.hostnames?.length > 0;
+  }
+
+  /**
+   * Cancels the hostname suggestion lookup scheduled by the last keystroke and closes the panel.
+   *
+   * Pressing Enter connects right away, but the autocomplete search is debounced.
+   * Without this, the pending search resolves after the form tab is hidden and opens the
+   * suggestion panel over the new session, positioned in the top-left corner because the
+   * overlay is aligned against an input that no longer has a layout box.
+   */
+  private closeHostnameSuggestions(): void {
+    const autoComplete = this.hostnameAutoComplete;
+    if (!autoComplete) {
+      return;
+    }
+
+    clearTimeout(autoComplete.searchTimeout);
+    autoComplete.searchTimeout = undefined;
+    autoComplete.loading = false;
+    autoComplete.hide();
   }
 
   filterHostname(event): void {
