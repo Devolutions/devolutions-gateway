@@ -409,6 +409,73 @@ const DvlPreset = definePreset(Aura, {
       },
     },
 
+    autocomplete: {
+      root: {
+        background: 'var(--bg-100)',
+        disabledBackground: 'var(--bg-300)',
+        color: 'var(--text-400)',
+        disabledColor: 'var(--text-100)',
+        borderColor: 'var(--border-200)',
+        hoverBorderColor: 'var(--accent-brand-400)',
+        focusBorderColor: 'var(--accent-brand-300)',
+        invalidBorderColor: 'var(--accent-danger-400)',
+        borderRadius: '4px',
+        paddingX: '0.5rem',
+        paddingY: '0.375rem',
+        shadow: 'none',
+        transitionDuration: '0.2s',
+        placeholderColor: 'var(--text-100)',
+      },
+
+      dropdown: {
+        width: '2.5rem',
+        color: 'var(--text-200)',
+        hoverColor: 'var(--text-300)',
+        activeColor: 'var(--text-400)',
+        borderColor: 'var(--border-200)',
+        borderRadius: '4px',
+      },
+
+      overlay: {
+        background: 'var(--bg-200)',
+        color: 'var(--text-300)',
+        borderColor: 'var(--accent-brand-300)',
+        borderRadius: '4px',
+        shadow: '0 4px 6px var(--alt-600)',
+      },
+
+      list: {
+        padding: '0',
+        gap: '0',
+      },
+
+      option: {
+        color: 'var(--text-300)',
+        focusBackground: 'var(--border-contrast-brand-100)',
+        focusColor: 'var(--text-300)',
+        selectedBackground: 'var(--border-contrast-brand-200)',
+        selectedColor: 'var(--text-300)',
+        selectedFocusBackground: 'var(--border-contrast-brand-200)',
+        selectedFocusColor: 'var(--text-300)',
+        padding: '0.5rem 0.75rem',
+        borderRadius: '0',
+      },
+
+      optionGroup: {
+        background: 'var(--bg-200)',
+        color: 'var(--text-300)',
+        padding: '0.5rem 0.75rem',
+      },
+
+      chip: {
+        borderRadius: '4px',
+      },
+
+      emptyMessage: {
+        padding: '0.5rem 0.75rem',
+      },
+    },
+
     //
     // CARD / DIALOG
     //
