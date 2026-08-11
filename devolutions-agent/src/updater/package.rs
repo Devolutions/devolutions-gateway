@@ -3,10 +3,12 @@
 use std::ops::DerefMut;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_agent_shared::windows::code_signing::{
+    certificate_sha1_thumbprint, is_devolutions_certificate_thumbprint,
+};
 use uuid::Uuid;
 use win_api_wrappers::utils::WideString;
 
-use crate::code_signing::{certificate_sha1_thumbprint, is_devolutions_certificate_thumbprint};
 use crate::updater::io::remove_file_on_reboot;
 use crate::updater::{AGENT_UPDATE_IN_PROGRESS, Product, UpdaterCtx, UpdaterError};
 

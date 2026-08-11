@@ -2,10 +2,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
-#[cfg(windows)]
-use devolutions_agent::broker::pipe::DEFAULT_PIPE_NAME;
-#[cfg(windows)]
-use devolutions_agent::broker::task::{BrokerTask, BrokerTaskConfig};
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::log::AgentLog;
 use devolutions_agent::psu_agent::PsuAgentTask;
@@ -19,6 +15,10 @@ use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 #[cfg(windows)]
 use devolutions_pedm::PedmTask;
+#[cfg(windows)]
+use now_package_broker::pipe::DEFAULT_PIPE_NAME;
+#[cfg(windows)]
+use now_package_broker::task::{BrokerTask, BrokerTaskConfig};
 use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
 

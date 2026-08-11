@@ -11,7 +11,7 @@ use now_policy::PolicyDocument;
 use now_policy::schema::{parse_policy_json, parse_policy_yaml};
 use tracing::info;
 
-use crate::broker::policy_security;
+use crate::policy_security;
 
 /// Default policy directory.
 pub fn default_policy_dir() -> PathBuf {

@@ -15,7 +15,7 @@ use super::evaluator;
 
 /// Local samples directory bundled inside the crate.
 fn samples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/broker/assets/samples")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/assets/samples")
 }
 
 // ─── Scenario file structures ────────────────────────────────────────────────
