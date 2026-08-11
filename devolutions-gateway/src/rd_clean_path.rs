@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
+use ironrdp_rdcleanpath::der::asn1::OctetString;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -229,14 +230,17 @@ struct ConnectedRdpServer {
     tls_stream: tokio_rustls::client::TlsStream<UpstreamLeg>,
     server_addr: SocketAddr,
     selected_target: TargetAddr,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
-/// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
+/// Establish a connection to the RDP server and perform the requested front sequence.
 ///
 /// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
 /// the WebSocket forwarders in [`crate::upstream`]; here we just do the RDP-specific
-/// PCB + X224 + TLS upgrade on top of whatever leg that returns.
+/// ordinary PCB + X224 + TLS or VMConnect PCB + TLS upgrade on top of whatever leg that returns.
+///
+/// VMConnect is detected from the existing VERSION_1 fields: X.224 absent and a non-empty
+/// `preconnection_blob` (Unicode PCB V2 payload). No IronRDP message-helper dependency.
 async fn connect_rdp_server(
     claims: &AssociationTokenClaims,
     cleanpath_pdu: RDCleanPathPdu,
@@ -267,24 +271,50 @@ async fn connect_rdp_server(
     debug!(%selected_target, "Connected to destination server");
     tracing::Span::current().record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable.
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_stream.write_all(pcb.as_bytes()).await?;
-    }
+    let is_vmconnect = cleanpath_pdu.x224_connection_pdu.is_none()
+        && cleanpath_pdu
+            .preconnection_blob
+            .as_ref()
+            .is_some_and(|pcb| !pcb.trim().is_empty());
 
-    // Send X224 connection request.
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
+    let x224_rsp = if is_vmconnect {
+        // Client sent Unicode PCB payload only; proxy encodes binary PCB V2 and skips X.224.
+        let pcb_payload = cleanpath_pdu
+            .preconnection_blob
+            .context("VMConnect request missing preconnection_blob")
+            .map_err(CleanPathError::BadRequest)?;
+        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+            id: 0,
+            version: ironrdp_pdu::pcb::PcbVersion::V2,
+            v2_payload: Some(pcb_payload),
+        };
+        let pcb = ironrdp_core::encode_vec(&pcb)
+            .context("encode VMConnect preconnection blob")
+            .map_err(CleanPathError::BadRequest)?;
+        debug!(pcb_len = pcb.len(), "Writing encoded VMConnect PCB before TLS");
+        server_stream.write_all(&pcb).await?;
+        None
+    } else {
+        // Ordinary: optional legacy complete PCB bytes, then X.224 CR/CC, then TLS.
+        if let Some(pcb) = cleanpath_pdu.preconnection_blob {
+            server_stream.write_all(pcb.as_bytes()).await?;
+        }
 
-    trace!("Receiving X224 response");
+        let x224_req = cleanpath_pdu
+            .x224_connection_pdu
+            .context("request is missing X224 connection PDU")
+            .map_err(CleanPathError::BadRequest)?;
+        server_stream.write_all(x224_req.as_bytes()).await?;
 
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
+        trace!("Receiving X224 response");
+
+        Some(
+            read_x224_response(&mut server_stream)
+                .await
+                .with_context(|| format!("read X224 response from {selected_target}"))
+                .map_err(CleanPathError::BadRequest)?,
+        )
+    };
 
     trace!("Establishing TLS connection with server");
 
@@ -371,6 +401,7 @@ async fn handle_with_credential_injection(
     } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
         .await
         .context("RDCleanPath connection failed")?;
+    let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
 
     // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
@@ -616,8 +647,24 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .context("build RDCleanPath response")?;
+    // Ordinary responses include X.224 CC. VMConnect responses are cert-chain only; the client
+    // runs CredSSP then X.224 on the upgraded path.
+    let rdcleanpath_rsp = if let Some(x224_rsp) = x224_rsp {
+        RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
+            .context("build RDCleanPath response")?
+    } else {
+        RDCleanPathPdu {
+            version: ironrdp_rdcleanpath::VERSION_1,
+            server_cert_chain: Some(
+                x509_chain
+                    .map(OctetString::new)
+                    .collect::<Result<_, _>>()
+                    .context("build VMConnect RDCleanPath cert chain")?,
+            ),
+            server_addr: Some(server_addr.to_string()),
+            ..RDCleanPathPdu::default()
+        }
+    };
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
