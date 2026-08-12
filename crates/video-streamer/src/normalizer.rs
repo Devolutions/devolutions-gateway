@@ -23,6 +23,7 @@ const MAX_PENDING_GOP_BYTES: usize = 64 * 1024 * 1024;
 const OUTPUT_BITRATE: u32 = 256 * 1024;
 const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
+const MAX_WEBM_BLOCK_TIMESTAMP: u64 = 32_767;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SegmentInfo {
@@ -457,6 +458,7 @@ struct OutputSegment {
     dimensions: Dimensions,
     origin_timestamp: Option<u64>,
     previous_timestamp: Option<u64>,
+    cluster_timestamp: Option<u64>,
     encoder: VpxEncoder,
     writer: WebmWriter<EventWriter>,
 }
@@ -490,6 +492,7 @@ impl OutputSegment {
             },
             origin_timestamp: None,
             previous_timestamp: None,
+            cluster_timestamp: None,
             encoder,
             writer,
         })
@@ -503,7 +506,14 @@ impl OutputSegment {
             .map_or(30, |previous| timestamp.saturating_sub(previous).max(1));
         self.previous_timestamp = Some(timestamp);
 
-        let flags = if relative_timestamp == 0 { VPX_EFLAG_FORCE_KF } else { 0 };
+        let cluster_timestamp_expired = self.cluster_timestamp.is_some_and(|cluster_timestamp| {
+            relative_timestamp.saturating_sub(cluster_timestamp) > MAX_WEBM_BLOCK_TIMESTAMP
+        });
+        let flags = if relative_timestamp == 0 || cluster_timestamp_expired {
+            VPX_EFLAG_FORCE_KF
+        } else {
+            0
+        };
         self.encoder.encode_frame(
             image,
             i64::try_from(relative_timestamp).context("relative timestamp is too large")?,
@@ -526,7 +536,31 @@ impl OutputSegment {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         for (timestamp, data) in frames {
-            write_frame(&mut self.writer, timestamp, &data)?;
+            let is_key_frame = is_vpx_key_frame(&data, VpxCodec::VP8);
+            anyhow::ensure!(
+                self.cluster_timestamp.is_some() || is_key_frame,
+                "output segment does not begin with a key frame"
+            );
+            if self.cluster_timestamp.is_none() || is_key_frame {
+                if self.cluster_timestamp.is_some() {
+                    self.writer.write(&MatroskaSpec::Cluster(Master::End))?;
+                }
+                self.writer.write_advanced(
+                    &MatroskaSpec::Cluster(Master::Start),
+                    WriteOptions::is_unknown_sized_element(),
+                )?;
+                self.writer.write(&MatroskaSpec::Timestamp(timestamp))?;
+                self.cluster_timestamp = Some(timestamp);
+            }
+
+            let cluster_timestamp = self.cluster_timestamp.context("output cluster timestamp is missing")?;
+            let block_timestamp = timestamp
+                .checked_sub(cluster_timestamp)
+                .context("output frame timestamp precedes its cluster")?;
+            let block_timestamp =
+                i16::try_from(block_timestamp).context("output cluster exceeds block timestamp range")?;
+            let block = SimpleBlock::new_uncheked(&data, 1, block_timestamp, false, None, false, is_key_frame);
+            self.writer.write(&MatroskaSpec::from(block))?;
         }
 
         Ok(())
@@ -535,6 +569,9 @@ impl OutputSegment {
     fn finish(mut self) -> anyhow::Result<()> {
         self.encoder.flush()?;
         self.write_encoded_frames()?;
+        if self.cluster_timestamp.is_some() {
+            self.writer.write(&MatroskaSpec::Cluster(Master::End))?;
+        }
         let event_writer = self.writer.into_inner()?;
         send_event(&event_writer.sender, SegmentEvent::End)
             .with_context(|| format!("failed to finish segment {}", self.info.sequence))
@@ -575,18 +612,6 @@ fn write_header(writer: &mut WebmWriter<EventWriter>, width: u32, height: u32) -
             ])),
         ]),
     )])))?;
-    Ok(())
-}
-
-fn write_frame(writer: &mut WebmWriter<EventWriter>, timestamp: u64, data: &[u8]) -> anyhow::Result<()> {
-    writer.write_advanced(
-        &MatroskaSpec::Cluster(Master::Start),
-        WriteOptions::is_unknown_sized_element(),
-    )?;
-    writer.write(&MatroskaSpec::Timestamp(timestamp))?;
-    let block = SimpleBlock::new_uncheked(data, 1, 0, false, None, false, data[0] & 1 == 0);
-    writer.write(&MatroskaSpec::from(block))?;
-    writer.write(&MatroskaSpec::Cluster(Master::End))?;
     Ok(())
 }
 

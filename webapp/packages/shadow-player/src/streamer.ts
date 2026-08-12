@@ -1,5 +1,5 @@
-import { ErrorMessage } from './protocol';
-import { ReactiveSourceBuffer } from './sourceBuffer';
+import { PlaybackClip } from './playbackClip';
+import type { ErrorMessage, SegmentStartedMessage, ServerMessage } from './protocol';
 import styles from './streamer.css?inline';
 import { ServerWebSocket } from './websocket';
 
@@ -15,76 +15,96 @@ export type ShadowPlayerError =
   | {
       type: 'session-not-found';
       message: string;
+    }
+  | {
+      type: 'player';
+      inner: Error;
     };
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
 
 export class ShadowPlayer extends HTMLElement {
-  shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
-  _buffer: ReactiveSourceBuffer | null = null;
   onErrorCallback: ShadowPlayerErrorCallback | null = null;
   onEndCallback: (() => void) | null = null;
   debug = false;
   _container: HTMLDivElement | null = null;
   _replayButton: HTMLButtonElement | null = null;
 
+  private root: ShadowRoot | null = null;
   private websocket: ServerWebSocket | null = null;
-  private isDisconnecting = false;
+  private readonly clips: PlaybackClip[] = [];
+  private receivingClip: PlaybackClip | null = null;
+  private activeClip: PlaybackClip | null = null;
+  private awaitingResponse = false;
+  private shouldPlay = false;
+  private streamEnded = false;
 
-  static get observedAttributes() {
-    return ['src', 'autoplay', 'loop', 'muted', 'poster', 'preload', 'style', 'width', 'height'];
+  static get observedAttributes(): string[] {
+    return ['src', 'autoplay', 'controls', 'loop', 'muted', 'poster', 'preload', 'style', 'width', 'height'];
   }
 
-  setDebug(debug: boolean) {
+  setDebug(debug: boolean): void {
     this.debug = debug;
-    if (this._buffer) {
-      this._buffer.setDebug(debug);
+    for (const clip of this.clips) {
+      clip.setDebug(debug);
     }
   }
 
-  onError(callback: ShadowPlayerErrorCallback) {
+  onError(callback: ShadowPlayerErrorCallback): void {
     this.onErrorCallback = callback;
   }
 
-  onEnd(callback: () => void) {
-    if (this._videoElement) {
-      this._videoElement.controls = true;
-    }
+  onEnd(callback: () => void): void {
     this.onEndCallback = callback;
   }
 
-  attributeChangedCallback(name: string, _oldValue: string, newValue: string) {
+  attributeChangedCallback(name: string, _oldValue: string | null, newValue: string | null): void {
     if (name === 'src') {
-      this.srcChange(newValue);
+      if (newValue === null) {
+        this.disconnect();
+        this._src = null;
+      } else if (this._container) {
+        this.srcChange(newValue);
+      } else {
+        this._src = newValue;
+      }
       return;
     }
 
-    if (this._videoElement && Object.prototype.hasOwnProperty.call(this._videoElement, name)) {
-      this._videoElement.setAttribute(name, newValue !== null ? newValue : '');
+    if (name === 'autoplay' && newValue !== null) {
+      this.shouldPlay = true;
+    }
+    for (const clip of this.clips) {
+      this.applyVideoAttribute(clip.video, name, newValue);
     }
   }
 
-  connectedCallback() {
+  connectedCallback(): void {
     this.init();
+    const src = this.getAttribute('src');
+    if (src !== null && !this.websocket) {
+      this.srcChange(src);
+    }
   }
 
-  init() {
-    this.shadowRoot = this.attachShadow({ mode: 'open' });
+  disconnectedCallback(): void {
+    this.disconnect();
+  }
 
-    // Add styles
+  init(): void {
+    if (this.root) {
+      return;
+    }
+
+    this.root = this.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
     style.textContent = styles;
-    this.shadowRoot.appendChild(style);
+    this.root.appendChild(style);
 
     this._container = document.createElement('div');
     this._container.className = 'container';
-
-    this.videoElement = document.createElement('video');
-    // Set muted to true so that the browser security policy will allow autoplay.
-    this.videoElement.muted = true;
-    this._container.appendChild(this.videoElement);
 
     this._replayButton = document.createElement('button');
     this._replayButton.className = 'replay-button';
@@ -95,220 +115,230 @@ export class ShadowPlayer extends HTMLElement {
     `;
     this._replayButton.onclick = () => this.replay();
     this._container.appendChild(this._replayButton);
-
-    this.shadowRoot.appendChild(this._container);
-    this.syncAttributes();
+    this.root.appendChild(this._container);
+    this.shouldPlay = this.hasAttribute('autoplay');
   }
 
-  syncAttributes() {
-    for (const attr of ShadowPlayer.observedAttributes) {
-      const value = this.getAttribute(attr);
-      if (attr === 'src' && value !== null) {
-        this.srcChange(value);
-      }
-      if (value !== null && this._videoElement) {
-        this._videoElement.setAttribute(attr, value);
-      }
+  public play(): void {
+    this.shouldPlay = true;
+    const video = this.activeClip?.video ?? this.receivingClip?.video;
+    if (video) {
+      void video.play();
     }
   }
 
-  private get videoElement() {
-    return this._videoElement as HTMLVideoElement;
-  }
-
-  private set videoElement(value: HTMLVideoElement) {
-    this._videoElement = value;
-  }
-
-  public play() {
-    if (this._videoElement) {
-      this._videoElement.play();
-    }
-  }
-
-  private replay() {
-    if (this._replayButton) {
-      this._replayButton.classList.remove('visible');
-    }
-    this._videoElement?.play();
-  }
-
-  public srcChange(value: string) {
-    if (!this._videoElement) {
+  private replay(): void {
+    this._replayButton?.classList.remove('visible');
+    if (!this.activeClip) {
       return;
     }
-    this.isDisconnecting = false;
-    const mediaSource = new MediaSource();
+    this.activeClip.video.currentTime = 0;
+    this.shouldPlay = true;
+    void this.activeClip.video.play();
+  }
+
+  public srcChange(value: string): void {
+    this.closeSession();
     this._src = value;
-    this._videoElement.src = URL.createObjectURL(mediaSource);
-    mediaSource.addEventListener('sourceopen', () => {
-      this.handleSourceOpen(mediaSource);
+    if (!this._container) {
+      return;
+    }
+
+    this.streamEnded = false;
+    this._replayButton?.classList.remove('visible');
+    const websocket = new ServerWebSocket(value);
+    this.websocket = websocket;
+
+    websocket.onopen(() => {
+      if (this.websocket === websocket) {
+        this.sendRequest(websocket, 'start');
+      }
     });
+    websocket.onmessage(
+      async (message) => this.handleServerMessage(websocket, message),
+      (error) => this.handlePlayerFailure(websocket, error),
+    );
+    websocket.onclose((event) => this.handleSocketClose(websocket, event));
+    websocket.onerror((event) => this.handleSocketError(websocket, event));
   }
 
-  private async handleSourceOpen(mediaSource: MediaSource) {
-    this.websocket = new ServerWebSocket(this._src as string);
-    let reactiveSourceBuffer: ReactiveSourceBuffer | null = null;
+  private async handleServerMessage(websocket: ServerWebSocket, message: ServerMessage): Promise<void> {
+    if (this.websocket !== websocket) {
+      return;
+    }
+    if (!this.awaitingResponse) {
+      throw new Error('Received a server message without a pending request');
+    }
+    this.awaitingResponse = false;
 
-    this.websocket.onopen(() => {
-      this.websocket!.send({ type: 'start' });
-      this.websocket!.send({ type: 'pull' });
+    if (message.type === 'segment-started') {
+      await this.startSegment(message);
+      this.sendRequest(websocket, 'pull');
+      return;
+    }
+    if (message.type === 'chunk') {
+      if (!this.receivingClip) {
+        throw new Error('Received a chunk before a segment started');
+      }
+      await this.receivingClip.append(message.data);
+      this.sendRequest(websocket, 'pull');
+      return;
+    }
+    if (message.type === 'error') {
+      this.onErrorCallback?.({ type: 'protocol', inner: message });
+      return;
+    }
 
-      this._videoElement?.addEventListener('ended', () => {
+    this.receivingClip?.finish();
+    this.streamEnded = true;
+    this.activeClip?.video.setAttribute('controls', '');
+    if (this.activeClip?.video.ended) {
+      this.showReplayButton();
+    }
+    this.onEndCallback?.();
+  }
+
+  private async startSegment(metadata: SegmentStartedMessage): Promise<void> {
+    if (metadata.sequence !== this.clips.length) {
+      throw new Error(`Expected segment ${this.clips.length}, received ${metadata.sequence}`);
+    }
+
+    this.receivingClip?.finish();
+    const clip = new PlaybackClip(metadata);
+    clip.setDebug(this.debug);
+    this.configureVideo(clip);
+    this.clips.push(clip);
+    this.receivingClip = clip;
+    this._container?.insertBefore(clip.video, this._replayButton);
+    await clip.open();
+    if (this.shouldPlay) {
+      void clip.video.play();
+    }
+  }
+
+  private configureVideo(clip: PlaybackClip): void {
+    const video = clip.video;
+    video.className = 'clip';
+    video.muted = true;
+    for (const attribute of ShadowPlayer.observedAttributes) {
+      if (attribute !== 'src') {
+        this.applyVideoAttribute(video, attribute, this.getAttribute(attribute));
+      }
+    }
+    video.addEventListener(
+      'loadeddata',
+      () => {
+        if (!this.activeClip || clip.metadata.sequence > this.activeClip.metadata.sequence) {
+          this.activateClip(clip);
+        }
+      },
+      { once: true },
+    );
+    video.addEventListener('ended', () => {
+      if (this.streamEnded && this.activeClip === clip) {
         this.showReplayButton();
-      });
-    });
-
-    this.websocket.onmessage((ev) => {
-      if (mediaSource.readyState === 'closed') {
-        return;
-      }
-      if (ev.type === 'metadata') {
-        const codec = ev.codec;
-        reactiveSourceBuffer = new ReactiveSourceBuffer(mediaSource, codec, () => {
-          this.websocket?.send({ type: 'pull' });
-        });
-        this._buffer = reactiveSourceBuffer;
-      }
-
-      if (ev.type === 'chunk') {
-        if (!reactiveSourceBuffer) {
-          return;
-        }
-
-        reactiveSourceBuffer.appendBuffer(ev.data);
-
-        if (!this._videoElement) {
-          return;
-        }
-
-        if (this.debug) {
-          const v = this._videoElement;
-          const buffered = v.buffered.length > 0
-            ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
-            : '(empty)';
-          console.log(
-            `[shadow-player] chunk appended: duration=${v.duration.toFixed(2)} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} readyState=${v.readyState}`
-          );
-        }
-
-        if (
-          this._videoElement.buffered.length > 0 &&
-          this._videoElement.buffered.end(0) - this._videoElement.currentTime > 5
-        ) {
-          this._videoElement.currentTime = this._videoElement.buffered.end(0);
-        }
-      }
-
-      if (ev.type === 'error') {
-        this.onErrorCallback?.({
-          type: 'protocol',
-          inner: ev,
-        });
-      }
-
-      if (ev.type === 'end') {
-        this.onEndCallback?.();
       }
     });
+  }
 
-    this.websocket.onclose((ev) => {
-      if (this.isDisconnecting) {
-        this.websocket = null;
-        return;
-      }
+  private activateClip(clip: PlaybackClip): void {
+    if (this.activeClip === clip) {
+      return;
+    }
+    if (this.activeClip) {
+      this.activeClip.video.pause();
+      this.activeClip.video.classList.remove('active');
+    }
+    this.activeClip = clip;
+    this._videoElement = clip.video;
+    clip.video.classList.add('active');
+    if (this.shouldPlay) {
+      void clip.video.play();
+    }
+  }
 
-      if (ev.code === 4001) {
-        this.onErrorCallback?.({
-          type: 'session-not-found',
-          message: 'Recording session is no longer active',
-        });
-      }
+  private applyVideoAttribute(video: HTMLVideoElement, name: string, value: string | null): void {
+    if (value === null) {
+      video.removeAttribute(name);
+    } else {
+      video.setAttribute(name, value);
+    }
+  }
 
-      this.videoElement.controls = true;
-      if (reactiveSourceBuffer && mediaSource.readyState === 'open') {
-        try {
-          if (this.debug && this._videoElement) {
-            const v = this._videoElement;
-            const buffered = v.buffered.length > 0
-              ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
-              : '(empty)';
-            console.log(
-              `[shadow-player] BEFORE endOfStream: duration=${v.duration} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} mediaSource.readyState=${mediaSource.readyState}`
-            );
-          }
-          mediaSource.endOfStream();
-          if (this.debug && this._videoElement) {
-            const v = this._videoElement;
-            const buffered = v.buffered.length > 0
-              ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
-              : '(empty)';
-            console.log(
-              `[shadow-player] AFTER endOfStream: duration=${v.duration} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} mediaSource.readyState=${mediaSource.readyState}`
-            );
-          }
-        } catch (error) {
-          if (this.debug) {
-            console.error('[shadow-player] endOfStream error:', error);
-          }
-        }
-      }
-      this.websocket = null;
-    });
+  private sendRequest(websocket: ServerWebSocket, type: 'start' | 'pull'): void {
+    if (this.websocket !== websocket) {
+      return;
+    }
+    if (this.awaitingResponse) {
+      throw new Error('A stream request is already pending');
+    }
+    this.awaitingResponse = true;
+    websocket.send({ type });
+  }
 
-    this.websocket.onerror((ev) => {
-      if (this.isDisconnecting) {
-        return;
-      }
-
+  private handleSocketClose(websocket: ServerWebSocket, event: CloseEvent): void {
+    if (this.websocket !== websocket) {
+      return;
+    }
+    this.awaitingResponse = false;
+    this.websocket = null;
+    if (event.code === 4001) {
       this.onErrorCallback?.({
-        type: 'websocket',
-        inner: ev as unknown as ErrorEvent,
+        type: 'session-not-found',
+        message: 'Recording session is no longer active',
       });
+    }
+    this.activeClip?.video.setAttribute('controls', '');
+  }
 
-      if (reactiveSourceBuffer && mediaSource.readyState === 'open') {
-        try {
-          mediaSource.endOfStream();
-        } catch (error) {
-          console.error('endOfStream error:', error);
-        }
-      }
+  private handleSocketError(websocket: ServerWebSocket, event: Event): void {
+    if (this.websocket !== websocket) {
+      return;
+    }
+    this.onErrorCallback?.({
+      type: 'websocket',
+      inner: event as ErrorEvent,
     });
   }
 
-  public downloadBUfferAsFile() {
-    if (this._buffer && this.debug) {
-      this._buffer.downloadBufferedFile();
+  private handlePlayerFailure(websocket: ServerWebSocket, value: unknown): void {
+    if (this.websocket !== websocket) {
+      return;
+    }
+    const error = value instanceof Error ? value : new Error(String(value));
+    this.awaitingResponse = false;
+    this.onErrorCallback?.({ type: 'player', inner: error });
+    websocket.close(1000, 'Player failure');
+    this.websocket = null;
+    this.activeClip?.video.setAttribute('controls', '');
+  }
+
+  public downloadBUfferAsFile(): void {
+    if (this.debug) {
+      (this.receivingClip ?? this.activeClip)?.downloadBufferedFile();
     }
   }
 
-  private showReplayButton() {
-    if (this._replayButton) {
-      this._replayButton.classList.add('visible');
-    }
+  private showReplayButton(): void {
+    this._replayButton?.classList.add('visible');
   }
 
   public disconnect(): void {
-    this.isDisconnecting = true;
+    this.closeSession();
+  }
 
-    if (this.websocket) {
-      try {
-        this.websocket.ws.close(1000, 'Component cleanup');
-      } catch (error) {
-        // Intentionally ignored: WebSocket may already be closed
-      }
-      this.websocket = null;
+  private closeSession(): void {
+    const websocket = this.websocket;
+    this.websocket = null;
+    this.awaitingResponse = false;
+    websocket?.close(1000, 'Component cleanup');
+    for (const clip of this.clips) {
+      clip.dispose();
     }
-
-    if (this._videoElement) {
-      try {
-        this._videoElement.pause();
-        this._videoElement.src = '';
-        this._videoElement.load();
-      } catch (error) {
-        // Intentionally ignored: Video element may already be in an invalid state
-      }
-    }
+    this.clips.length = 0;
+    this.receivingClip = null;
+    this.activeClip = null;
+    this._videoElement = null;
   }
 }
 
