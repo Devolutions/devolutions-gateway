@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,7 +11,7 @@ use bytes::Bytes;
 use serde::Serialize;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt as _, BufWriter};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use ulid::Ulid;
 use uuid::Uuid;
@@ -20,9 +21,12 @@ use crate::ws::MessageObserver;
 
 const CAPTURE_DIR_ENV: &str = "DGATEWAY_JREC_CAPTURE_DIR";
 const CAPTURE_FORMAT_VERSION: u32 = 1;
+const CAPTURE_QUEUE_CAPACITY: usize = 256;
+const CAPTURE_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 
 static CAPTURE_RUN: LazyLock<(Ulid, Instant)> = LazyLock::new(|| (Ulid::new(), Instant::now()));
 
+#[derive(Clone, Copy)]
 pub(crate) enum CaptureOutcome {
     Done,
     StorageFull,
@@ -42,7 +46,9 @@ impl CaptureOutcome {
 pub(crate) struct JrecCapture {
     connection_path: PathBuf,
     observer: MessageObserver,
-    sender: mpsc::UnboundedSender<CaptureCommand>,
+    sender: mpsc::Sender<CaptureCommand>,
+    state: Arc<CaptureState>,
+    finish_sender: oneshot::Sender<(CaptureOutcome, u64)>,
     started_at: Instant,
     writer_task: JoinHandle<anyhow::Result<()>>,
 }
@@ -81,23 +87,37 @@ impl JrecCapture {
         };
         write_metadata(&connection_path, &metadata).await?;
 
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(CAPTURE_QUEUE_CAPACITY);
+        let (finish_sender, finish_receiver) = oneshot::channel();
+        let state = Arc::new(CaptureState::default());
         let started_at = Instant::now();
         let observer_sender = sender.clone();
+        let observer_state = Arc::clone(&state);
         let observer: MessageObserver = Arc::new(move |message: &ws::Message| {
             let command = CaptureCommand::Message {
                 time_us: duration_us(started_at.elapsed()),
                 message: CapturedMessage::from(message),
             };
-            let _ = observer_sender.send(command);
+            let retained_bytes = command.retained_bytes();
+            if !observer_state.reserve(retained_bytes) {
+                return;
+            }
+            if observer_sender.try_send(command).is_err() {
+                observer_state.release(retained_bytes);
+                observer_state.disable();
+            }
         });
         let writer_path = connection_path.clone();
-        let writer_task = tokio::spawn(async move { write_capture(&writer_path, receiver).await });
+        let writer_state = Arc::clone(&state);
+        let writer_task =
+            tokio::spawn(async move { write_capture(&writer_path, receiver, finish_receiver, &writer_state).await });
 
         Ok(Some(Self {
             connection_path,
             observer,
             sender,
+            state,
+            finish_sender,
             started_at,
             writer_task,
         }))
@@ -108,14 +128,18 @@ impl JrecCapture {
     }
 
     pub(crate) async fn finish(self, outcome: CaptureOutcome) {
-        let _ = self.sender.send(CaptureCommand::Finished {
-            time_us: duration_us(self.started_at.elapsed()),
-            outcome,
-        });
+        let finished_at_us = duration_us(self.started_at.elapsed());
+        drop(self.observer);
         drop(self.sender);
+        let _ = self.finish_sender.send((outcome, finished_at_us));
 
         match self.writer_task.await {
-            Ok(Ok(())) => info!(path = %self.connection_path.display(), "Recorded JREC push capture"),
+            Ok(Ok(())) => info!(
+                path = %self.connection_path.display(),
+                complete = self.state.is_complete(),
+                finished_at_us,
+                "Recorded JREC push capture"
+            ),
             Ok(Err(error)) => {
                 error!(path = %self.connection_path.display(), error = %error, "Failed to record JREC push capture")
             }
@@ -123,6 +147,42 @@ impl JrecCapture {
                 error!(path = %self.connection_path.display(), error = %error, "JREC push capture task failed")
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct CaptureState {
+    queued_bytes: AtomicUsize,
+    disabled: AtomicBool,
+}
+
+impl CaptureState {
+    fn reserve(&self, bytes: usize) -> bool {
+        if self.disabled.load(Ordering::Relaxed) {
+            return false;
+        }
+        let reserved = self
+            .queued_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                queued.checked_add(bytes).filter(|total| *total <= CAPTURE_QUEUE_BYTES)
+            })
+            .is_ok();
+        if !reserved {
+            self.disable();
+        }
+        reserved
+    }
+
+    fn release(&self, bytes: usize) {
+        self.queued_bytes.fetch_sub(bytes, Ordering::Relaxed);
+    }
+
+    fn disable(&self) {
+        self.disabled.store(true, Ordering::Relaxed);
+    }
+
+    fn is_complete(&self) -> bool {
+        !self.disabled.load(Ordering::Relaxed)
     }
 }
 
@@ -157,7 +217,21 @@ async fn write_metadata(path: &Path, metadata: &CaptureMetadata<'_>) -> anyhow::
 
 enum CaptureCommand {
     Message { time_us: u64, message: CapturedMessage },
-    Finished { time_us: u64, outcome: CaptureOutcome },
+}
+
+impl CaptureCommand {
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Message {
+                message: CapturedMessage::Payload { data, .. },
+                ..
+            } => data.len(),
+            Self::Message {
+                message: CapturedMessage::Close { reason, .. },
+                ..
+            } => reason.as_ref().map_or(0, String::len),
+        }
+    }
 }
 
 enum CapturedMessage {
@@ -209,10 +283,16 @@ enum CaptureEvent<'a> {
     Finished {
         time_us: u64,
         outcome: &'a str,
+        complete: bool,
     },
 }
 
-async fn write_capture(path: &Path, mut receiver: mpsc::UnboundedReceiver<CaptureCommand>) -> anyhow::Result<()> {
+async fn write_capture(
+    path: &Path,
+    mut receiver: mpsc::Receiver<CaptureCommand>,
+    finish_receiver: oneshot::Receiver<(CaptureOutcome, u64)>,
+    state: &CaptureState,
+) -> anyhow::Result<()> {
     let events_path = path.join("events.jsonl");
     let payload_path = path.join("payload.bin");
     let mut events = BufWriter::new(
@@ -228,6 +308,7 @@ async fn write_capture(path: &Path, mut receiver: mpsc::UnboundedReceiver<Captur
     let mut payload_offset = 0u64;
 
     while let Some(command) = receiver.recv().await {
+        state.release(command.retained_bytes());
         match command {
             CaptureCommand::Message {
                 time_us,
@@ -255,19 +336,19 @@ async fn write_capture(path: &Path, mut receiver: mpsc::UnboundedReceiver<Captur
             } => {
                 write_event(&mut events, &CaptureEvent::Close { time_us, code, reason }).await?;
             }
-            CaptureCommand::Finished { time_us, outcome } => {
-                write_event(
-                    &mut events,
-                    &CaptureEvent::Finished {
-                        time_us,
-                        outcome: outcome.as_str(),
-                    },
-                )
-                .await?;
-                break;
-            }
         }
     }
+
+    let (outcome, finished_at_us) = finish_receiver.await.context("capture finished without an outcome")?;
+    write_event(
+        &mut events,
+        &CaptureEvent::Finished {
+            time_us: finished_at_us,
+            outcome: outcome.as_str(),
+            complete: state.is_complete(),
+        },
+    )
+    .await?;
 
     payload.flush().await.context("flush capture payload")?;
     events.flush().await.context("flush capture events")?;

@@ -62,9 +62,9 @@ class WebSocketClient:
             raise ValueError(f"unsupported captured message type: {message_type}")
         self._send_frame(opcode, payload)
 
-    def close(self, code: int = 1000, reason: str = "") -> None:
+    def close(self, code: int | None = 1000, reason: str = "") -> None:
         if not self._close_sent and not self.closed:
-            payload = struct.pack("!H", code) + reason.encode("utf-8")
+            payload = b"" if code is None else struct.pack("!H", code) + reason.encode("utf-8")
             try:
                 self._send_frame(0x8, payload)
                 self._close_sent = True
@@ -213,6 +213,13 @@ def load_capture(session_path: Path) -> list[ConnectionCapture]:
             for line in (connection_path / "events.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         )
+        finished = tuple(event for event in events if event.get("event") == "finished")
+        if len(finished) != 1:
+            raise ValueError(f"capture must contain one finished event in {connection_path}")
+        if not bool(finished[0].get("complete", True)):
+            raise ValueError(f"capture is incomplete in {connection_path}")
+        if finished[0].get("outcome") != "done":
+            raise ValueError(f"capture outcome is {finished[0].get('outcome')!r} in {connection_path}")
         connections.append(
             ConnectionCapture(
                 path=connection_path,
@@ -260,7 +267,8 @@ def replay_connection(connection: ConnectionCapture, url: str, connect_timeout: 
                     sent_messages += 1
                     sent_bytes += len(data)
                 elif event_type == "close":
-                    client.close(int(event.get("code") or 1000), str(event.get("reason") or ""))
+                    code = event.get("code")
+                    client.close(None if code is None else int(code), str(event.get("reason") or ""))
                     close_sent = True
                 elif event_type == "finished":
                     break

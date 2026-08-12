@@ -162,16 +162,12 @@ async fn handle_jrec_push(
         .instrument(info_span!("jrec", client = %source_addr, %session_id))
         .await;
 
-    if let Some(capture) = capture {
-        let outcome = match &result {
-            Ok(PushOutcome::Done) => CaptureOutcome::Done,
-            Ok(PushOutcome::StorageFull) => CaptureOutcome::StorageFull,
-            Err(_) => CaptureOutcome::Error,
-        };
-        capture.finish(outcome).await;
-    }
-
-    match result {
+    let capture_outcome = match &result {
+        Ok(PushOutcome::Done) => CaptureOutcome::Done,
+        Ok(PushOutcome::StorageFull) => CaptureOutcome::StorageFull,
+        Err(_) => CaptureOutcome::Error,
+    };
+    match &result {
         Ok(PushOutcome::Done) => close_handle.normal_close().await,
         Ok(PushOutcome::StorageFull) => {
             warn!(client = %source_addr, %session_id, "JREC push closed: storage full");
@@ -181,6 +177,10 @@ async fn handle_jrec_push(
             close_handle.server_error("forwarding failure".to_owned()).await;
             error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
         }
+    }
+
+    if let Some(capture) = capture {
+        capture.finish(capture_outcome).await;
     }
 }
 

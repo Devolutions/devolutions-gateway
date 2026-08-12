@@ -3,7 +3,8 @@
 This tool captures real RDM and DVLS recording uploads once, then replays them against a local Gateway without starting RDM or DVLS.
 
 The Gateway recorder is passive.
-It preserves incoming WebSocket messages, connection boundaries, and timing without parsing or changing WebM data.
+It preserves payload messages, close frames, connection boundaries, and timing without parsing or changing WebM data.
+WebSocket keep-alive responses follow the new connection instead of replaying control frames from the old connection.
 
 ## Capture
 
@@ -51,6 +52,7 @@ python 'D:\devolutions-gateway\tools\jrec-replay\replay.py' `
 
 The replayer uses only the Python standard library.
 It opens each captured WebSocket in order, sends each message at its recorded offset, and preserves gaps between connections.
+It rejects incomplete captures and captures whose original Gateway upload did not finish successfully.
 
 ## Data handling
 
