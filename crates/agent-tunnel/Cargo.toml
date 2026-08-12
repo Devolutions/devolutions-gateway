@@ -17,6 +17,7 @@ test-utils = []
 [dependencies]
 # Internal crates
 agent-tunnel-proto = { path = "../agent-tunnel-proto", features = ["serde"] }
+devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 
 # Async / runtime

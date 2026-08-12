@@ -10,6 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
+anyhow = "1"
 camino = "1.1"
 cfg-if = "1"
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +20,8 @@ thiserror = "2"
 tracing = "0.1"
 
 [target.'cfg(windows)'.dependencies]
+# Used to create private key files with an explicit protected DACL.
+win-api-wrappers = { path = "../win-api-wrappers" }
 windows-registry = "0.5"
 # Required for `windows-registry` error type. (`Error` is not reexported from `windows-registry`).
 windows-result = "0.3"
