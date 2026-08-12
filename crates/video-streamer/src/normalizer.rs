@@ -371,9 +371,7 @@ impl ClipNormalizer {
         let input_decoder = self
             .input_decoder
             .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
-        let Some(decoded) = input_decoder.decode(&frame.data, frame.key_frame)? else {
-            return Ok(());
-        };
+        let decoded = input_decoder.decode(&frame.data)?;
         let dimensions = decoded.dimensions;
         let size_changed = self
             .output_segment

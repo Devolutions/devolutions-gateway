@@ -62,8 +62,7 @@ Every segment begins with a keyframe and keeps one resolution.
 ## Prerequisites
 
 This crate uses `cadeau` and its XMF backend for VP8 and VP9 decoding and VP8 encoding.
-The current Cadeau API does not expose decoded image dimensions.
-The streamer therefore reads resolution changes from VP8 and VP9 keyframe headers.
+The streamer reads the dimensions of every decoded image so source resolution changes do not depend on codec header parsing.
 Set `DGATEWAY_LIB_XMF_PATH` when the default XMF library is unavailable.
 
 ```powershell
