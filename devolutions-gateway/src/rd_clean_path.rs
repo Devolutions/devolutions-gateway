@@ -251,13 +251,39 @@ fn is_vmconnect_request(cleanpath_pdu: &RDCleanPathPdu) -> bool {
 /// Encode the Hyper-V PCB V2 that the proxy writes before TLS.
 ///
 /// `payload` is the opaque Unicode string from RDCleanPath (`GUID` or `GUID;EnhancedMode=1`).
+///
+/// Encoded locally rather than via `ironrdp-pdu` 0.9.0: that crates.io release counts `cchPCB`
+/// with `chars().count()`, which under-counts non-BMP code points (UTF-16 surrogates). IronRDP
+/// master fixed this to `encode_utf16().count()` but has not published a crates.io bump yet, and
+/// its MSRV is ahead of Gateway. Match the fixed wire shape here so opaque Unicode payloads stay
+/// well-formed.
 fn encode_vmconnect_pcb_v2(payload: String) -> anyhow::Result<Vec<u8>> {
-    let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
-        id: 0,
-        version: ironrdp_pdu::pcb::PcbVersion::V2,
-        v2_payload: Some(payload),
-    };
-    ironrdp_core::encode_vec(&pcb).context("encode VMConnect preconnection blob")
+    // PCB V2 layout (little-endian):
+    // cbSize u32 | flags u32 | version u32 | id u32 | cchPCB u16 | wszPCB UTF-16LE + NUL
+    const FIXED_PART_SIZE: usize =
+        4 /* cbSize */ + 4 /* flags */ + 4 /* version */ + 4 /* id */;
+    const VERSION_V2: u32 = 2;
+
+    let utf16: Vec<u16> = payload.encode_utf16().chain(core::iter::once(0)).collect();
+    let cch_pcb = u16::try_from(utf16.len()).context("VMConnect PCB payload too long")?;
+    let utf16_byte_len = utf16.len().checked_mul(2).context("VMConnect PCB payload too long")?;
+    let total_size = FIXED_PART_SIZE
+        .checked_add(2 /* cchPCB */)
+        .and_then(|n| n.checked_add(utf16_byte_len))
+        .context("VMConnect PCB payload too long")?;
+    let cb_size = u32::try_from(total_size).context("VMConnect PCB payload too long")?;
+
+    let mut out = Vec::with_capacity(total_size);
+    out.extend_from_slice(&cb_size.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+    out.extend_from_slice(&VERSION_V2.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // id
+    out.extend_from_slice(&cch_pcb.to_le_bytes());
+    for unit in utf16 {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    debug_assert_eq!(out.len(), total_size);
+    Ok(out)
 }
 
 /// Cert-chain-only success response after VMConnect PCB + TLS (no X.224).
@@ -989,6 +1015,23 @@ mod tests {
         let payload = "21c82e1f-2368-43d5-9cb6-a7c99c449bba".to_owned();
         let bytes = encode_vmconnect_pcb_v2(payload).expect("encode");
         assert_eq!(bytes.len(), 92);
+    }
+
+    #[test]
+    fn encodes_non_bmp_payload_with_utf16_code_unit_cch() {
+        // U+1F600 needs a UTF-16 surrogate pair (2 code units, 1 scalar).
+        // crates.io ironrdp-pdu 0.9.0 would set cchPCB = chars+NUL = 5; correct is 6.
+        let payload = "vm-\u{1F600}".to_owned();
+        assert_eq!(payload.chars().count(), 4);
+        assert_eq!(payload.encode_utf16().count(), 5);
+
+        let bytes = encode_vmconnect_pcb_v2(payload.clone()).expect("encode");
+        let cch = u16::from_le_bytes([bytes[16], bytes[17]]);
+        assert_eq!(cch, 6, "cchPCB must count UTF-16 code units including NUL");
+        assert_eq!(bytes.len(), 16 + 2 + usize::from(cch) * 2);
+
+        let decoded: ironrdp_pdu::pcb::PreconnectionBlob = ironrdp_core::decode(&bytes).expect("decode round-trip");
+        assert_eq!(decoded.v2_payload.as_deref(), Some(payload.as_str()));
     }
 
     #[test]
