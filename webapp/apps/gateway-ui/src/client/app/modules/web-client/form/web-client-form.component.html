@@ -54,15 +54,11 @@
                 <p-autoComplete
                   formControlName="autoComplete"
                   id="hostname"
-                  field="hostname"
                   optionLabel="hostname"
                   placeholder="Enter hostname"
                   [suggestions]="filteredHostnames"
                   [dropdown]="isHostnamesExists()"
                   (completeMethod)="filterHostname($event)"
-                  [overlayOptions]="{
-                    styleClass: 'dv-autocomplete-panel-open'
-                  }"
                   [appendTo]="'body'"
                   required
                 ></p-autoComplete>
