@@ -1,11 +1,9 @@
+use std::error::Error;
 use std::pin::Pin;
 
 use anyhow::Context as _;
-use bytes::Bytes;
-use futures_util::{SinkExt as _, Stream, StreamExt as _};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
-use tokio_util::bytes::{self, Buf, BufMut};
-use tokio_util::codec::{self, Framed};
+use bytes::{BufMut as _, Bytes, BytesMut};
+use futures_util::{Sink, SinkExt as _, Stream, StreamExt as _};
 
 use crate::normalizer::{SegmentEvent, SegmentInfo};
 
@@ -17,37 +15,10 @@ pub(crate) enum ServerMessage {
     StreamEnded,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum ClientMessage {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClientMessage {
     Start,
     Pull,
-}
-
-pub(crate) struct ProtocolCodec;
-
-impl codec::Decoder for ProtocolCodec {
-    type Item = ClientMessage;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.is_empty() {
-            return Ok(None);
-        }
-
-        let type_code = src.get_u8();
-        let message = match type_code {
-            0 => ClientMessage::Start,
-            1 => ClientMessage::Pull,
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "invalid message type",
-                ));
-            }
-        };
-
-        Ok(Some(message))
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,101 +27,131 @@ pub(crate) enum UserFriendlyError {
 }
 
 impl UserFriendlyError {
-    pub(crate) fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::UnexpectedError => "UnexpectedError",
         }
     }
 }
 
-impl codec::Encoder<ServerMessage> for ProtocolCodec {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: ServerMessage, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
-        let type_code = match item {
-            ServerMessage::Chunk(_) => 0,
-            ServerMessage::SegmentStarted(_) => 1,
-            ServerMessage::Error(_) => 2,
-            ServerMessage::StreamEnded => 3,
-        };
-
-        dst.put_u8(type_code);
-
-        match item {
-            ServerMessage::Chunk(chunk) => dst.put(chunk),
-            ServerMessage::SegmentStarted(info) => {
-                let json = format!(
-                    "{{\"codec\":\"vp8\",\"sequence\":{},\"width\":{},\"height\":{}}}",
-                    info.sequence, info.width, info.height
-                );
-                dst.put(json.as_bytes());
-            }
-            ServerMessage::Error(error) => {
-                let json = format!("{{\"error\":\"{}\"}}", error.as_str());
-                dst.put(json.as_bytes());
-            }
-            ServerMessage::StreamEnded => {}
-        }
-
-        Ok(())
-    }
-}
-
-pub(crate) async fn stream_segments<W, S>(output_stream: W, segments: S) -> anyhow::Result<()>
+pub(crate) async fn stream_segments<T, S, E>(mut transport: T, segments: S) -> anyhow::Result<()>
 where
-    W: AsyncRead + AsyncWrite + Unpin,
+    T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
     S: Stream<Item = anyhow::Result<SegmentEvent>>,
+    E: Error + Send + Sync + 'static,
 {
-    let mut framed = Framed::new(output_stream, ProtocolCodec);
     tokio::pin!(segments);
-    let mut client_started = false;
+    let mut expected = ClientMessage::Start;
     let mut segment_state = SegmentState::AwaitingBegin;
 
-    while let Some(message) = framed.next().await {
-        let message = message.context("read client stream message")?;
-        let valid = match message {
-            ClientMessage::Start if !client_started => {
-                client_started = true;
-                true
+    loop {
+        let Some(message) = transport.next().await else {
+            return Ok(());
+        };
+        let message = message
+            .map_err(anyhow::Error::new)
+            .context("read client stream message")?;
+        let message = match decode_client_message(&message) {
+            Ok(message) if message == expected => message,
+            Ok(_) | Err(_) => {
+                let _ =
+                    send_server_message(&mut transport, ServerMessage::Error(UserFriendlyError::UnexpectedError)).await;
+                anyhow::bail!("invalid client stream state");
             }
-            ClientMessage::Pull if client_started => true,
-            ClientMessage::Start | ClientMessage::Pull => false,
         };
 
-        if !valid {
-            framed
-                .send(ServerMessage::Error(UserFriendlyError::UnexpectedError))
-                .await?;
-            framed.get_mut().shutdown().await?;
-            anyhow::bail!("invalid client stream state");
-        }
-
-        let response = match next_segment_message(segments.as_mut(), &mut segment_state).await {
+        let response = match wait_for_response(&mut transport, segments.as_mut(), &mut segment_state).await {
             Ok(Some(response)) => response,
-            Ok(None) => {
-                framed.send(ServerMessage::StreamEnded).await?;
-                framed.get_mut().shutdown().await?;
-                return Ok(());
-            }
+            Ok(None) => return Ok(()),
             Err(error) => {
-                let _ = framed
-                    .send(ServerMessage::Error(UserFriendlyError::UnexpectedError))
-                    .await;
-                let _ = framed.get_mut().shutdown().await;
+                let _ =
+                    send_server_message(&mut transport, ServerMessage::Error(UserFriendlyError::UnexpectedError)).await;
                 return Err(error);
             }
         };
 
-        framed.send(response).await.context("write server stream message")?;
-    }
+        let ended = response == ServerMessage::StreamEnded;
+        send_server_message(&mut transport, response).await?;
+        if ended {
+            return Ok(());
+        }
 
-    Ok(())
+        expected = match message {
+            ClientMessage::Start | ClientMessage::Pull => ClientMessage::Pull,
+        };
+    }
+}
+
+async fn send_server_message<T, E>(transport: &mut T, message: ServerMessage) -> anyhow::Result<()>
+where
+    T: Sink<Bytes, Error = E> + Unpin,
+    E: Error + Send + Sync + 'static,
+{
+    transport
+        .send(encode_server_message(message))
+        .await
+        .map_err(anyhow::Error::new)
+        .context("write server stream message")
+}
+
+fn decode_client_message(message: &[u8]) -> anyhow::Result<ClientMessage> {
+    match message {
+        [0] => Ok(ClientMessage::Start),
+        [1] => Ok(ClientMessage::Pull),
+        _ => anyhow::bail!("invalid client message"),
+    }
+}
+
+fn encode_server_message(message: ServerMessage) -> Bytes {
+    let mut encoded = BytesMut::new();
+    match message {
+        ServerMessage::Chunk(chunk) => {
+            encoded.reserve(1 + chunk.len());
+            encoded.put_u8(0);
+            encoded.put(chunk);
+        }
+        ServerMessage::SegmentStarted(info) => {
+            encoded.put_u8(1);
+            let json = format!(
+                "{{\"codec\":\"vp8\",\"sequence\":{},\"width\":{},\"height\":{}}}",
+                info.sequence, info.width, info.height
+            );
+            encoded.put(json.as_bytes());
+        }
+        ServerMessage::Error(error) => {
+            encoded.put_u8(2);
+            let json = format!("{{\"error\":\"{}\"}}", error.as_str());
+            encoded.put(json.as_bytes());
+        }
+        ServerMessage::StreamEnded => encoded.put_u8(3),
+    }
+    encoded.freeze()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SegmentState {
     AwaitingBegin,
     Streaming,
+}
+
+async fn wait_for_response<T, S, E>(
+    transport: &mut T,
+    segments: Pin<&mut S>,
+    state: &mut SegmentState,
+) -> anyhow::Result<Option<ServerMessage>>
+where
+    T: Stream<Item = Result<Bytes, E>> + Unpin,
+    S: Stream<Item = anyhow::Result<SegmentEvent>>,
+    E: Error + Send + Sync + 'static,
+{
+    tokio::select! {
+        response = next_segment_message(segments, state) => response,
+        message = transport.next() => match message {
+            None => Ok(None),
+            Some(Ok(_)) => anyhow::bail!("client sent another request before receiving a response"),
+            Some(Err(error)) => Err(anyhow::Error::new(error).context("read client stream message")),
+        },
+    }
 }
 
 async fn next_segment_message<S>(
@@ -166,7 +167,7 @@ where
                 *state == SegmentState::AwaitingBegin,
                 "segment stream ended inside a segment"
             );
-            return Ok(None);
+            return Ok(Some(ServerMessage::StreamEnded));
         };
 
         match event? {
@@ -196,57 +197,41 @@ where
 #[cfg(test)]
 mod tests {
     use futures_util::stream;
-    use tokio_util::codec::{Decoder as _, Encoder as _};
 
     use super::*;
 
     #[test]
     fn protocol_codes_are_stable() {
-        let mut codec = ProtocolCodec;
-        let mut buffer = bytes::BytesMut::new();
-
-        codec
-            .encode(
-                ServerMessage::SegmentStarted(SegmentInfo {
-                    sequence: 7,
-                    width: 1920,
-                    height: 1080,
-                }),
-                &mut buffer,
-            )
-            .expect("encode segment start");
         assert_eq!(
-            &buffer[..],
-            b"\x01{\"codec\":\"vp8\",\"sequence\":7,\"width\":1920,\"height\":1080}"
+            encode_server_message(ServerMessage::SegmentStarted(SegmentInfo {
+                sequence: 7,
+                width: 1920,
+                height: 1080,
+            })),
+            Bytes::from_static(b"\x01{\"codec\":\"vp8\",\"sequence\":7,\"width\":1920,\"height\":1080}")
         );
-
-        buffer.clear();
-        codec
-            .encode(ServerMessage::Chunk(Bytes::from_static(b"webm")), &mut buffer)
-            .expect("encode chunk");
-        assert_eq!(&buffer[..], b"\x00webm");
-
-        buffer.clear();
-        codec
-            .encode(ServerMessage::StreamEnded, &mut buffer)
-            .expect("encode end");
-        assert_eq!(&buffer[..], b"\x03");
+        assert_eq!(
+            encode_server_message(ServerMessage::Chunk(Bytes::from_static(b"webm"))),
+            Bytes::from_static(b"\x00webm")
+        );
+        assert_eq!(
+            encode_server_message(ServerMessage::StreamEnded),
+            Bytes::from_static(b"\x03")
+        );
     }
 
     #[test]
-    fn client_codes_are_stable() {
-        let mut codec = ProtocolCodec;
-        let mut buffer = bytes::BytesMut::from(&b"\x00\x01"[..]);
-
+    fn client_messages_require_one_complete_transport_message() {
         assert_eq!(
-            codec.decode(&mut buffer).expect("decode start"),
-            Some(ClientMessage::Start)
+            decode_client_message(b"\x00").expect("decode start"),
+            ClientMessage::Start
         );
         assert_eq!(
-            codec.decode(&mut buffer).expect("decode pull"),
-            Some(ClientMessage::Pull)
+            decode_client_message(b"\x01").expect("decode pull"),
+            ClientMessage::Pull
         );
-        assert_eq!(codec.decode(&mut buffer).expect("wait for input"), None);
+        assert!(decode_client_message(b"\x00\x01").is_err());
+        assert!(decode_client_message(b"").is_err());
     }
 
     #[tokio::test]
@@ -299,7 +284,7 @@ mod tests {
             next_segment_message(segments.as_mut(), &mut state)
                 .await
                 .expect("stream end"),
-            None
+            Some(ServerMessage::StreamEnded)
         );
     }
 }

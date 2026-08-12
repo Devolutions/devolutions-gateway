@@ -25,6 +25,7 @@ macro_rules! perf_debug {
 
 pub mod config;
 pub mod debug;
+mod decoder;
 mod normalizer;
 mod protocol;
 pub mod reopenable;

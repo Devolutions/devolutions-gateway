@@ -8,7 +8,8 @@ The output keeps one transport connection, always uses VP8, and starts a new fix
 
 ## Interface
 
-Call `stream_session` with a `Stream<Item = anyhow::Result<RecordingEvent>>` and an asynchronous duplex transport.
+Call `stream_session` with a recording event stream and a message transport.
+The transport must implement `Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E>`.
 
 ```rust
 stream_session(recording_events, transport, SessionConfig::default()).await?;
@@ -26,10 +27,12 @@ Use `StartAt::Beginning` for clips that start after the consumer joins.
 
 The incremental decoder owns incomplete EBML bytes between `Bytes` events.
 The caller never seeks, rolls back, or retries an incomplete element.
+The decoder limits one buffered EBML element and one retained group of pictures to 64 MiB each.
 
 ## Wire protocol
 
-Each transport write is one protocol message.
+Each transport item is one complete protocol message.
+For WebSocket use, one item maps to one binary WebSocket message.
 The first byte is its type code.
 
 Client messages:
@@ -59,6 +62,8 @@ Every segment begins with a keyframe and keeps one resolution.
 ## Prerequisites
 
 This crate uses `cadeau` and its XMF backend for VP8 and VP9 decoding and VP8 encoding.
+The current Cadeau API does not expose decoded image dimensions.
+The streamer therefore reads resolution changes from VP8 and VP9 keyframe headers.
 Set `DGATEWAY_LIB_XMF_PATH` when the default XMF library is unavailable.
 
 ```powershell

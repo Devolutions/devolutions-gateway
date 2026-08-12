@@ -2,12 +2,11 @@ use std::collections::{HashSet, VecDeque};
 use std::io::Read;
 
 use super::errors::tag_iterator::{CorruptedFileError, TagIteratorError};
-use super::errors::tool::ToolError;
 use super::specs::{EbmlSpecification, EbmlTag, Master, PathPart, TagDataType};
-use super::tools;
 use crate::spec_util::validate_tag_path;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{AllowableErrors, EBMLSize, ProcessingTag, DEFAULT_BUFFER_LEN};
+use crate::tag_parse;
 
 const INVALID_TAG_ID_ERROR: u8 = 0x01;
 const INVALID_HIERARCHY_ERROR: u8 = 0x02;
@@ -269,66 +268,22 @@ where
         Ok(true)
     }
 
-    #[inline(always)]
-    fn peek_tag_id(&mut self) -> Result<(u64, usize), TagIteratorError> {
-        self.ensure_data_read(8)?;
-        if self.buffer[self.internal_buffer_position] == 0 {
-            return Ok((0, 1));
-        }
-        let length = 8 - self.buffer[self.internal_buffer_position].ilog2() as usize;
-        let mut val = self.buffer[self.internal_buffer_position] as u64;
-        for i in 1..length {
-            val <<= 8;
-            val += self.buffer[self.internal_buffer_position + i] as u64;
-        }
-        Ok((val, length))
-    }
-
     #[inline]
     fn peek_valid_tag_header(&mut self) -> Result<(u64, Option<TagDataType>, EBMLSize, usize), TagIteratorError> {
         self.ensure_data_read(16)?;
-        let (tag_id, id_len) = self.peek_tag_id()?;
-        let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
-
-        let (size, size_len) = tools::read_vint(&self.buffer[(self.internal_buffer_position + id_len)..])
-            .or(Err(TagIteratorError::CorruptedFileData(
-                CorruptedFileError::InvalidTagData {
-                    tag_id,
-                    position: self.current_offset(),
-                },
-            )))?
-            .ok_or(TagIteratorError::UnexpectedEOF {
-                tag_start: self.current_offset(),
-                tag_id: Some(tag_id),
+        let current_offset = self.current_offset();
+        let available = &self.buffer[self.internal_buffer_position..self.buffered_byte_length];
+        let header =
+            tag_parse::read_header::<TSpec>(available, current_offset)?.ok_or(TagIteratorError::UnexpectedEOF {
+                tag_start: current_offset,
+                tag_id: None,
                 tag_size: None,
                 partial_data: None,
             })?;
-
-        if self.buffered_byte_length <= id_len + size_len {
-            return Err(TagIteratorError::UnexpectedEOF {
-                tag_start: self.current_offset(),
-                tag_id: Some(tag_id),
-                tag_size: None,
-                partial_data: None,
-            });
-        }
-
-        if matches!(
-            spec_tag_type,
-            Some(TagDataType::UnsignedInt) | Some(TagDataType::Integer) | Some(TagDataType::Float)
-        ) && size > 8
-        {
-            return Err(TagIteratorError::CorruptedFileData(
-                CorruptedFileError::InvalidTagData {
-                    tag_id,
-                    position: self.current_offset(),
-                },
-            ));
-        }
-
-        let size = EBMLSize::new(size, size_len);
-
-        let header_len = id_len + size_len;
+        let tag_id = header.id;
+        let spec_tag_type = header.data_type;
+        let size = header.size;
+        let header_len = header.len;
 
         if (self.allowed_errors & INVALID_TAG_ID_ERROR == 0) && spec_tag_type.is_none() {
             return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagId {
@@ -446,57 +401,15 @@ where
             ));
         };
 
-        let tag = match spec_tag_type {
-            Some(TagDataType::Master) => TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| {
+        let tag = if matches!(spec_tag_type, Some(TagDataType::Master)) {
+            TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| {
                 panic!(
                     "Bad specification implementation: Tag id 0x{:x?} type was master, but could not get tag!",
                     tag_id
                 )
-            }),
-            Some(TagDataType::UnsignedInt) => {
-                let val = tools::arr_to_u64(raw_data)
-                    .map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
-                TSpec::get_unsigned_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was unsigned int, but could not get tag!", tag_id))
-            }
-            Some(TagDataType::Integer) => {
-                let val = tools::arr_to_i64(raw_data)
-                    .map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
-                TSpec::get_signed_int_tag(tag_id, val).unwrap_or_else(|| {
-                    panic!(
-                        "Bad specification implementation: Tag id 0x{:x?} type was integer, but could not get tag!",
-                        tag_id
-                    )
-                })
-            }
-            Some(TagDataType::Utf8) => {
-                let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData {
-                    tag_id,
-                    problem: ToolError::FromUtf8Error(raw_data.to_vec(), e),
-                })?;
-                TSpec::get_utf8_tag(tag_id, val).unwrap_or_else(|| {
-                    panic!(
-                        "Bad specification implementation: Tag id 0x{:x?} type was utf8, but could not get tag!",
-                        tag_id
-                    )
-                })
-            }
-            Some(TagDataType::Binary) => TSpec::get_binary_tag(tag_id, raw_data).unwrap_or_else(|| {
-                panic!(
-                    "Bad specification implementation: Tag id 0x{:x?} type was binary, but could not get tag!",
-                    tag_id
-                )
-            }),
-            Some(TagDataType::Float) => {
-                let val = tools::arr_to_f64(raw_data)
-                    .map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
-                TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| {
-                    panic!(
-                        "Bad specification implementation: Tag id 0x{:x?} type was float, but could not get tag!",
-                        tag_id
-                    )
-                })
-            }
-            None => TSpec::get_raw_tag(tag_id, raw_data),
+            })
+        } else {
+            tag_parse::read_data_tag(tag_id, spec_tag_type, raw_data)?
         };
 
         Ok(ProcessingTag {

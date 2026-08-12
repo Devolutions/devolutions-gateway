@@ -1,6 +1,7 @@
+use std::error::Error;
+
 use bytes::Bytes;
-use futures_util::Stream;
-use tokio::io::{AsyncRead, AsyncWrite};
+use futures_util::{Sink, Stream};
 
 /// A structural event from one append-only recording session.
 ///
@@ -36,11 +37,19 @@ impl Default for SessionConfig {
 }
 
 /// Converts a recording session into fixed-size VP8 WebM segments over one pull-driven stream.
-pub async fn stream_session<S, W>(source: S, output_stream: W, config: SessionConfig) -> anyhow::Result<()>
+pub async fn stream_session<S, T, E>(source: S, transport: T, config: SessionConfig) -> anyhow::Result<()>
 where
     S: Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static,
-    W: AsyncRead + AsyncWrite + Unpin,
+    T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
+    E: Error + Send + Sync + 'static,
 {
-    let segments = crate::normalizer::normalize(source, config);
-    crate::protocol::stream_segments(output_stream, segments).await
+    let mut segments = crate::normalizer::normalize(source, config);
+    let stream_result = crate::protocol::stream_segments(transport, &mut segments).await;
+    let shutdown_result = segments.shutdown().await;
+
+    match (stream_result, shutdown_result) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }

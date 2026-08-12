@@ -6,11 +6,11 @@ use std::collections::{HashSet, VecDeque};
 use bytes::{Buf, BytesMut};
 
 use crate::errors::tag_iterator::{CorruptedFileError, TagIteratorError};
-use crate::errors::tool::ToolError;
 use crate::spec_util::{is_ended_by, validate_tag_path};
 use crate::specs::{EbmlSpecification, EbmlTag, Master, PathPart, TagDataType};
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{AllowableErrors, EBMLSize};
+use crate::tag_parse::{self, TagHeader};
 use crate::tools;
 
 const INVALID_TAG_ID_ERROR: u8 = 0x01;
@@ -30,13 +30,6 @@ struct OpenTag<TSpec> {
     data_start: usize,
     capture: bool,
     children: Vec<TSpec>,
-}
-
-struct TagHeader {
-    id: u64,
-    data_type: Option<TagDataType>,
-    size: EBMLSize,
-    len: usize,
 }
 
 pub struct TagDecoder<TSpec>
@@ -108,7 +101,7 @@ where
                 return Ok(None);
             }
 
-            let Some(header) = self.read_header(input)? else {
+            let Some(header) = tag_parse::read_header::<TSpec>(input, self.position)? else {
                 return Ok(None);
             };
 
@@ -169,51 +162,6 @@ where
 
     pub fn is_finished(&self) -> bool {
         self.finished && self.emission_queue.is_empty()
-    }
-
-    fn read_header(&self, input: &[u8]) -> Result<Option<TagHeader>, TagIteratorError> {
-        let Some(first) = input.first().copied() else {
-            return Ok(None);
-        };
-        let id_len = if first == 0 { 1 } else { 8 - first.ilog2() as usize };
-        if input.len() < id_len {
-            return Ok(None);
-        }
-
-        let id = input[..id_len]
-            .iter()
-            .fold(0u64, |value, byte| (value << 8) + u64::from(*byte));
-        let size_start = id_len;
-        let size = tools::read_vint(&input[size_start..]).map_err(|_| {
-            TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData {
-                tag_id: id,
-                position: self.position,
-            })
-        })?;
-        let Some((size, size_len)) = size else {
-            return Ok(None);
-        };
-        let data_type = TSpec::get_tag_data_type(id);
-
-        if matches!(
-            data_type,
-            Some(TagDataType::UnsignedInt | TagDataType::Integer | TagDataType::Float)
-        ) && (size == 0 || size > 8)
-        {
-            return Err(TagIteratorError::CorruptedFileData(
-                CorruptedFileError::InvalidTagData {
-                    tag_id: id,
-                    position: self.position,
-                },
-            ));
-        }
-
-        Ok(Some(TagHeader {
-            id,
-            data_type,
-            size: EBMLSize::new(size, size_len),
-            len: id_len + size_len,
-        }))
     }
 
     fn validate_header(&mut self, header: &TagHeader) -> Result<(), TagIteratorError> {
@@ -361,48 +309,7 @@ where
         }
 
         let raw_data = &input[header.len..total_size];
-        let tag = match header.data_type {
-            Some(TagDataType::Master) => unreachable!(),
-            Some(TagDataType::UnsignedInt) => {
-                let value = tools::arr_to_u64(raw_data).map_err(|problem| TagIteratorError::CorruptedTagData {
-                    tag_id: header.id,
-                    problem,
-                })?;
-                TSpec::get_unsigned_int_tag(header.id, value)
-            }
-            Some(TagDataType::Integer) => {
-                let value = tools::arr_to_i64(raw_data).map_err(|problem| TagIteratorError::CorruptedTagData {
-                    tag_id: header.id,
-                    problem,
-                })?;
-                TSpec::get_signed_int_tag(header.id, value)
-            }
-            Some(TagDataType::Utf8) => {
-                let value =
-                    String::from_utf8(raw_data.to_vec()).map_err(|error| TagIteratorError::CorruptedTagData {
-                        tag_id: header.id,
-                        problem: ToolError::FromUtf8Error(raw_data.to_vec(), error),
-                    })?;
-                TSpec::get_utf8_tag(header.id, value)
-            }
-            Some(TagDataType::Binary) => TSpec::get_binary_tag(header.id, raw_data),
-            Some(TagDataType::Float) => {
-                let value = tools::arr_to_f64(raw_data).map_err(|problem| TagIteratorError::CorruptedTagData {
-                    tag_id: header.id,
-                    problem,
-                })?;
-                TSpec::get_float_tag(header.id, value)
-            }
-            None => return Ok(Some(TSpec::get_raw_tag(header.id, raw_data))),
-        }
-        .unwrap_or_else(|| {
-            panic!(
-                "Bad specification implementation: Tag id 0x{:x?} had an incompatible data type!",
-                header.id
-            )
-        });
-
-        Ok(Some(tag))
+        tag_parse::read_data_tag(header.id, header.data_type, raw_data).map(Some)
     }
 
     fn close_completed_tags(&mut self) -> Result<(), TagIteratorError> {

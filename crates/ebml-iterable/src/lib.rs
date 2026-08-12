@@ -29,6 +29,7 @@ pub mod specs;
 mod tag_decoder;
 mod tag_iterator;
 mod tag_iterator_util;
+mod tag_parse;
 mod tag_writer;
 pub mod tools;
 
