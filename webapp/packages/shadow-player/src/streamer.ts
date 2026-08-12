@@ -35,6 +35,7 @@ export class ShadowPlayer extends HTMLElement {
   private root: ShadowRoot | null = null;
   private websocket: ServerWebSocket | null = null;
   private readonly clips: PlaybackClip[] = [];
+  private readonly playableClips = new Set<PlaybackClip>();
   private receivingClip: PlaybackClip | null = null;
   private activeClip: PlaybackClip | null = null;
   private awaitingResponse = false;
@@ -121,20 +122,24 @@ export class ShadowPlayer extends HTMLElement {
 
   public play(): void {
     this.shouldPlay = true;
-    const video = this.activeClip?.video ?? this.receivingClip?.video;
-    if (video) {
-      void video.play();
+    if (this.activeClip) {
+      void this.activeClip.video.play();
+    } else {
+      this.activateNextClip();
     }
   }
 
   private replay(): void {
     this._replayButton?.classList.remove('visible');
-    if (!this.activeClip) {
+    const firstClip = this.clips[0];
+    if (!firstClip) {
       return;
     }
-    this.activeClip.video.currentTime = 0;
+    for (const clip of this.clips) {
+      clip.video.currentTime = 0;
+    }
     this.shouldPlay = true;
-    void this.activeClip.video.play();
+    this.activateClip(firstClip);
   }
 
   public srcChange(value: string): void {
@@ -211,9 +216,6 @@ export class ShadowPlayer extends HTMLElement {
     this.receivingClip = clip;
     this._container?.insertBefore(clip.video, this._replayButton);
     await clip.open();
-    if (this.shouldPlay) {
-      void clip.video.play();
-    }
   }
 
   private configureVideo(clip: PlaybackClip): void {
@@ -228,28 +230,57 @@ export class ShadowPlayer extends HTMLElement {
     video.addEventListener(
       'loadeddata',
       () => {
-        if (!this.activeClip || clip.metadata.sequence > this.activeClip.metadata.sequence) {
-          this.activateClip(clip);
-        }
+        this.playableClips.add(clip);
+        this.activateNextClip();
       },
       { once: true },
     );
+    video.addEventListener('play', () => {
+      if (this.activeClip === clip) {
+        this.shouldPlay = true;
+      }
+    });
+    video.addEventListener('pause', () => {
+      if (this.activeClip === clip && !video.ended) {
+        this.shouldPlay = false;
+      }
+    });
     video.addEventListener('ended', () => {
-      if (this.streamEnded && this.activeClip === clip) {
+      if (this.activeClip !== clip) {
+        return;
+      }
+      if (!this.activateNextClip() && this.streamEnded) {
         this.showReplayButton();
       }
     });
   }
 
+  private activateNextClip(): boolean {
+    const sequence = this.activeClip ? this.activeClip.metadata.sequence + 1 : 0;
+    const next = this.clips[sequence];
+    if (!next || !this.playableClips.has(next)) {
+      return false;
+    }
+    if (this.activeClip && !this.activeClip.video.ended) {
+      return false;
+    }
+    this.activateClip(next);
+    return true;
+  }
+
   private activateClip(clip: PlaybackClip): void {
     if (this.activeClip === clip) {
+      if (this.shouldPlay) {
+        void clip.video.play();
+      }
       return;
     }
-    if (this.activeClip) {
-      this.activeClip.video.pause();
-      this.activeClip.video.classList.remove('active');
-    }
+    const previous = this.activeClip;
     this.activeClip = clip;
+    if (previous) {
+      previous.video.pause();
+      previous.video.classList.remove('active');
+    }
     this._videoElement = clip.video;
     clip.video.classList.add('active');
     if (this.shouldPlay) {
@@ -336,6 +367,7 @@ export class ShadowPlayer extends HTMLElement {
       clip.dispose();
     }
     this.clips.length = 0;
+    this.playableClips.clear();
     this.receivingClip = null;
     this.activeClip = null;
     this._videoElement = null;
