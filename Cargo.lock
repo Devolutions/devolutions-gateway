@@ -4770,9 +4770,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11808c712bda38e8cee0ec0a6902bbfe63583f475608ee6bcf8ffd848473ab06"
+checksum = "fa0817fd85c0a6b0173e2b837fa2b369be684c93c11fed1b5182284021411839"
 dependencies = [
  "chrono",
  "derive_more",
