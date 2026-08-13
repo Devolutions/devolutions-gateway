@@ -1197,9 +1197,24 @@ jobs:
       - name: Prepare runner
         run: |
           rustup toolchain install nightly
-          # Pin to the latest working version: 1.2023.4.11 fails to install
-          # because its pinned checksum no longer matches the upstream PSTools.zip.
-          choco install pstools --version 1.2012.04.12 --yes
+
+      # The pstools Chocolatey package is unreliable: it downloads PSTools.zip from
+      # Microsoft at install time, and its pinned checksum breaks whenever Microsoft
+      # updates the zip. Download it directly and verify against our own checksum
+      # instead; bump the hash deliberately when Microsoft publishes a new PSTools.
+      - name: Install PsExec
+        shell: pwsh
+        run: |
+          $expectedHash = '4F49964CC9CBAC2B5D87BDC8F9526012E9C4B243D8B7D0C0BB51F254A721CA2E'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
+          $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
+          $actualHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw "PSTools.zip checksum mismatch: expected $expectedHash, got $actualHash"
+          }
+          Expand-Archive -Path $zipPath -DestinationPath $toolsDir
+          Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
 
       # The Docker service for Windows containers may not be started yet at this point.
       # Starting it explicitly avoids flaky failures when the daemon is not ready.
