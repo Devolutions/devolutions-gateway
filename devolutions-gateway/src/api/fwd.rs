@@ -322,7 +322,7 @@ async fn fwd_http(
     use axum::http::{Response, header};
     use http_body_util::BodyExt as _; // into_data_stream
     use tokio_rustls::rustls;
-    use tokio_tungstenite::connect_async_tls_with_config;
+    use tokio_tungstenite::{connect_async_tls_with_config, tungstenite};
 
     // Default HTTP client for typical usage.
     static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
