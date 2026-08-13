@@ -1197,7 +1197,9 @@ jobs:
       - name: Prepare runner
         run: |
           rustup toolchain install nightly
-          choco install pstools --yes
+          # Pin to the latest working version: 1.2023.4.11 fails to install
+          # because its pinned checksum no longer matches the upstream PSTools.zip.
+          choco install pstools --version 1.2012.04.12 --yes
 
       # The Docker service for Windows containers may not be started yet at this point.
       # Starting it explicitly avoids flaky failures when the daemon is not ready.
