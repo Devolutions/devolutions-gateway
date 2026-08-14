@@ -669,7 +669,98 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+
+    use base64::Engine as _;
+    use secrecy::SecretString;
+    use uuid::Uuid;
+
     use super::*;
+    use crate::config::ConfHandle;
+    use crate::credential::{CleartextAppCredential, CleartextAppCredentialMapping};
+    use crate::credential_injection_kdc::CredentialService;
+    use crate::target_connection_options::TargetConnectionOptions;
+
+    const TEST_CONFIG: &str = r#"{
+        "Hostname": "dgateway.localhost.com",
+        "ProvisionerPublicKeyData": {
+            "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        },
+        "Listeners": [
+            { "InternalUrl": "http://*:7171", "ExternalUrl": "https://*:7171" }
+        ],
+        "__debug__": { "disable_token_validation": true }
+    }"#;
+
+    const KERBEROS_CONFIG: &str = r#"{
+        "Hostname": "dgateway.localhost.com",
+        "ProvisionerPublicKeyData": {
+            "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        },
+        "Listeners": [
+            { "InternalUrl": "http://*:7171", "ExternalUrl": "https://*:7171" }
+        ],
+        "__debug__": {
+            "disable_token_validation": true,
+            "enable_unstable": true,
+            "kerberos_credential_injection": true
+        }
+    }"#;
+
+    fn conf(json: &str) -> Arc<Conf> {
+        ConfHandle::mock(json).expect("test config is valid").get_conf()
+    }
+
+    fn client_addr() -> SocketAddr {
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 33_889))
+    }
+
+    fn association_token(jti: Uuid) -> String {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let header = engine.encode(r#"{"alg":"RS256"}"#);
+        let payload = engine.encode(
+            serde_json::to_vec(&serde_json::json!({
+                "jti": jti,
+                "dst_hst": "target.example:3389"
+            }))
+            .expect("payload serializes"),
+        );
+        let signature = engine.encode(b"signature");
+        format!("{header}.{payload}.{signature}")
+    }
+
+    fn mapping(target_username: &str) -> CleartextAppCredentialMapping {
+        CleartextAppCredentialMapping {
+            proxy: CleartextAppCredential::UsernamePassword {
+                username: "proxy@example.invalid".to_owned(),
+                password: SecretString::from("pwd"),
+            },
+            target: CleartextAppCredential::UsernamePassword {
+                username: target_username.to_owned(),
+                password: SecretString::from("pwd"),
+            },
+        }
+    }
+
+    /// Provision credentials (and optional `krb_kdc`) then resolve the injection KDC — the
+    /// in-process path RDP takes before building CredSSP Kerberos configs.
+    fn provisioned_kdc(target_username: &str, krb_kdc: Option<&str>) -> CredentialInjectionKdc {
+        let service = CredentialService::new(ConfHandle::mock(TEST_CONFIG).expect("test config is valid"));
+        let jti = Uuid::new_v4();
+        service
+            .insert_credentials(
+                association_token(jti),
+                Some(mapping(target_username)),
+                time::Duration::minutes(5),
+            )
+            .expect("credentials insert");
+        if let Some(krb_kdc) = krb_kdc {
+            let options = TargetConnectionOptions::new(Some(krb_kdc)).expect("valid krb_kdc");
+            service.insert_connection_options(jti, options, time::Duration::minutes(5));
+        }
+        service.kdc_for(jti).expect("kdc_for resolves provisioned state")
+    }
 
     // The two CredSSP legs are built from this single decision, so agreement is guaranteed by
     // construction. These cases pin the decision itself (the bug was the two legs deciding
@@ -687,5 +778,69 @@ mod tests {
         // Domainless target can't get a ticket => NTLM regardless of the flags.
         assert!(!injection_uses_kerberos(true, true, Ntlm));
         assert!(!injection_uses_kerberos(false, false, Ntlm));
+    }
+
+    #[test]
+    fn provisioned_krb_kdc_becomes_client_kdc_proxy_url() {
+        let conf = conf(KERBEROS_CONFIG);
+        let kdc = provisioned_kdc("administrator@example.invalid", Some("tcp://dc.example.com:88"));
+
+        let configs =
+            credential_injection_kerberos_configs(conf.as_ref(), client_addr(), "dgateway.localhost.com", &kdc)
+                .expect("kerberos configs build when krb_kdc is provisioned");
+
+        let client = configs.client.expect("client leg speaks Kerberos");
+        assert_eq!(
+            client.kdc_proxy_url.as_ref().map(url::Url::as_str),
+            Some("tcp://dc.example.com:88"),
+            "target-side CredSSP must use the provisioned KDC URL",
+        );
+        assert_eq!(client.hostname, "dgateway.localhost.com");
+        assert!(configs.server.is_some(), "both CredSSP legs must agree on Kerberos");
+    }
+
+    #[test]
+    fn kerberos_path_requires_provisioned_krb_kdc() {
+        let conf = conf(KERBEROS_CONFIG);
+        let kdc = provisioned_kdc("administrator@example.invalid", None);
+
+        let error =
+            match credential_injection_kerberos_configs(conf.as_ref(), client_addr(), "dgateway.localhost.com", &kdc) {
+                Ok(_) => panic!("Kerberos without krb_kdc must fail before CredSSP starts"),
+                Err(error) => error,
+            };
+
+        assert!(
+            format!("{error:#}").contains("krb_kdc"),
+            "error should name the missing connection option, got: {error:#}",
+        );
+    }
+
+    #[test]
+    fn ntlm_path_does_not_require_krb_kdc() {
+        // Domainless target → NTLM decision even with Kerberos feature flags on.
+        let conf = conf(KERBEROS_CONFIG);
+        let kdc = provisioned_kdc("Administrator", None);
+
+        let configs =
+            credential_injection_kerberos_configs(conf.as_ref(), client_addr(), "dgateway.localhost.com", &kdc)
+                .expect("NTLM path succeeds without connection options");
+
+        assert!(configs.client.is_none());
+        assert!(configs.server.is_none());
+    }
+
+    #[test]
+    fn kerberos_flags_off_does_not_require_krb_kdc() {
+        // Domain-qualified target but feature flags off → NTLM on both legs.
+        let conf = conf(TEST_CONFIG);
+        let kdc = provisioned_kdc("administrator@example.invalid", None);
+
+        let configs =
+            credential_injection_kerberos_configs(conf.as_ref(), client_addr(), "dgateway.localhost.com", &kdc)
+                .expect("flags off means NTLM without needing krb_kdc");
+
+        assert!(configs.client.is_none());
+        assert!(configs.server.is_none());
     }
 }
