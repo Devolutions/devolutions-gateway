@@ -154,7 +154,7 @@ impl CredentialInjectionKdc {
         })
     }
 
-    pub(crate) fn krb_kdc(&self) -> Option<&crate::target_addr::TargetAddr> {
+    pub(crate) fn krb_kdc(&self) -> Option<&Url> {
         self.connection_options.as_ref()?.krb_kdc()
     }
 

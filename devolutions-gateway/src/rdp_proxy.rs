@@ -401,7 +401,7 @@ pub(crate) fn credential_injection_kerberos_configs(
     Ok(CredentialInjectionKerberosConfigs {
         server: Some(credential_injection_kdc.server_kerberos_config(client_addr)?),
         client: Some(ironrdp_connector::credssp::KerberosConfig {
-            kdc_proxy_url: Some(url::Url::try_from(krb_kdc).context("convert target kdc address to url")?),
+            kdc_proxy_url: Some(krb_kdc.clone()),
             hostname: gateway_hostname.to_owned(),
         }),
     })
