@@ -2198,6 +2198,7 @@ dependencies = [
 [[package]]
 name = "ebml-iterable"
 version = "0.6.3"
+source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable?tag=v0.6.3-devo1#f67a18e0cf3cf99c7198c4636493d397776f8025"
 dependencies = [
  "bytes 1.12.1",
  "ebml-iterable-specification",
@@ -2208,10 +2209,12 @@ dependencies = [
 [[package]]
 name = "ebml-iterable-specification"
 version = "0.4.0"
+source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable?tag=v0.6.3-devo1#f67a18e0cf3cf99c7198c4636493d397776f8025"
 
 [[package]]
 name = "ebml-iterable-specification-derive"
 version = "0.4.0"
+source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable?tag=v0.6.3-devo1#f67a18e0cf3cf99c7198c4636493d397776f8025"
 dependencies = [
  "ebml-iterable-specification",
  "proc-macro2 1.0.106",

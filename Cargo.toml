@@ -10,10 +10,6 @@ members = [
     "testsuite",
     "tools/generate-openapi",
 ]
-exclude = [
-    "crates/ebml-iterable/specification",
-    "crates/ebml-iterable/specification-derive",
-]
 default-members = [
     "devolutions-agent",
     "devolutions-agent-updater",
@@ -36,7 +32,7 @@ codegen-units = 1
 lto = true
 
 [patch.crates-io]
-ebml-iterable = { path = "crates/ebml-iterable" }
+ebml-iterable = { git = "https://github.com/irvingoujAtDevolution/ebml-iterable", tag = "v0.6.3-devo1" }
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
 
 [workspace.lints.rust]
