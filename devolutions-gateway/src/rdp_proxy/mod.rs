@@ -8,10 +8,7 @@ use typed_builder::TypedBuilder;
 
 mod credssp;
 
-use credssp::CredsspSession;
-pub(crate) use credssp::{
-    PreparedCredssp, intercept_connect_confirm, perform_credssp_as_client, perform_credssp_as_server,
-};
+pub(crate) use credssp::{CredsspSession, PreparedCredssp};
 
 use crate::config::Conf;
 use crate::credential::AppCredential;
@@ -269,10 +266,4 @@ where
     let payload = ironrdp_core::encode_vec(pdu).context("failed to encode PDU")?;
     framed.write_all(&payload).await.context("failed to write PDU")?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    // Protocol selection is owned by CredentialInjection (from_provisioned + register_if_kerberos).
-    // See credential_injection tests for Kerberos-vs-NTLM decision coverage.
 }

@@ -1,8 +1,9 @@
-//! Credential-injection runtime: groceries → dish → synthetic KDC pass window.
+//! Credential-injection runtime for RDP.
 //!
-//! - Provisioned data lives in [`crate::provisioning::ProvisioningStore`] (supermarket).
-//! - [`CredentialInjection`] is built by the RDP path from those groceries (chef).
-//! - [`SyntheticKdcRegistry`] is the pass window: RDP publishes, `/jet/KdcProxy` looks up only.
+//! - Provisioned material lives in [`crate::provisioning::ProvisioningStore`] until checkout.
+//! - [`CredentialInjection::from_provisioned`] builds a session-scoped injection plan.
+//! - Kerberos sessions publish a [`CredentialInjectionKdc`] into [`SyntheticKdcRegistry`];
+//!   `/jet/KdcProxy` resolves only that registry (not the provisioning store).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -97,14 +98,14 @@ pub(crate) enum CredentialInjection {
     Ntlm(NtlmCredentialInjection),
 }
 
-/// Kerberos dish: credentials + real KDC address + shared synthetic KDC.
+/// Kerberos injection: credentials, target KDC URL, and the session synthetic KDC.
 pub(crate) struct KerberosCredentialInjection {
     credential_mapping: AppCredentialMapping,
     target_kdc: Url,
     synthetic: Arc<CredentialInjectionKdc>,
 }
 
-/// Chef output: protocol chosen; synthetic KDC built if needed, not yet published.
+/// Protocol chosen; synthetic KDC built when Kerberos, not yet published to the registry.
 #[derive(Debug)]
 pub(crate) enum PreparedCredentialInjection {
     Kerberos(KerberosCredentialInjection),
@@ -119,7 +120,7 @@ impl PreparedCredentialInjection {
                 let registration = registry.register(Arc::clone(&injection.synthetic));
                 debug!(
                     jti = %injection.synthetic.jti(),
-                    "registered synthetic KDC for credential-injection session"
+                    "Registered synthetic KDC for credential-injection session"
                 );
                 CredentialInjection::Kerberos(injection, registration)
             }
@@ -201,7 +202,10 @@ impl CredentialInjection {
         matches!(self, Self::Kerberos(_, _))
     }
 
-    /// RDP chef: owned groceries → prepared dish. Does not touch the registry.
+    /// Build a session injection plan from a checked-out provisioning entry.
+    ///
+    /// Does not publish to [`SyntheticKdcRegistry`]; call
+    /// [`PreparedCredentialInjection::register_if_kerberos`] next.
     pub(crate) fn from_provisioned(
         jti: Uuid,
         credential_entry: ProvisioningEntry,
@@ -214,7 +218,7 @@ impl CredentialInjection {
         } = credential_entry;
 
         let mapping = mapping.ok_or_else(|| {
-            warn!(%jti, "credential-injection state has no mapping");
+            warn!(%jti, "Credential-injection state has no mapping");
             CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
         })?;
 
@@ -222,28 +226,26 @@ impl CredentialInjection {
             warn!(
                 %jti,
                 error = format!("{source:#}"),
-                "invalid credential-injection association token"
+                "Invalid credential-injection association token"
             );
             CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
         })?;
 
-        let target_username = match sspi::Username::parse(app_credential_username(&mapping.target)) {
-            Ok(u) => u,
-            Err(error) => {
-                warn!(%jti, error = format!("{error:#}"), "invalid target credential username");
-                return Err(CredentialInjectionKdcResolveError::BuildKdcConfig {
-                    jti,
-                    source: anyhow::anyhow!("invalid target credential username: {error}"),
-                });
-            }
-        };
-
-        let wants_kerberos = kerberos_enabled && target_username.domain_name().is_some();
-        if !wants_kerberos {
+        let target_username = app_credential_username(&mapping.target);
+        if !select_kerberos_for_target(kerberos_enabled, target_username) {
             return Ok(PreparedCredentialInjection::Ntlm(NtlmCredentialInjection {
                 jti,
                 credential_mapping: mapping,
             }));
+        }
+
+        // Kerberos path: username must parse (select_kerberos_for_target already required a domain).
+        if let Err(error) = sspi::Username::parse(target_username) {
+            warn!(%jti, error = format!("{error:#}"), "Invalid target credential username");
+            return Err(CredentialInjectionKdcResolveError::BuildKdcConfig {
+                jti,
+                source: anyhow::anyhow!("invalid target credential username: {error}"),
+            });
         }
 
         let target_kdc = connection_options
@@ -265,6 +267,21 @@ impl CredentialInjection {
             synthetic: Arc::new(synthetic),
         }))
     }
+}
+
+/// Unstable debug opt-in for Kerberos credential injection (both legs).
+pub(crate) fn kerberos_injection_opt_in(conf: &crate::config::Conf) -> bool {
+    conf.debug.enable_unstable && conf.debug.kerberos_credential_injection
+}
+
+/// Whether target username + opt-in select Kerberos injection (otherwise NTLM).
+pub(crate) fn select_kerberos_for_target(kerberos_enabled: bool, target_username: &str) -> bool {
+    if !kerberos_enabled {
+        return false;
+    }
+    sspi::Username::parse(target_username)
+        .ok()
+        .is_some_and(|username| username.domain_name().is_some())
 }
 
 pub(crate) struct CredentialInjectionKdcRequest {
@@ -329,6 +346,11 @@ impl CredentialInjectionKdc {
         self.jti
     }
 
+    /// Session destination host from association `dst_hst` (not Gateway `conf.hostname`).
+    pub(crate) fn target_hostname(&self) -> &str {
+        &self.target_hostname
+    }
+
     pub(crate) fn server_kerberos_config(&self, client_addr: SocketAddr) -> anyhow::Result<sspi::KerberosServerConfig> {
         let user = sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
             &self.acceptor_principal_name,
@@ -338,9 +360,8 @@ impl CredentialInjectionKdc {
 
         let kdc_url = self.in_process_kdc_url()?;
 
-        // The SPN that the client puts on its AP-REQ ticket is the one for the target RDP
-        // server (`TERMSRV/<target>`). Gateway-as-CredSSP-server is impersonating that target,
-        // so ServerProperties must claim the same SPN or sspi-rs rejects the ticket.
+        // Client AP-REQ SPN is TERMSRV/<dst_hst>. Gateway-as-CredSSP-server impersonates that
+        // session destination, so ServerProperties must claim the same SPN.
         Ok(sspi::KerberosServerConfig {
             kerberos_config: sspi::KerberosConfig {
                 kdc_url: Some(kdc_url),
@@ -516,9 +537,9 @@ fn random_32_bytes() -> Vec<u8> {
 
 /// Live synthetic KDCs published by active RDP credential-injection sessions.
 ///
-/// Pass window between handlers:
-/// - RDP path publishes when it starts a Kerberos injection
-/// - `/jet/KdcProxy` only looks up; it never builds a KDC from provisioned groceries
+/// - The RDP path registers when a Kerberos injection session starts.
+/// - `/jet/KdcProxy` only looks up published entries; it never builds a KDC from
+///   [`crate::provisioning::ProvisioningStore`].
 ///
 /// Entries are connection-scoped via [`SyntheticKdcRegistration`]. Reconnects `register` again
 /// (replace + bump generation); a late drop of an older registration is a no-op.
@@ -675,6 +696,15 @@ mod tests {
     }
 
     #[test]
+    fn select_kerberos_for_target_matrix() {
+        assert!(!select_kerberos_for_target(false, "user@CORP.EXAMPLE"));
+        assert!(!select_kerberos_for_target(true, "Administrator"));
+        assert!(!select_kerberos_for_target(true, ""));
+        assert!(select_kerberos_for_target(true, "user@CORP.EXAMPLE"));
+        assert!(select_kerberos_for_target(true, r"CORP\user"));
+    }
+
+    #[test]
     fn proxy_user_at_realm_is_used_as_realm() {
         assert_eq!(
             realm_from_proxy_username("proxy@example.invalid", Uuid::new_v4()),
@@ -725,7 +755,7 @@ mod tests {
         let store = stock_with_mapping(jti, "administrator@example.invalid");
         store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
         let entry = store.take(jti).expect("entry");
-        assert!(store.take(jti).is_none(), "take consumes groceries");
+        assert!(store.take(jti).is_none(), "take is one-shot");
         let registry = SyntheticKdcRegistry::new();
         let prepared = CredentialInjection::from_provisioned(jti, entry, true).expect("prepared");
         assert!(registry.get(jti).is_none(), "not published until register_if_kerberos");
@@ -757,6 +787,38 @@ mod tests {
     }
 
     #[test]
+    fn from_provisioned_uses_association_dst_hst_for_synthetic_kdc() {
+        // Destination is dynamic per token. conf.hostname is Gateway identity only and must not
+        // drive synthetic KDC SPN / service host (deliberate correction of #1856).
+        let jti = Uuid::new_v4();
+        let store = ProvisioningStore::new();
+        store
+            .insert_credentials(
+                unsigned_jws(serde_json::json!({
+                    "jti": jti,
+                    "dst_hst": "it-help-dc.corp.example:3389"
+                })),
+                Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
+                time::Duration::minutes(5),
+            )
+            .expect("insert");
+        store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
+        let entry = store.take(jti).expect("entry");
+        let injection = CredentialInjection::from_provisioned(jti, entry, true)
+            .expect("prepared")
+            .register_if_kerberos(&SyntheticKdcRegistry::new());
+
+        assert_eq!(
+            injection
+                .as_kerberos()
+                .expect("kerberos")
+                .synthetic_kdc()
+                .target_hostname(),
+            "it-help-dc.corp.example",
+        );
+    }
+
+    #[test]
     fn registry_replace_and_guarded_drop_keeps_successor() {
         let registry = SyntheticKdcRegistry::new();
         let jti = Uuid::new_v4();
@@ -773,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn kdc_proxy_cannot_invent_from_groceries() {
+    fn kdc_proxy_cannot_invent_from_provisioning_store() {
         let jti = Uuid::new_v4();
         let _store = stock_with_mapping(jti, "administrator@example.invalid");
         let registry = SyntheticKdcRegistry::new();

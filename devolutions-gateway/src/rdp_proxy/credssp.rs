@@ -110,7 +110,6 @@ impl CredsspSession {
             server_public_key,
             server_security_protocol,
             &credential_injection,
-            &conf.hostname,
             &kdc_connector,
         );
 
@@ -154,7 +153,7 @@ impl CredsspSession {
     }
 }
 
-pub(crate) async fn intercept_connect_confirm<C, S>(
+async fn intercept_connect_confirm<C, S>(
     client_framed: &mut ironrdp_tokio::MovableTokioFramed<C>,
     server_framed: &mut ironrdp_tokio::MovableTokioFramed<S>,
     server_security_protocol: nego::SecurityProtocol,
@@ -201,26 +200,26 @@ fn server_kerberos_setup(
 }
 
 fn client_kerberos_config(
-    gateway_hostname: &str,
     injection: &CredentialInjection,
 ) -> anyhow::Result<Option<ironrdp_connector::credssp::KerberosConfig>> {
     let Some(kerberos) = injection.as_kerberos() else {
         return Ok(None);
     };
+    // Target-leg Kerberos uses the same session destination as the synthetic KDC (association
+    // `dst_hst`). conf.hostname is Gateway identity only and is not the RDP destination.
     Ok(Some(ironrdp_connector::credssp::KerberosConfig {
         kdc_proxy_url: Some(kerberos.target_kdc().clone()),
-        hostname: gateway_hostname.to_owned(),
+        hostname: kerberos.synthetic_kdc().target_hostname().to_owned(),
     }))
 }
 
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
-pub(crate) async fn perform_credssp_as_client<S>(
+async fn perform_credssp_as_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     server_name: String,
     server_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
     injection: &CredentialInjection,
-    gateway_hostname: &str,
     kdc_connector: &KdcConnector,
 ) -> anyhow::Result<()>
 where
@@ -229,7 +228,7 @@ where
     use ironrdp_tokio::FramedWrite as _;
 
     let credentials = injection.target_credential();
-    let kerberos_config = client_kerberos_config(gateway_hostname, injection)?;
+    let kerberos_config = client_kerberos_config(injection)?;
 
     // Decrypt password into short-lived buffer.
     let (username, decrypted_password) = credentials
@@ -350,7 +349,7 @@ async fn resolve_client_generator(
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-pub(crate) async fn perform_credssp_as_server<S>(
+async fn perform_credssp_as_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: SocketAddr,
     gateway_public_key: Vec<u8>,
@@ -529,9 +528,9 @@ mod tests {
     }
 
     #[test]
-    fn client_kerberos_config_uses_provisioned_target_kdc_url() {
+    fn client_kerberos_config_uses_provisioned_target_kdc_url_and_dst_hst() {
         let injection = kerberos_injection();
-        let config = client_kerberos_config("dgateway.localhost.com", &injection)
+        let config = client_kerberos_config(&injection)
             .expect("config builds")
             .expect("kerberos client leg");
 
@@ -540,7 +539,10 @@ mod tests {
             Some("tcp://dc.example.com:88"),
             "CredSSP kdc_proxy_url must be the provisioned krb_kdc",
         );
-        assert_eq!(config.hostname, "dgateway.localhost.com");
+        assert_eq!(
+            config.hostname, "target.example",
+            "target-leg Kerberos hostname is association dst_hst, not conf.hostname",
+        );
     }
 
     #[test]
@@ -568,7 +570,7 @@ mod tests {
             .expect("ntlm prepared")
             .register_if_kerberos(&SyntheticKdcRegistry::new());
 
-        let config = client_kerberos_config("dgateway.localhost.com", &injection).expect("ntlm ok");
+        let config = client_kerberos_config(&injection).expect("ntlm ok");
         assert!(config.is_none());
     }
 }

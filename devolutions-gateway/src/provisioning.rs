@@ -142,11 +142,16 @@ impl ProvisioningStore {
         }
     }
 
-    /// Take the provisioned view for a session (one-shot).
+    /// Take the provisioned view for a session (one-shot checkout).
     ///
     /// Removes the credentials half (required) and any live connection-options half for `jti`.
-    /// Returns `None` if credentials are missing or expired. A second `take` for the same JTI
-    /// fails until preflight inserts again.
+    /// Returns `None` if credentials are missing or expired.
+    ///
+    /// **Contract:** injection mappings are consumed when the injection path checks them out.
+    /// They are not restored after a failed TLS/CredSSP attempt. `time_to_live` is how long the
+    /// entry may wait for that first checkout, not a retry budget. Re-provision to try again.
+    /// Callers must [`Self::has_mapping`] (or equivalent) before taking so token-only rows are
+    /// not destroyed by unrelated RDP connections.
     pub(crate) fn take(&self, jti: Uuid) -> Option<ProvisioningEntry> {
         let now = time::OffsetDateTime::now_utc();
 

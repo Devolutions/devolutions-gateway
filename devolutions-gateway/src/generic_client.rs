@@ -146,20 +146,15 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
-                // We support proxy-based credential injection for RDP.
-                // If a credential mapping has been pushed, we automatically switch to this mode.
-                // Otherwise, we continue the generic procedure.
-                //
-                // RdpProxy is generic over the server stream, so credential injection works
-                // regardless of whether the upstream is direct TCP or tunnelled via an agent.
-                // The credential store is keyed on the association token's JTI, so a direct
-                // lookup by `claims.jti` is the primary path.
-                if is_rdp
-                    && let Some(entry) = provisioning.take(claims.jti)
-                    && entry.mapping.is_some()
-                {
+                // RDP credential injection: peek for a mapping first so token-only provision rows are not
+                // consumed. take() is one-shot after the injection path is chosen.
+                if is_rdp && provisioning.has_mapping(claims.jti) {
+                    let entry = provisioning
+                        .take(claims.jti)
+                        .context("provisioned credentials missing after has_mapping")?;
+                    anyhow::ensure!(entry.mapping.is_some(), "provisioned entry has no credential mapping");
                     anyhow::ensure!(token == entry.token, "token mismatch");
-                    let kerberos_enabled = conf.debug.enable_unstable && conf.debug.kerberos_credential_injection;
+                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(&conf);
                     let credential_injection =
                         CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
                             .register_if_kerberos(&synthetic_kdc_registry);
