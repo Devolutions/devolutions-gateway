@@ -509,6 +509,7 @@ catch (ApiException e)
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **404** | Recording not found |  -  |
+| **413** | Recording package exceeds download size or file-count limits |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

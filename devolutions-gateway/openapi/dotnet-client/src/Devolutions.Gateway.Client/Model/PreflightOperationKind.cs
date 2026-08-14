@@ -73,7 +73,13 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum ResolveHost for value: resolve-host
         /// </summary>
         [EnumMember(Value = "resolve-host")]
-        ResolveHost = 7
+        ResolveHost = 7,
+
+        /// <summary>
+        /// Enum ProvisionConnectionOptions for value: provision-connection-options
+        /// </summary>
+        [EnumMember(Value = "provision-connection-options")]
+        ProvisionConnectionOptions = 8
     }
 
     public static class PreflightOperationKindExtensions
@@ -99,6 +105,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "provision-credentials";
                 case PreflightOperationKind.ResolveHost:
                     return "resolve-host";
+                case PreflightOperationKind.ProvisionConnectionOptions:
+                    return "provision-connection-options";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }
