@@ -7,10 +7,10 @@ export interface ChunkMessage {
 
 export interface SegmentStartedMessage {
   type: 'segment-started';
-  codec: 'vp8';
+  codec: 'vp8' | 'vp9';
   sequence: number;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
 }
 
 export interface ErrorMessage {
@@ -41,6 +41,17 @@ export function parseServerMessage(buffer: ArrayBuffer): ServerMessage {
 
   if (typeCode === 1) {
     const metadata = parseJsonPayload(buffer);
+    if (metadata.sequence === undefined && metadata.width === undefined && metadata.height === undefined) {
+      if (metadata.codec !== 'vp8' && metadata.codec !== 'vp9') {
+        throw new Error('Unsupported stream codec');
+      }
+      return {
+        type: 'segment-started',
+        codec: metadata.codec,
+        sequence: 0,
+      };
+    }
+
     if (metadata.codec !== 'vp8') {
       throw new Error('Unsupported stream codec');
     }

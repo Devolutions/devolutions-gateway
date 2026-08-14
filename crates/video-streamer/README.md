@@ -53,6 +53,8 @@ Server messages:
 
 `Start` requests the first `Segment started` message.
 Each `Pull` requests exactly one later server message.
+For legacy one-segment clients, the server accepts one `Pull` sent immediately after `Start` and applies it after the first `Segment started` response.
+All later requests remain sequential.
 The next `Segment started` message ends the previous segment implicitly.
 `Stream ended` ends the final segment and the session.
 

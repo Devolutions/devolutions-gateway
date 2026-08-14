@@ -43,15 +43,21 @@ where
     tokio::pin!(segments);
     let mut expected = ClientMessage::Start;
     let mut segment_state = SegmentState::AwaitingBegin;
+    let mut buffered_request = None;
 
     loop {
-        let Some(message) = transport.next().await else {
-            return Ok(());
+        let message = if let Some(message) = buffered_request.take() {
+            Ok(message)
+        } else {
+            let Some(message) = transport.next().await else {
+                return Ok(());
+            };
+            let message = message
+                .map_err(anyhow::Error::new)
+                .context("read client stream message")?;
+            decode_client_message(&message)
         };
-        let message = message
-            .map_err(anyhow::Error::new)
-            .context("read client stream message")?;
-        let message = match decode_client_message(&message) {
+        let message = match message {
             Ok(message) if message == expected => message,
             Ok(_) | Err(_) => {
                 let _ =
@@ -60,8 +66,18 @@ where
             }
         };
 
-        let response = match wait_for_response(&mut transport, segments.as_mut(), &mut segment_state).await {
-            Ok(Some(response)) => response,
+        let response = match wait_for_response(
+            &mut transport,
+            segments.as_mut(),
+            &mut segment_state,
+            message == ClientMessage::Start,
+        )
+        .await
+        {
+            Ok(Some((response, next_request))) => {
+                buffered_request = next_request;
+                response
+            }
             Ok(None) => return Ok(()),
             Err(error) => {
                 let _ =
@@ -136,21 +152,37 @@ enum SegmentState {
 
 async fn wait_for_response<T, S, E>(
     transport: &mut T,
-    segments: Pin<&mut S>,
+    mut segments: Pin<&mut S>,
     state: &mut SegmentState,
-) -> anyhow::Result<Option<ServerMessage>>
+    allow_pipelined_pull: bool,
+) -> anyhow::Result<Option<(ServerMessage, Option<ClientMessage>)>>
 where
     T: Stream<Item = Result<Bytes, E>> + Unpin,
     S: Stream<Item = anyhow::Result<SegmentEvent>>,
     E: Error + Send + Sync + 'static,
 {
-    tokio::select! {
-        response = next_segment_message(segments, state) => response,
-        message = transport.next() => match message {
-            None => Ok(None),
-            Some(Ok(_)) => anyhow::bail!("client sent another request before receiving a response"),
-            Some(Err(error)) => Err(anyhow::Error::new(error).context("read client stream message")),
-        },
+    let mut buffered_request = None;
+
+    loop {
+        tokio::select! {
+            response = next_segment_message(segments.as_mut(), state) => {
+                return response.map(|response| response.map(|message| (message, buffered_request)));
+            }
+            message = transport.next() => match message {
+                None => return Ok(None),
+                Some(Ok(message)) => {
+                    let message = decode_client_message(&message).context("decode pipelined client request")?;
+                    if allow_pipelined_pull && buffered_request.is_none() && message == ClientMessage::Pull {
+                        buffered_request = Some(message);
+                    } else {
+                        anyhow::bail!("client sent another request before receiving a response");
+                    }
+                }
+                Some(Err(error)) => {
+                    return Err(anyhow::Error::new(error).context("read client stream message"));
+                }
+            },
+        }
     }
 }
 
@@ -286,5 +318,33 @@ mod tests {
                 .expect("stream end"),
             Some(ServerMessage::StreamEnded)
         );
+    }
+
+    #[tokio::test]
+    async fn start_response_buffers_one_pipelined_pull() {
+        let mut transport = stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"\x01"))]);
+        let segments = stream::once(async {
+            tokio::task::yield_now().await;
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            }))
+        });
+        tokio::pin!(segments);
+        let mut state = SegmentState::AwaitingBegin;
+
+        let response = wait_for_response(&mut transport, segments.as_mut(), &mut state, true)
+            .await
+            .expect("wait for start response")
+            .expect("segment response");
+
+        assert!(matches!(
+            response,
+            (
+                ServerMessage::SegmentStarted(SegmentInfo { sequence: 0, .. }),
+                Some(ClientMessage::Pull)
+            )
+        ));
     }
 }
