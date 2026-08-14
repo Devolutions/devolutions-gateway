@@ -929,8 +929,7 @@ dependencies = [
 [[package]]
 name = "cadeau"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abc663bd17ad2e21ad335c0d2c3fd51b341113c4165b8b5cc078dd15b97f3f9"
+source = "git+https://github.com/Devolutions/cadeau?rev=d990b0a96e60226f5107e7838dde2487139c2207#d990b0a96e60226f5107e7838dde2487139c2207"
 dependencies = [
  "xmf-sys",
 ]
@@ -8572,6 +8571,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "bytes 1.12.1",
  "cadeau",
  "criterion",
  "ebml-iterable",
@@ -9522,8 +9522,7 @@ dependencies = [
 [[package]]
 name = "xmf-sys"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe719e326e963b00276c45c7d8a10567330106f48ea56ad25976b4be0e6caebc"
+source = "git+https://github.com/Devolutions/cadeau?rev=d990b0a96e60226f5107e7838dde2487139c2207#d990b0a96e60226f5107e7838dde2487139c2207"
 dependencies = [
  "dlib",
 ]
