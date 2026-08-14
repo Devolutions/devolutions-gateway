@@ -11,7 +11,7 @@
 
 export interface TargetConnectionOptions { 
     /**
-     * Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are `tcp` and `udp`.
+     * Kerberos KDC address for the target-side CredSSP connection.  Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
      */
     krb_kdc?: string | null;
 }

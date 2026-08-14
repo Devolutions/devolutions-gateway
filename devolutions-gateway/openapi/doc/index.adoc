@@ -938,6 +938,108 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.pullRecordingSession]
+==== pullRecordingSession
+
+`GET /jet/jrec/pull/{id}`
+
+Downloads an entire recorded session as a ZIP archive
+
+===== Description
+
+The archive always contains `recording.json` and every clip listed in that manifest that is present on disk. A single-clip session is still returned as a ZIP so callers can use one download contract for every recording.
+
+
+// markup not found, no include::{specDir}jet/jrec/pull/\{id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `jrec_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| id
+| Recorded session ID 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+
+<<File>>
+
+
+===== Content Type
+
+* application/zip
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| ZIP archive containing the recording session
+|  <<File>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| Recording not found
+|  <<>>
+
+
+| 413
+| Recording package exceeds download size or file-count limits
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/pull/\{id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Jrl]
 === Jrl
 
@@ -4323,7 +4425,7 @@ Current auto-update schedule for Devolutions Agent.
 | 
 |  <<PreflightOperationKind>>  
 | 
-|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, provision-token, provision-credentials, provision-connection-options, resolve-host,  
+|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, provision-token, provision-credentials, resolve-host, provision-connection-options,  
 
 | proxy_credential
 | 
@@ -4376,8 +4478,8 @@ Current auto-update schedule for Devolutions Agent.
 | get-recording-storage-health
 | provision-token
 | provision-credentials
-| provision-connection-options
 | resolve-host
+| provision-connection-options
 
 |===
 
@@ -4877,7 +4979,7 @@ Subscriber configuration
 | 
 | X
 |   String  
-| Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are `tcp` and `udp`.
+| Kerberos KDC address for the target-side CredSSP connection.  Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
 |     
 
 |===

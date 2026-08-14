@@ -36,16 +36,16 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="TargetConnectionOptions" /> class.
         /// </summary>
-        /// <param name="krbKdc">Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;..</param>
+        /// <param name="krbKdc">Kerberos KDC address for the target-side CredSSP connection.  Format: &#x60;&lt;scheme&gt;://&lt;host&gt;:&lt;port&gt;&#x60; (port is required). Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;..</param>
         public TargetConnectionOptions(string krbKdc = default(string))
         {
             this.KrbKdc = krbKdc;
         }
 
         /// <summary>
-        /// Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;.
+        /// Kerberos KDC address for the target-side CredSSP connection.  Format: &#x60;&lt;scheme&gt;://&lt;host&gt;:&lt;port&gt;&#x60; (port is required). Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;.
         /// </summary>
-        /// <value>Kerberos KDC address for the target-side CredSSP connection.  Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;.</value>
+        /// <value>Kerberos KDC address for the target-side CredSSP connection.  Format: &#x60;&lt;scheme&gt;://&lt;host&gt;:&lt;port&gt;&#x60; (port is required). Supported schemes are &#x60;tcp&#x60; and &#x60;udp&#x60;.</value>
         [DataMember(Name = "krb_kdc", EmitDefaultValue = true)]
         public string KrbKdc { get; set; }
 

@@ -103,10 +103,10 @@ namespace Devolutions.Gateway.Client.Model
                     return "provision-token";
                 case PreflightOperationKind.ProvisionCredentials:
                     return "provision-credentials";
-                case PreflightOperationKind.ProvisionConnectionOptions:
-                    return "provision-connection-options";
                 case PreflightOperationKind.ResolveHost:
                     return "resolve-host";
+                case PreflightOperationKind.ProvisionConnectionOptions:
+                    return "provision-connection-options";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }

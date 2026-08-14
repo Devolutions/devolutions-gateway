@@ -2034,7 +2034,7 @@ components:
           nullable: true
         krb_kdc:
           type: string
-          description: Kerberos KDC address (`<scheme>://<host>:<port>`; port required). Supported schemes: tcp, udp.
+          description: |-
             Kerberos KDC address.
 
             E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`.
@@ -2153,10 +2153,10 @@ components:
       properties:
         krb_kdc:
           type: string
-          description: Kerberos KDC address (`<scheme>://<host>:<port>`; port required). Supported schemes: tcp, udp.
+          description: |-
             Kerberos KDC address for the target-side CredSSP connection.
 
-            Supported schemes are `tcp` and `udp`.
+            Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
           nullable: true
     TrafficEventResponse:
       type: object
