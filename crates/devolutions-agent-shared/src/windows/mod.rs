@@ -1,5 +1,6 @@
 mod reversed_hex_uuid;
 
+pub mod code_signing;
 pub mod registry;
 
 use uuid::{Uuid, uuid};

@@ -19,6 +19,10 @@ thiserror = "2"
 tracing = "0.1"
 
 [target.'cfg(windows)'.dependencies]
+anyhow = "1"
+hex = "0.4"
+win-api-wrappers = { path = "../win-api-wrappers" }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 windows-registry = "0.5"
 # Required for `windows-registry` error type. (`Error` is not reexported from `windows-registry`).
 windows-result = "0.3"
