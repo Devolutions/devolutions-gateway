@@ -646,20 +646,15 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
-          ./ci/install-chocolatey-package.ps1 `
-            -Package wixtoolset `
-            -Version 3.14.0 `
-            -AdditionalArguments @('--allow-downgrade', '--force')
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
 
-          $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
-          if (-not (Test-Path (Join-Path $WixBinPath 'candle.exe'))) {
-            throw "WiX installation is missing candle.exe at $WixBinPath"
-          }
-          Write-Output $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Output "WIXSHARP_WIXDIR=$WixBinPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # WiX is installed on Windows runners but not in the PATH
+          Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          ./ci/install-chocolatey-package.ps1 -Package nasm
+          choco install nasm
 
           # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
           Install-Module VsDevShell -Force
@@ -914,23 +909,18 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
-          ./ci/install-chocolatey-package.ps1 `
-            -Package wixtoolset `
-            -Version 3.14.0 `
-            -AdditionalArguments @('--allow-downgrade', '--force')
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # Devolutions PEDM needs MakeAppx.exe
           Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
-          if (-not (Test-Path (Join-Path $WixBinPath 'candle.exe'))) {
-            throw "WiX installation is missing candle.exe at $WixBinPath"
-          }
-          Write-Output $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Output "WIXSHARP_WIXDIR=$WixBinPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # WiX is installed on Windows runners but not in the PATH
+          Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          ./ci/install-chocolatey-package.ps1 -Package nasm
+          choco install nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
