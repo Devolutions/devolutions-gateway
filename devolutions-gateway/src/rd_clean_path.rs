@@ -17,7 +17,7 @@ const PCB_TRANSMIT_DEADLINE: Duration = Duration::from_secs(10);
 
 use crate::config::Conf;
 use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
-use crate::provisioning::ProvisioningStore;
+use crate::provisioning::{MappingStatus, ProvisioningStore};
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
@@ -484,6 +484,11 @@ async fn handle_with_credential_injection(
         .proxy_auth
         .clone()
         .context("missing token in RDCleanPath PDU")?;
+    anyhow::ensure!(
+        provisioning.mapping_status(claims.jti) != MappingStatus::Consumed,
+        "credential-injection material for {} was already consumed; re-provision to retry",
+        claims.jti,
+    );
 
     // Connect before checkout so a target connect failure does not consume one-shot credentials.
     let ConnectedRdpServer {
@@ -496,15 +501,17 @@ async fn handle_with_credential_injection(
         .context("RDCleanPath connection failed")?;
     let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
 
-    let entry = provisioning
-        .take(claims.jti)
-        .context("provisioned credentials missing after authorization")?;
-    anyhow::ensure!(entry.mapping.is_some(), "provisioned entry has no credential mapping");
-    anyhow::ensure!(token == entry.token, "token mismatch");
-
-    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(&conf);
-    let credential_injection = CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
-        .register_if_kerberos(synthetic_kdc_registry);
+    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
+        conf.debug.enable_unstable,
+        conf.debug.kerberos_credential_injection,
+    );
+    let credential_injection = CredentialInjection::checkout(
+        provisioning,
+        synthetic_kdc_registry,
+        claims.jti,
+        &token,
+        kerberos_enabled,
+    )?;
 
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
         gateway_hostname,
@@ -615,10 +622,13 @@ pub async fn handle(
         .context("missing token in RDCleanPath PDU")?;
 
     // If a credential mapping has been pushed, switch to proxy-based credential injection.
-    // Peek only here — take after authorize + server connect so an unverified token cannot
-    // burn a victim JTI, and a failed target connect does not consume the one-shot entry.
+    // Peek here without consuming.
+    // Checkout happens after authorization and target connection to protect the JTI from invalid requests and failures.
     if let Some(jti) = crate::token::extract_jti(token).ok()
-        && provisioning.has_mapping(jti)
+        && matches!(
+            provisioning.mapping_status(jti),
+            MappingStatus::Available | MappingStatus::Consumed
+        )
     {
         // VMConnect needs pre-X.224 CredSSP against the Hyper-V host cert on the client.
         // Proxy CredSSP MITM is X.224-first and is not supported for this ordering.

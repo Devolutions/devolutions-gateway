@@ -9,7 +9,7 @@ use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
 use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
-use crate::provisioning::ProvisioningStore;
+use crate::provisioning::{MappingStatus, ProvisioningStore};
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -146,50 +146,66 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
-                // RDP credential injection: peek for a mapping first so token-only provision rows are not
-                // consumed. take() is one-shot after the injection path is chosen.
-                if is_rdp && provisioning.has_mapping(claims.jti) {
-                    let entry = provisioning
-                        .take(claims.jti)
-                        .context("provisioned credentials missing after has_mapping")?;
-                    anyhow::ensure!(entry.mapping.is_some(), "provisioned entry has no credential mapping");
-                    anyhow::ensure!(token == entry.token, "token mismatch");
-                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(&conf);
-                    let credential_injection =
-                        CredentialInjection::from_provisioned(claims.jti, entry, kerberos_enabled)?
-                            .register_if_kerberos(&synthetic_kdc_registry);
+                // Peek first so token-only provision rows are not consumed.
+                // Fail explicitly for consumed mappings instead of silently downgrading.
+                let mapping_status = if is_rdp {
+                    provisioning.mapping_status(claims.jti)
+                } else {
+                    MappingStatus::Absent
+                };
+                match mapping_status {
+                    MappingStatus::Consumed => {
+                        anyhow::bail!(
+                            "credential-injection material for {} was already consumed; re-provision to retry",
+                            claims.jti
+                        );
+                    }
+                    MappingStatus::Absent => {}
+                    MappingStatus::Available => {
+                        let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
+                            conf.debug.enable_unstable,
+                            conf.debug.kerberos_credential_injection,
+                        );
+                        let credential_injection = CredentialInjection::checkout(
+                            &provisioning,
+                            &synthetic_kdc_registry,
+                            claims.jti,
+                            token,
+                            kerberos_enabled,
+                        )?;
 
-                    info!(
-                        jti = %credential_injection.jti(),
-                        kerberos = credential_injection.uses_kerberos(),
-                        "RDP-TLS forwarding with credential injection"
-                    );
+                        info!(
+                            jti = %credential_injection.jti(),
+                            kerberos = credential_injection.uses_kerberos(),
+                            "RDP-TLS forwarding with credential injection"
+                        );
 
-                    let kdc_connector = crate::kdc_connector::KdcConnector::new(
-                        claims.jet_aid,
-                        claims.jet_agent_id,
-                        agent_tunnel_handle.clone(),
-                    );
+                        let kdc_connector = crate::kdc_connector::KdcConnector::new(
+                            claims.jet_aid,
+                            claims.jet_agent_id,
+                            agent_tunnel_handle.clone(),
+                        );
 
-                    // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
-                    return crate::rdp_proxy::RdpProxy::builder()
-                        .conf(conf)
-                        .session_info(info)
-                        .client_addr(client_addr)
-                        .client_stream(client_stream)
-                        .server_addr(server_addr)
-                        .server_stream(server_stream)
-                        .sessions(sessions)
-                        .subscriber_tx(subscriber_tx)
-                        .credential_injection(credential_injection)
-                        .client_stream_leftover_bytes(leftover_bytes)
-                        .server_dns_name(selected_target.host().to_owned())
-                        .disconnect_interest(disconnect_interest)
-                        .kdc_connector(kdc_connector)
-                        .build()
-                        .run()
-                        .await
-                        .context("encountered a failure during RDP proxying (credential injection)");
+                        // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
+                        return crate::rdp_proxy::RdpProxy::builder()
+                            .conf(conf)
+                            .session_info(info)
+                            .client_addr(client_addr)
+                            .client_stream(client_stream)
+                            .server_addr(server_addr)
+                            .server_stream(server_stream)
+                            .sessions(sessions)
+                            .subscriber_tx(subscriber_tx)
+                            .credential_injection(credential_injection)
+                            .client_stream_leftover_bytes(leftover_bytes)
+                            .server_dns_name(selected_target.host().to_owned())
+                            .disconnect_interest(disconnect_interest)
+                            .kdc_connector(kdc_connector)
+                            .build()
+                            .run()
+                            .await
+                            .context("encountered a failure during RDP proxying (credential injection)");
+                    }
                 }
 
                 info!("Upstream forwarding");

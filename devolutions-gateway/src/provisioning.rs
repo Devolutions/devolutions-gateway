@@ -51,6 +51,19 @@ struct CredentialsEntry {
     expires_at: time::OffsetDateTime,
 }
 
+#[derive(Debug, Default)]
+struct CredentialsState {
+    entries: HashMap<Uuid, CredentialsEntry>,
+    consumed: HashMap<Uuid, time::OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MappingStatus {
+    Available,
+    Consumed,
+    Absent,
+}
+
 #[derive(Debug, Clone)]
 struct ConnectionOptionsEntry {
     connection_options: TargetConnectionOptions,
@@ -68,7 +81,7 @@ struct ConnectionOptionsEntry {
 /// operations and may arrive, expire, or be replaced independently.
 #[derive(Debug, Clone)]
 pub struct ProvisioningStore {
-    credentials: Arc<Mutex<HashMap<Uuid, CredentialsEntry>>>,
+    credentials: Arc<Mutex<CredentialsState>>,
     connection_options: Arc<Mutex<HashMap<Uuid, ConnectionOptionsEntry>>>,
 }
 
@@ -81,7 +94,7 @@ impl Default for ProvisioningStore {
 impl ProvisioningStore {
     pub fn new() -> Self {
         Self {
-            credentials: Arc::new(Mutex::new(HashMap::new())),
+            credentials: Arc::new(Mutex::new(CredentialsState::default())),
             connection_options: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -111,7 +124,9 @@ impl ProvisioningStore {
             expires_at: time::OffsetDateTime::now_utc() + time_to_live,
         };
 
-        Ok(self.credentials.lock().insert(jti, entry).is_some())
+        let mut credentials = self.credentials.lock();
+        credentials.consumed.remove(&jti);
+        Ok(credentials.entries.insert(jti, entry).is_some())
     }
 
     /// Insert or replace the connection-options half. Returns whether a prior entry was replaced.
@@ -129,38 +144,44 @@ impl ProvisioningStore {
         self.connection_options.lock().insert(jti, entry).is_some()
     }
 
-    /// True when the credentials half is live and carries an injection mapping.
+    /// State of the credential-injection mapping for `jti`.
     ///
-    /// Does not consume the entry — use before auth when deciding whether to take the
-    /// credential-injection path.
-    pub(crate) fn has_mapping(&self, jti: Uuid) -> bool {
+    /// Does not consume the entry.
+    /// A consumed tombstone remains until the original provisioning expiry.
+    /// This makes reconnects fail explicitly instead of silently falling back to non-injected forwarding.
+    pub(crate) fn mapping_status(&self, jti: Uuid) -> MappingStatus {
         let now = time::OffsetDateTime::now_utc();
-        let entries = self.credentials.lock();
-        match entries.get(&jti) {
-            Some(entry) if now < entry.expires_at => entry.mapping.is_some(),
-            _ => false,
+        let mut credentials = self.credentials.lock();
+
+        if credentials
+            .consumed
+            .get(&jti)
+            .is_some_and(|expires_at| now < *expires_at)
+        {
+            return MappingStatus::Consumed;
+        }
+        credentials.consumed.remove(&jti);
+
+        match credentials.entries.get(&jti) {
+            Some(entry) if now < entry.expires_at && entry.mapping.is_some() => MappingStatus::Available,
+            _ => MappingStatus::Absent,
         }
     }
 
-    /// Take the provisioned view for a session (one-shot checkout).
-    ///
-    /// Removes the credentials half (required) and any live connection-options half for `jti`.
-    /// Returns `None` if credentials are missing or expired.
-    ///
-    /// **Contract:** injection mappings are consumed when the injection path checks them out.
-    /// They are not restored after a failed TLS/CredSSP attempt. `time_to_live` is how long the
-    /// entry may wait for that first checkout, not a retry budget. Re-provision to try again.
-    /// Callers must [`Self::has_mapping`] (or equivalent) before taking so token-only rows are
-    /// not destroyed by unrelated RDP connections.
+    /// Test helper that takes either a token-only or mapped entry.
+    #[cfg(test)]
     pub(crate) fn take(&self, jti: Uuid) -> Option<ProvisioningEntry> {
         let now = time::OffsetDateTime::now_utc();
 
         let (token, mapping) = {
-            let mut entries = self.credentials.lock();
-            let entry = entries.remove(&jti)?;
+            let mut credentials = self.credentials.lock();
+            let entry = credentials.entries.remove(&jti)?;
             if now >= entry.expires_at {
                 warn!(%jti, "Provisioned credentials expired before the connection arrived");
                 return None;
+            }
+            if entry.mapping.is_some() {
+                credentials.consumed.insert(jti, entry.expires_at);
             }
             (entry.token, entry.mapping)
         };
@@ -178,6 +199,64 @@ impl ProvisioningStore {
         };
 
         Some(ProvisioningEntry {
+            token,
+            mapping,
+            connection_options,
+        })
+    }
+
+    /// Atomically validate and consume an injection mapping (one-shot checkout).
+    ///
+    /// The mapping is not restored after a failed TLS/CredSSP attempt.
+    /// `time_to_live` is how long it may wait for first checkout, not a retry budget.
+    /// A consumed tombstone makes subsequent attempts fail explicitly until expiry or re-provisioning.
+    pub(crate) fn take_mapping(&self, jti: Uuid, token: &str) -> anyhow::Result<ProvisioningEntry> {
+        let now = time::OffsetDateTime::now_utc();
+
+        let (token, mapping) = {
+            let mut credentials = self.credentials.lock();
+
+            if credentials
+                .consumed
+                .get(&jti)
+                .is_some_and(|expires_at| now < *expires_at)
+            {
+                anyhow::bail!("credential-injection material for {jti} was already consumed; re-provision to retry");
+            }
+            credentials.consumed.remove(&jti);
+
+            let entry = credentials
+                .entries
+                .get(&jti)
+                .context("provisioned credential-injection material is missing")?;
+            anyhow::ensure!(
+                now < entry.expires_at,
+                "provisioned credential-injection material expired"
+            );
+            anyhow::ensure!(entry.mapping.is_some(), "provisioned entry has no credential mapping");
+            anyhow::ensure!(token == entry.token, "token mismatch");
+
+            let entry = credentials
+                .entries
+                .remove(&jti)
+                .expect("entry exists while credential state lock is held");
+            credentials.consumed.insert(jti, entry.expires_at);
+            (entry.token, entry.mapping)
+        };
+
+        let connection_options = {
+            let mut entries = self.connection_options.lock();
+            match entries.remove(&jti) {
+                Some(entry) if now < entry.expires_at => Some(entry.connection_options),
+                Some(_) => {
+                    warn!(%jti, "Provisioned connection options expired before the connection arrived");
+                    None
+                }
+                None => None,
+            }
+        };
+
+        Ok(ProvisioningEntry {
             token,
             mapping,
             connection_options,
@@ -218,7 +297,10 @@ async fn cleanup_task(handle: ProvisioningStore, mut shutdown_signal: ShutdownSi
         }
 
         let now = time::OffsetDateTime::now_utc();
-        handle.credentials.lock().retain(|_, entry| now < entry.expires_at);
+        let mut credentials = handle.credentials.lock();
+        credentials.entries.retain(|_, entry| now < entry.expires_at);
+        credentials.consumed.retain(|_, expires_at| now < *expires_at);
+        drop(credentials);
         handle
             .connection_options
             .lock()
@@ -336,5 +418,73 @@ mod tests {
 
         assert!(!store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
         assert!(store.insert_connection_options(jti, options(), time::Duration::minutes(5)));
+    }
+
+    #[test]
+    fn consumed_mapping_is_explicit_until_reprovisioned() {
+        let store = ProvisioningStore::new();
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        store
+            .insert_credentials(token.clone(), Some(mapping()), time::Duration::minutes(5))
+            .expect("insert");
+
+        assert_eq!(store.mapping_status(jti), MappingStatus::Available);
+        store.take_mapping(jti, &token).expect("first checkout");
+        assert_eq!(store.mapping_status(jti), MappingStatus::Consumed);
+        let error = store.take_mapping(jti, &token).expect_err("second checkout fails");
+        assert!(format!("{error:#}").contains("already consumed"));
+
+        store
+            .insert_credentials(token, Some(mapping()), time::Duration::minutes(5))
+            .expect("re-provision");
+        assert_eq!(store.mapping_status(jti), MappingStatus::Available);
+    }
+
+    #[test]
+    fn token_mismatch_does_not_consume_mapping() {
+        let store = ProvisioningStore::new();
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        store
+            .insert_credentials(token.clone(), Some(mapping()), time::Duration::minutes(5))
+            .expect("insert");
+
+        let error = store.take_mapping(jti, "different token").expect_err("mismatch");
+        assert!(format!("{error:#}").contains("token mismatch"));
+        assert_eq!(store.mapping_status(jti), MappingStatus::Available);
+        store.take_mapping(jti, &token).expect("valid checkout");
+    }
+
+    #[test]
+    fn concurrent_mapping_checkout_has_one_winner() {
+        let store = ProvisioningStore::new();
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        store
+            .insert_credentials(token.clone(), Some(mapping()), time::Duration::minutes(5))
+            .expect("insert");
+
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let store = store.clone();
+                let token = token.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.take_mapping(jti, &token)
+                })
+            })
+            .collect();
+        barrier.wait();
+
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("thread"))
+            .collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let error = results.into_iter().find_map(Result::err).expect("one failure");
+        assert!(format!("{error:#}").contains("already consumed"));
     }
 }

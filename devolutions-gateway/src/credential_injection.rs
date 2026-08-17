@@ -24,9 +24,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::credential::{AppCredential, AppCredentialMapping};
-use crate::provisioning::ProvisioningEntry;
-#[cfg(test)]
-use crate::provisioning::ProvisioningStore;
+use crate::provisioning::{ProvisioningEntry, ProvisioningStore};
 
 // The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
 // never leave the process: `intercept_network_request` recognises this hostname and dispatches
@@ -49,26 +47,6 @@ pub(crate) struct CredentialInjectionKdc {
     acceptor_long_term_key: SecretBox<Vec<u8>>,
     // Built once from acceptor + proxy material; kdc crate API takes this by ref on each message.
     kdc_config: kdc::config::KerberosServer,
-}
-
-#[derive(Debug, Error)]
-pub(crate) enum CredentialInjectionKdcResolveError {
-    #[error("credential-injection state is not available for {jti}")]
-    NonInjectionCredential { jti: Uuid },
-    #[error("association token for {jti} is not valid for credential injection")]
-    InvalidAssociationToken {
-        jti: Uuid,
-        #[source]
-        source: anyhow::Error,
-    },
-    #[error("credential-injection KDC config could not be initialized for {jti}")]
-    BuildKdcConfig {
-        jti: Uuid,
-        #[source]
-        source: anyhow::Error,
-    },
-    #[error("Kerberos credential injection requires target connection option krb_kdc for {jti}")]
-    MissingKrbKdc { jti: Uuid },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -170,6 +148,19 @@ impl NtlmCredentialInjection {
 }
 
 impl CredentialInjection {
+    pub(crate) fn checkout(
+        provisioning: &ProvisioningStore,
+        registry: &SyntheticKdcRegistry,
+        jti: Uuid,
+        token: &str,
+        kerberos_enabled: bool,
+    ) -> anyhow::Result<Self> {
+        let entry = provisioning
+            .take_mapping(jti, token)
+            .with_context(|| format!("checkout credential-injection material for {jti}"))?;
+        Ok(Self::from_provisioned(jti, entry, kerberos_enabled)?.register_if_kerberos(registry))
+    }
+
     pub(crate) fn jti(&self) -> Uuid {
         match self {
             Self::Kerberos(k, _) => k.synthetic.jti(),
@@ -210,26 +201,17 @@ impl CredentialInjection {
         jti: Uuid,
         credential_entry: ProvisioningEntry,
         kerberos_enabled: bool,
-    ) -> Result<PreparedCredentialInjection, CredentialInjectionKdcResolveError> {
+    ) -> anyhow::Result<PreparedCredentialInjection> {
         let ProvisioningEntry {
             token,
             mapping,
             connection_options,
         } = credential_entry;
 
-        let mapping = mapping.ok_or_else(|| {
-            warn!(%jti, "Credential-injection state has no mapping");
-            CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
-        })?;
+        let mapping = mapping.context("credential-injection state has no mapping")?;
 
-        let target_hostname = crate::token::extract_credential_injection_target_hostname(&token).map_err(|source| {
-            warn!(
-                %jti,
-                error = format!("{source:#}"),
-                "Invalid credential-injection association token"
-            );
-            CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
-        })?;
+        let target_hostname = crate::token::extract_credential_injection_target_hostname(&token)
+            .with_context(|| format!("association token for {jti} is not valid for credential injection"))?;
 
         let target_username = app_credential_username(&mapping.target);
         if !select_kerberos_for_target(kerberos_enabled, target_username) {
@@ -240,26 +222,20 @@ impl CredentialInjection {
         }
 
         // Kerberos path: username must parse (select_kerberos_for_target already required a domain).
-        if let Err(error) = sspi::Username::parse(target_username) {
-            warn!(%jti, error = format!("{error:#}"), "Invalid target credential username");
-            return Err(CredentialInjectionKdcResolveError::BuildKdcConfig {
-                jti,
-                source: anyhow::anyhow!("invalid target credential username: {error}"),
-            });
-        }
+        sspi::Username::parse(target_username)
+            .with_context(|| format!("invalid target credential username for credential-injection session {jti}"))?;
 
         let target_kdc = connection_options
             .as_ref()
             .and_then(|o| o.krb_kdc())
             .cloned()
-            .ok_or_else(|| {
-                warn!(%jti, "Kerberos credential injection requires krb_kdc");
-                CredentialInjectionKdcResolveError::MissingKrbKdc { jti }
+            .with_context(|| {
+                format!("Kerberos credential injection requires target connection option krb_kdc for {jti}")
             })?;
 
         let proxy_username = app_credential_username(&mapping.proxy).to_owned();
         let synthetic = CredentialInjectionKdc::new(jti, target_hostname, &proxy_username, &mapping.proxy)
-            .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })?;
+            .with_context(|| format!("credential-injection KDC config could not be initialized for {jti}"))?;
 
         Ok(PreparedCredentialInjection::Kerberos(KerberosCredentialInjection {
             credential_mapping: mapping,
@@ -270,8 +246,8 @@ impl CredentialInjection {
 }
 
 /// Unstable debug opt-in for Kerberos credential injection (both legs).
-pub(crate) fn kerberos_injection_opt_in(conf: &crate::config::Conf) -> bool {
-    conf.debug.enable_unstable && conf.debug.kerberos_credential_injection
+pub(crate) fn kerberos_injection_opt_in(enable_unstable: bool, kerberos_credential_injection: bool) -> bool {
+    enable_unstable && kerberos_credential_injection
 }
 
 /// Whether target username + opt-in select Kerberos injection (otherwise NTLM).
@@ -541,8 +517,9 @@ fn random_32_bytes() -> Vec<u8> {
 /// - `/jet/KdcProxy` only looks up published entries; it never builds a KDC from
 ///   [`crate::provisioning::ProvisioningStore`].
 ///
-/// Entries are connection-scoped via [`SyntheticKdcRegistration`]. Reconnects `register` again
-/// (replace + bump generation); a late drop of an older registration is a no-op.
+/// Entries are connection-scoped via [`SyntheticKdcRegistration`] and removed when the owning session ends.
+/// Generations prevent an older session from unpublishing a replacement.
+/// Re-provisioning the same JTI can register that replacement before the older session ends.
 #[derive(Debug, Clone)]
 pub struct SyntheticKdcRegistry {
     inner: Arc<Mutex<RegistryInner>>,
@@ -551,7 +528,6 @@ pub struct SyntheticKdcRegistry {
 #[derive(Debug, Default)]
 struct RegistryInner {
     live: HashMap<Uuid, PublishedSyntheticKdc>,
-    /// Registry-wide monotonic counter (not per-JTI) so generations stay unique without leaking map entries.
     next_generation: u64,
 }
 
@@ -561,7 +537,7 @@ struct PublishedSyntheticKdc {
     kdc: Arc<CredentialInjectionKdc>,
 }
 
-/// RAII lease for a published synthetic KDC. Dropping it unpublishes only this generation.
+/// RAII lease for a published synthetic KDC.
 pub(crate) struct SyntheticKdcRegistration {
     registry: SyntheticKdcRegistry,
     jti: Uuid,
@@ -576,7 +552,7 @@ impl Drop for SyntheticKdcRegistration {
         };
         if current.generation == self.generation {
             inner.live.remove(&self.jti);
-            debug!(jti = %self.jti, generation = self.generation, "unpublished synthetic KDC");
+            debug!(jti = %self.jti, generation = self.generation, "Unpublished synthetic KDC");
         }
     }
 }
@@ -594,17 +570,13 @@ impl SyntheticKdcRegistry {
         }
     }
 
-    fn allocate_generation(inner: &mut RegistryInner) -> u64 {
-        inner.next_generation = inner.next_generation.wrapping_add(1);
-        inner.next_generation
-    }
-
     pub(crate) fn register(&self, kdc: Arc<CredentialInjectionKdc>) -> SyntheticKdcRegistration {
         let jti = kdc.jti();
         let mut inner = self.inner.lock();
-        let generation = Self::allocate_generation(&mut inner);
+        inner.next_generation = inner.next_generation.wrapping_add(1);
+        let generation = inner.next_generation;
         inner.live.insert(jti, PublishedSyntheticKdc { generation, kdc });
-        debug!(%jti, generation, "published synthetic KDC");
+        debug!(%jti, generation, "Published synthetic KDC");
         SyntheticKdcRegistration {
             registry: self.clone(),
             jti,
@@ -613,7 +585,7 @@ impl SyntheticKdcRegistry {
     }
 
     pub(crate) fn get(&self, jti: Uuid) -> Option<Arc<CredentialInjectionKdc>> {
-        self.inner.lock().live.get(&jti).map(|e| Arc::clone(&e.kdc))
+        self.inner.lock().live.get(&jti).map(|entry| Arc::clone(&entry.kdc))
     }
 }
 
@@ -696,6 +668,14 @@ mod tests {
     }
 
     #[test]
+    fn kerberos_injection_opt_in_requires_both_flags() {
+        assert!(!kerberos_injection_opt_in(false, false));
+        assert!(!kerberos_injection_opt_in(false, true));
+        assert!(!kerberos_injection_opt_in(true, false));
+        assert!(kerberos_injection_opt_in(true, true));
+    }
+
+    #[test]
     fn select_kerberos_for_target_matrix() {
         assert!(!select_kerberos_for_target(false, "user@CORP.EXAMPLE"));
         assert!(!select_kerberos_for_target(true, "Administrator"));
@@ -746,7 +726,7 @@ mod tests {
         let jti = Uuid::new_v4();
         let entry = dummy_entry(jti, "administrator@example.invalid");
         let err = CredentialInjection::from_provisioned(jti, entry, true).expect_err("kdc");
-        assert!(matches!(err, CredentialInjectionKdcResolveError::MissingKrbKdc { .. }));
+        assert!(format!("{err:#}").contains("requires target connection option krb_kdc"));
     }
 
     #[test]
@@ -819,18 +799,19 @@ mod tests {
     }
 
     #[test]
-    fn registry_replace_and_guarded_drop_keeps_successor() {
+    fn older_registration_drop_keeps_reprovisioned_successor() {
         let registry = SyntheticKdcRegistry::new();
         let jti = Uuid::new_v4();
         let first = Arc::new(dummy_kdc(jti));
-        let first_reg = registry.register(Arc::clone(&first));
+        let first_registration = registry.register(Arc::clone(&first));
         assert!(Arc::ptr_eq(&registry.get(jti).expect("first"), &first));
+
         let second = Arc::new(dummy_kdc(jti));
-        let second_reg = registry.register(Arc::clone(&second));
-        assert!(Arc::ptr_eq(&registry.get(jti).expect("second"), &second));
-        drop(first_reg);
-        assert!(Arc::ptr_eq(&registry.get(jti).expect("still second"), &second));
-        drop(second_reg);
+        let second_registration = registry.register(Arc::clone(&second));
+        drop(first_registration);
+        assert!(Arc::ptr_eq(&registry.get(jti).expect("successor"), &second));
+
+        drop(second_registration);
         assert!(registry.get(jti).is_none());
     }
 
