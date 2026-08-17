@@ -1,4 +1,4 @@
-## @devolutions/gateway-client@0.15.0
+## @devolutions/gateway-client@0.16.0
 
 Protocol-aware fine-grained relay server
 
@@ -23,7 +23,7 @@ Navigate to the folder of your consuming project and run one of next commands.
 _published:_
 
 ```
-npm install @devolutions/gateway-client@0.15.0 --save
+npm install @devolutions/gateway-client@0.16.0 --save
 ```
 
 _without publishing (not recommended):_

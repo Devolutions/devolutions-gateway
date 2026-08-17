@@ -19,12 +19,12 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use crate::broker::event_channel::{OperationEventSink, OutputStream};
-use crate::broker::executor::{
+use crate::event_channel::{OperationEventSink, OutputStream};
+use crate::executor::{
     ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, OperationCanceled, ProcessStartedCallback, tail_utf8,
 };
-use crate::broker::operation_tracker::OperationTracker;
-use crate::broker::policy_security;
+use crate::operation_tracker::OperationTracker;
+use crate::policy_security;
 
 /// How long a canceled process is given to exit after the graceful console
 /// ctrl event before it is forcefully terminated.
@@ -66,7 +66,7 @@ impl<'a> OutputCapture<'a> {
 /// stdout and stderr are redirected into two separate pipes; raw chunks are forwarded to
 /// `event_sink` (when present) as they arrive, and a tail-truncated combined copy is
 /// returned in [`ExecutionOutput`] (limited to
-/// [`crate::broker::executor::MAX_CAPTURED_OUTPUT_BYTES`]); otherwise no output is captured.
+/// [`crate::executor::MAX_CAPTURED_OUTPUT_BYTES`]); otherwise no output is captured.
 ///
 /// Returns the process exit code and (when captured) its output.
 ///

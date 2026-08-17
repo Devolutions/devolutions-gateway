@@ -8,7 +8,7 @@ use now_policy_api::{
     RuleId, Scope, ServerContext, Transport,
 };
 
-use crate::broker::operation_tracker::OperationTracker;
+use crate::operation_tracker::OperationTracker;
 
 pub(super) fn api_version() -> ApiVersion {
     API_VERSION_STR.into()
@@ -24,7 +24,7 @@ pub(super) fn server_context() -> ServerContext {
 /// Capability descriptions for every manager the broker can drive.
 ///
 /// This is the full supported set; the server filters it down to the managers actually
-/// available for the requesting user (see [`crate::broker::server::BrokerState`]).
+/// available for the requesting user (see [`crate::server::BrokerState`]).
 pub(super) fn supported_manager_capabilities() -> Vec<ManagerCapability> {
     vec![
         ManagerCapability {

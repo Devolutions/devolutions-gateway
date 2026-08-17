@@ -39,6 +39,7 @@ pub mod session;
 pub mod streaming;
 pub mod subscriber;
 pub mod target_addr;
+pub(crate) mod target_connection_options;
 pub mod tls;
 pub mod token;
 pub mod traffic_audit;

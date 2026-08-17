@@ -22,7 +22,7 @@ use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
     ProcessStartedCallback, is_canceled_error,
 };
-use crate::broker::policy_security;
+use crate::policy_security;
 
 mod privileges;
 mod process;
@@ -161,9 +161,7 @@ fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>
             .is_ok(),
         ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
         ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
-        ManagerName::Dotnet => {
-            Path::new(&crate::broker::command_builder::dotnet::trusted_dotnet_executable()).is_file()
-        }
+        ManagerName::Dotnet => Path::new(&crate::command_builder::dotnet::trusted_dotnet_executable()).is_file(),
         ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok(),
         // npm runs through the user PATH `npm` shim inside the trusted Windows PowerShell wrapper,
         // so both the shim and the host must exist.
@@ -1355,7 +1353,7 @@ mod tests {
         prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
         reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
     };
-    use crate::broker::executor::{CommandExecutor as _, ExecutionContext};
+    use crate::executor::{CommandExecutor as _, ExecutionContext};
 
     fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
         ExplicitAccess {

@@ -6,13 +6,13 @@ use anyhow::{Context as _, bail};
 use win_api_wrappers::security::crypt::{AuthenticodeSignatureStatus, authenticode_status};
 
 /// List of allowed thumbprints for Devolutions code signing certificates.
-pub(crate) const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
+pub const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "3f5202a9432d54293bdfe6f7e46adb0a6f8b3ba6",
     "8db5a43bb8afe4d2ffb92da9007d8997a4cc4e13",
     "50f753333811ff11f1920274afde3ffd4468b210",
 ];
 
-pub(crate) fn certificate_sha1_thumbprint(cert_der: &[u8]) -> anyhow::Result<[u8; 20]> {
+pub fn certificate_sha1_thumbprint(cert_der: &[u8]) -> anyhow::Result<[u8; 20]> {
     use windows::Win32::Security::Cryptography::{CALG_SHA1, CryptHashCertificate};
 
     let mut thumbprint = [0u8; 20];
@@ -39,7 +39,7 @@ pub(crate) fn certificate_sha1_thumbprint(cert_der: &[u8]) -> anyhow::Result<[u8
     Ok(thumbprint)
 }
 
-pub(crate) fn is_devolutions_certificate_thumbprint(calculated_thumbprint: &[u8; 20]) -> bool {
+pub fn is_devolutions_certificate_thumbprint(calculated_thumbprint: &[u8; 20]) -> bool {
     DEVOLUTIONS_CERT_THUMBPRINTS.iter().any(|thumbprint| {
         let mut thumbprint_bytes = [0u8; 20];
         hex::decode_to_slice(thumbprint, &mut thumbprint_bytes)
@@ -49,32 +49,32 @@ pub(crate) fn is_devolutions_certificate_thumbprint(calculated_thumbprint: &[u8;
     })
 }
 
-pub(crate) fn validate_devolutions_authenticode_signature(path: &Path) -> anyhow::Result<String> {
+pub fn validate_devolutions_authenticode_signature(path: &Path) -> anyhow::Result<String> {
     let wintrust_result = authenticode_status(path).with_context(|| {
         format!(
-            "failed to read authenticode signature for client executable '{}'",
+            "failed to read authenticode signature for executable '{}'",
             path.display()
         )
     })?;
 
     if !matches!(wintrust_result.status, AuthenticodeSignatureStatus::Valid) {
-        bail!("client executable signature is not valid: {:?}", wintrust_result.status);
+        bail!("executable signature is not valid: {:?}", wintrust_result.status);
     }
 
     let signer = wintrust_result
         .provider
         .as_ref()
         .and_then(|provider| provider.signers.first())
-        .context("client executable signature has no signer")?;
+        .context("executable signature has no signer")?;
     let signing_cert = signer
         .cert_chain
         .first()
-        .context("client executable signature has no signing certificate")?;
+        .context("executable signature has no signing certificate")?;
 
     let thumbprint = certificate_sha1_thumbprint(&signing_cert.cert.encoded)?;
     if !is_devolutions_certificate_thumbprint(&thumbprint) {
         bail!(
-            "client executable is signed with an unexpected certificate thumbprint: {}",
+            "executable is signed with an unexpected certificate thumbprint: {}",
             hex::encode(thumbprint)
         );
     }

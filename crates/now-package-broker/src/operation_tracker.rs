@@ -14,7 +14,7 @@ use now_policy_api::{EventChannel, OperationStatus, PackageRequest, ResourceId};
 use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use crate::broker::event_channel::OperationEventSink;
+use crate::event_channel::OperationEventSink;
 
 /// How long completed/failed operation results are retained for status queries.
 const RESULT_RETENTION: Duration = Duration::from_secs(5 * 60); // 5 minutes.

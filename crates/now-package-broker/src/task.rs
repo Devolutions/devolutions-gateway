@@ -8,11 +8,11 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::broker::executor::{self, CommandExecutor};
-use crate::broker::pipe::DEFAULT_PIPE_NAME;
-use crate::broker::policy_loader;
-use crate::broker::policy_watcher::{PolicyState, PolicyWatcher};
-use crate::broker::server::BrokerState;
+use crate::executor::{self, CommandExecutor};
+use crate::pipe::DEFAULT_PIPE_NAME;
+use crate::policy_loader;
+use crate::policy_watcher::{PolicyState, PolicyWatcher};
+use crate::server::BrokerState;
 
 /// Configuration for the broker task.
 #[derive(Debug, Clone)]
@@ -102,7 +102,7 @@ impl Task for BrokerTask {
             policy: RwLock::new(initial_policy),
             executor,
             pipe_name: self.config.pipe_name.clone(),
-            tracker: crate::broker::operation_tracker::OperationTracker::new(),
+            tracker: crate::operation_tracker::OperationTracker::new(),
             skip_signature_validation: self.config.skip_signature_validation,
             manager_probe_cache: Default::default(),
         });
@@ -153,7 +153,7 @@ impl Task for BrokerTask {
         let server_shutdown = shutdown.clone();
         let server_handle = tokio::spawn({
             let state = Arc::clone(&state);
-            async move { crate::broker::pipe::run_pipe_server(state, server_shutdown).await }
+            async move { crate::pipe::run_pipe_server(state, server_shutdown).await }
         });
 
         // Wait for agent shutdown signal.

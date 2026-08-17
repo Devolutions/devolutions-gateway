@@ -81,9 +81,11 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
 
     let (app, _state, _handles) = make_router()?;
 
-    // JWT payload includes `dst_hst` because credential injection requires a target hostname
-    // (fake-KDC validates TGS-REQ sname against `TERMSRV/<host>`); preflight rejects tokens without it.
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgiLCJkc3RfaHN0IjoidGFyZ2V0LmV4YW1wbGU6MzM4OSJ9.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
+    let jti = Uuid::new_v4();
+    let token = unsigned_jws(json!({
+        "jti": jti,
+        "dst_hst": "target.example:3389"
+    }))?;
 
     let op_id = Uuid::new_v4();
 
@@ -97,12 +99,12 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
     }]);
 
     let request = preflight_request(op)?;
-
-    let response = app.oneshot(request).await.unwrap();
+    let response = app.oneshot(request).await?;
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await?.to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body)?;
+
     assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[0]["operation_id"], op_id.to_string());
     assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
@@ -114,12 +116,16 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
 async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::Result<()> {
     let _guard = init_logger();
 
+    // `provision-credentials` is protocol-neutral: NTLM credential injection relies on this
+    // path even when the unstable feature flag is off.
     let config = CONFIG.replace("\"enable_unstable\": true", "\"enable_unstable\": false");
     let (app, _state, _handles) = make_router_with_config(&config)?;
 
-    // `provision-credentials` is protocol-neutral: NTLM credential injection relies on this
-    // preflight state even when the Kerberos injection path is disabled.
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgiLCJkc3RfaHN0IjoidGFyZ2V0LmV4YW1wbGU6MzM4OSJ9.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
+    let jti = Uuid::new_v4();
+    let token = unsigned_jws(json!({
+        "jti": jti,
+        "dst_hst": "target.example:3389"
+    }))?;
 
     let op_id = Uuid::new_v4();
 
@@ -132,11 +138,12 @@ async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::
         "time_to_live": 15
     }]);
 
-    let response = app.oneshot(preflight_request(op)?).await.unwrap();
+    let response = app.oneshot(preflight_request(op)?).await?;
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await?.to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body)?;
+
     assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[0]["operation_id"], op_id.to_string());
     assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
@@ -236,7 +243,11 @@ async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
 
     let (app, _state, _handles) = make_router()?;
 
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgifQ.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
+    // Same JTI twice: second provision-token replaces the stored token-only entry (master behavior).
+    let token = unsigned_jws(json!({
+        "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+        "dst_hst": "target.example:3389"
+    }))?;
 
     let op_id1 = Uuid::new_v4();
     let op_id2 = Uuid::new_v4();
@@ -263,6 +274,78 @@ async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
     assert_eq!(body[0]["kind"], "alert");
     assert!(body[0]["alert_message"].as_str().unwrap().contains("replaced"));
     assert_eq!(body[1]["kind"], "ack");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_provision_connection_options_success() -> anyhow::Result<()> {
+    let _guard = init_logger();
+
+    let (app, _state, _handles) = make_router()?;
+
+    let jti = Uuid::new_v4();
+    let token = unsigned_jws(json!({
+        "jti": jti,
+        "dst_hst": "target.example:3389"
+    }))?;
+
+    let op_id = Uuid::new_v4();
+    let op = json!([{
+        "id": op_id,
+        "kind": "provision-connection-options",
+        "token": token,
+        "connection_options": { "krb_kdc": "tcp://dc.example:88" },
+        "time_to_live": 15
+    }]);
+
+    let response = app.oneshot(preflight_request(op)?).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(body.as_array().expect("an array").len(), 1);
+    assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_provision_credentials_and_connection_options_fold() -> anyhow::Result<()> {
+    let _guard = init_logger();
+
+    let (app, _state, _handles) = make_router()?;
+
+    let jti = Uuid::new_v4();
+    let token = unsigned_jws(json!({
+        "jti": jti,
+        "dst_hst": "target.example:3389"
+    }))?;
+
+    let ops = json!([
+        {
+            "id": Uuid::new_v4(),
+            "kind": "provision-credentials",
+            "token": token,
+            "proxy_credential": { "kind": "username-password", "username": "proxy_user", "password": "secret1" },
+            "target_credential": { "kind": "username-password", "username": "target_user", "password": "secret2" },
+            "time_to_live": 15
+        },
+        {
+            "id": Uuid::new_v4(),
+            "kind": "provision-connection-options",
+            "token": token,
+            "connection_options": { "krb_kdc": "tcp://dc.example:88" },
+            "time_to_live": 15
+        }
+    ]);
+
+    let response = app.oneshot(preflight_request(ops)?).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(body.as_array().expect("an array").len(), 2);
+    assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
+    assert_eq!(body[1]["kind"], "ack", "{:?}", body[1]);
 
     Ok(())
 }

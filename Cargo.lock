@@ -1689,13 +1689,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "aws-lc-rs",
- "axum 0.8.9",
  "backoff",
  "base64 0.23.0",
  "bytes 1.12.1",
  "camino",
  "ceviche",
- "chrono",
  "ctrlc",
  "devolutions-agent-shared",
  "devolutions-gateway-task",
@@ -1707,15 +1705,10 @@ dependencies = [
  "hex",
  "hostname 0.4.2",
  "http-client-proxy",
- "hyper 1.10.1",
- "hyper-util",
  "ipnetwork",
  "ironrdp",
- "notify 7.0.0",
  "notify-debouncer-mini",
- "now-policy",
- "now-policy-api",
- "now-policy-server-template",
+ "now-package-broker",
  "parking_lot",
  "prost 0.13.5",
  "prost-types",
@@ -1723,15 +1716,12 @@ dependencies = [
  "quinn",
  "rand 0.8.7",
  "rcgen",
- "regex",
  "reqwest",
  "rustls 0.23.42",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
- "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "tap",
  "tempfile",
@@ -1740,14 +1730,11 @@ dependencies = [
  "tokio 1.52.3",
  "tokio-rustls",
  "tokio-stream",
- "tokio-util",
  "tonic 0.12.3",
  "tonic-build",
- "tower-service",
  "tracing",
  "url",
  "uuid",
- "widestring 1.2.1",
  "win-api-wrappers",
  "windows 0.61.3",
  "x509-parser",
@@ -1760,6 +1747,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
+ "hex",
  "serde",
  "serde_json",
  "tempfile",
@@ -1767,6 +1755,7 @@ dependencies = [
  "tracing",
  "uuid",
  "win-api-wrappers",
+ "windows 0.61.3",
  "windows-registry 0.5.3",
  "windows-result 0.3.4",
 ]
@@ -3764,7 +3753,7 @@ dependencies = [
  "mcp-proxy",
  "native-tls",
  "openssl",
- "openssl-probe 0.1.6",
+ "openssl-probe",
  "proxy-http",
  "proxy-socks",
  "proxy-types",
@@ -4487,7 +4476,7 @@ dependencies = [
  "libc",
  "log",
  "openssl",
- "openssl-probe 0.2.1",
+ "openssl-probe",
  "openssl-sys",
  "schannel",
  "security-framework",
@@ -4756,6 +4745,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "now-package-broker"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "devolutions-agent-shared",
+ "devolutions-gateway-task",
+ "hex",
+ "hyper 1.10.1",
+ "hyper-util",
+ "notify 7.0.0",
+ "now-policy",
+ "now-policy-api",
+ "now-policy-server-template",
+ "parking_lot",
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio 1.52.3",
+ "tokio-util",
+ "tower-service",
+ "tracing",
+ "uuid",
+ "widestring 1.2.1",
+ "win-api-wrappers",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "now-policy"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4773,9 +4797,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11808c712bda38e8cee0ec0a6902bbfe63583f475608ee6bcf8ffd848473ab06"
+checksum = "fa0817fd85c0a6b0173e2b837fa2b369be684c93c11fed1b5182284021411839"
 dependencies = [
  "chrono",
  "derive_more",
@@ -5013,12 +5037,6 @@ dependencies = [
  "quote 1.0.46",
  "syn 2.0.118",
 ]
-
-[[package]]
-name = "openssl-probe"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-probe"
@@ -6572,7 +6590,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
 dependencies = [
- "openssl-probe 0.2.1",
+ "openssl-probe",
  "rustls-pki-types",
  "schannel",
  "security-framework",

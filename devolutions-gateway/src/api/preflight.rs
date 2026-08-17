@@ -23,6 +23,7 @@ const OP_GET_RUNNING_SESSION_COUNT: &str = "get-running-session-count";
 const OP_GET_RECORDING_STORAGE_HEALTH: &str = "get-recording-storage-health";
 const OP_PROVISION_TOKEN: &str = "provision-token";
 const OP_PROVISION_CREDENTIALS: &str = "provision-credentials";
+const OP_PROVISION_CONNECTION_OPTIONS: &str = "provision-connection-options";
 const OP_RESOLVE_HOST: &str = "resolve-host";
 
 const DEFAULT_TTL: Duration = Duration::minutes(15);
@@ -47,6 +48,13 @@ struct ProvisionCredentialsParams {
     token: String,
     #[serde(flatten)]
     mapping: crate::credential::CleartextAppCredentialMapping,
+    time_to_live: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProvisionConnectionOptionsParams {
+    token: String,
+    connection_options: crate::target_connection_options::TargetConnectionOptions,
     time_to_live: Option<u32>,
 }
 
@@ -310,6 +318,8 @@ async fn handle_operation(
             });
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            // Same store path as master: provision-token inserts a token-only row (mapping=None);
+            // provision-credentials inserts with a mapping. Connection options are a separate op.
             let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
             let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
                 let ProvisionTokenParams { token, time_to_live } =
@@ -323,20 +333,7 @@ async fn handle_operation(
                 } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
                 (token, time_to_live, Some(mapping))
             };
-
-            let time_to_live = time_to_live
-                .map(i64::from)
-                .map(Duration::seconds)
-                .unwrap_or(DEFAULT_TTL);
-
-            if time_to_live > MAX_TTL {
-                return Err(PreflightError {
-                    status: PreflightAlertStatus::InvalidParams,
-                    message: format!(
-                        "provided time_to_live ({time_to_live}) is exceeding the maximum TTL duration ({MAX_TTL})"
-                    ),
-                });
-            }
+            let time_to_live = validate_time_to_live(time_to_live)?;
 
             // Provision-credentials tokens must be valid association tokens with the credential
             // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
@@ -358,27 +355,56 @@ async fn handle_operation(
                     })?;
             }
 
-            let previous_entry = credentials
-                .insert(token, mapping, time_to_live)
+            let replaced = credentials
+                .insert_credentials(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|error| match error {
                     InsertError::InvalidToken(error) => {
                         PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
                     }
-                    InsertError::Internal(_) => PreflightError::new(
+                    InsertError::CredentialEncryption(_) => PreflightError::new(
                         PreflightAlertStatus::InternalServerError,
                         "an internal error occurred".to_owned(),
                     ),
                 })?;
 
-            // `CredentialService::insert` already drops the cached Kerberos session for a
-            // replaced entry, so no explicit invalidation is needed here.
-            if previous_entry.is_some() {
+            if replaced {
                 outputs.push(PreflightOutput {
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
                         message: "an existing credential entry was replaced".to_owned(),
+                    },
+                });
+            }
+
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::Ack,
+            });
+        }
+        OP_PROVISION_CONNECTION_OPTIONS => {
+            let ProvisionConnectionOptionsParams {
+                token,
+                connection_options,
+                time_to_live,
+            } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+            let time_to_live = validate_time_to_live(time_to_live)?;
+
+            // Connection options are generic routing metadata, not credential-injection state, so
+            // they only need a JTI to key by — not the full credential-injection token shape.
+            let jti = crate::token::extract_jti(&token).map_err(|error| {
+                PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
+            })?;
+
+            let replaced = credentials.insert_connection_options(jti, connection_options, time_to_live);
+
+            if replaced {
+                outputs.push(PreflightOutput {
+                    operation_id: operation.id,
+                    kind: PreflightOutputKind::Alert {
+                        status: PreflightAlertStatus::Info,
+                        message: "existing provisioned connection options were replaced".to_owned(),
                     },
                 });
             }
@@ -422,6 +448,21 @@ async fn handle_operation(
     Ok(())
 }
 
+fn validate_time_to_live(time_to_live: Option<u32>) -> Result<Duration, PreflightError> {
+    let time_to_live = time_to_live
+        .map(i64::from)
+        .map(Duration::seconds)
+        .unwrap_or(DEFAULT_TTL);
+
+    if time_to_live > MAX_TTL {
+        return Err(PreflightError::new(
+            PreflightAlertStatus::InvalidParams,
+            format!("provided time_to_live ({time_to_live}) is exceeding the maximum TTL duration ({MAX_TTL})"),
+        ));
+    }
+
+    Ok(time_to_live)
+}
 fn from_params<T: de::DeserializeOwned>(params: serde_json::Map<String, serde_json::Value>) -> serde_json::Result<T> {
     serde_json::from_value(serde_json::Value::Object(params))
 }

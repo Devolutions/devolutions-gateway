@@ -1023,6 +1023,11 @@ The archive always contains `recording.json` and every clip listed in that manif
 | Recording not found
 |  <<>>
 
+
+| 413
+| Recording package exceeds download size or file-count limits
+|  <<>>
+
 |===
 
 
@@ -4394,6 +4399,13 @@ Current auto-update schedule for Devolutions Agent.
 |===
 | Field Name| Required| Nullable | Type| Description | Format
 
+| connection_options
+| 
+| X
+| <<TargetConnectionOptions>>    
+| 
+|     
+
 | host_to_resolve
 | 
 | X
@@ -4413,7 +4425,7 @@ Current auto-update schedule for Devolutions Agent.
 | 
 |  <<PreflightOperationKind>>  
 | 
-|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, provision-token, provision-credentials, resolve-host,  
+|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, provision-token, provision-credentials, resolve-host, provision-connection-options,  
 
 | proxy_credential
 | 
@@ -4433,14 +4445,14 @@ Current auto-update schedule for Devolutions Agent.
 | 
 | X
 |   Integer  
-| Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\" and \"provision-credentials\" kinds.
+| Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\" kinds.
 | int32    
 
 | token
 | 
 | X
 |   String  
-| The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kinds.
+| The token to be stored on the proxy-side.  Required for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\" kinds.
 |     
 
 |===
@@ -4467,6 +4479,7 @@ Current auto-update schedule for Devolutions Agent.
 | provision-token
 | provision-credentials
 | resolve-host
+| provision-connection-options
 
 |===
 
@@ -4945,6 +4958,28 @@ Subscriber configuration
 | 
 |   String  
 | HTTP URL where notification messages are to be sent
+|     
+
+|===
+
+
+
+[#TargetConnectionOptions]
+=== _TargetConnectionOptions_ 
+
+
+
+
+[.fields-TargetConnectionOptions]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| krb_kdc
+| 
+| X
+|   String  
+| Kerberos KDC address for the target-side CredSSP connection.  Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
 |     
 
 |===

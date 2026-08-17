@@ -18,11 +18,11 @@ use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, Sh
 use tracing::{info, trace, warn};
 use win_api_wrappers::identity::sid::Sid;
 
-use crate::broker::auth::PipeClient;
-use crate::broker::command_builder::build_command;
-use crate::broker::evaluator;
-use crate::broker::executor::{CommandExecutor, ExecutionContext};
-use crate::broker::operation_tracker::OperationTracker;
+use crate::auth::PipeClient;
+use crate::command_builder::build_command;
+use crate::evaluator;
+use crate::executor::{CommandExecutor, ExecutionContext};
+use crate::operation_tracker::OperationTracker;
 
 mod connection;
 mod execution;
@@ -283,7 +283,7 @@ impl BrokerState {
                 #[cfg(windows)]
                 {
                     let operation_key = operation_id.to_string();
-                    match crate::broker::event_channel::open_operation_channel(&operation_key, user_sid) {
+                    match crate::event_channel::open_operation_channel(&operation_key, user_sid) {
                         Ok((sink, descriptor)) => {
                             self.tracker
                                 .set_event_channel(&operation_key, sink.clone(), descriptor.clone());
@@ -529,7 +529,7 @@ mod tests {
     use now_policy_api as api;
 
     use super::*;
-    use crate::broker::executor::{ExecutionOutput, OperationCanceled, ProcessStartedCallback};
+    use crate::executor::{ExecutionOutput, OperationCanceled, ProcessStartedCallback};
 
     struct NoopExecutor;
 

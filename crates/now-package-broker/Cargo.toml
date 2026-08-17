@@ -1,0 +1,71 @@
+[package]
+name = "now-package-broker"
+version = "0.0.0"
+edition = "2024"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Package broker for the Devolutions Agent"
+publish = false
+
+[features]
+default = []
+# Development-only feature allowing broker client signature validation to be skipped.
+# Must never be enabled for shipped builds: without it, broker client signature validation is
+# unconditionally enforced regardless of the configuration file contents.
+dev-skip-broker-signature = []
+
+[lints]
+workspace = true
+
+# The broker is only functional on Windows; all dependencies are Windows-only
+# so the crate compiles to an empty library on other platforms.
+[target.'cfg(windows)'.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "original-uri", "matched-path"] }
+chrono = { version = "0.4", features = ["serde"] }
+devolutions-agent-shared = { path = "../devolutions-agent-shared" }
+devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+hex = "0.4"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
+notify = { version = "7", default-features = false }
+now-policy = "0.2"
+now-policy-api = { version = "0.3", features = ["policy-compat"] }
+now-policy-server-template = { version = "0.3", features = ["policy-compat"] }
+parking_lot = "0.12"
+regex = "1"
+semver = "1"
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
+tokio-util = "0.7"
+tower-service = "0.3"
+tracing = "0.1"
+uuid = { version = "1.23", features = ["v4"] }
+widestring = "1.2"
+win-api-wrappers = { path = "../win-api-wrappers" }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_ApplicationInstallationAndServicing",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[target.'cfg(windows)'.dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tempfile = "3"
+tokio = { version = "1.52", features = ["rt-multi-thread"] }

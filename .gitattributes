@@ -25,4 +25,4 @@ devolutions-gateway/openapi/ts-angular-client/api/** linguist-generated merge=bi
 devolutions-gateway/openapi/ts-angular-client/model/** linguist-generated merge=binary
 
 # Sample assets produce huge LoC counts; exclude them from language statistics.
-devolutions-agent/src/broker/assets/** linguist-generated
+crates/now-package-broker/src/assets/** linguist-generated
