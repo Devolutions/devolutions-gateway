@@ -31,6 +31,10 @@ impl PipeClient {
     /// unauthenticated work a connection flood can trigger.
     pub(crate) fn from_connected_pipe(server: &NamedPipeServer) -> anyhow::Result<Self> {
         let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
+        Self::from_process_id(process_id)
+    }
+
+    fn from_process_id(process_id: u32) -> anyhow::Result<Self> {
         let process = Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION)
             .with_context(|| format!("failed to open pipe client process {process_id}"))?;
         let executable_path = process
@@ -50,6 +54,11 @@ impl PipeClient {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_current_process() -> anyhow::Result<Self> {
+        Self::from_process_id(std::process::id())
+    }
+
     /// Security identifier of the authenticated pipe client user, captured at connect.
     pub(crate) fn user_sid(&self) -> &Sid {
         &self.user_sid
@@ -61,7 +70,7 @@ impl PipeClient {
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
         self.validate_client_context(&request.client)?;
-        self.validate_signature(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)
     }
 
     pub(crate) fn validate_status_request(
@@ -70,7 +79,7 @@ impl PipeClient {
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
         self.validate_client_context(&request.client)?;
-        self.validate_signature(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)
     }
 
     pub(crate) fn validate_cancel_request(
@@ -79,7 +88,7 @@ impl PipeClient {
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
         self.validate_client_context(&request.client)?;
-        self.validate_signature(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)
     }
 
     fn validate_client_context(&self, client: &ClientContext) -> anyhow::Result<()> {
@@ -87,7 +96,7 @@ impl PipeClient {
         self.validate_executable_path(&client.client_executable_path)
     }
 
-    fn validate_signature(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
+    pub(crate) fn validate_connection(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
         if signature_validation_skipped(skip_signature_validation) {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());
@@ -364,7 +373,7 @@ mod tests {
                 user_sid: client_user_sid(),
             };
 
-            assert!(client.validate_signature(true).is_err());
+            assert!(client.validate_connection(true).is_err());
         }
     }
 
