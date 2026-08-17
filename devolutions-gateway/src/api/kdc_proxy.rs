@@ -183,10 +183,9 @@ mod tests {
 
     #[test]
     fn enforce_realm_mismatch_passes_under_bypass() {
-        // `bypass=true` is the `__debug__.disable_token_validation` downgrade. CBenoit asked
-        // for explicit coverage of this branch because it is the only place the realm
-        // authorization is intentionally weakened, and slipping the gate (e.g. by inverting the
-        // condition) would only surface in production.
+        // `bypass=true` is the `__debug__.disable_token_validation` downgrade.
+        // This is the only branch where realm authorization is intentionally weakened, so pin it
+        // explicitly to catch an inverted gate.
         assert!(enforce_realm_token_match("ad.example", "evil.example", true).is_ok());
     }
 

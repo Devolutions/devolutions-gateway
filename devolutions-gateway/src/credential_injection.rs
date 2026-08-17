@@ -323,6 +323,11 @@ impl CredentialInjectionKdc {
     }
 
     /// Session destination host from association `dst_hst` (not Gateway `conf.hostname`).
+    ///
+    /// Supported clients retain this logical destination when forming their `TERMSRV` SPN, even
+    /// when the transport endpoint is a Gateway listener.
+    /// Clients that derive the SPN from the Gateway transport hostname are not supported by the
+    /// unstable Kerberos credential-injection path.
     pub(crate) fn target_hostname(&self) -> &str {
         &self.target_hostname
     }
