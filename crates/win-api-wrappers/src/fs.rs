@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::fs::File;
-use std::io;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 
