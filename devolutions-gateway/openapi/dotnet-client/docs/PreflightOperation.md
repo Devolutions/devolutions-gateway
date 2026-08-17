@@ -10,7 +10,8 @@ Name | Type | Description | Notes
 **Kind** | **PreflightOperationKind** |  | 
 **ProxyCredential** | [**AppCredential**](AppCredential.md) |  | [optional] 
 **TargetCredential** | [**AppCredential**](AppCredential.md) |  | [optional] 
-**TimeToLive** | **int?** | How long provisioned data may wait for first use, in seconds.  Optional for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot;. Credential-injection mappings are consumed once when a session starts and are not restored after a failed attempt. Re-provision to retry. | [optional]
+**TimeToLive** | **int?** | Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds. | [optional] 
 **Token** | **string** | The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds. | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+

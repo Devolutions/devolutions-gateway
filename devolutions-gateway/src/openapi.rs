@@ -393,13 +393,10 @@ struct PreflightOperation {
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
-    /// How long provisioned data may wait for first use, in seconds.
+    /// Minimum persistence duration in seconds for the data provisioned via this operation.
     ///
-    /// Optional for "provision-token", "provision-credentials", and
-    /// "provision-connection-options".
-    /// Credential-injection mappings are consumed once when a session starts and are not restored
-    /// after a failed attempt.
-    /// Re-provision to retry.
+    /// Optional parameter for "provision-token", "provision-credentials", and
+    /// "provision-connection-options" kinds.
     time_to_live: Option<u32>,
 }
 

@@ -26,7 +26,7 @@ export interface PreflightOperation {
     proxy_credential?: AppCredential | null;
     target_credential?: AppCredential | null;
     /**
-     * How long provisioned data may wait for first use, in seconds.  Optional for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\". Credential-injection mappings are consumed once when a session starts and are not restored after a failed attempt. Re-provision to retry.
+     * Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\" kinds.
      */
     time_to_live?: number | null;
     /**
