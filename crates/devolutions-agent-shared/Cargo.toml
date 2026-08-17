@@ -10,6 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
+anyhow = "1"
 camino = "1.1"
 cfg-if = "1"
 serde = { version = "1", features = ["derive"] }

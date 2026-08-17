@@ -94,6 +94,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.0",
  "camino",
+ "devolutions-agent-shared",
  "devolutions-gateway-task",
  "hex",
  "ipnetwork",
