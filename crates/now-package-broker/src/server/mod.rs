@@ -179,7 +179,7 @@ impl BrokerState {
         guard
             .as_ref()
             .map(Arc::clone)
-            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "policy file is unavailable or corrupted"))
+            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))
     }
 
     fn policy_response(&self) -> Result<PolicyResponse, ErrorResponse> {
@@ -699,7 +699,7 @@ mod tests {
         let body = response_json(response).await;
         let error: ErrorResponse = serde_json::from_value(body.clone()).expect("deserialize error response");
         assert_eq!(error.code, ErrorCode::BrokerPaused);
-        assert_eq!(error.message, "policy file is unavailable or corrupted");
+        assert_eq!(error.message, "active policy is unavailable");
         assert!(error.details.is_empty());
         assert!(body.get("Policy").is_none());
     }
