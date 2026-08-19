@@ -92,7 +92,9 @@ impl DockerEnvironment {
     fn create(repo_root: &Path) -> anyhow::Result<Self> {
         docker(["info", "--format", "{{.ServerVersion}}"])?;
 
-        let suffix = Uuid::new_v4().simple().to_string();
+        let id = Uuid::new_v4();
+        let subnet = format!("10.{}.{}.0/24", id.as_bytes()[0], id.as_bytes()[1]);
+        let suffix = id.simple().to_string();
         let mut environment = Self {
             image: format!("dgw-agent-tunnel-e2e:{suffix}"),
             network: format!("dgw-agent-tunnel-e2e-{suffix}"),
@@ -117,7 +119,15 @@ impl DockerEnvironment {
             repo_root.as_os_str(),
         ])?;
 
-        docker(["network", "create", "--driver", "bridge", &environment.network])?;
+        docker([
+            "network",
+            "create",
+            "--driver",
+            "bridge",
+            "--subnet",
+            &subnet,
+            &environment.network,
+        ])?;
         let subnet: Ipv4Network = docker_stdout([
             "network",
             "inspect",
