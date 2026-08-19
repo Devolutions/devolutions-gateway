@@ -1,326 +1,338 @@
-//! Full-stack integration test for the QUIC agent tunnel (Quinn).
-//!
-//! Verifies the full data path:
-//!   TCP echo server ← Agent (Quinn client) ← QUIC mTLS ← Gateway listener ← TunnelStream
-//!
-//! This test runs entirely in-process with real UDP sockets on localhost.
-
-use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
-use agent_tunnel::AgentTunnelListener;
-use agent_tunnel::cert::{CaManager, extract_agent_id_from_pem};
+use agent_tunnel::AgentTunnelHandle;
+use agent_tunnel::cert::extract_agent_id_from_pem;
+use agent_tunnel::registry::AgentRegistry;
 use agent_tunnel_proto::{
-    CertRenewalResult, ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, SessionStream,
+    CertRenewalResult, ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, DomainName,
 };
-use camino::Utf8PathBuf;
-use ipnetwork::Ipv4Network;
+use devolutions_gateway::target_addr::TargetAddr;
+use devolutions_gateway::upstream::{ConnectedUpstream, UpstreamLeg, connect_upstream};
+use nonempty::NonEmpty;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
 use super::common::{
-    connect_quinn_client, generate_csr_with_cn, generate_test_key_and_csr, start_echo_server, wait_for_route_advertised,
+    accept_session_request, advertise_routes, bind_test_listener, generate_csr_with_cn, start_echo_server,
+    wait_for_route_advertised,
 };
 
-/// Full E2E integration test.
-///
-/// 1. Start TCP echo server
-/// 2. Start QUIC listener (gateway, in-process)
-/// 3. Connect a simulated agent (Quinn client) with mTLS
-/// 4. Agent sends RouteAdvertise on control stream
-/// 5. Gateway opens a proxy stream via connect_via_agent
-/// 6. Agent reads ConnectRequest, connects to echo server, sends ConnectResponse::Success
-/// 7. Bidirectional data flows through the full tunnel
-/// 8. Verify echo response matches
-#[tokio::test]
-async fn quic_agent_tunnel_e2e() {
-    // ── 1. Setup certificates ──
+fn target(host: &str, port: u16) -> TargetAddr {
+    TargetAddr::from_components("tcp", host, port).expect("build target address")
+}
 
-    let temp_dir = tempfile::tempdir().expect("create tempdir");
-    let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("UTF-8 temp path");
-
-    let ca_manager = CaManager::load_or_generate(&data_dir).expect("CA generation");
-
-    let agent_id = Uuid::new_v4();
-    let (key_pair, csr_pem) = generate_test_key_and_csr("test-agent");
-    let signed = ca_manager
-        .sign_agent_csr(agent_id, "test-agent", &csr_pem, Some("localhost"))
-        .expect("sign agent CSR");
-
-    // ── 2. Start TCP echo server ──
-
-    let (echo_addr, _echo_handle) = start_echo_server().await;
-    let echo_subnet: Ipv4Network = format!("{}/32", echo_addr.ip()).parse().unwrap();
-
-    // ── 3. Start QUIC listener (gateway) ──
-
-    let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (listener, handle) = AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), "localhost")
-        .await
-        .expect("bind QUIC listener");
-
-    let server_addr = listener.local_addr();
-
-    let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
-    let listener_task = tokio::spawn(async move {
-        use devolutions_gateway_task::Task;
-        let _ = listener.run(shutdown_signal).await;
-    });
-
-    // Give listener time to be ready.
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // ── 4. Connect simulated agent (Quinn client with mTLS) ──
-
-    let connection = connect_quinn_client(
-        &signed.ca_cert_pem,
-        &signed.client_cert_pem,
-        &key_pair.serialize_pem(),
-        server_addr,
+async fn advertise_domain(
+    connection: &quinn::Connection,
+    registry: &AgentRegistry,
+    agent_id: Uuid,
+    epoch: u64,
+    domain: &str,
+) -> ControlStream<quinn::SendStream, quinn::RecvStream> {
+    advertise_routes(
+        connection,
+        registry,
+        agent_id,
+        epoch,
+        vec![],
+        vec![DomainAdvertisement {
+            domain: DomainName::new(domain),
+            auto_detected: false,
+        }],
     )
-    .await;
+    .await
+}
 
-    // ── 5. Open control stream and send RouteAdvertise ──
+async fn set_route_order(registry: &AgentRegistry, older: Uuid, newer: Uuid) {
+    registry
+        .get(&older)
+        .await
+        .expect("find older agent")
+        .set_received_at_for_test(std::time::UNIX_EPOCH + Duration::from_secs(1));
+    registry
+        .get(&newer)
+        .await
+        .expect("find newer agent")
+        .set_received_at_for_test(std::time::UNIX_EPOCH + Duration::from_secs(2));
+}
 
-    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
+async fn connect(
+    handle: AgentTunnelHandle,
+    target: TargetAddr,
+    explicit_agent_id: Option<Uuid>,
+    session_id: Uuid,
+) -> anyhow::Result<ConnectedUpstream> {
+    connect_upstream(&NonEmpty::new(target), explicit_agent_id, session_id, Some(&handle)).await
+}
 
-    let route_msg = ControlMessage::route_advertise(1, vec![echo_subnet], vec![]);
-    ctrl.send(&route_msg).await.expect("send RouteAdvertise");
+async fn assert_round_trip(mut upstream: UpstreamLeg, payload: &[u8]) {
+    upstream.write_all(payload).await.expect("write upstream payload");
+    let mut response = vec![0; payload.len()];
+    upstream
+        .read_exact(&mut response)
+        .await
+        .expect("read upstream response");
+    assert_eq!(response, payload);
+}
 
-    // Wait for the gateway to actually process the RouteAdvertise.
-    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
-
-    // Verify agent is registered.
-    assert!(
-        handle.registry().get(&agent_id).await.is_some(),
-        "agent should be registered in the registry"
-    );
-    assert_eq!(handle.registry().online_count().await, 1);
-
-    // ── 6. Gateway opens proxy stream ──
+#[tokio::test]
+async fn gateway_connect_upstream_routes_wildcard_domain_without_subnets() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("test-agent").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "*.echo.test").await;
 
     let session_id = Uuid::new_v4();
-    let target_str = echo_addr.to_string();
+    let expected_target = format!("service.echo.test:{}", echo_addr.port());
+    let handle = listener.handle.clone();
+    let connect_task = tokio::spawn(connect(
+        handle,
+        target("service.echo.test", echo_addr.port()),
+        None,
+        session_id,
+    ));
 
-    let handle_clone = handle.clone();
-    let target_clone = target_str.clone();
-    let proxy_task = tokio::spawn(async move {
-        handle_clone
-            .connect_via_agent(agent_id, session_id, &target_clone)
-            .await
-    });
+    let mut session = accept_session_request(&connection, session_id, &expected_target).await;
 
-    // ── 7. Agent accepts session stream ──
-
-    let (send, recv) = connection
-        .accept_bi()
-        .await
-        .expect("accept session stream from gateway");
-    let mut session: SessionStream<_, _> = (send, recv).into();
-
-    let connect_msg = session.recv_request().await.expect("recv ConnectRequest");
-    assert_eq!(connect_msg.session_id(), session_id);
-    assert_eq!(connect_msg.target(), target_str);
-
-    // Connect to echo server.
     let mut tcp_stream = TcpStream::connect(echo_addr).await.expect("connect to echo server");
-
-    // Send success response.
     session
         .send_response(&ConnectResponse::success())
         .await
-        .expect("send ConnectResponse::Success");
+        .expect("send connection success");
 
-    // ── 8. Wait for proxy task to complete ──
-
-    let tunnel_stream = tokio::time::timeout(Duration::from_secs(5), proxy_task)
+    let connected = tokio::time::timeout(Duration::from_secs(5), connect_task)
         .await
-        .expect("proxy task should complete in time")
-        .expect("proxy task should not panic")
-        .expect("connect_via_agent should succeed");
+        .expect("upstream connection timed out")
+        .expect("upstream task panicked")
+        .expect("connect through agent");
+    assert!(matches!(connected.leg, UpstreamLeg::Tunnel(_)));
 
-    // ── 9. Bidirectional data test ──
+    let payload = b"agent tunnel payload";
+    let (mut tunnel_read, mut tunnel_write) = tokio::io::split(connected.leg);
+    tunnel_write.write_all(payload).await.expect("write tunnel payload");
 
-    let test_data = b"Hello from the Quinn E2E integration test!";
-    let (mut quic_read, mut quic_write) = tokio::io::split(tunnel_stream);
-
-    // Gateway writes test data.
-    quic_write.write_all(test_data).await.expect("write to TunnelStream");
-
-    // Agent relays: QUIC → TCP echo → QUIC.
     let (mut session_send, mut session_recv) = session.into_inner();
-    let mut relay_buf = vec![0u8; test_data.len()];
-    session_recv
-        .read_exact(&mut relay_buf)
+    let mut relay = vec![0; payload.len()];
+    session_recv.read_exact(&mut relay).await.expect("read agent payload");
+    tcp_stream.write_all(&relay).await.expect("write echo payload");
+    tcp_stream.read_exact(&mut relay).await.expect("read echo payload");
+    session_send.write_all(&relay).await.expect("write agent response");
+
+    let mut response = vec![0; payload.len()];
+    tunnel_read
+        .read_exact(&mut response)
         .await
-        .expect("read from QUIC session stream");
-    assert_eq!(&relay_buf, test_data);
-
-    // Forward to echo server.
-    tcp_stream.write_all(&relay_buf).await.expect("write to echo server");
-
-    // Read echo response.
-    let mut echo_buf = vec![0u8; test_data.len()];
-    tcp_stream.read_exact(&mut echo_buf).await.expect("read echo response");
-    assert_eq!(&echo_buf, test_data);
-
-    // Send echo response back through QUIC.
-    session_send
-        .write_all(&echo_buf)
-        .await
-        .expect("write echo response to QUIC");
-    let _ = session_send.finish();
-
-    // Gateway reads the echoed data.
-    let mut response_buf = vec![0u8; test_data.len()];
-    quic_read
-        .read_exact(&mut response_buf)
-        .await
-        .expect("read from TunnelStream");
-    assert_eq!(&response_buf, test_data, "echo response should match");
-
-    // ── 10. Cleanup ──
+        .expect("read tunnel response");
+    assert_eq!(response, payload);
 
     connection.close(0u32.into(), b"test done");
-    shutdown_handle.signal();
-    let _ = tokio::time::timeout(Duration::from_secs(2), listener_task).await;
+    echo_task.abort();
+    listener.shutdown().await;
 }
 
-/// Domain routing E2E test.
-///
-/// Same as above but agent advertises domain "test.local" alongside subnet.
-/// Verifies domain appears in the registry.
 #[tokio::test]
-async fn quic_agent_tunnel_domain_routing_e2e() {
-    let temp_dir = tempfile::tempdir().expect("create tempdir");
-    let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("UTF-8 temp path");
+async fn gateway_connect_upstream_falls_back_to_direct_tcp_without_a_route() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("unmatched-agent").await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "unused.example").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
 
-    let ca_manager = CaManager::load_or_generate(&data_dir).expect("CA generation");
-
-    let agent_id = Uuid::new_v4();
-    let (key_pair, csr_pem) = generate_test_key_and_csr("domain-agent");
-    let signed = ca_manager
-        .sign_agent_csr(agent_id, "domain-agent", &csr_pem, Some("localhost"))
-        .expect("sign agent CSR");
-
-    let (echo_addr, _echo_handle) = start_echo_server().await;
-    let echo_subnet: Ipv4Network = format!("{}/32", echo_addr.ip()).parse().unwrap();
-
-    let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (listener, handle) = AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), "localhost")
-        .await
-        .expect("bind QUIC listener");
-
-    let server_addr = listener.local_addr();
-
-    let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
-    let listener_task = tokio::spawn(async move {
-        use devolutions_gateway_task::Task;
-        let _ = listener.run(shutdown_signal).await;
-    });
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let connection = connect_quinn_client(
-        &signed.ca_cert_pem,
-        &signed.client_cert_pem,
-        &key_pair.serialize_pem(),
-        server_addr,
+    let connected = connect(
+        listener.handle.clone(),
+        target("127.0.0.1", echo_addr.port()),
+        None,
+        Uuid::new_v4(),
     )
-    .await;
+    .await
+    .expect("connect directly");
+    assert!(matches!(connected.leg, UpstreamLeg::Tcp(_)));
+    assert_round_trip(connected.leg, b"direct payload").await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), connection.accept_bi())
+            .await
+            .is_err()
+    );
 
-    // Send RouteAdvertise with domain.
-    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
-
-    let domains = vec![DomainAdvertisement {
-        domain: agent_tunnel_proto::DomainName::new("test.local"),
-        auto_detected: false,
-    }];
-    let route_msg = ControlMessage::route_advertise(1, vec![echo_subnet], domains);
-    ctrl.send(&route_msg).await.expect("send RouteAdvertise");
-
-    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
-
-    // Verify agent + domain registered.
-    let peer = handle
-        .registry()
-        .get(&agent_id)
-        .await
-        .expect("agent should be registered");
-
-    let route_state = peer.route_state();
-    assert_eq!(route_state.domains.len(), 1);
-    assert_eq!(route_state.domains[0].domain.as_str(), "test.local");
-    assert!(!route_state.domains[0].auto_detected);
-
-    // Cleanup.
     connection.close(0u32.into(), b"test done");
-    shutdown_handle.signal();
-    let _ = tokio::time::timeout(Duration::from_secs(2), listener_task).await;
+    echo_task.abort();
+    listener.shutdown().await;
 }
 
-/// Certificate renewal E2E test.
-///
-/// Pins the security invariant introduced by #1775 review: the gateway must
-/// re-sign with the agent's mTLS-authenticated identity, never the CSR
-/// subject. Here the renewal CSR is deliberately filed under
-/// `CN=evil-impersonator` — the renewed cert's URN SAN must still encode the
-/// original `agent_id`.
 #[tokio::test]
-async fn cert_renewal_preserves_mtls_identity_e2e() {
-    let temp_dir = tempfile::tempdir().expect("create tempdir");
-    let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("UTF-8 temp path");
+async fn gateway_connect_upstream_uses_explicit_agent_without_a_matching_route() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("explicit-agent").await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "unused.example").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
+    let session_id = Uuid::new_v4();
+    let target_addr = format!("127.0.0.1:{}", echo_addr.port());
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("127.0.0.1", echo_addr.port()),
+        Some(agent_id),
+        session_id,
+    ));
 
-    let ca_manager = CaManager::load_or_generate(&data_dir).expect("CA generation");
-
-    let agent_id = Uuid::new_v4();
-    let (key_pair, csr_pem) = generate_test_key_and_csr("renewal-agent");
-    let signed = ca_manager
-        .sign_agent_csr(agent_id, "renewal-agent", &csr_pem, Some("localhost"))
-        .expect("sign initial agent CSR");
-
-    let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (listener, handle) = AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), "localhost")
+    let mut session = accept_session_request(&connection, session_id, &target_addr).await;
+    let tcp_stream = TcpStream::connect(echo_addr).await.expect("connect to echo server");
+    session
+        .send_response(&ConnectResponse::success())
         .await
-        .expect("bind QUIC listener");
-
-    let server_addr = listener.local_addr();
-
-    let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
-    let listener_task = tokio::spawn(async move {
-        use devolutions_gateway_task::Task;
-        let _ = listener.run(shutdown_signal).await;
+        .expect("send connection success");
+    let connected = connect_task
+        .await
+        .expect("upstream task panicked")
+        .expect("connect through explicit agent");
+    let relay_task = tokio::spawn(async move {
+        let (mut send, mut recv) = session.into_inner();
+        let (mut read, mut write) = tcp_stream.into_split();
+        tokio::try_join!(
+            tokio::io::copy(&mut recv, &mut write),
+            tokio::io::copy(&mut read, &mut send)
+        )
     });
+    assert_round_trip(connected.leg, b"explicit payload").await;
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    relay_task.abort();
+    connection.close(0u32.into(), b"test done");
+    echo_task.abort();
+    listener.shutdown().await;
+}
 
-    let connection = connect_quinn_client(
-        &signed.ca_cert_pem,
-        &signed.client_cert_pem,
-        &key_pair.serialize_pem(),
-        server_addr,
+#[tokio::test]
+async fn gateway_connect_upstream_tries_the_next_matching_agent() {
+    let listener = bind_test_listener().await;
+    let (fallback_id, fallback_connection) = listener.connect_agent("fallback-agent").await;
+    let _fallback_ctrl = advertise_domain(
+        &fallback_connection,
+        listener.handle.registry(),
+        fallback_id,
+        1,
+        "service.example",
     )
     .await;
+    let (first_id, first_connection) = listener.connect_agent("first-agent").await;
+    let _first_ctrl = advertise_domain(
+        &first_connection,
+        listener.handle.registry(),
+        first_id,
+        1,
+        "service.example",
+    )
+    .await;
+    set_route_order(listener.handle.registry(), fallback_id, first_id).await;
+    let session_id = Uuid::new_v4();
+    let target_addr = "service.example:443";
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("service.example", 443),
+        None,
+        session_id,
+    ));
 
+    let mut first_session = accept_session_request(&first_connection, session_id, target_addr).await;
+    first_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let mut fallback_session = accept_session_request(&fallback_connection, session_id, target_addr).await;
+    fallback_session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("send connection success");
+    let connected = connect_task
+        .await
+        .expect("upstream task panicked")
+        .expect("connect through fallback agent");
+    assert!(matches!(connected.leg, UpstreamLeg::Tunnel(_)));
+
+    first_connection.close(0u32.into(), b"test done");
+    fallback_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_does_not_bypass_failed_agent_routes() {
+    let listener = bind_test_listener().await;
+    let (first_id, first_connection) = listener.connect_agent("first-agent").await;
+    let _first_ctrl = advertise_routes(
+        &first_connection,
+        listener.handle.registry(),
+        first_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    let (second_id, second_connection) = listener.connect_agent("second-agent").await;
+    let _second_ctrl = advertise_routes(
+        &second_connection,
+        listener.handle.registry(),
+        second_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    set_route_order(listener.handle.registry(), first_id, second_id).await;
+    let direct_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
+    let target_port = direct_listener.local_addr().expect("read direct target address").port();
+    let session_id = Uuid::new_v4();
+    let target_addr = format!("127.0.0.1:{target_port}");
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("127.0.0.1", target_port),
+        None,
+        session_id,
+    ));
+
+    let mut second_session = accept_session_request(&second_connection, session_id, &target_addr).await;
+    second_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let mut first_session = accept_session_request(&first_connection, session_id, &target_addr).await;
+    first_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let error = match connect_task.await.expect("upstream task panicked") {
+        Ok(_) => panic!("all routed connections should fail"),
+        Err(error) => error,
+    };
+    assert!(format!("{error:#}").contains("connection refused"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), direct_listener.accept())
+            .await
+            .is_err()
+    );
+
+    first_connection.close(0u32.into(), b"test done");
+    second_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_listener_renews_authenticated_agent_identity() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("renewal-agent").await;
+    let expected_ca = listener.handle.ca_manager().ca_cert_pem().to_owned();
     let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
 
-    // Agent must announce routes first so the control loop is established.
-    let route_msg = ControlMessage::route_advertise(1, vec![], vec![]);
-    ctrl.send(&route_msg).await.expect("send RouteAdvertise");
-    wait_for_route_advertised(handle.registry(), agent_id, 1).await;
+    ctrl.send(&ControlMessage::route_advertise(1, vec![], vec![]))
+        .await
+        .expect("send route advertisement");
+    wait_for_route_advertised(listener.handle.registry(), agent_id, 1).await;
 
-    // Build the renewal CSR with an attacker-chosen Common Name.
-    let (_renewal_key, evil_csr_pem) = generate_csr_with_cn("evil-impersonator");
-    let renewal_msg = ControlMessage::cert_renewal_request(evil_csr_pem);
-    ctrl.send(&renewal_msg).await.expect("send CertRenewalRequest");
+    let (_, csr_pem) = generate_csr_with_cn("evil-impersonator");
+    ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+        .await
+        .expect("send renewal request");
 
     let response = tokio::time::timeout(Duration::from_secs(5), ctrl.recv())
         .await
-        .expect("renewal response within timeout")
-        .expect("decode renewal response");
-
+        .expect("renewal response timed out")
+        .expect("receive renewal response");
     let renewed_pem = match response {
         ControlMessage::CertRenewalResponse {
             result:
@@ -330,22 +342,17 @@ async fn cert_renewal_preserves_mtls_identity_e2e() {
                 },
             ..
         } => {
-            assert_eq!(
-                gateway_ca_cert_pem, signed.ca_cert_pem,
-                "renewal must echo back the same CA cert"
-            );
+            assert_eq!(gateway_ca_cert_pem, expected_ca);
             client_cert_pem
         }
-        other => panic!("expected CertRenewalResponse::Success, got {other:?}"),
+        other => panic!("expected successful renewal, got {other:?}"),
     };
 
-    let renewed_agent_id = extract_agent_id_from_pem(&renewed_pem).expect("renewed cert has urn:uuid SAN");
     assert_eq!(
-        renewed_agent_id, agent_id,
-        "renewed cert must encode the mTLS-authenticated agent_id, not the CSR subject"
+        extract_agent_id_from_pem(&renewed_pem).expect("read renewed agent identity"),
+        agent_id
     );
 
     connection.close(0u32.into(), b"test done");
-    shutdown_handle.signal();
-    let _ = tokio::time::timeout(Duration::from_secs(2), listener_task).await;
+    listener.shutdown().await;
 }

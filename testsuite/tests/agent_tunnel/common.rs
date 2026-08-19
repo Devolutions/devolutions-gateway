@@ -1,9 +1,3 @@
-//! Shared helpers for the agent-tunnel test suite.
-//!
-//! These were originally private to `integration.rs`; consolidated here so
-//! the cert-renewal E2E and the routing tests can reuse them without
-//! duplicating ~80 lines of QUIC + mTLS scaffolding per test.
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,64 +6,37 @@ use agent_tunnel::AgentTunnelHandle;
 use agent_tunnel::cert::CaManager;
 use agent_tunnel::listener::AgentTunnelListener;
 use agent_tunnel::registry::AgentRegistry;
+use agent_tunnel_proto::{ControlMessage, ControlStream, DomainAdvertisement, SessionStream};
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::ShutdownHandle;
+use ipnetwork::Ipv4Network;
 use tempfile::TempDir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-/// Start a TCP echo server that echoes back whatever it receives.
 pub(super) async fn start_echo_server() -> (SocketAddr, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let handle = tokio::spawn(async move {
-        loop {
-            let (mut stream, _) = match listener.accept().await {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-
-            tokio::spawn(async move {
-                let mut buf = vec![0u8; 65535];
-                loop {
-                    let n = match stream.read(&mut buf).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => n,
-                    };
-                    if stream.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                }
-            });
-        }
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind echo server");
+    let addr = listener.local_addr().expect("read echo server address");
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept echo connection");
+        let (mut read, mut write) = stream.into_split();
+        tokio::io::copy(&mut read, &mut write).await.expect("echo data");
     });
 
-    (addr, handle)
+    (addr, task)
 }
 
-/// Generate a key pair and CSR (same as the real agent does during enrollment).
-pub(super) fn generate_test_key_and_csr(agent_name: &str) -> (rcgen::KeyPair, String) {
-    generate_csr_with_cn(agent_name)
-}
-
-/// Generate a key pair and CSR with the given Common Name on the CSR subject.
-///
-/// Useful for the security-invariant test that checks `sign_agent_csr` ignores
-/// the CSR subject in favor of the mTLS-authenticated agent name.
 pub(super) fn generate_csr_with_cn(cn: &str) -> (rcgen::KeyPair, String) {
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("generate test key pair");
     let mut params = rcgen::CertificateParams::default();
     params.distinguished_name.push(rcgen::DnType::CommonName, cn);
-    let csr = params.serialize_request(&key_pair).expect("serialize test CSR");
-    let csr_pem = csr.pem().expect("CSR to PEM");
+    let csr = params.serialize_request(&key_pair).expect("serialize test csr");
+    let csr_pem = csr.pem().expect("encode test csr");
     (key_pair, csr_pem)
 }
 
-/// Create a Quinn client connection to the gateway with mTLS.
-pub(super) async fn connect_quinn_client(
+async fn connect_quinn_client(
     ca_cert_pem: &str,
     client_cert_pem: &str,
     client_key_pem: &str,
@@ -82,100 +49,106 @@ pub(super) async fn connect_quinn_client(
     let client_certs: Vec<rustls_pki_types::CertificateDer<'static>> =
         certs(&mut std::io::BufReader::new(client_cert_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()
-            .expect("parse client certs");
+            .expect("parse client certificates");
     let client_key = private_key(&mut std::io::BufReader::new(client_key_pem.as_bytes()))
-        .expect("parse private key")
-        .expect("no private key found");
+        .expect("parse client key")
+        .expect("find client key");
 
     let mut roots = rustls::RootCertStore::empty();
     let ca_certs: Vec<rustls_pki_types::CertificateDer<'static>> =
         certs(&mut std::io::BufReader::new(ca_cert_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()
-            .expect("parse CA certs");
+            .expect("parse ca certificates");
     for cert in ca_certs {
-        roots.add(cert).expect("add CA cert to root store");
+        roots.add(cert).expect("add ca certificate");
     }
 
-    // Trust only the test CA. Hostname verification is still on (SNI = "localhost").
     let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
         .build()
-        .expect("build verifier");
-
+        .expect("build server verifier");
     let mut client_crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_client_auth_cert(client_certs, client_key)
-        .expect("client auth config");
-
+        .expect("configure client authentication");
     client_crypto.alpn_protocols = vec![agent_tunnel_proto::ALPN_PROTOCOL.to_vec()];
 
     let client_config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto).expect("QUIC client config"),
+        quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto).expect("configure quic client"),
     ));
-
-    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().expect("bind addr")).expect("create endpoint");
+    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().expect("parse client bind address"))
+        .expect("create client endpoint");
     endpoint.set_default_client_config(client_config);
 
     endpoint
         .connect(server_addr, "localhost")
-        .expect("initiate connection")
+        .expect("start quic connection")
         .await
-        .expect("QUIC handshake")
+        .expect("complete quic handshake")
 }
 
-/// Live `AgentTunnelListener` running on a random localhost port, plus the
-/// resources needed to drive and shut it down cleanly.
 pub(super) struct TestListener {
     pub handle: AgentTunnelHandle,
+    pub server_addr: SocketAddr,
     shutdown: ShutdownHandle,
-    task: JoinHandle<()>,
+    task: JoinHandle<anyhow::Result<()>>,
     _temp_dir: TempDir,
 }
 
 impl TestListener {
-    /// Signal shutdown and wait for the listener task to exit (or time out).
+    pub(super) async fn connect_agent(&self, agent_name: &str) -> (Uuid, quinn::Connection) {
+        let agent_id = Uuid::new_v4();
+        let (key_pair, csr_pem) = generate_csr_with_cn(agent_name);
+        let signed = self
+            .handle
+            .ca_manager()
+            .sign_agent_csr(agent_id, agent_name, &csr_pem, Some("localhost"))
+            .expect("sign agent csr");
+        let connection = connect_quinn_client(
+            &signed.ca_cert_pem,
+            &signed.client_cert_pem,
+            &key_pair.serialize_pem(),
+            self.server_addr,
+        )
+        .await;
+
+        (agent_id, connection)
+    }
+
     pub(super) async fn shutdown(self) {
         self.shutdown.signal();
-        let _ = tokio::time::timeout(Duration::from_secs(2), self.task).await;
+        tokio::time::timeout(Duration::from_secs(2), self.task)
+            .await
+            .expect("listener shutdown timed out")
+            .expect("listener task panicked")
+            .expect("listener shutdown failed");
     }
 }
 
-/// Bring up a fresh `AgentTunnelListener` on `127.0.0.1:0` with a freshly
-/// generated CA in a temp directory.
 pub(super) async fn bind_test_listener() -> TestListener {
-    let temp_dir = tempfile::tempdir().expect("create tempdir");
-    let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("UTF-8 temp path");
-    let ca_manager = CaManager::load_or_generate(&data_dir).expect("CA generation");
-
-    let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let temp_dir = tempfile::tempdir().expect("create temporary directory");
+    let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("use utf-8 temporary path");
+    let ca_manager = CaManager::load_or_generate(&data_dir).expect("generate test ca");
+    let listen_addr: SocketAddr = "127.0.0.1:0".parse().expect("parse listener address");
     let (listener, handle) = AgentTunnelListener::bind(listen_addr, ca_manager, "localhost")
         .await
-        .expect("bind QUIC listener");
-
+        .expect("bind quic listener");
+    let server_addr = listener.local_addr();
     let (shutdown, shutdown_signal) = ShutdownHandle::new();
     let task = tokio::spawn(async move {
         use devolutions_gateway_task::Task;
-        let _ = listener.run(shutdown_signal).await;
+        listener.run(shutdown_signal).await
     });
-
-    // Give listener time to be ready.
-    tokio::time::sleep(Duration::from_millis(50)).await;
 
     TestListener {
         handle,
+        server_addr,
         shutdown,
         task,
         _temp_dir: temp_dir,
     }
 }
 
-/// Poll the registry until `agent_id` is present and has applied at least one
-/// route advertisement with epoch ≥ `min_epoch`, or panic after 5 seconds.
-///
-/// Replaces the older fixed-sleep pattern that raced on slow CI runners:
-/// `ctrl.send(&RouteAdvertise)` only guarantees the message is on the wire,
-/// not that the gateway has processed it. Default `RouteAdvertisementState`
-/// starts at epoch 0, so any successful RouteAdvertise bumps it to ≥ 1.
 pub(super) async fn wait_for_route_advertised(registry: &AgentRegistry, agent_id: Uuid, min_epoch: u64) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -184,9 +157,39 @@ pub(super) async fn wait_for_route_advertised(registry: &AgentRegistry, agent_id
         {
             return;
         }
-        if Instant::now() >= deadline {
-            panic!("agent {agent_id} did not advertise route at epoch >= {min_epoch} within 5s");
-        }
+        assert!(
+            Instant::now() < deadline,
+            "agent {agent_id} did not advertise route at epoch >= {min_epoch} within 5s"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+pub(super) async fn advertise_routes(
+    connection: &quinn::Connection,
+    registry: &AgentRegistry,
+    agent_id: Uuid,
+    epoch: u64,
+    subnets: Vec<Ipv4Network>,
+    domains: Vec<DomainAdvertisement>,
+) -> ControlStream<quinn::SendStream, quinn::RecvStream> {
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
+    ctrl.send(&ControlMessage::route_advertise(epoch, subnets, domains))
+        .await
+        .expect("send route advertisement");
+    wait_for_route_advertised(registry, agent_id, epoch).await;
+    ctrl
+}
+
+pub(super) async fn accept_session_request(
+    connection: &quinn::Connection,
+    session_id: Uuid,
+    expected_target: &str,
+) -> SessionStream<quinn::SendStream, quinn::RecvStream> {
+    let (send, recv) = connection.accept_bi().await.expect("accept session stream");
+    let mut session: SessionStream<_, _> = (send, recv).into();
+    let request = session.recv_request().await.expect("receive connect request");
+    assert_eq!(request.session_id(), session_id);
+    assert_eq!(request.target(), expected_target);
+    session
 }
