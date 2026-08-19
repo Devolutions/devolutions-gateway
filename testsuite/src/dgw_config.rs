@@ -35,6 +35,12 @@ pub struct AgentTunnelConfig {
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
     #[builder(default, setter(into))]
+    hostname: Option<String>,
+    #[builder(default = "127.0.0.1".to_owned(), setter(into))]
+    listener_host: String,
+    #[builder(default, setter(into))]
+    provisioner_public_key_data: Option<String>,
+    #[builder(default, setter(into))]
     tcp_port: Option<u16>,
     #[builder(default, setter(into))]
     http_port: Option<u16>,
@@ -79,6 +85,9 @@ pub struct DgwConfigHandle {
 impl DgwConfigHandle {
     pub fn init(config: DgwConfig) -> anyhow::Result<Self> {
         let DgwConfig {
+            hostname,
+            listener_host,
+            provisioner_public_key_data,
             tcp_port,
             http_port,
             disable_token_validation,
@@ -119,19 +128,31 @@ impl DgwConfigHandle {
             String::new()
         };
 
+        let hostname_json = hostname
+            .map(|hostname| {
+                format!(
+                    r#"    "Hostname": "{hostname}",
+"#
+                )
+            })
+            .unwrap_or_default();
+        let provisioner_public_key_data = provisioner_public_key_data.unwrap_or_else(|| {
+            "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HgjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB".to_owned()
+        });
+
         let config = format!(
             r#"{{
-    "ProvisionerPublicKeyData": {{
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HgjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+{hostname_json}    "ProvisionerPublicKeyData": {{
+        "Value": "{provisioner_public_key_data}"
     }},
     "Listeners": [
         {{
-            "InternalUrl": "tcp://127.0.0.1:{tcp_port}",
-            "ExternalUrl": "tcp://127.0.0.1:{tcp_port}"
+            "InternalUrl": "tcp://{listener_host}:{tcp_port}",
+            "ExternalUrl": "tcp://{listener_host}:{tcp_port}"
         }},
         {{
-            "InternalUrl": "http://127.0.0.1:{http_port}",
-            "ExternalUrl": "http://127.0.0.1:{http_port}"
+            "InternalUrl": "http://{listener_host}:{http_port}",
+            "ExternalUrl": "http://{listener_host}:{http_port}"
         }}
     ],
     "VerbosityProfile": "{verbosity_profile}",

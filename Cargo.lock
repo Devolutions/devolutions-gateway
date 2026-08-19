@@ -7498,19 +7498,34 @@ dependencies = [
 name = "testsuite"
 version = "0.0.0"
 dependencies = [
+ "agent-tunnel",
+ "agent-tunnel-proto",
  "anyhow",
  "assert_cmd",
  "base64 0.23.0",
+ "camino",
+ "devolutions-gateway",
+ "devolutions-gateway-task",
  "dynosaur",
  "escargot",
  "expect-test",
  "fastrand",
+ "futures-util",
+ "ipnetwork",
  "libsql",
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
+ "nonempty",
+ "picky",
  "proxy-socks",
+ "quinn",
+ "rcgen",
+ "reqwest",
  "rstest",
+ "rustls 0.23.42",
+ "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sysevent",
@@ -7523,6 +7538,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "typed-builder",
+ "uuid",
 ]
 
 [[package]]
