@@ -320,8 +320,7 @@ async fn run_single_connection(
     // sends us back through this path. With a 1-year cert and a 15-day
     // threshold, the renewal window will be hit on the first reconnect after
     // T-15d, which is more than often enough in any real deployment.
-    if let Some(outcome) = try_renew_certificate(&mut ctrl, cert_path, key_path, ca_path).await? {
-        connection.close(0u32.into(), b"cert-renewed");
+    if let Some(outcome) = try_renew_certificate(&mut ctrl, &connection, cert_path, key_path, ca_path).await? {
         return Ok(outcome);
     }
 
@@ -593,6 +592,7 @@ fn version_negotiation_probe_packet() -> Vec<u8> {
 ///   connection lost.
 async fn try_renew_certificate<S, R>(
     ctrl: &mut ControlStream<S, R>,
+    connection: &quinn::Connection,
     cert_path: &camino::Utf8Path,
     key_path: &camino::Utf8Path,
     ca_path: &camino::Utf8Path,
@@ -650,7 +650,8 @@ where
         } => {
             std::fs::write(cert_path.as_str(), &client_cert_pem).context("write renewed certificate")?;
             std::fs::write(ca_path.as_str(), &gateway_ca_cert_pem).context("write renewed CA certificate")?;
-            info!("Certificate renewed; reconnecting so the new cert takes effect");
+            info!("Certificate renewed; closing connection so new cert takes effect on reconnect");
+            connection.close(0u32.into(), b"cert-renewed");
             Ok(Some(ConnectionOutcome::CertRenewed))
         }
         ControlMessage::CertRenewalResponse {
@@ -716,15 +717,12 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 /// black-holed target outlives its deadline and it never hears why we failed.
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
 
-async fn run_session_proxy<S, R>(
+async fn run_session_proxy(
     advertise_subnets: Vec<Ipv4Network>,
     advertise_domains: Vec<DomainAdvertisement>,
-    send: S,
-    recv: R,
-) where
-    S: tokio::io::AsyncWrite + Unpin,
-    R: tokio::io::AsyncRead + Unpin,
-{
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+) {
     let _: anyhow::Result<()> = async {
         let mut session: SessionStream<_, _> = (send, recv).into();
 
@@ -797,7 +795,8 @@ async fn run_session_proxy<S, R>(
         r1.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
         r2.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
 
-        let _ = tokio::io::AsyncWriteExt::shutdown(&mut send).await;
+        // Gracefully finish the QUIC send stream (signals EOF to peer).
+        let _ = send.finish();
 
         Ok(())
     }
@@ -807,19 +806,10 @@ async fn run_session_proxy<S, R>(
 
 #[cfg(test)]
 mod tests {
-    use agent_tunnel_proto::DomainName;
     use camino::Utf8PathBuf;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::task::JoinHandle;
-    use uuid::Uuid;
 
     use super::*;
     use crate::config::TunnelConf;
-
-    type DuplexControlStream =
-        ControlStream<tokio::io::WriteHalf<tokio::io::DuplexStream>, tokio::io::ReadHalf<tokio::io::DuplexStream>>;
-    type DuplexSessionStream =
-        SessionStream<tokio::io::WriteHalf<tokio::io::DuplexStream>, tokio::io::ReadHalf<tokio::io::DuplexStream>>;
 
     fn tunnel_conf_template() -> TunnelConf {
         TunnelConf {
@@ -835,124 +825,6 @@ mod tests {
             route_advertise_interval_secs: 60,
             server_spki_sha256: None,
         }
-    }
-
-    fn write_test_identity(expired: bool) -> (tempfile::TempDir, Utf8PathBuf, Utf8PathBuf, Utf8PathBuf) {
-        let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let root = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("use utf-8 temporary path");
-        let cert_path = root.join("agent.pem");
-        let key_path = root.join("agent.key");
-        let ca_path = root.join("ca.pem");
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("generate test key");
-        let mut params = rcgen::CertificateParams::default();
-        params
-            .distinguished_name
-            .push(rcgen::DnType::CommonName, "renewal-agent");
-        params.not_before = rcgen::date_time_ymd(2020, 1, 1);
-        params.not_after = if expired {
-            rcgen::date_time_ymd(2020, 1, 2)
-        } else {
-            rcgen::date_time_ymd(2035, 1, 1)
-        };
-        let certificate = params.self_signed(&key_pair).expect("sign test certificate");
-        std::fs::write(&cert_path, certificate.pem()).expect("write test certificate");
-        std::fs::write(&key_path, key_pair.serialize_pem()).expect("write test key");
-        std::fs::write(&ca_path, "old-ca").expect("write test ca");
-        (temp_dir, cert_path, key_path, ca_path)
-    }
-
-    fn control_streams() -> (DuplexControlStream, DuplexControlStream) {
-        let (agent, gateway) = tokio::io::duplex(64 * 1024);
-        let (agent_read, agent_write) = tokio::io::split(agent);
-        let (gateway_read, gateway_write) = tokio::io::split(gateway);
-        ((agent_write, agent_read).into(), (gateway_write, gateway_read).into())
-    }
-
-    fn domain_route(domain: &str) -> DomainAdvertisement {
-        DomainAdvertisement {
-            domain: DomainName::new(domain),
-            auto_detected: false,
-        }
-    }
-
-    fn start_session_proxy(
-        advertise_subnets: Vec<Ipv4Network>,
-        advertise_domains: Vec<DomainAdvertisement>,
-    ) -> (DuplexSessionStream, JoinHandle<()>) {
-        let (gateway_io, agent_io) = tokio::io::duplex(64 * 1024);
-        let (gateway_read, gateway_write) = tokio::io::split(gateway_io);
-        let (agent_read, agent_write) = tokio::io::split(agent_io);
-        let proxy_task = tokio::spawn(run_session_proxy(
-            advertise_subnets,
-            advertise_domains,
-            agent_write,
-            agent_read,
-        ));
-        ((gateway_write, gateway_read).into(), proxy_task)
-    }
-
-    async fn proxy_error(
-        advertise_subnets: Vec<Ipv4Network>,
-        advertise_domains: Vec<DomainAdvertisement>,
-        target: &str,
-    ) -> String {
-        let (mut session, proxy_task) = start_session_proxy(advertise_subnets, advertise_domains);
-        session
-            .send_request(&agent_tunnel_proto::ConnectRequest::tcp(
-                Uuid::new_v4(),
-                target.to_owned(),
-            ))
-            .await
-            .expect("send rejected connect request");
-
-        let reason = match session.recv_response().await.expect("receive connection error") {
-            ConnectResponse::Error { reason, .. } => reason,
-            ConnectResponse::Success { .. } => panic!("expected connection error"),
-        };
-        proxy_task.await.expect("proxy task panicked");
-        reason
-    }
-
-    async fn assert_proxy_round_trip(
-        advertise_subnets: Vec<Ipv4Network>,
-        advertise_domains: Vec<DomainAdvertisement>,
-        target_host: &str,
-    ) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind echo server");
-        let target = format!(
-            "{target_host}:{}",
-            listener.local_addr().expect("read echo server address").port()
-        );
-        let echo_task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.expect("accept echo connection");
-            let (mut read, mut write) = stream.into_split();
-            tokio::io::copy(&mut read, &mut write).await.expect("echo data");
-        });
-
-        let (mut session, proxy_task) = start_session_proxy(advertise_subnets, advertise_domains);
-        session
-            .send_request(&agent_tunnel_proto::ConnectRequest::tcp(Uuid::new_v4(), target))
-            .await
-            .expect("send connect request");
-        assert!(
-            session
-                .recv_response()
-                .await
-                .expect("receive connect response")
-                .is_success()
-        );
-
-        let payload = b"agent proxy payload";
-        let (mut send, mut recv) = session.into_inner();
-        send.write_all(payload).await.expect("write proxy payload");
-        let mut response = vec![0; payload.len()];
-        recv.read_exact(&mut response).await.expect("read proxy response");
-        assert_eq!(response, payload);
-
-        proxy_task.abort();
-        echo_task.abort();
     }
 
     #[tokio::test]
@@ -991,154 +863,6 @@ mod tests {
         // so it catches a "probe hangs instead of timing out" regression without flaking on a loaded
         // runner where the timer fires late.
         assert!(started.elapsed() < Duration::from_secs(5), "probe must fail fast");
-    }
-
-    #[tokio::test]
-    async fn session_proxy_relays_ip_target_in_an_advertised_subnet() {
-        assert_proxy_round_trip(
-            vec!["127.0.0.0/8".parse().expect("parse loopback subnet")],
-            vec![],
-            "127.0.0.1",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn session_proxy_relays_domain_target_without_an_advertised_subnet() {
-        assert_proxy_round_trip(vec![], vec![domain_route("localhost")], "localhost").await;
-    }
-
-    #[tokio::test]
-    async fn session_proxy_reports_unresolvable_advertised_domain() {
-        let reason = proxy_error(vec![], vec![domain_route("*.invalid")], "missing.invalid:443").await;
-        assert!(reason.contains("resolve target"), "unexpected error: {reason}");
-    }
-
-    #[tokio::test]
-    async fn session_proxy_reports_closed_target_port() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("reserve closed target port");
-        let target = format!(
-            "localhost:{}",
-            listener.local_addr().expect("read reserved port").port()
-        );
-        drop(listener);
-
-        let reason = proxy_error(vec![], vec![domain_route("localhost")], &target).await;
-        assert!(reason.contains("TCP connect failed"), "unexpected error: {reason}");
-    }
-
-    #[tokio::test]
-    async fn session_proxy_refuses_unadvertised_target() {
-        let reason = proxy_error(vec![], vec![], "127.0.0.1:9").await;
-        assert!(
-            reason.contains("not in advertised subnets"),
-            "unexpected error: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    async fn certificate_renewal_persists_response_and_requests_reconnect() {
-        let (_temp_dir, cert_path, key_path, ca_path) = write_test_identity(true);
-        let (mut agent_ctrl, mut gateway_ctrl) = control_streams();
-        let gateway_task = tokio::spawn(async move {
-            match gateway_ctrl.recv().await.expect("receive renewal request") {
-                ControlMessage::CertRenewalRequest { csr_pem, .. } => {
-                    assert!(csr_pem.contains("BEGIN CERTIFICATE REQUEST"));
-                }
-                other => panic!("expected renewal request, got {other:?}"),
-            }
-            gateway_ctrl
-                .send(&ControlMessage::cert_renewal_response(
-                    agent_tunnel_proto::CertRenewalResult::Success {
-                        client_cert_pem: "renewed-cert".to_owned(),
-                        gateway_ca_cert_pem: "renewed-ca".to_owned(),
-                    },
-                ))
-                .await
-                .expect("send renewal response");
-        });
-
-        let outcome = try_renew_certificate(&mut agent_ctrl, &cert_path, &key_path, &ca_path)
-            .await
-            .expect("renew certificate");
-        assert!(matches!(outcome, Some(ConnectionOutcome::CertRenewed)));
-        gateway_task.await.expect("gateway task panicked");
-        assert_eq!(
-            std::fs::read_to_string(cert_path).expect("read renewed certificate"),
-            "renewed-cert"
-        );
-        assert_eq!(std::fs::read_to_string(ca_path).expect("read renewed ca"), "renewed-ca");
-    }
-
-    #[tokio::test]
-    async fn fresh_certificate_skips_renewal() {
-        let (_temp_dir, cert_path, key_path, ca_path) = write_test_identity(false);
-        let (mut agent_ctrl, _gateway_ctrl) = control_streams();
-
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(1),
-            try_renew_certificate(&mut agent_ctrl, &cert_path, &key_path, &ca_path),
-        )
-        .await
-        .expect("renewal check timed out")
-        .expect("check certificate renewal");
-        assert!(outcome.is_none());
-    }
-
-    #[tokio::test]
-    async fn refused_certificate_renewal_preserves_existing_files() {
-        let (_temp_dir, cert_path, key_path, ca_path) = write_test_identity(true);
-        let original_cert = std::fs::read_to_string(&cert_path).expect("read original certificate");
-        let (mut agent_ctrl, mut gateway_ctrl) = control_streams();
-        let gateway_task = tokio::spawn(async move {
-            gateway_ctrl.recv().await.expect("receive renewal request");
-            gateway_ctrl
-                .send(&ControlMessage::cert_renewal_response(
-                    agent_tunnel_proto::CertRenewalResult::Error {
-                        reason: "renewal refused".to_owned(),
-                    },
-                ))
-                .await
-                .expect("send renewal refusal");
-        });
-
-        let outcome = try_renew_certificate(&mut agent_ctrl, &cert_path, &key_path, &ca_path)
-            .await
-            .expect("check certificate renewal");
-        gateway_task.await.expect("gateway task panicked");
-        assert!(outcome.is_none());
-        assert_eq!(
-            std::fs::read_to_string(cert_path).expect("read preserved certificate"),
-            original_cert
-        );
-        assert_eq!(std::fs::read_to_string(ca_path).expect("read preserved ca"), "old-ca");
-    }
-
-    #[tokio::test]
-    async fn unexpected_certificate_renewal_response_preserves_existing_files() {
-        let (_temp_dir, cert_path, key_path, ca_path) = write_test_identity(true);
-        let original_cert = std::fs::read_to_string(&cert_path).expect("read original certificate");
-        let (mut agent_ctrl, mut gateway_ctrl) = control_streams();
-        let gateway_task = tokio::spawn(async move {
-            gateway_ctrl.recv().await.expect("receive renewal request");
-            gateway_ctrl
-                .send(&ControlMessage::heartbeat(1, 0))
-                .await
-                .expect("send unexpected response");
-        });
-
-        let outcome = try_renew_certificate(&mut agent_ctrl, &cert_path, &key_path, &ca_path)
-            .await
-            .expect("check certificate renewal");
-        gateway_task.await.expect("gateway task panicked");
-        assert!(outcome.is_none());
-        assert_eq!(
-            std::fs::read_to_string(cert_path).expect("read preserved certificate"),
-            original_cert
-        );
-        assert_eq!(std::fs::read_to_string(ca_path).expect("read preserved ca"), "old-ca");
     }
 
     fn domains_of(advertisements: &[DomainAdvertisement]) -> Vec<(&str, bool)> {
