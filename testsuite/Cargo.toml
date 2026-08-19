@@ -36,14 +36,19 @@ agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde
 base64 = "0.23"
 camino = "1"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+devolutions-gateway = { path = "../devolutions-gateway" }
+futures-util = "0.3"
 ipnetwork = "0.20"
 libsql = { version = "0.9", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
+nonempty = "0.12"
+picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rstest = "0.25"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
