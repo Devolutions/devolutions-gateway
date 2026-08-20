@@ -18,23 +18,25 @@ use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, Buf
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Child;
 
-const CLIENT_COOKIE: &str = "client-cookie-user";
-const TARGET_USER: &str = "injected-target-user";
-const PROXY_USER: &str = "injected-proxy-user";
-const KERBEROS_TARGET_USER: &str = "administrator@example.invalid";
-const INJECT_LOG: &str = "RDP-TLS forwarding with credential injection";
+pub(crate) const CLIENT_COOKIE: &str = "client-cookie-user";
+pub(crate) const TARGET_USER: &str = "injected-target-user";
+pub(crate) const PROXY_USER: &str = "injected-proxy-user";
+pub(crate) const PROXY_PASSWORD: &str = "proxy-secret";
+pub(crate) const TARGET_PASSWORD: &str = "target-secret";
+pub(crate) const KERBEROS_TARGET_USER: &str = "administrator@example.invalid";
+pub(crate) const INJECT_LOG: &str = "RDP-TLS forwarding with credential injection";
 const FORWARD_LOG: &str = "Upstream forwarding";
 const MISSING_LOG: &str = "missing or expired; re-provision to retry";
 const PUBLISHED_KDC_LOG: &str = "Published synthetic KDC";
 const REGISTERED_KDC_LOG: &str = "Registered synthetic KDC for credential-injection session";
 
-fn next_id() -> String {
+pub(crate) fn next_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("00000000-0000-4000-a000-{n:012x}")
 }
 
-fn unsigned_jws(header: serde_json::Value, payload: serde_json::Value) -> anyhow::Result<String> {
+pub(crate) fn unsigned_jws(header: serde_json::Value, payload: serde_json::Value) -> anyhow::Result<String> {
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let header = engine.encode(serde_json::to_vec(&header).context("serialize JWT header")?);
     let payload = engine.encode(serde_json::to_vec(&payload).context("serialize JWT payload")?);
@@ -52,7 +54,7 @@ fn preflight_scope_token() -> anyhow::Result<String> {
     )
 }
 
-fn association_token(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -> anyhow::Result<String> {
+pub(crate) fn association_token(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -> anyhow::Result<String> {
     unsigned_jws(
         serde_json::json!({"alg":"RS256","typ":"JWT","cty":"ASSOCIATION"}),
         serde_json::json!({
@@ -69,7 +71,7 @@ fn association_token(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -
     )
 }
 
-fn encode_pcb(token: &str) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn encode_pcb(token: &str) -> anyhow::Result<Vec<u8>> {
     let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
         version: ironrdp_pdu::pcb::PcbVersion::V2,
         id: 0,
@@ -108,22 +110,22 @@ fn strip_ansi(input: &str) -> String {
     out
 }
 
-struct LogBuffer(Arc<Mutex<String>>);
+pub(crate) struct LogBuffer(Arc<Mutex<String>>);
 
 impl LogBuffer {
     fn new() -> Self {
         Self(Arc::new(Mutex::new(String::new())))
     }
 
-    fn snapshot(&self) -> String {
+    pub(crate) fn snapshot(&self) -> String {
         strip_ansi(&self.0.lock().expect("log mutex"))
     }
 
-    async fn wait_contains(&self, needle: &str) -> anyhow::Result<String> {
+    pub(crate) async fn wait_contains(&self, needle: &str) -> anyhow::Result<String> {
         self.wait_count(needle, 1).await
     }
 
-    async fn wait_count(&self, needle: &str, count: usize) -> anyhow::Result<String> {
+    pub(crate) async fn wait_count(&self, needle: &str, count: usize) -> anyhow::Result<String> {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let snapshot = self.snapshot();
@@ -205,14 +207,14 @@ impl FakeRdpTarget {
     }
 }
 
-struct GatewayProc {
-    config: DgwConfigHandle,
-    process: Child,
-    logs: LogBuffer,
+pub(crate) struct GatewayProc {
+    pub(crate) config: DgwConfigHandle,
+    pub(crate) process: Child,
+    pub(crate) logs: LogBuffer,
 }
 
 impl GatewayProc {
-    async fn start(kerberos: bool) -> anyhow::Result<Self> {
+    pub(crate) async fn start(kerberos: bool) -> anyhow::Result<Self> {
         let config = DgwConfig::builder()
             .disable_token_validation(true)
             .verbosity_profile(VerbosityProfile::DEBUG)
@@ -338,7 +340,7 @@ async fn post_preflight(http_port: u16, operations: serde_json::Value) -> anyhow
     Ok(json)
 }
 
-async fn provision_credentials(
+pub(crate) async fn provision_credentials(
     http_port: u16,
     token: &str,
     target_username: &str,
@@ -352,12 +354,12 @@ async fn provision_credentials(
         "proxy_credential": {
             "kind": "username-password",
             "username": PROXY_USER,
-            "password": "proxy-secret"
+            "password": PROXY_PASSWORD
         },
         "target_credential": {
             "kind": "username-password",
             "username": target_username,
-            "password": "target-secret"
+            "password": TARGET_PASSWORD
         },
         "time_to_live": time_to_live
     })];

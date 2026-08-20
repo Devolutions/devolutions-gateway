@@ -43,9 +43,13 @@ agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
 gateway-db.path = "../crates/gateway-db"
 hex = "0.4"
 ipnetwork = "0.20"
+ironrdp-acceptor = "0.10"
+ironrdp-connector = "0.10"
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
+ironrdp-tokio = "0.10"
 jmux-proto = { path = "../crates/jmux-proto" }
+kdc = "0.1"
 libsql = { version = "0.10", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
@@ -53,6 +57,7 @@ network-scanner-proto = { path = "../crates/network-scanner-proto" }
 nonempty = "0.12"
 private-fs.path = "../crates/private-fs"
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
+picky-krb = "0.12"
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
@@ -69,6 +74,7 @@ test-utils.path = "../crates/test-utils"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
 uuid = { version = "1", features = ["v4"] }
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 # Sets POSIX ACLs in the private-fs tests, which `setfacl` would need a package for.

@@ -2,6 +2,7 @@ mod ai_analysis;
 mod benign_disconnect;
 mod cli_args;
 mod cred_injection;
+mod cred_injection_kdc;
 mod heartbeat;
 mod jrec_push;
 mod kdc_proxy;
