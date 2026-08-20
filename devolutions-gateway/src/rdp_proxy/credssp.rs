@@ -492,7 +492,8 @@ mod tests {
         let payload = engine.encode(
             serde_json::to_vec(&serde_json::json!({
                 "jti": jti,
-                "dst_hst": "target.example:3389"
+                "dst_hst": "target.example:3389",
+                "exp": time::OffsetDateTime::now_utc().unix_timestamp() + 3600
             }))
             .expect("payload serializes"),
         );
@@ -524,7 +525,7 @@ mod tests {
         let entry = store.take(jti).expect("entry");
         CredentialInjection::from_provisioned(jti, entry, true)
             .expect("prepared")
-            .register_if_kerberos(&SyntheticKdcRegistry::new())
+            .register_if_kerberos(&SyntheticKdcRegistry::new(), 1)
     }
 
     #[test]
@@ -568,7 +569,7 @@ mod tests {
         let entry = store.take(jti).expect("entry");
         let injection = CredentialInjection::from_provisioned(jti, entry, true)
             .expect("ntlm prepared")
-            .register_if_kerberos(&SyntheticKdcRegistry::new());
+            .register_if_kerberos(&SyntheticKdcRegistry::new(), 1);
 
         let config = client_kerberos_config(&injection).expect("ntlm ok");
         assert!(config.is_none());

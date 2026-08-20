@@ -432,12 +432,10 @@ async fn handle_with_credential_injection(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
-    token_cache: &TokenCache,
-    jrl: &CurrentJrl,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
+    claims: AssociationTokenClaims,
     provisioning: &ProvisioningStore,
     synthetic_kdc_registry: &SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
@@ -468,29 +466,11 @@ async fn handle_with_credential_injection(
         )
     };
 
-    let CleanPathAuth { claims } = authorize_cleanpath(
-        &cleanpath_pdu,
-        client_addr,
-        &conf,
-        token_cache,
-        jrl,
-        active_recordings,
-        &sessions,
-    )
-    .await
-    .context("RDCleanPath authorization failed")?;
-
     let token = cleanpath_pdu
         .proxy_auth
         .clone()
         .context("missing token in RDCleanPath PDU")?;
-    anyhow::ensure!(
-        provisioning.mapping_status(claims.jti) != MappingStatus::Consumed,
-        "credential-injection material for {} was already consumed; re-provision to retry",
-        claims.jti,
-    );
 
-    // Connect before checkout so a target connect failure does not consume one-shot credentials.
     let ConnectedRdpServer {
         tls_stream: server_stream,
         server_addr,
@@ -615,69 +595,74 @@ pub async fn handle(
         .await
         .context("couldn't read cleanpath PDU")?;
 
-    // Early credential detection: check if we should use RdpProxy instead.
-    let token = cleanpath_pdu
-        .proxy_auth
-        .as_deref()
-        .context("missing token in RDCleanPath PDU")?;
+    let auth = match authorize_cleanpath(
+        &cleanpath_pdu,
+        client_addr,
+        &conf,
+        token_cache,
+        jrl,
+        active_recordings,
+        &sessions,
+    )
+    .await
+    {
+        Ok(auth) => auth,
+        Err(error) => {
+            let response = RDCleanPathPdu::from(&error);
+            send_clean_path_response(&mut client_stream, &response).await?;
+            return anyhow::Error::new(error)
+                .context("an error occurred when processing cleanpath PDU")
+                .pipe(Err)?;
+        }
+    };
 
-    // If a credential mapping has been pushed, switch to proxy-based credential injection.
-    // Peek here without consuming.
-    // Checkout happens after authorization and target connection to protect the JTI from invalid requests and failures.
-    if let Some(jti) = crate::token::extract_jti(token).ok()
+    let mapping_status = provisioning.mapping_status(auth.claims.jti);
+    if is_vmconnect_request(&cleanpath_pdu)
         && matches!(
-            provisioning.mapping_status(jti),
-            MappingStatus::Available | MappingStatus::Consumed
+            mapping_status,
+            MappingStatus::Available | MappingStatus::RequiredMissing
         )
     {
-        // VMConnect needs pre-X.224 CredSSP against the Hyper-V host cert on the client.
-        // Proxy CredSSP MITM is X.224-first and is not supported for this ordering.
-        if is_vmconnect_request(&cleanpath_pdu) {
-            let response = RDCleanPathPdu::new_http_error(400);
-            send_clean_path_response(&mut client_stream, &response).await?;
-            anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
+        let response = RDCleanPathPdu::new_http_error(400);
+        send_clean_path_response(&mut client_stream, &response).await?;
+        anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
+    }
+
+    match mapping_status {
+        MappingStatus::Available => {
+            debug!(jti = %auth.claims.jti, "Switching to RdpProxy for credential injection (WebSocket)");
+            return handle_with_credential_injection(
+                client_stream,
+                client_addr,
+                conf,
+                sessions,
+                subscriber_tx,
+                cleanpath_pdu,
+                auth.claims,
+                provisioning,
+                synthetic_kdc_registry,
+                agent_tunnel_handle.clone(),
+            )
+            .await;
         }
-
-        debug!(%jti, "Switching to RdpProxy for credential injection (WebSocket)");
-
-        return handle_with_credential_injection(
-            client_stream,
-            client_addr,
-            conf,
-            token_cache,
-            jrl,
-            sessions,
-            subscriber_tx,
-            active_recordings,
-            cleanpath_pdu,
-            provisioning,
-            synthetic_kdc_registry,
-            agent_tunnel_handle.clone(),
-        )
-        .await;
+        MappingStatus::RequiredMissing => {
+            let error = CleanPathError::BadRequest(anyhow::anyhow!(
+                "credential-injection material for {} is missing or expired; re-provision to retry",
+                auth.claims.jti
+            ));
+            let response = RDCleanPathPdu::from(&error);
+            send_clean_path_response(&mut client_stream, &response).await?;
+            return anyhow::Error::new(error)
+                .context("an error occurred when processing cleanpath PDU")
+                .pipe(Err)?;
+        }
+        MappingStatus::Absent => {}
     }
 
     trace!("Processing RDCleanPath");
 
-    let (auth, connected) = match async {
-        let auth = authorize_cleanpath(
-            &cleanpath_pdu,
-            client_addr,
-            &conf,
-            token_cache,
-            jrl,
-            active_recordings,
-            &sessions,
-        )
-        .await?;
-
-        let connected = connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await?;
-
-        Ok::<_, CleanPathError>((auth, connected))
-    }
-    .await
-    {
-        Ok(result) => result,
+    let connected = match connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await {
+        Ok(connected) => connected,
         Err(error) => {
             let response = RDCleanPathPdu::from(&error);
             send_clean_path_response(&mut client_stream, &response).await?;

@@ -1,9 +1,10 @@
 //! Credential-injection runtime for RDP.
 //!
-//! - Provisioned material lives in [`crate::provisioning::ProvisioningStore`] until checkout.
+//! - Provisioned mappings live in [`crate::provisioning::ProvisioningStore`].
 //! - [`CredentialInjection::from_provisioned`] builds a session-scoped injection plan.
-//! - Kerberos sessions publish a [`CredentialInjectionKdc`] into [`SyntheticKdcRegistry`];
-//!   `/jet/KdcProxy` resolves only that registry (not the provisioning store).
+//! - Kerberos sessions reuse one synthetic KDC per provisioning generation, then publish a
+//!   [`CredentialInjectionKdc`] into [`SyntheticKdcRegistry`] for the connection.
+//! - `/jet/KdcProxy` resolves only that registry (not the provisioning store).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -92,10 +93,14 @@ pub(crate) enum PreparedCredentialInjection {
 
 impl PreparedCredentialInjection {
     /// Publish the synthetic KDC when this is Kerberos; NTLM is a no-op pass-through.
-    pub(crate) fn register_if_kerberos(self, registry: &SyntheticKdcRegistry) -> CredentialInjection {
+    pub(crate) fn register_if_kerberos(
+        self,
+        registry: &SyntheticKdcRegistry,
+        provision_generation: u64,
+    ) -> CredentialInjection {
         match self {
             Self::Kerberos(injection) => {
-                let registration = registry.register(Arc::clone(&injection.synthetic));
+                let registration = registry.register(Arc::clone(&injection.synthetic), provision_generation);
                 debug!(
                     jti = %injection.synthetic.jti(),
                     "Registered synthetic KDC for credential-injection session"
@@ -156,9 +161,21 @@ impl CredentialInjection {
         kerberos_enabled: bool,
     ) -> anyhow::Result<Self> {
         let entry = provisioning
-            .take_mapping(jti, token)
+            .get_mapping(jti, token)
             .with_context(|| format!("checkout credential-injection material for {jti}"))?;
-        Ok(Self::from_provisioned(jti, entry, kerberos_enabled)?.register_if_kerberos(registry))
+        let generation = entry.generation;
+        let kdc_expires_at = entry.kdc_expires_at;
+        registry.discard_stale_session_kdc(jti, generation);
+        let prepared = Self::from_provisioned(jti, entry, kerberos_enabled)?;
+        let prepared = match prepared {
+            PreparedCredentialInjection::Kerberos(mut injection) => {
+                let expires_at = kdc_expires_at.context("mapped Kerberos row has no token deadline")?;
+                injection.synthetic = registry.intern_session_kdc(jti, generation, expires_at, injection.synthetic);
+                PreparedCredentialInjection::Kerberos(injection)
+            }
+            ntlm @ PreparedCredentialInjection::Ntlm(_) => ntlm,
+        };
+        Ok(prepared.register_if_kerberos(registry, generation))
     }
 
     pub(crate) fn jti(&self) -> Uuid {
@@ -206,6 +223,8 @@ impl CredentialInjection {
             token,
             mapping,
             connection_options,
+            generation: _,
+            kdc_expires_at: _,
         } = credential_entry;
 
         let mapping = mapping.context("credential-injection state has no mapping")?;
@@ -522,9 +541,9 @@ fn random_32_bytes() -> Vec<u8> {
 /// - `/jet/KdcProxy` only looks up published entries; it never builds a KDC from
 ///   [`crate::provisioning::ProvisioningStore`].
 ///
-/// Entries are connection-scoped via [`SyntheticKdcRegistration`] and removed when the owning session ends.
-/// Generations prevent an older session from unpublishing a replacement.
-/// Re-provisioning the same JTI can register that replacement before the older session ends.
+/// Connection leases publish to `/jet/KdcProxy`. The same provisioning generation is
+/// reference-counted; a newer generation replaces an older one. An older lease cannot unpublish
+/// or overwrite a newer generation.
 #[derive(Debug, Clone)]
 pub struct SyntheticKdcRegistry {
     inner: Arc<Mutex<RegistryInner>>,
@@ -533,31 +552,51 @@ pub struct SyntheticKdcRegistry {
 #[derive(Debug, Default)]
 struct RegistryInner {
     live: HashMap<Uuid, PublishedSyntheticKdc>,
-    next_generation: u64,
+    session: HashMap<Uuid, SessionSyntheticKdc>,
 }
 
 #[derive(Debug, Clone)]
 struct PublishedSyntheticKdc {
-    generation: u64,
+    provision_generation: u64,
+    leases: u32,
     kdc: Arc<CredentialInjectionKdc>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionSyntheticKdc {
+    provision_generation: u64,
+    expires_at: time::OffsetDateTime,
+    kdc: Arc<CredentialInjectionKdc>,
+}
+
+fn generation_is_newer(candidate: u64, than: u64) -> bool {
+    candidate != than && candidate.wrapping_sub(than) < than.wrapping_sub(candidate)
 }
 
 /// RAII lease for a published synthetic KDC.
 pub(crate) struct SyntheticKdcRegistration {
     registry: SyntheticKdcRegistry,
     jti: Uuid,
-    generation: u64,
+    provision_generation: u64,
 }
 
 impl Drop for SyntheticKdcRegistration {
     fn drop(&mut self) {
         let mut inner = self.registry.inner.lock();
-        let Some(current) = inner.live.get(&self.jti) else {
+        let Some(current) = inner.live.get_mut(&self.jti) else {
             return;
         };
-        if current.generation == self.generation {
+        if current.provision_generation != self.provision_generation {
+            return;
+        }
+        current.leases = current.leases.saturating_sub(1);
+        if current.leases == 0 {
             inner.live.remove(&self.jti);
-            debug!(jti = %self.jti, generation = self.generation, "Unpublished synthetic KDC");
+            debug!(
+                jti = %self.jti,
+                provision_generation = self.provision_generation,
+                "Unpublished synthetic KDC"
+            );
         }
     }
 }
@@ -575,22 +614,111 @@ impl SyntheticKdcRegistry {
         }
     }
 
-    pub(crate) fn register(&self, kdc: Arc<CredentialInjectionKdc>) -> SyntheticKdcRegistration {
+    pub(crate) fn register(
+        &self,
+        kdc: Arc<CredentialInjectionKdc>,
+        provision_generation: u64,
+    ) -> SyntheticKdcRegistration {
         let jti = kdc.jti();
         let mut inner = self.inner.lock();
-        inner.next_generation = inner.next_generation.wrapping_add(1);
-        let generation = inner.next_generation;
-        inner.live.insert(jti, PublishedSyntheticKdc { generation, kdc });
-        debug!(%jti, generation, "Published synthetic KDC");
+        match inner.live.get_mut(&jti) {
+            Some(current) if current.provision_generation == provision_generation => {
+                current.leases = current.leases.saturating_add(1);
+            }
+            Some(current) if generation_is_newer(current.provision_generation, provision_generation) => {}
+            _ => {
+                inner.live.insert(
+                    jti,
+                    PublishedSyntheticKdc {
+                        provision_generation,
+                        leases: 1,
+                        kdc,
+                    },
+                );
+                debug!(%jti, provision_generation, "Published synthetic KDC");
+            }
+        }
         SyntheticKdcRegistration {
             registry: self.clone(),
             jti,
-            generation,
+            provision_generation,
         }
     }
 
     pub(crate) fn get(&self, jti: Uuid) -> Option<Arc<CredentialInjectionKdc>> {
         self.inner.lock().live.get(&jti).map(|entry| Arc::clone(&entry.kdc))
+    }
+
+    /// Drop interned KDCs that are expired or older than this provisioning generation.
+    pub(crate) fn discard_stale_session_kdc(&self, jti: Uuid, provision_generation: u64) {
+        let now = time::OffsetDateTime::now_utc();
+        let mut inner = self.inner.lock();
+        inner.session.retain(|_, entry| now < entry.expires_at);
+        if inner
+            .session
+            .get(&jti)
+            .is_some_and(|entry| generation_is_newer(provision_generation, entry.provision_generation))
+        {
+            inner.session.remove(&jti);
+        }
+    }
+
+    /// Reuse the synthetic KDC for this provisioning generation until `expires_at`.
+    ///
+    /// A later `provision-credentials` bumps the generation and replaces the cached KDC.
+    /// An older generation never overwrites a newer interned KDC.
+    pub(crate) fn intern_session_kdc(
+        &self,
+        jti: Uuid,
+        provision_generation: u64,
+        expires_at: time::OffsetDateTime,
+        kdc: Arc<CredentialInjectionKdc>,
+    ) -> Arc<CredentialInjectionKdc> {
+        let now = time::OffsetDateTime::now_utc();
+        let mut inner = self.inner.lock();
+        inner.session.retain(|_, entry| now < entry.expires_at);
+        if now >= expires_at {
+            if inner
+                .session
+                .get(&jti)
+                .is_some_and(|entry| entry.provision_generation == provision_generation)
+            {
+                inner.session.remove(&jti);
+            }
+            return kdc;
+        }
+        if let Some(existing) = inner.session.get(&jti) {
+            if existing.provision_generation == provision_generation {
+                return Arc::clone(&existing.kdc);
+            }
+            if generation_is_newer(existing.provision_generation, provision_generation) {
+                return kdc;
+            }
+        }
+        inner.session.insert(
+            jti,
+            SessionSyntheticKdc {
+                provision_generation,
+                expires_at,
+                kdc: Arc::clone(&kdc),
+            },
+        );
+        kdc
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session_kdc_live(&self, jti: Uuid) -> bool {
+        self.interned_kdc(jti).is_some()
+    }
+
+    #[cfg(test)]
+    fn interned_kdc(&self, jti: Uuid) -> Option<Arc<CredentialInjectionKdc>> {
+        let now = time::OffsetDateTime::now_utc();
+        self.inner
+            .lock()
+            .session
+            .get(&jti)
+            .and_then(|entry| (now < entry.expires_at).then(|| Arc::clone(&entry.kdc)))
     }
 }
 
@@ -628,7 +756,8 @@ mod tests {
     fn association_token(jti: Uuid) -> String {
         unsigned_jws(serde_json::json!({
             "jti": jti,
-            "dst_hst": "target.example:3389"
+            "dst_hst": "target.example:3389",
+            "exp": time::OffsetDateTime::now_utc().unix_timestamp() + 3600
         }))
     }
 
@@ -710,7 +839,7 @@ mod tests {
         let registry = SyntheticKdcRegistry::new();
         let injection = CredentialInjection::from_provisioned(jti, entry, false)
             .expect("prepared")
-            .register_if_kerberos(&registry);
+            .register_if_kerberos(&registry, 1);
         assert!(!injection.uses_kerberos());
         assert!(registry.get(jti).is_none());
     }
@@ -722,7 +851,7 @@ mod tests {
         let registry = SyntheticKdcRegistry::new();
         let injection = CredentialInjection::from_provisioned(jti, entry, true)
             .expect("prepared")
-            .register_if_kerberos(&registry);
+            .register_if_kerberos(&registry, 1);
         assert!(!injection.uses_kerberos());
     }
 
@@ -740,17 +869,91 @@ mod tests {
         let store = stock_with_mapping(jti, "administrator@example.invalid");
         store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
         let entry = store.take(jti).expect("entry");
-        assert!(store.take(jti).is_none(), "take is one-shot");
+        assert!(store.take(jti).is_none(), "test helper take removes the row");
         let registry = SyntheticKdcRegistry::new();
         let prepared = CredentialInjection::from_provisioned(jti, entry, true).expect("prepared");
         assert!(registry.get(jti).is_none(), "not published until register_if_kerberos");
-        let injection = prepared.register_if_kerberos(&registry);
+        let injection = prepared.register_if_kerberos(&registry, 1);
         assert!(injection.uses_kerberos());
         assert!(registry.get(jti).is_some());
         assert_eq!(
             registry.get(jti).expect("live kdc").jti(),
             injection.as_kerberos().expect("kerberos").synthetic_kdc().jti()
         );
+    }
+
+    #[test]
+    fn checkout_reuses_synthetic_kdc_for_the_same_generation() {
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        let store = ProvisioningStore::new();
+        store
+            .insert_credentials(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
+                time::Duration::minutes(5),
+            )
+            .expect("insert");
+        store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
+        let registry = SyntheticKdcRegistry::new();
+
+        let first = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("first");
+        let first_ptr = std::ptr::from_ref(first.as_kerberos().expect("kerberos").synthetic_kdc());
+        drop(first);
+
+        let second = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("second");
+        let second_ptr = std::ptr::from_ref(second.as_kerberos().expect("kerberos").synthetic_kdc());
+        assert_eq!(first_ptr, second_ptr);
+
+        store
+            .insert_credentials(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
+                time::Duration::minutes(5),
+            )
+            .expect("re-provision");
+        store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
+        let third = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("third");
+        let third_ptr = std::ptr::from_ref(third.as_kerberos().expect("kerberos").synthetic_kdc());
+        assert_ne!(first_ptr, third_ptr);
+    }
+
+    #[test]
+    fn interned_kdc_is_not_kept_past_deadline() {
+        let jti = Uuid::new_v4();
+        let registry = SyntheticKdcRegistry::new();
+        let kdc = Arc::new(dummy_kdc(jti));
+        let expired = time::OffsetDateTime::now_utc() - time::Duration::seconds(1);
+        registry.intern_session_kdc(jti, 1, expired, kdc);
+        assert!(!registry.session_kdc_live(jti));
+    }
+
+    #[test]
+    fn ntlm_checkout_discards_previous_generation_kdc() {
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        let store = ProvisioningStore::new();
+        store
+            .insert_credentials(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
+                time::Duration::minutes(5),
+            )
+            .expect("insert");
+        store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
+        let registry = SyntheticKdcRegistry::new();
+        let _kerberos = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("kerberos");
+        assert!(registry.session_kdc_live(jti));
+
+        store
+            .insert_credentials(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("Administrator")),
+                time::Duration::minutes(5),
+            )
+            .expect("ntlm re-provision");
+        let _ntlm = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("ntlm");
+        assert!(!registry.session_kdc_live(jti));
     }
 
     #[test]
@@ -762,7 +965,7 @@ mod tests {
         let entry = store.take(jti).expect("entry");
         let injection = CredentialInjection::from_provisioned(jti, entry, true)
             .expect("prepared")
-            .register_if_kerberos(&SyntheticKdcRegistry::new());
+            .register_if_kerberos(&SyntheticKdcRegistry::new(), 1);
 
         assert_eq!(
             injection.as_kerberos().expect("kerberos").target_kdc().as_str(),
@@ -781,7 +984,8 @@ mod tests {
             .insert_credentials(
                 unsigned_jws(serde_json::json!({
                     "jti": jti,
-                    "dst_hst": "it-help-dc.corp.example:3389"
+                    "dst_hst": "it-help-dc.corp.example:3389",
+                    "exp": time::OffsetDateTime::now_utc().unix_timestamp() + 3600
                 })),
                 Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
                 time::Duration::minutes(5),
@@ -791,7 +995,7 @@ mod tests {
         let entry = store.take(jti).expect("entry");
         let injection = CredentialInjection::from_provisioned(jti, entry, true)
             .expect("prepared")
-            .register_if_kerberos(&SyntheticKdcRegistry::new());
+            .register_if_kerberos(&SyntheticKdcRegistry::new(), 1);
 
         assert_eq!(
             injection
@@ -808,16 +1012,45 @@ mod tests {
         let registry = SyntheticKdcRegistry::new();
         let jti = Uuid::new_v4();
         let first = Arc::new(dummy_kdc(jti));
-        let first_registration = registry.register(Arc::clone(&first));
+        let first_registration = registry.register(Arc::clone(&first), 1);
         assert!(Arc::ptr_eq(&registry.get(jti).expect("first"), &first));
 
         let second = Arc::new(dummy_kdc(jti));
-        let second_registration = registry.register(Arc::clone(&second));
+        let second_registration = registry.register(Arc::clone(&second), 2);
         drop(first_registration);
         assert!(Arc::ptr_eq(&registry.get(jti).expect("successor"), &second));
 
         drop(second_registration);
         assert!(registry.get(jti).is_none());
+    }
+
+    #[test]
+    fn same_generation_leases_unpublish_on_last_drop() {
+        let registry = SyntheticKdcRegistry::new();
+        let jti = Uuid::new_v4();
+        let kdc = Arc::new(dummy_kdc(jti));
+        let first = registry.register(Arc::clone(&kdc), 1);
+        let second = registry.register(Arc::clone(&kdc), 1);
+        drop(first);
+        assert!(registry.get(jti).is_some());
+        drop(second);
+        assert!(registry.get(jti).is_none());
+    }
+
+    #[test]
+    fn stale_generation_does_not_replace_interned_kdc() {
+        let jti = Uuid::new_v4();
+        let registry = SyntheticKdcRegistry::new();
+        let newer = Arc::new(dummy_kdc(jti));
+        let older = Arc::new(dummy_kdc(jti));
+        let deadline = time::OffsetDateTime::now_utc() + time::Duration::minutes(5);
+        let interned = registry.intern_session_kdc(jti, 2, deadline, Arc::clone(&newer));
+        assert!(Arc::ptr_eq(&interned, &newer));
+        let rejected = registry.intern_session_kdc(jti, 1, deadline, Arc::clone(&older));
+        assert!(Arc::ptr_eq(&rejected, &older));
+        assert!(Arc::ptr_eq(&registry.interned_kdc(jti).expect("kept"), &newer));
+        registry.discard_stale_session_kdc(jti, 1);
+        assert!(Arc::ptr_eq(&registry.interned_kdc(jti).expect("still kept"), &newer));
     }
 
     #[test]
