@@ -7516,6 +7516,8 @@ dependencies = [
  "escargot",
  "expect-test",
  "fastrand",
+ "ironrdp-core 0.2.1",
+ "ironrdp-pdu",
  "libsql",
  "mcp-proxy",
  "network-scanner",
