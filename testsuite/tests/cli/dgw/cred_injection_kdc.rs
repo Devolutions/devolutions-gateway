@@ -17,7 +17,7 @@ use ironrdp_pdu::nego::{
 use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use picky_krb::messages::KdcProxyMessage;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::rustls::pki_types::pem::PemObject as _;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -25,8 +25,9 @@ use tokio_rustls::rustls::{ClientConfig, ServerConfig};
 use x509_cert::der::Decode as _;
 
 use super::cred_injection::{
-    GatewayProc, KERBEROS_TARGET_USER, PROXY_PASSWORD, PROXY_USER, TARGET_PASSWORD, encode_pcb, next_id,
-    provision_credentials, unsigned_jws,
+    FORWARD_LOG, GatewayProc, INJECT_LOG, KERBEROS_TARGET_USER, MISSING_LOG, PROXY_KERBEROS_USER, PROXY_PASSWORD,
+    PROXY_USER, TARGET_PASSWORD, TARGET_USER, encode_pcb, next_id, provision_credentials, provision_mapping,
+    unsigned_jws,
 };
 
 const REALM: &str = "EXAMPLE.INVALID";
@@ -114,13 +115,27 @@ async fn serve_kdc_exchange(mut stream: TcpStream, config: &kdc::config::Kerbero
     Ok(())
 }
 
+#[derive(Clone)]
+enum MockRdpMode {
+    Kerberos { kdc_url: String },
+    Ntlm,
+}
+
 struct MockRdp {
     port: u16,
     credssp_ok: Arc<AtomicBool>,
 }
 
 impl MockRdp {
-    async fn start(kdc_url: String) -> anyhow::Result<Self> {
+    async fn start_kerberos(kdc_url: String) -> anyhow::Result<Self> {
+        Self::start(MockRdpMode::Kerberos { kdc_url }).await
+    }
+
+    async fn start_ntlm() -> anyhow::Result<Self> {
+        Self::start(MockRdpMode::Ntlm).await
+    }
+
+    async fn start(mode: MockRdpMode) -> anyhow::Result<Self> {
         install_crypto_provider();
         // Dual-stack so Windows `localhost` (IPv6 first) still hits the fake server.
         let listener = match TcpListener::bind("[::]:0").await {
@@ -141,9 +156,15 @@ impl MockRdp {
                 let acceptor = acceptor.clone();
                 let public_key = public_key.clone();
                 let credssp_ok = Arc::clone(&credssp_ok_task);
-                let kdc_url = kdc_url.clone();
+                let mode = mode.clone();
                 tokio::spawn(async move {
-                    match accept_kerberos_rdp(stream, peer, acceptor, public_key, &kdc_url).await {
+                    let result = match &mode {
+                        MockRdpMode::Kerberos { kdc_url } => {
+                            accept_kerberos_rdp(stream, peer, acceptor, public_key, kdc_url).await
+                        }
+                        MockRdpMode::Ntlm => accept_ntlm_rdp(stream, peer, acceptor, public_key).await,
+                    };
+                    match result {
                         Ok(()) => credssp_ok.store(true, Ordering::SeqCst),
                         Err(error) => eprintln!("mock RDP CredSSP failed: {error:#}"),
                     }
@@ -254,6 +275,69 @@ async fn accept_kerberos_rdp(
     anyhow::bail!("mock RDP CredSSP exceeded 6 round trips")
 }
 
+async fn accept_ntlm_rdp(
+    stream: TcpStream,
+    peer: std::net::SocketAddr,
+    acceptor: tokio_rustls::TlsAcceptor,
+    public_key: Vec<u8>,
+) -> anyhow::Result<()> {
+    let mut framed = TokioFramed::new(stream);
+    let (_, request) = framed.read_pdu().await.context("read X.224 CR")?;
+    let _: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
+
+    let confirm = X224(ConnectionConfirm::Response {
+        flags: ResponseFlags::empty(),
+        protocol: SecurityProtocol::HYBRID,
+    });
+    framed
+        .write_all(&ironrdp_core::encode_vec(&confirm).context("encode X.224 CC")?)
+        .await
+        .context("write X.224 CC")?;
+
+    let tcp = framed.into_inner_no_leftover();
+    let tls = acceptor.accept(tcp).await.context("TLS accept")?;
+    let mut framed = TokioFramed::new(tls);
+
+    let identity = sspi::AuthIdentity {
+        username: sspi::Username::parse(TARGET_USER).context("parse NTLM target username")?,
+        password: TARGET_PASSWORD.to_owned().into(),
+    };
+    let mut server = sspi::credssp::CredSspServer::new(
+        public_key,
+        IdentityProxy(identity),
+        sspi::credssp::ServerMode::Ntlm(sspi::ntlm::NtlmConfig {
+            client_computer_name: Some(peer.to_string()),
+        }),
+    )
+    .context("init NTLM CredSSP server")?;
+
+    let hint = TsRequestHint;
+    let mut buf = ironrdp_pdu::WriteBuf::new();
+    for _ in 0..6 {
+        let pdu = framed.read_by_hint(&hint).await.context("read CredSSP TSRequest")?;
+        let ts_request = sspi::credssp::TsRequest::from_buffer(&pdu).context("decode CredSSP")?;
+        let result = {
+            let mut generator = server.process(ts_request);
+            resolve_sspi_server(&mut generator)
+                .await
+                .map_err(|error| anyhow::anyhow!("mock RDP NTLM CredSSP: {error:?}"))?
+        };
+        match result {
+            sspi::credssp::ServerState::ReplyNeeded(outbound) => {
+                buf.clear();
+                let length = usize::from(outbound.buffer_len());
+                outbound
+                    .encode_ts_request(buf.unfilled_to(length))
+                    .context("encode server TSRequest")?;
+                buf.advance(length);
+                framed.write_all(&buf[..length]).await.context("write CredSSP")?;
+            }
+            sspi::credssp::ServerState::Finished(_) => return Ok(()),
+        }
+    }
+    anyhow::bail!("mock RDP NTLM CredSSP exceeded 6 round trips")
+}
+
 async fn resolve_sspi_server(
     generator: &mut sspi::generator::Generator<
         '_,
@@ -343,39 +427,68 @@ async fn connect_ntlm_client(
 }
 
 async fn complete_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
+    complete_client_credssp(tls, PROXY_USER, None, false).await
+}
+
+async fn complete_raw_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
+    complete_client_credssp(tls, PROXY_USER, None, true).await
+}
+
+async fn complete_client_credssp(
+    tls: tokio_rustls::client::TlsStream<TcpStream>,
+    username: &str,
+    kdc_proxy_url: Option<&str>,
+    raw_ntlm: bool,
+) -> anyhow::Result<()> {
     use sspi::credssp::{ClientMode, ClientState, CredSspClient, CredSspMode, TsRequest};
     use sspi::ntlm::NtlmConfig;
 
     let public_key = peer_public_key(&tls)?;
     let mut framed = TokioFramed::new(tls);
     let identity = sspi::AuthIdentity {
-        username: sspi::Username::parse(PROXY_USER).context("parse proxy username")?,
+        username: sspi::Username::parse(username).context("parse client username")?,
         password: PROXY_PASSWORD.to_owned().into(),
     };
-    let mut client = CredSspClient::new(
-        public_key,
-        identity.into(),
-        CredSspMode::WithCredentials,
-        // Gateway's CredSSP server is Negotiate (Kerberos+NTLM). A raw NTLM client is rejected.
+    let client_mode = if let Some(kdc_url) = kdc_proxy_url {
+        ClientMode::Negotiate(sspi::NegotiateConfig::new(
+            Box::new(sspi::KerberosConfig {
+                kdc_url: Some(kdc_url.parse().context("parse KDC proxy URL")?),
+                client_computer_name: "cred-injection-e2e".to_owned(),
+            }),
+            Some("kerberos,!ntlm".to_owned()),
+            "cred-injection-e2e".to_owned(),
+        ))
+    } else if raw_ntlm {
+        // Gateway NTLM injection uses ServerMode::Ntlm, which rejects SPNEGO.
+        ClientMode::Ntlm(NtlmConfig {
+            client_computer_name: Some("cred-injection-e2e".to_owned()),
+        })
+    } else {
         ClientMode::Negotiate(sspi::NegotiateConfig::new(
             Box::new(NtlmConfig {
                 client_computer_name: Some("cred-injection-e2e".to_owned()),
             }),
             Some("ntlm,!kerberos,!pku2u".to_owned()),
             "cred-injection-e2e".to_owned(),
-        )),
+        ))
+    };
+    let mut client = CredSspClient::new(
+        public_key,
+        identity.into(),
+        CredSspMode::WithCredentials,
+        client_mode,
         format!("TERMSRV/{SERVICE_HOST}"),
     )
-    .context("init Negotiate-NTLM CredSSP client")?;
+    .context("init CredSSP client")?;
 
     let mut ts_request = TsRequest::default();
     let mut buf = ironrdp_pdu::WriteBuf::new();
     let hint = TsRequestHint;
 
-    for _ in 0..6 {
+    for _ in 0..8 {
         let client_state = {
             let mut generator = client.process(std::mem::take(&mut ts_request));
-            resolve_sspi_client(&mut generator)?
+            resolve_sspi_client(&mut generator).await?
         };
         let (outbound, finished) = match client_state {
             ClientState::ReplyNeeded(request) => (request, false),
@@ -395,10 +508,10 @@ async fn complete_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) 
         ts_request = TsRequest::from_buffer(&pdu).context("decode server TSRequest")?;
     }
 
-    anyhow::bail!("CredSSP exceeded 6 round trips")
+    anyhow::bail!("CredSSP exceeded 8 round trips")
 }
 
-fn resolve_sspi_client(
+async fn resolve_sspi_client(
     generator: &mut sspi::generator::Generator<
         '_,
         sspi::generator::NetworkRequest,
@@ -406,13 +519,102 @@ fn resolve_sspi_client(
         sspi::Result<sspi::credssp::ClientState>,
     >,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
-    let state = generator.start();
-    match state {
-        GeneratorState::Suspended(request) => {
-            anyhow::bail!("NTLM CredSSP client issued a network request: {}", request.url);
+    let mut state = generator.start();
+    loop {
+        match state {
+            GeneratorState::Suspended(request) => {
+                let reply = match request.url.scheme() {
+                    "tcp" | "udp" => send_kdc_tcp(&request).await?,
+                    "http" | "https" => send_kdc_http(&request).await?,
+                    other => anyhow::bail!("unsupported KDC scheme {other}: {}", request.url),
+                };
+                state = generator.resume(Ok(reply));
+            }
+            GeneratorState::Completed(result) => {
+                break result.map_err(|error| anyhow::anyhow!("client CredSSP: {error}"));
+            }
         }
-        GeneratorState::Completed(result) => result.map_err(|error| anyhow::anyhow!("client CredSSP: {error}")),
     }
+}
+
+async fn send_kdc_http(request: &sspi::generator::NetworkRequest) -> anyhow::Result<Vec<u8>> {
+    let host = request.url.host_str().context("KDC proxy host")?;
+    let port = request.url.port_or_known_default().unwrap_or(80);
+    let path = if request.url.query().is_some() {
+        format!("{}?{}", request.url.path(), request.url.query().unwrap_or_default())
+    } else {
+        request.url.path().to_owned()
+    };
+    let mut stream = TcpStream::connect((host, port)).await.context("connect KDC proxy")?;
+    let header = format!(
+        "POST {path} HTTP/1.1\r\n\
+         Host: {host}:{port}\r\n\
+         Content-Type: application/octet-stream\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        request.data.len()
+    );
+    stream
+        .write_all(header.as_bytes())
+        .await
+        .context("write KDC proxy headers")?;
+    stream.write_all(&request.data).await.context("write KDC proxy body")?;
+    stream.flush().await.context("flush KDC proxy")?;
+
+    let mut reader = BufReader::new(stream);
+    let mut status_line = String::new();
+    reader
+        .read_line(&mut status_line)
+        .await
+        .context("read KDC proxy status")?;
+    anyhow::ensure!(status_line.contains("200"), "KDC proxy HTTP status was {status_line:?}");
+
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.context("read KDC proxy header")?;
+        if line == "\r\n" || line.is_empty() {
+            break;
+        }
+        if let Some(value) = line
+            .split_once(':')
+            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .map(|(_, value)| value.trim().to_owned())
+        {
+            content_length = Some(value.parse::<usize>().context("parse KDC proxy Content-Length")?);
+        }
+    }
+
+    if let Some(len) = content_length {
+        let mut buf = vec![0u8; len];
+        tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buf)
+            .await
+            .context("read KDC proxy body")?;
+        Ok(buf)
+    } else {
+        let mut buf = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf)
+            .await
+            .context("read KDC proxy eof body")?;
+        Ok(buf)
+    }
+}
+
+fn kdc_inject_token(association_jti: &str) -> anyhow::Result<String> {
+    unsigned_jws(
+        serde_json::json!({"alg":"RS256","typ":"JWT","cty":"KDC"}),
+        serde_json::json!({
+            "exp": 9_999_999_999i64,
+            "jet_cred_id": association_jti,
+            "jti": next_id(),
+        }),
+    )
+}
+
+fn kdc_proxy_url(http_port: u16, association_jti: &str) -> anyhow::Result<String> {
+    let token = kdc_inject_token(association_jti)?;
+    Ok(format!("http://127.0.0.1:{http_port}/jet/KdcProxy/{token}"))
 }
 
 #[derive(Debug)]
@@ -551,7 +753,7 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoCertificateV
 async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Result<()> {
     install_crypto_provider();
     let kdc = MockKdc::start().await?;
-    let rdp = MockRdp::start(kdc.url()).await?;
+    let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start(true).await?;
 
     let jti = next_id();
@@ -582,6 +784,202 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
 
     let _ = gateway.process.start_kill();
     Ok(())
+}
+
+#[tokio::test]
+async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()> {
+    install_crypto_provider();
+    let kdc = MockKdc::start().await?;
+    let rdp = MockRdp::start_kerberos(kdc.url()).await?;
+    let mut gateway = GatewayProc::start(true).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_mapping(
+        gateway.config.http_port(),
+        &token,
+        PROXY_KERBEROS_USER,
+        KERBEROS_TARGET_USER,
+        TARGET_PASSWORD,
+        300,
+        Some(&kdc.url()),
+    )
+    .await?;
+
+    let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &jti)?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    complete_client_credssp(tls, PROXY_KERBEROS_USER, Some(&kdc_proxy), false)
+        .await
+        .with_context(|| {
+            format!(
+                "client-leg Kerberos CredSSP; gateway logs:\n{}",
+                gateway.logs.snapshot()
+            )
+        })?;
+    rdp.wait_credssp().await.with_context(|| {
+        format!(
+            "target-leg Kerberos CredSSP; gateway logs:\n{}",
+            gateway.logs.snapshot()
+        )
+    })?;
+    anyhow::ensure!(
+        kdc.exchanges() >= 2,
+        "target-leg must talk to the mock KDC; exchanges={}; logs:\n{}",
+        kdc.exchanges(),
+        gateway.logs.snapshot()
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
+    install_crypto_provider();
+    let kdc = MockKdc::start().await?;
+    let rdp = MockRdp::start_kerberos(kdc.url()).await?;
+    let mut gateway = GatewayProc::start(true).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_mapping(
+        gateway.config.http_port(),
+        &token,
+        PROXY_USER,
+        KERBEROS_TARGET_USER,
+        "wrong-target-password",
+        300,
+        Some(&kdc.url()),
+    )
+    .await?;
+
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let _ = complete_ntlm_credssp(tls).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    anyhow::ensure!(
+        !rdp.credssp_ok(),
+        "wrong target password must not complete Kerberos CredSSP; logs:\n{}",
+        gateway.logs.snapshot()
+    );
+    let logs = gateway.logs.snapshot();
+    anyhow::ensure!(
+        !logs.contains(FORWARD_LOG),
+        "wrong password must not ordinary-forward; logs:\n{logs}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
+    install_crypto_provider();
+    let rdp = MockRdp::start_kerberos("tcp://127.0.0.1:1".to_owned()).await?;
+    let mut gateway = GatewayProc::start(true).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &token,
+        KERBEROS_TARGET_USER,
+        300,
+        Some("tcp://127.0.0.1:1"),
+    )
+    .await?;
+
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let _ = complete_ntlm_credssp(tls).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    anyhow::ensure!(
+        !rdp.credssp_ok(),
+        "unreachable KDC must not complete CredSSP; logs:\n{}",
+        gateway.logs.snapshot()
+    );
+    let logs = gateway.logs.snapshot();
+    anyhow::ensure!(
+        !logs.contains(FORWARD_LOG),
+        "KDC down must not ordinary-forward; logs:\n{logs}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
+    let rdp = FakeClosedTarget::start().await?;
+    let mut gateway = GatewayProc::start(true).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_credentials(gateway.config.http_port(), &token, KERBEROS_TARGET_USER, 300, None).await?;
+
+    let mut stream = TcpStream::connect(("127.0.0.1", gateway.config.tcp_port()))
+        .await
+        .context("connect gateway TCP")?;
+    stream.write_all(&encode_pcb(&token)?).await.context("write PCB")?;
+    stream.write_all(&encode_hybrid_cr()?).await.context("write CR")?;
+    stream.flush().await.context("flush CR")?;
+    let logs = gateway.logs.wait_contains(MISSING_LOG).await?;
+    anyhow::ensure!(
+        !logs.contains(FORWARD_LOG),
+        "missing krb_kdc must fail closed; logs:\n{logs}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
+    install_crypto_provider();
+    let rdp = MockRdp::start_ntlm().await?;
+    let mut gateway = GatewayProc::start(false).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    complete_raw_ntlm_credssp(tls)
+        .await
+        .with_context(|| format!("client-leg NTLM CredSSP; logs:\n{}", gateway.logs.snapshot()))?;
+    rdp.wait_credssp()
+        .await
+        .with_context(|| format!("target-leg NTLM CredSSP; logs:\n{}", gateway.logs.snapshot()))?;
+    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
+    anyhow::ensure!(
+        logs.contains("kerberos=false"),
+        "expected NTLM injection; logs:\n{logs}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+struct FakeClosedTarget {
+    port: u16,
+}
+
+impl FakeClosedTarget {
+    async fn start() -> anyhow::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.context("bind closed target")?;
+        let port = listener.local_addr()?.port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((_stream, _)) = listener.accept().await else {
+                    break;
+                };
+            }
+        });
+        Ok(Self { port })
+    }
 }
 
 const CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
