@@ -7516,12 +7516,17 @@ dependencies = [
  "escargot",
  "expect-test",
  "fastrand",
+ "ironrdp-acceptor",
+ "ironrdp-connector",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
+ "ironrdp-tokio",
+ "kdc",
  "libsql",
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
+ "picky-krb",
  "proxy-socks",
  "rstest",
  "serde",
@@ -7536,6 +7541,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "typed-builder",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
