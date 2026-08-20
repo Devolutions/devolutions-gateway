@@ -43,6 +43,8 @@ agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
 gateway-db.path = "../crates/gateway-db"
 hex = "0.4"
 ipnetwork = "0.20"
+ironrdp-core = { version = "0.2", features = ["std"] }
+ironrdp-pdu = { version = "0.9", features = ["std"] }
 jmux-proto = { path = "../crates/jmux-proto" }
 libsql = { version = "0.10", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
