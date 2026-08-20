@@ -25,8 +25,9 @@ pub(crate) const PROXY_PASSWORD: &str = "proxy-secret";
 pub(crate) const TARGET_PASSWORD: &str = "target-secret";
 pub(crate) const KERBEROS_TARGET_USER: &str = "administrator@example.invalid";
 pub(crate) const INJECT_LOG: &str = "RDP-TLS forwarding with credential injection";
-const FORWARD_LOG: &str = "Upstream forwarding";
-const MISSING_LOG: &str = "missing or expired; re-provision to retry";
+pub(crate) const FORWARD_LOG: &str = "Upstream forwarding";
+pub(crate) const MISSING_LOG: &str = "missing or expired; re-provision to retry";
+pub(crate) const PROXY_KERBEROS_USER: &str = "injected-proxy-user@example.invalid";
 const PUBLISHED_KDC_LOG: &str = "Published synthetic KDC";
 const REGISTERED_KDC_LOG: &str = "Registered synthetic KDC for credential-injection session";
 
@@ -347,19 +348,40 @@ pub(crate) async fn provision_credentials(
     time_to_live: u32,
     krb_kdc: Option<&str>,
 ) -> anyhow::Result<()> {
+    provision_mapping(
+        http_port,
+        token,
+        PROXY_USER,
+        target_username,
+        TARGET_PASSWORD,
+        time_to_live,
+        krb_kdc,
+    )
+    .await
+}
+
+pub(crate) async fn provision_mapping(
+    http_port: u16,
+    token: &str,
+    proxy_username: &str,
+    target_username: &str,
+    target_password: &str,
+    time_to_live: u32,
+    krb_kdc: Option<&str>,
+) -> anyhow::Result<()> {
     let mut operations = vec![serde_json::json!({
         "id": next_id(),
         "kind": "provision-credentials",
         "token": token,
         "proxy_credential": {
             "kind": "username-password",
-            "username": PROXY_USER,
+            "username": proxy_username,
             "password": PROXY_PASSWORD
         },
         "target_credential": {
             "kind": "username-password",
             "username": target_username,
-            "password": TARGET_PASSWORD
+            "password": target_password
         },
         "time_to_live": time_to_live
     })];
@@ -606,6 +628,62 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
             .iter()
             .all(|payload| String::from_utf8_lossy(payload).contains(&cookie_line(KERBEROS_TARGET_USER))),
         "each generation should inject the Kerberos target username; payloads={payloads:?}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> {
+    let target = FakeRdpTarget::start().await?;
+    let mut gateway = GatewayProc::start(true).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &token,
+        TARGET_USER,
+        300,
+        Some("tcp://127.0.0.1:88"),
+    )
+    .await?;
+
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
+    assert!(
+        logs.contains("kerberos=false"),
+        "username without a realm must stay NTLM even if krb_kdc is provisioned; logs:\n{logs}"
+    );
+
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn kerberos_opt_out_uses_ntlm_for_domain_user() -> anyhow::Result<()> {
+    let target = FakeRdpTarget::start().await?;
+    let mut gateway = GatewayProc::start(false).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &token,
+        KERBEROS_TARGET_USER,
+        300,
+        Some("tcp://127.0.0.1:88"),
+    )
+    .await?;
+
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
+    assert!(
+        logs.contains("kerberos=false"),
+        "Kerberos injection opt-out must NTLM even with a domain username; logs:\n{logs}"
     );
 
     let _ = gateway.process.start_kill();
