@@ -46,7 +46,7 @@ fn preflight_scope_token() -> anyhow::Result<String> {
         serde_json::json!({"alg":"RS256","typ":"JWT","cty":"SCOPE"}),
         serde_json::json!({
             "scope": "gateway.preflight",
-            "exp": 9_999_999_999_i64,
+            "exp": 9_999_999_999i64,
             "jti": next_id(),
         }),
     )
@@ -57,7 +57,7 @@ fn association_token(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -
         serde_json::json!({"alg":"RS256","typ":"JWT","cty":"ASSOCIATION"}),
         serde_json::json!({
             "dst_hst": format!("127.0.0.1:{dest_port}"),
-            "exp": 9_999_999_999_i64,
+            "exp": 9_999_999_999i64,
             "jet_aid": jet_aid,
             "jet_ap": "rdp",
             "jet_cm": "fwd",
@@ -161,7 +161,7 @@ impl FakeRdpTarget {
                 accepted_task.fetch_add(1, Ordering::SeqCst);
                 let payloads = Arc::clone(&payloads_task);
                 tokio::spawn(async move {
-                    let mut buf = vec![0_u8; 4096];
+                    let mut buf = vec![0u8; 4096];
                     // CredSSP cert generation can delay the rewritten X.224 CR.
                     if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut buf)).await
                         && n > 0
@@ -310,7 +310,7 @@ async fn post_preflight(http_port: u16, operations: serde_json::Value) -> anyhow
     }
 
     let response_body = if let Some(len) = content_length {
-        let mut buf = vec![0_u8; len];
+        let mut buf = vec![0u8; len];
         reader.read_exact(&mut buf).await.context("read preflight body")?;
         String::from_utf8(buf).context("preflight body utf-8")?
     } else {
@@ -326,7 +326,7 @@ async fn post_preflight(http_port: u16, operations: serde_json::Value) -> anyhow
         serde_json::from_str(&response_body).with_context(|| format!("parse preflight JSON: {response_body}"))?;
     let outputs = json.as_array().context("preflight response is not an array")?;
     // Re-provisioning the same JTI emits an info alert, then still acks.
-    let mut acked = 0_usize;
+    let mut acked = 0usize;
     for output in outputs {
         match output["kind"].as_str() {
             Some("ack") => acked += 1,
