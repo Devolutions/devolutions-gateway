@@ -1,14 +1,16 @@
-use std::io::Seek;
+use std::io::{Read, Seek, SeekFrom};
 
-use anyhow::Context;
+use bytes::BytesMut;
 use cadeau::xmf::vpx::VpxCodec;
+use ebml_iterable::TagDecoder;
 use thiserror::Error;
-use webm_iterable::WebmIterator;
 use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 use super::block_tag::is_vpx_key_frame;
 use crate::reopenable::Reopenable;
+
+const INPUT_CHUNK_SIZE: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LastKeyFrameInfo {
@@ -23,26 +25,16 @@ pub(crate) enum LastKeyFrameInfo {
     },
 }
 
-pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
-    inner: Option<WebmIterator<R>>,
-    // The absolute position of the last tag emitted
+pub(crate) struct WebmPositionedIterator<R: Read + Seek + Reopenable> {
+    reader: R,
+    decoder: TagDecoder<MatroskaSpec>,
+    input: BytesMut,
+    // Absolute file offset of the last tag emitted.
     previous_emitted_tag_postion: usize,
-    // The absolute position of the last cluster start tag emitted
-    last_cluster_position: Option<usize>,
-
-    // The absolute position of the last block group/simple block that is a keyframe
+    // Absolute file offset of the last block group/simple block that is a keyframe.
     last_key_frame_info: LastKeyFrameInfo,
-    // The absolute position of the last tag emitted before rollback
+    // Absolute file offset where the current decoder's position 0 maps.
     rollback_record: Option<usize>,
-
-    // When rollback at BlockGroup Full, then the Cluster(Master::end) will not be emitted
-    // So we need to keep track of weather we hit the cluster start and rolled back
-    // if so, we need to emit the cluster end tag manually
-    rolled_back_between_cluster: bool,
-
-    should_emit_cache: Option<MatroskaSpec>,
-
-    // VPX codec type for codec-aware keyframe detection.
     codec: VpxCodec,
 }
 
@@ -50,8 +42,6 @@ pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
 pub(crate) enum IteratorError {
     #[error("Inner Iterator Error: {0}")]
     InnerError(#[from] TagIteratorError),
-    #[error("Position Correction Error: {before_correct_position}")]
-    PositionCorrectionError { before_correct_position: u64 },
     #[error("Value Expected: {0}")]
     ValueExpected(&'static str),
     #[error("IO Error: {0}")]
@@ -62,201 +52,65 @@ pub(crate) enum IteratorError {
 
 impl<R> WebmPositionedIterator<R>
 where
-    R: std::io::Read + Seek + Reopenable,
+    R: Read + Seek + Reopenable,
 {
-    pub(crate) fn new(mut inner: WebmIterator<R>, codec: VpxCodec, cluster_start_position: usize) -> Self {
-        inner.emit_master_end_when_eof(false);
+    pub(crate) fn new(reader: R, codec: VpxCodec) -> Self {
         Self {
-            inner: Some(inner),
-            previous_emitted_tag_postion: cluster_start_position,
-            last_cluster_position: Some(cluster_start_position),
+            reader,
+            decoder: new_decoder(),
+            input: BytesMut::new(),
+            previous_emitted_tag_postion: 0,
             rollback_record: None,
-            rolled_back_between_cluster: false,
-            should_emit_cache: None,
             last_key_frame_info: LastKeyFrameInfo::NotMet {
                 cluster_timestamp: None,
-                cluster_start_position: Some(cluster_start_position),
+                cluster_start_position: None,
             },
             codec,
         }
     }
 
+    pub(crate) fn set_codec(&mut self, codec: VpxCodec) {
+        self.codec = codec;
+    }
+
     pub(crate) fn next(&mut self) -> Option<Result<MatroskaSpec, IteratorError>> {
-        let Some(inner) = self.inner.as_mut() else {
-            return Some(Err(IteratorError::ValueExpected("inner tag writer")));
-        };
-
-        let result = inner.next();
-
-        if result.is_none() {
-            let record = self.rollback_record.unwrap_or(0);
-            if record + inner.last_emitted_tag_offset() > self.previous_emitted_tag_postion {
-                self.previous_emitted_tag_postion = record + inner.last_emitted_tag_offset();
-            }
-            return None;
-        }
-
-        if let Some(Ok(tag)) = &result {
-            let record = self.rollback_record.unwrap_or(0);
-            // The last emitted tag is relative, i.e when rollback, the last_emitted_tag_offset() will be reset to 0
-            if record + inner.last_emitted_tag_offset() >= self.previous_emitted_tag_postion {
-                self.previous_emitted_tag_postion = record + inner.last_emitted_tag_offset();
-            }
-
-            if matches!(tag, MatroskaSpec::BlockGroup(Master::Full(_))) {
-                // we check if the tag is BlockGroup Full,
-                // If so, we need to correct for the last tag position
-                // because the full element offset will skip the header
-
-                if let Err(e) =
-                    self.correct_for_blockgroup_header()
-                        .map_err(|_| IteratorError::PositionCorrectionError {
-                            before_correct_position: self.previous_emitted_tag_postion as u64,
-                        })
-                {
-                    return Some(Err(e));
+        loop {
+            match self.decoder.decode(&mut self.input) {
+                Ok(Some(positioned)) => {
+                    return Some(self.observe_tag(positioned.tag, positioned.offset));
                 }
-            }
-
-            if let MatroskaSpec::Timestamp(time) = tag {
-                match self.last_key_frame_info {
-                    LastKeyFrameInfo::NotMet {
-                        cluster_timestamp: ref mut potential_cluster_timestamp,
-                        ..
-                    } => {
-                        potential_cluster_timestamp.replace(*time);
-                    }
-                    LastKeyFrameInfo::Met {
-                        ref mut cluster_timestamp,
-                        ..
-                    } => {
-                        *cluster_timestamp = *time;
-                    }
-                }
-
-                return result.map(|result| result.map_err(|err| err.into()));
-            }
-
-            match self.is_key_frame(tag) {
-                Err(e) => {
-                    return Some(Err(e));
-                }
-                Ok(false) => {}
-                Ok(true) => {
-                    perf_trace!(
-                        last_tag_position = self.previous_emitted_tag_postion,
-                        last_key_frame_info = ?self.last_key_frame_info,
-                        "Key Frame Found"
-                    );
-                    match self.last_key_frame_info {
-                        LastKeyFrameInfo::NotMet {
-                            cluster_timestamp,
-                            cluster_start_position,
-                        } => {
-                            let Some(cluster_timestamp) = cluster_timestamp else {
-                                return Some(Err(IteratorError::ValueExpected("cluster_timestamp")));
-                            };
-
-                            let Some(cluster_start_position) = cluster_start_position else {
-                                return Some(Err(IteratorError::ValueExpected("cluster_start_position")));
-                            };
-
-                            self.last_key_frame_info = LastKeyFrameInfo::Met {
-                                position: self.previous_emitted_tag_postion,
-                                cluster_timestamp,
-                                cluster_start_position,
-                            }
-                        }
-                        LastKeyFrameInfo::Met { ref mut position, .. } => {
-                            *position = self.previous_emitted_tag_postion;
-                        }
-                    }
-                }
-            };
-
-            if let Some(Ok(MatroskaSpec::Cluster(Master::Start))) = &result {
-                self.last_cluster_position = Some(self.previous_emitted_tag_postion);
-
-                match self.last_key_frame_info {
-                    LastKeyFrameInfo::NotMet {
-                        ref mut cluster_start_position,
-                        ..
-                    } => {
-                        cluster_start_position.replace(self.previous_emitted_tag_postion);
-                    }
-                    LastKeyFrameInfo::Met {
-                        ref mut cluster_start_position,
-                        ..
-                    } => {
-                        *cluster_start_position = self.previous_emitted_tag_postion;
-                    }
-                };
-
-                if self.rolled_back_between_cluster {
-                    self.should_emit_cache = Some(MatroskaSpec::Cluster(Master::Start));
-                    self.rolled_back_between_cluster = false;
-                    return Some(Ok(MatroskaSpec::Cluster(Master::End)));
-                } else {
-                    return result.map(|result| result.map_err(|err| err.into()));
-                }
+                Ok(None) => match self.fill_input() {
+                    Ok(0) => return None,
+                    Ok(_) => continue,
+                    Err(error) => return Some(Err(error.into())),
+                },
+                Err(error) => return Some(Err(error.into())),
             }
         }
-
-        result.map(|result| result.map_err(|err| err.into()))
     }
 
-    pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
-        perf_debug!(
-            last_tag_position = self.previous_emitted_tag_postion,
-            "Rolling back to last successful tag"
-        );
-        let inner = self.inner.take().context("no inner iterator")?;
-        let mut file = inner.into_inner();
-        file.reopen()?;
-        file.seek(std::io::SeekFrom::Start(self.previous_emitted_tag_postion as u64))?;
-        self.new_inner(file);
-        self.rollback_record = Some(self.previous_emitted_tag_postion);
-
-        if self
-            .last_cluster_position
-            .map(|last_cluster_position| last_cluster_position != self.previous_emitted_tag_postion)
-            .unwrap_or(false)
-        {
-            self.rolled_back_between_cluster = true;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn skip(&mut self, number: u32) -> anyhow::Result<()> {
-        for _ in 0..number {
-            let _ = self.next().context("failed to skip tag")??;
-        }
-
+    pub(crate) fn refresh_from_disk(&mut self) -> anyhow::Result<()> {
+        self.reader.reopen()?;
+        let absolute_read_head = self.rollback_record.unwrap_or(0) + self.decoder.position() + self.input.len();
+        self.reader.seek(SeekFrom::Start(absolute_read_head.try_into()?))?;
         Ok(())
     }
 
     pub(crate) fn rollback_to_last_key_frame(&mut self) -> Result<LastKeyFrameInfo, IteratorError> {
         let LastKeyFrameInfo::Met {
             position: last_key_frame_position,
-            cluster_start_position,
             ..
         } = self.last_key_frame_info
         else {
             return Ok(self.last_key_frame_info);
         };
 
-        let inner = self
-            .inner
-            .take()
-            .ok_or(IteratorError::ValueExpected("inner tag writer"))?;
-        let mut file = inner.into_inner();
-        file.reopen()?;
-        file.seek(std::io::SeekFrom::Start(last_key_frame_position as u64))?;
+        self.reader.reopen()?;
+        self.reader.seek(SeekFrom::Start(last_key_frame_position as u64))?;
+        self.decoder = new_decoder();
+        self.input.clear();
         self.rollback_record = Some(last_key_frame_position);
         self.previous_emitted_tag_postion = last_key_frame_position;
-        self.new_inner(file);
-        self.last_cluster_position = Some(cluster_start_position);
         Ok(self.last_key_frame_info)
     }
 
@@ -264,34 +118,91 @@ where
         self.previous_emitted_tag_postion
     }
 
-    // The BlockGroup element binary layout is like this
-    // a0 [VInt for content length] [content]
-    // We search for a0 [VInt for content length] from 16 bytes backward from current position
-    fn correct_for_blockgroup_header(&mut self) -> anyhow::Result<()> {
-        let file = self.inner.as_mut().context("inner is none")?.get_mut();
-        let current_position = file.stream_position()?;
-        file.seek(std::io::SeekFrom::Start(self.previous_emitted_tag_postion.try_into()?))?;
-        let mut lookback_range = [0u8; 16];
-        file.seek_relative(-16)?;
-        file.read_exact(&mut lookback_range)?;
+    fn fill_input(&mut self) -> std::io::Result<usize> {
+        let mut buf = [0u8; INPUT_CHUNK_SIZE];
+        let read = self.reader.read(&mut buf)?;
+        if read > 0 {
+            self.input.extend_from_slice(&buf[..read]);
+        }
+        Ok(read)
+    }
 
-        let mut found = false;
-        for i in (1..lookback_range.len()).rev() {
-            let slice = &lookback_range[i..];
-            if slice[0] == 0xa0 && read_vint(&slice[1..]).is_ok_and(|opt| opt.is_some()) {
-                let trace_back_offset = 16 - i;
-                self.previous_emitted_tag_postion -= trace_back_offset;
-                found = true;
-                break;
+    fn observe_tag(&mut self, tag: MatroskaSpec, relative_offset: usize) -> Result<MatroskaSpec, IteratorError> {
+        let record = self.rollback_record.unwrap_or(0);
+        let absolute_offset = record + relative_offset;
+        if absolute_offset >= self.previous_emitted_tag_postion {
+            self.previous_emitted_tag_postion = absolute_offset;
+        }
+
+        if let MatroskaSpec::Timestamp(time) = tag {
+            match self.last_key_frame_info {
+                LastKeyFrameInfo::NotMet {
+                    cluster_timestamp: ref mut potential_cluster_timestamp,
+                    ..
+                } => {
+                    potential_cluster_timestamp.replace(time);
+                }
+                LastKeyFrameInfo::Met {
+                    ref mut cluster_timestamp,
+                    ..
+                } => {
+                    *cluster_timestamp = time;
+                }
+            }
+            return Ok(tag);
+        }
+
+        match self.is_key_frame(&tag) {
+            Err(error) => return Err(error),
+            Ok(false) => {}
+            Ok(true) => {
+                perf_trace!(
+                    last_tag_position = self.previous_emitted_tag_postion,
+                    last_key_frame_info = ?self.last_key_frame_info,
+                    "Key Frame Found"
+                );
+                match self.last_key_frame_info {
+                    LastKeyFrameInfo::NotMet {
+                        cluster_timestamp,
+                        cluster_start_position,
+                    } => {
+                        let Some(cluster_timestamp) = cluster_timestamp else {
+                            return Err(IteratorError::ValueExpected("cluster_timestamp"));
+                        };
+                        let Some(cluster_start_position) = cluster_start_position else {
+                            return Err(IteratorError::ValueExpected("cluster_start_position"));
+                        };
+                        self.last_key_frame_info = LastKeyFrameInfo::Met {
+                            position: self.previous_emitted_tag_postion,
+                            cluster_timestamp,
+                            cluster_start_position,
+                        };
+                    }
+                    LastKeyFrameInfo::Met { ref mut position, .. } => {
+                        *position = self.previous_emitted_tag_postion;
+                    }
+                }
             }
         }
 
-        file.seek(std::io::SeekFrom::Start(current_position))?;
-        if !found {
-            anyhow::bail!("no EBML Element of BlockGroup Found");
+        if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
+            match self.last_key_frame_info {
+                LastKeyFrameInfo::NotMet {
+                    ref mut cluster_start_position,
+                    ..
+                } => {
+                    cluster_start_position.replace(self.previous_emitted_tag_postion);
+                }
+                LastKeyFrameInfo::Met {
+                    ref mut cluster_start_position,
+                    ..
+                } => {
+                    *cluster_start_position = self.previous_emitted_tag_postion;
+                }
+            }
         }
 
-        Ok(())
+        Ok(tag)
     }
 
     fn is_key_frame(&self, tag: &MatroskaSpec) -> Result<bool, IteratorError> {
@@ -322,71 +233,136 @@ where
             _ => Ok(false),
         }
     }
-
-    fn new_inner(&mut self, reader: R) {
-        let mut inner = WebmIterator::new(reader, &[MatroskaSpec::BlockGroup(Master::Start)]);
-        // Disable automatic Master::End or Master::Start tag emission at EOF.
-        //
-        // Scenario 1 - EOF within a Cluster:
-        // - When we hit EOF between Cluster(Master::Start) and expected Cluster(Master::End)
-        // - By default, iterator emits Cluster(Master::End) automatically
-        // - This causes last_emitted_tag_offset() to jump back to the Cluster(Master::Start) position
-        // - Our position tracking becomes incorrect as it's smaller than BlockGroup/SimpleBlock we read
-        //
-        // Scenario 2 - EOF when reading from middle of a Cluster:
-        // - When we start reading from middle of a Cluster (after rollback/seek)
-        // - At EOF, iterator assumes we need a matching Start tag.
-        // - It emits a Cluster(Master::Start) with offset 0
-        // - This resets last_emitted_tag_offset() to 0, breaking our position tracking
-        inner.emit_master_end_when_eof(false);
-        self.inner = Some(inner);
-    }
 }
 
-pub(crate) fn read_vint(buffer: &[u8]) -> anyhow::Result<Option<(u64, usize)>> {
-    if buffer.is_empty() {
-        return Ok(None);
-    }
-
-    if buffer[0] == 0 {
-        anyhow::bail!("VInt first byte cannot be 0");
-    }
-
-    let length = 8 - buffer[0].ilog2() as usize;
-
-    if length > buffer.len() {
-        // Not enough data in the buffer to read out the vint value
-        return Ok(None);
-    }
-
-    let mut value = u64::from(buffer[0]);
-    value -= 1 << (8 - length);
-
-    for item in buffer.iter().take(length).skip(1) {
-        value <<= 8;
-        value += u64::from(*item);
-    }
-
-    Ok(Some((value, length)))
+fn new_decoder() -> TagDecoder<MatroskaSpec> {
+    TagDecoder::new(&[MatroskaSpec::BlockGroup(Master::Start)])
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, SeekFrom};
+
+    use webm_iterable::{WebmWriter, WriteOptions};
+
     use super::*;
 
-    #[test]
-    fn test_read_vint() {
-        let test_cases = vec![
-            (vec![0x46, 0xa0, 0x00], Some((1696, 2))), // Single-byte VINT
-            (vec![0x46, 0xa0], Some((1696, 2))),       // Single-byte VINT
-        ];
+    struct GrowingFile {
+        data: Vec<u8>,
+        pos: usize,
+        visible: usize,
+    }
 
-        for (input, expected) in test_cases {
-            let result = read_vint(&input);
-            let Ok(result) = result else {
-                panic!("Failed to read vint");
-            };
-            assert_eq!(result, expected);
+    impl Read for GrowingFile {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.pos >= self.visible {
+                return Ok(0);
+            }
+            let read = (self.visible - self.pos).min(buf.len());
+            buf[..read].copy_from_slice(&self.data[self.pos..self.pos + read]);
+            self.pos += read;
+            Ok(read)
         }
+    }
+
+    impl Seek for GrowingFile {
+        fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+            let next = match from {
+                SeekFrom::Start(offset) => i64::try_from(offset).map_err(io::Error::other)?,
+                SeekFrom::Current(offset) => i64::try_from(self.pos)
+                    .map_err(io::Error::other)?
+                    .checked_add(offset)
+                    .ok_or_else(|| io::Error::other("seek overflow"))?,
+                SeekFrom::End(offset) => i64::try_from(self.visible)
+                    .map_err(io::Error::other)?
+                    .checked_add(offset)
+                    .ok_or_else(|| io::Error::other("seek overflow"))?,
+            };
+            if next < 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "negative seek"));
+            }
+            self.pos = usize::try_from(next).map_err(io::Error::other)?;
+            Ok(self.pos as u64)
+        }
+    }
+
+    impl Reopenable for GrowingFile {
+        fn reopen(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn sample_webm() -> Vec<u8> {
+        let mut dest = Vec::new();
+        let mut writer = WebmWriter::new(&mut dest);
+        writer
+            .write(&MatroskaSpec::Ebml(Master::Start))
+            .expect("write ebml start");
+        writer.write(&MatroskaSpec::EbmlVersion(1)).expect("write ebml version");
+        writer.write(&MatroskaSpec::Ebml(Master::End)).expect("write ebml end");
+        writer
+            .write_advanced(
+                &MatroskaSpec::Segment(Master::Start),
+                WriteOptions::is_unknown_sized_element(),
+            )
+            .expect("write segment start");
+        writer
+            .write(&MatroskaSpec::Cluster(Master::Start))
+            .expect("write cluster start");
+        writer.write(&MatroskaSpec::Timestamp(0)).expect("write timestamp");
+        writer.flush().expect("flush webm writer");
+        dest
+    }
+
+    #[test]
+    fn incomplete_input_waits_then_resumes_after_refresh() {
+        let data = sample_webm();
+        assert!(
+            data.len() > 16,
+            "fixture too small ({} bytes): {:02x?}",
+            data.len(),
+            data
+        );
+
+        let mut complete = WebmPositionedIterator::new(
+            GrowingFile {
+                data: data.clone(),
+                pos: 0,
+                visible: data.len(),
+            },
+            VpxCodec::VP8,
+        );
+        let complete_tags = std::iter::from_fn(|| complete.next())
+            .map(|tag| tag.expect("complete fixture should parse"))
+            .collect::<Vec<_>>();
+        assert!(
+            complete_tags
+                .iter()
+                .any(|tag| matches!(tag, MatroskaSpec::Cluster(Master::Start))),
+            "complete fixture tags: {complete_tags:?}"
+        );
+
+        let mut iter = WebmPositionedIterator::new(
+            GrowingFile {
+                data: data.clone(),
+                pos: 0,
+                visible: 4,
+            },
+            VpxCodec::VP8,
+        );
+
+        assert!(iter.next().is_none());
+
+        iter.reader.visible = data.len();
+        iter.refresh_from_disk().expect("refresh growing file");
+
+        let mut saw_cluster = false;
+        while let Some(tag) = iter.next() {
+            if matches!(tag.expect("valid tag"), MatroskaSpec::Cluster(Master::Start)) {
+                saw_cluster = true;
+                break;
+            }
+        }
+        assert!(saw_cluster);
     }
 }
