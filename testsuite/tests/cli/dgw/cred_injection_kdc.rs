@@ -4,8 +4,8 @@
 //! sspi-rs) and completes CredSSP with a fake RDP acceptor. The Gateway-facing client uses
 //! NTLM so the test does not depend on the in-process synthetic KDC.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
@@ -16,7 +16,8 @@ use ironrdp_pdu::nego::{
 };
 use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
-use picky_krb::messages::KdcProxyMessage;
+use picky_krb::data_types::PrincipalName;
+use picky_krb::messages::{AsRep, AsReq, KdcProxyMessage, KrbError, TgsRep, TgsReq};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::rustls::pki_types::pem::PemObject as _;
@@ -36,9 +37,17 @@ const SERVICE_HOST: &str = "localhost";
 const KRBTGT_KEY: [u8; 32] = [0x11; 32];
 const TERMSRV_KEY: [u8; 32] = [0x22; 32];
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ObservedKdcReq {
+    As { cname: String, realm: String },
+    Tgs { sname: Vec<String>, realm: String },
+    Other,
+}
+
 struct MockKdc {
     port: u16,
     exchanges: Arc<AtomicUsize>,
+    requests: Arc<Mutex<Vec<ObservedKdcReq>>>,
 }
 
 impl MockKdc {
@@ -46,7 +55,9 @@ impl MockKdc {
         let listener = TcpListener::bind("127.0.0.1:0").await.context("bind mock KDC")?;
         let port = listener.local_addr().context("mock KDC local_addr")?.port();
         let exchanges = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
         let exchanges_task = Arc::clone(&exchanges);
+        let requests_task = Arc::clone(&requests);
         let config = kdc_config();
 
         tokio::spawn(async move {
@@ -56,8 +67,9 @@ impl MockKdc {
                 };
                 let config = config.clone();
                 let exchanges = Arc::clone(&exchanges_task);
+                let requests = Arc::clone(&requests_task);
                 tokio::spawn(async move {
-                    match serve_kdc_exchange(stream, &config).await {
+                    match serve_kdc_exchange(stream, &config, &requests).await {
                         Ok(()) => {
                             exchanges.fetch_add(1, Ordering::SeqCst);
                         }
@@ -67,7 +79,11 @@ impl MockKdc {
             }
         });
 
-        Ok(Self { port, exchanges })
+        Ok(Self {
+            port,
+            exchanges,
+            requests,
+        })
     }
 
     fn url(&self) -> String {
@@ -76,6 +92,10 @@ impl MockKdc {
 
     fn exchanges(&self) -> usize {
         self.exchanges.load(Ordering::SeqCst)
+    }
+
+    fn requests(&self) -> Vec<ObservedKdcReq> {
+        self.requests.lock().expect("kdc request mutex").clone()
     }
 }
 
@@ -95,12 +115,18 @@ fn kdc_config() -> kdc::config::KerberosServer {
     }
 }
 
-async fn serve_kdc_exchange(mut stream: TcpStream, config: &kdc::config::KerberosServer) -> anyhow::Result<()> {
+async fn serve_kdc_exchange(
+    mut stream: TcpStream,
+    config: &kdc::config::KerberosServer,
+    requests: &Mutex<Vec<ObservedKdcReq>>,
+) -> anyhow::Result<()> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await.context("read KDC length")?;
     let len = usize::try_from(u32::from_be_bytes(len_buf)).context("KDC length")?;
     let mut body = vec![0u8; len];
     stream.read_exact(&mut body).await.context("read KDC body")?;
+
+    requests.lock().expect("kdc request mutex").push(observe_kdc_req(&body));
 
     let mut raw = Vec::with_capacity(4 + len);
     raw.extend_from_slice(&len_buf);
@@ -115,6 +141,61 @@ async fn serve_kdc_exchange(mut stream: TcpStream, config: &kdc::config::Kerbero
     Ok(())
 }
 
+fn principal_strings(name: &PrincipalName) -> Vec<String> {
+    name.name_string.0.0.iter().map(|part| part.0.to_string()).collect()
+}
+
+fn observe_kdc_req(body: &[u8]) -> ObservedKdcReq {
+    if let Ok(as_req) = picky_asn1_der::from_bytes::<AsReq>(body) {
+        let req = &as_req.0.req_body.0;
+        let cname = req
+            .cname
+            .0
+            .as_ref()
+            .map(|name| principal_strings(&name.0).join("/"))
+            .unwrap_or_default();
+        return ObservedKdcReq::As {
+            cname,
+            realm: req.realm.0.to_string(),
+        };
+    }
+    if let Ok(tgs_req) = picky_asn1_der::from_bytes::<TgsReq>(body) {
+        let req = &tgs_req.0.req_body.0;
+        let sname = req
+            .sname
+            .0
+            .as_ref()
+            .map(|name| principal_strings(&name.0))
+            .unwrap_or_default();
+        return ObservedKdcReq::Tgs {
+            sname,
+            realm: req.realm.0.to_string(),
+        };
+    }
+    ObservedKdcReq::Other
+}
+
+fn observe_kdc_reply(body: &[u8]) -> ObservedKdcReply {
+    let krb = body.get(4..).unwrap_or(body);
+    if picky_asn1_der::from_bytes::<AsRep>(krb).is_ok() {
+        ObservedKdcReply::AsRep
+    } else if picky_asn1_der::from_bytes::<TgsRep>(krb).is_ok() {
+        ObservedKdcReply::TgsRep
+    } else if picky_asn1_der::from_bytes::<KrbError>(krb).is_ok() {
+        ObservedKdcReply::KrbError
+    } else {
+        ObservedKdcReply::Other
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ObservedKdcReply {
+    AsRep,
+    TgsRep,
+    KrbError,
+    Other,
+}
+
 #[derive(Clone)]
 enum MockRdpMode {
     Kerberos { kdc_url: String },
@@ -124,6 +205,8 @@ enum MockRdpMode {
 struct MockRdp {
     port: u16,
     credssp_ok: Arc<AtomicBool>,
+    finished_account: Arc<Mutex<Option<String>>>,
+    cookies: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockRdp {
@@ -144,7 +227,11 @@ impl MockRdp {
         };
         let port = listener.local_addr().context("mock RDP local_addr")?.port();
         let credssp_ok = Arc::new(AtomicBool::new(false));
+        let finished_account = Arc::new(Mutex::new(None));
+        let cookies = Arc::new(Mutex::new(Vec::new()));
         let credssp_ok_task = Arc::clone(&credssp_ok);
+        let finished_account_task = Arc::clone(&finished_account);
+        let cookies_task = Arc::clone(&cookies);
         let acceptor = tls_acceptor()?;
         let public_key = server_public_key()?;
 
@@ -156,13 +243,26 @@ impl MockRdp {
                 let acceptor = acceptor.clone();
                 let public_key = public_key.clone();
                 let credssp_ok = Arc::clone(&credssp_ok_task);
+                let finished_account = Arc::clone(&finished_account_task);
+                let cookies = Arc::clone(&cookies_task);
                 let mode = mode.clone();
                 tokio::spawn(async move {
                     let result = match &mode {
                         MockRdpMode::Kerberos { kdc_url } => {
-                            accept_kerberos_rdp(stream, peer, acceptor, public_key, kdc_url).await
+                            accept_kerberos_rdp(
+                                stream,
+                                peer,
+                                acceptor,
+                                public_key,
+                                kdc_url,
+                                &cookies,
+                                &finished_account,
+                            )
+                            .await
                         }
-                        MockRdpMode::Ntlm => accept_ntlm_rdp(stream, peer, acceptor, public_key).await,
+                        MockRdpMode::Ntlm => {
+                            accept_ntlm_rdp(stream, peer, acceptor, public_key, &cookies, &finished_account).await
+                        }
                     };
                     match result {
                         Ok(()) => credssp_ok.store(true, Ordering::SeqCst),
@@ -172,11 +272,24 @@ impl MockRdp {
             }
         });
 
-        Ok(Self { port, credssp_ok })
+        Ok(Self {
+            port,
+            credssp_ok,
+            finished_account,
+            cookies,
+        })
     }
 
     fn credssp_ok(&self) -> bool {
         self.credssp_ok.load(Ordering::SeqCst)
+    }
+
+    fn finished_account(&self) -> Option<String> {
+        self.finished_account.lock().expect("finished account mutex").clone()
+    }
+
+    fn cookies(&self) -> Vec<String> {
+        self.cookies.lock().expect("cookie mutex").clone()
     }
 
     async fn wait_credssp(&self) -> anyhow::Result<()> {
@@ -199,10 +312,13 @@ async fn accept_kerberos_rdp(
     acceptor: tokio_rustls::TlsAcceptor,
     public_key: Vec<u8>,
     kdc_url: &str,
+    cookies: &Mutex<Vec<String>>,
+    finished_account: &Mutex<Option<String>>,
 ) -> anyhow::Result<()> {
     let mut framed = TokioFramed::new(stream);
     let (_, request) = framed.read_pdu().await.context("read X.224 CR")?;
-    let _: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
+    let cr: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
+    record_cookie(&cr, cookies);
 
     let confirm = X224(ConnectionConfirm::Response {
         flags: ResponseFlags::empty(),
@@ -269,7 +385,11 @@ async fn accept_kerberos_rdp(
                 buf.advance(length);
                 framed.write_all(&buf[..length]).await.context("write CredSSP")?;
             }
-            sspi::credssp::ServerState::Finished(_) => return Ok(()),
+            sspi::credssp::ServerState::Finished(identity) => {
+                *finished_account.lock().expect("finished account mutex") =
+                    Some(identity.username.account_name().to_owned());
+                return Ok(());
+            }
         }
     }
     anyhow::bail!("mock RDP CredSSP exceeded 6 round trips")
@@ -280,10 +400,13 @@ async fn accept_ntlm_rdp(
     peer: std::net::SocketAddr,
     acceptor: tokio_rustls::TlsAcceptor,
     public_key: Vec<u8>,
+    cookies: &Mutex<Vec<String>>,
+    finished_account: &Mutex<Option<String>>,
 ) -> anyhow::Result<()> {
     let mut framed = TokioFramed::new(stream);
     let (_, request) = framed.read_pdu().await.context("read X.224 CR")?;
-    let _: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
+    let cr: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
+    record_cookie(&cr, cookies);
 
     let confirm = X224(ConnectionConfirm::Response {
         flags: ResponseFlags::empty(),
@@ -332,10 +455,20 @@ async fn accept_ntlm_rdp(
                 buf.advance(length);
                 framed.write_all(&buf[..length]).await.context("write CredSSP")?;
             }
-            sspi::credssp::ServerState::Finished(_) => return Ok(()),
+            sspi::credssp::ServerState::Finished(identity) => {
+                *finished_account.lock().expect("finished account mutex") =
+                    Some(identity.username.account_name().to_owned());
+                return Ok(());
+            }
         }
     }
     anyhow::bail!("mock RDP NTLM CredSSP exceeded 6 round trips")
+}
+
+fn record_cookie(cr: &X224<ConnectionRequest>, cookies: &Mutex<Vec<String>>) {
+    if let Some(NegoRequestData::Cookie(cookie)) = &cr.0.nego_data {
+        cookies.lock().expect("cookie mutex").push(cookie.0.clone());
+    }
 }
 
 async fn resolve_sspi_server(
@@ -427,11 +560,11 @@ async fn connect_ntlm_client(
 }
 
 async fn complete_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, false).await
+    complete_client_credssp(tls, PROXY_USER, None, false, None).await
 }
 
 async fn complete_raw_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, true).await
+    complete_client_credssp(tls, PROXY_USER, None, true, None).await
 }
 
 async fn complete_client_credssp(
@@ -439,6 +572,7 @@ async fn complete_client_credssp(
     username: &str,
     kdc_proxy_url: Option<&str>,
     raw_ntlm: bool,
+    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
 ) -> anyhow::Result<()> {
     use sspi::credssp::{ClientMode, ClientState, CredSspClient, CredSspMode, TsRequest};
     use sspi::ntlm::NtlmConfig;
@@ -488,7 +622,7 @@ async fn complete_client_credssp(
     for _ in 0..8 {
         let client_state = {
             let mut generator = client.process(std::mem::take(&mut ts_request));
-            resolve_sspi_client(&mut generator).await?
+            resolve_sspi_client(&mut generator, proxy_replies).await?
         };
         let (outbound, finished) = match client_state {
             ClientState::ReplyNeeded(request) => (request, false),
@@ -518,6 +652,7 @@ async fn resolve_sspi_client(
         sspi::Result<Vec<u8>>,
         sspi::Result<sspi::credssp::ClientState>,
     >,
+    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
     let mut state = generator.start();
     loop {
@@ -525,7 +660,7 @@ async fn resolve_sspi_client(
             GeneratorState::Suspended(request) => {
                 let reply = match request.url.scheme() {
                     "tcp" | "udp" => send_kdc_tcp(&request).await?,
-                    "http" | "https" => send_kdc_http(&request).await?,
+                    "http" | "https" => send_kdc_http(&request, proxy_replies).await?,
                     other => anyhow::bail!("unsupported KDC scheme {other}: {}", request.url),
                 };
                 state = generator.resume(Ok(reply));
@@ -537,7 +672,10 @@ async fn resolve_sspi_client(
     }
 }
 
-async fn send_kdc_http(request: &sspi::generator::NetworkRequest) -> anyhow::Result<Vec<u8>> {
+async fn send_kdc_http(
+    request: &sspi::generator::NetworkRequest,
+    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
+) -> anyhow::Result<Vec<u8>> {
     let host = request.url.host_str().context("KDC proxy host")?;
     let port = request.url.port_or_known_default().unwrap_or(80);
     let path = if request.url.query().is_some() {
@@ -586,19 +724,27 @@ async fn send_kdc_http(request: &sspi::generator::NetworkRequest) -> anyhow::Res
         }
     }
 
-    if let Some(len) = content_length {
+    let buf = if let Some(len) = content_length {
         let mut buf = vec![0u8; len];
         tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buf)
             .await
             .context("read KDC proxy body")?;
-        Ok(buf)
+        buf
     } else {
         let mut buf = Vec::new();
         tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf)
             .await
             .context("read KDC proxy eof body")?;
-        Ok(buf)
+        buf
+    };
+    if let Ok(message) = KdcProxyMessage::from_raw(&buf)
+        && let Some(log) = proxy_replies
+    {
+        log.lock()
+            .expect("proxy reply mutex")
+            .push(observe_kdc_reply(&message.kerb_message.0.0));
     }
+    Ok(buf)
 }
 
 fn kdc_inject_token(association_jti: &str) -> anyhow::Result<String> {
@@ -749,6 +895,27 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoCertificateV
     }
 }
 
+fn assert_target_kdc_as_and_tgs(kdc: &MockKdc) -> anyhow::Result<()> {
+    let reqs = kdc.requests();
+    anyhow::ensure!(
+        reqs.iter().any(|req| matches!(
+            req,
+            ObservedKdcReq::As { cname, realm }
+                if cname.eq_ignore_ascii_case("administrator") && realm.eq_ignore_ascii_case(REALM)
+        )),
+        "KDC must see AS-REQ cname=administrator realm={REALM}; requests={reqs:?}"
+    );
+    anyhow::ensure!(
+        reqs.iter().any(|req| matches!(
+            req,
+            ObservedKdcReq::Tgs { sname, realm }
+                if *sname == ["TERMSRV", SERVICE_HOST] && realm.eq_ignore_ascii_case(REALM)
+        )),
+        "KDC must see TGS-REQ sname=TERMSRV/{SERVICE_HOST} realm={REALM}; requests={reqs:?}"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -781,6 +948,18 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
         kdc.exchanges(),
         gateway.logs.snapshot()
     );
+    assert_target_kdc_as_and_tgs(&kdc)?;
+    anyhow::ensure!(
+        rdp.finished_account().as_deref() == Some("administrator"),
+        "RDP CredSSP Finished account must be administrator; got={:?}; cookies={:?}",
+        rdp.finished_account(),
+        rdp.cookies()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
+        "RDP X.224 cookie must be {KERBEROS_TARGET_USER}; cookies={:?}",
+        rdp.cookies()
+    );
 
     let _ = gateway.process.start_kill();
     Ok(())
@@ -808,8 +987,9 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     .await?;
 
     let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &jti)?;
+    let proxy_replies = Mutex::new(Vec::new());
     let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
-    complete_client_credssp(tls, PROXY_KERBEROS_USER, Some(&kdc_proxy), false)
+    complete_client_credssp(tls, PROXY_KERBEROS_USER, Some(&kdc_proxy), false, Some(&proxy_replies))
         .await
         .with_context(|| {
             format!(
@@ -828,6 +1008,17 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
         "target-leg must talk to the mock KDC; exchanges={}; logs:\n{}",
         kdc.exchanges(),
         gateway.logs.snapshot()
+    );
+    assert_target_kdc_as_and_tgs(&kdc)?;
+    let replies = proxy_replies.lock().expect("proxy reply mutex").clone();
+    anyhow::ensure!(
+        replies.contains(&ObservedKdcReply::AsRep) && replies.contains(&ObservedKdcReply::TgsRep),
+        "/jet/KdcProxy must return AS-REP and TGS-REP (PREAUTH KRB-ERROR is allowed first); replies={replies:?}"
+    );
+    anyhow::ensure!(
+        rdp.finished_account().as_deref() == Some("administrator"),
+        "RDP CredSSP Finished account must be administrator; got={:?}",
+        rdp.finished_account()
     );
 
     let _ = gateway.process.start_kill();
@@ -859,8 +1050,9 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     let _ = complete_ntlm_credssp(tls).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
     anyhow::ensure!(
-        !rdp.credssp_ok(),
-        "wrong target password must not complete Kerberos CredSSP; logs:\n{}",
+        !rdp.credssp_ok() && rdp.finished_account().is_none(),
+        "wrong target password must not complete Kerberos CredSSP; account={:?}; logs:\n{}",
+        rdp.finished_account(),
         gateway.logs.snapshot()
     );
     let logs = gateway.logs.snapshot();
@@ -895,8 +1087,9 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     let _ = complete_ntlm_credssp(tls).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
     anyhow::ensure!(
-        !rdp.credssp_ok(),
-        "unreachable KDC must not complete CredSSP; logs:\n{}",
+        !rdp.credssp_ok() && rdp.finished_account().is_none(),
+        "unreachable KDC must not complete CredSSP; account={:?}; logs:\n{}",
+        rdp.finished_account(),
         gateway.logs.snapshot()
     );
     let logs = gateway.logs.snapshot();
@@ -957,6 +1150,16 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     anyhow::ensure!(
         logs.contains("kerberos=false"),
         "expected NTLM injection; logs:\n{logs}"
+    );
+    anyhow::ensure!(
+        rdp.finished_account().as_deref() == Some(TARGET_USER),
+        "RDP NTLM CredSSP Finished account must be {TARGET_USER}; got={:?}",
+        rdp.finished_account()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == TARGET_USER),
+        "RDP X.224 cookie must be {TARGET_USER}; cookies={:?}",
+        rdp.cookies()
     );
 
     let _ = gateway.process.start_kill();

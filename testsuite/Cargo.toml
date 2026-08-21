@@ -53,6 +53,7 @@ network-scanner = { path = "../crates/network-scanner", features = ["test-utils"
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
 nonempty = "0.12"
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
+picky-asn1-der = "0.5"
 picky-krb = "0.12"
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
