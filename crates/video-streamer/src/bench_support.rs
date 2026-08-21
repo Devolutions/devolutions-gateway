@@ -3,12 +3,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 use crate::StreamingConfig;
 use crate::reopenable::Reopenable;
-use crate::streamer::iter::{IteratorError, WebmPositionedIterator};
+use crate::streamer::iter::WebmPositionedIterator;
 use crate::streamer::tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 
 #[derive(Debug, Clone)]
@@ -154,7 +153,6 @@ where
                     WriterResult::Continue => {}
                 }
             }
-            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. }))) => break,
             Some(Err(e)) => return Err(e).context("webm iterator error"),
             None => break,
         }
