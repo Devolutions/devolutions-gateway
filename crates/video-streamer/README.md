@@ -1,8 +1,18 @@
 # video-streamer
 
-This crate takes an unseekable WebM recording (typically from Chrome CaptureStream) and rewrites it into a “fresh” WebM stream that can start playing immediately.
-It does this by parsing the incoming WebM, finding the correct cut point, and re-encoding frames.
-The output stream begins with a keyframe and valid headers.
+This crate takes an unseekable WebM recording and rewrites it into a stream that can start playing immediately.
+
+`webm_stream` still serves one growing file over the original Start/Pull protocol.
+`stream_session` accepts a multi-clip recording event stream, reconnects across clips, and emits independent VP8 WebM segments over the same Start/Pull codes.
+
+The input event grammar is:
+
+```text
+(ClipStarted Bytes* CaughtUp Bytes* ClipEnded)* SessionEnded
+```
+
+Pulls that arrive while a response is pending are queued.
+`Stream ended` (type code 3) ends the session.
 
 ## Prerequisites
 
