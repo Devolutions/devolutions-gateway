@@ -38,6 +38,7 @@ ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
 ironrdp-tokio = "0.10"
 kdc = "0.1"
+picky-asn1-der = "0.5"
 picky-krb = "0.12"
 proxy-socks = { path = "../crates/proxy-socks" }
 libsql = { version = "0.9", default-features = false, features = ["core"] }
