@@ -1,105 +1,58 @@
 export class ReactiveSourceBuffer {
-  sourceBuffer: SourceBuffer;
-  bufferQueue: Uint8Array[] = [];
-  isAppending = false;
-  next = () => {};
-  allBuffers: Blob[] = []; // Store all buffers for file creation
-  debug = false;
+  private readonly sourceBuffer: SourceBuffer;
+  private readonly allBuffers: Blob[] = [];
+  private debug = false;
 
-  private readonly onUpdateEnd: () => void;
-
-  constructor(
-    mediaSource: MediaSource,
-    codec: string,
-    next: () => void,
-    onUpdateEnd?: () => void
-  ) {
+  constructor(mediaSource: MediaSource, codec: string) {
     this.sourceBuffer = mediaSource.addSourceBuffer(`video/webm; codecs="${codec}"`);
-    this.next = next;
-    this.onUpdateEnd = onUpdateEnd ?? (() => {});
-
-    this.sourceBuffer.addEventListener('updateend', () => {
-      try {
-        this.onUpdateEnd();
-      } finally {
-        this.tryAppendBuffer();
-      }
-    });
-
-    // Handle errors and trigger download of the file
-    this.sourceBuffer.addEventListener('error', (event) => {
-      this.logErrorDetails(event);
-      this.downloadBufferedFile();
-    });
   }
 
-  setDebug(debug: boolean) {
+  setDebug(debug: boolean): void {
     this.debug = debug;
   }
 
-  appendBuffer(buffer: Uint8Array) {
-    this.bufferQueue.push(buffer);
-    if (this.debug) {
-      this.allBuffers.push(new Blob([buffer], { type: 'video/webm' })); // Save each buffer
-      console.log(
-        `[sourceBuffer] appendBuffer: size=${buffer.length} queueLen=${this.bufferQueue.length} bufferedRanges=${this.getBufferedRanges() || '(empty)'}`
-      );
+  async appendBuffer(buffer: Uint8Array): Promise<void> {
+    if (this.sourceBuffer.updating) {
+      throw new Error('SourceBuffer is already updating');
     }
-    this.tryAppendBuffer();
-  }
 
-  private tryAppendBuffer() {
-    if (!this.isAppending && !this.sourceBuffer.updating && this.bufferQueue.length > 0) {
-      this.isAppending = true;
+    if (this.debug) {
+      this.allBuffers.push(new Blob([buffer], { type: 'video/webm' }));
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        this.sourceBuffer.removeEventListener('updateend', onUpdateEnd);
+        this.sourceBuffer.removeEventListener('error', onError);
+      };
+      const onUpdateEnd = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error('SourceBuffer append failed'));
+      };
+
+      this.sourceBuffer.addEventListener('updateend', onUpdateEnd);
+      this.sourceBuffer.addEventListener('error', onError);
       try {
-        const buffer = this.bufferQueue.shift() as Uint8Array;
         this.sourceBuffer.appendBuffer(buffer);
       } catch (error) {
-        this.logErrorDetails(error);
-      } finally {
-        this.next();
-        this.isAppending = false;
+        cleanup();
+        reject(error);
       }
-    }
+    });
   }
 
-  public downloadBufferedFile() {
-    const completeBlob = new Blob(this.allBuffers, { type: 'video/webm' });
-    const url = URL.createObjectURL(completeBlob);
-
-    // Create a download link
+  downloadBufferedFile(): void {
+    const url = URL.createObjectURL(new Blob(this.allBuffers, { type: 'video/webm' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'buffered-video.webm';
     document.body.appendChild(link);
     link.click();
-
-    // Cleanup
-    document.body.removeChild(link);
+    link.remove();
     URL.revokeObjectURL(url);
-    console.log('Buffered file downloaded.');
-  }
-
-  private logErrorDetails(error: unknown) {
-    console.error('Error encountered in ReactiveSourceBuffer:');
-
-    // Log the error object with stack trace
-    console.error('Error object:', error);
-
-    // Log the state of the bufferQueue
-    console.log('Current bufferQueue length:', this.bufferQueue.length);
-
-    // Log the sourceBuffer state
-    console.log('SourceBuffer updating:', this.sourceBuffer.updating);
-    console.log('SourceBuffer buffered ranges:', this.getBufferedRanges());
-  }
-
-  private getBufferedRanges(): string {
-    const ranges = this.sourceBuffer.buffered;
-    let rangeStr = '';
-    for (let i = 0; i < ranges.length; i++) {
-      rangeStr += `[${ranges.start(i)} - ${ranges.end(i)}] `;
-    }
-    return rangeStr.trim();
   }
 }
