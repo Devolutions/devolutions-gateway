@@ -3,7 +3,12 @@
 //! Proves the target-leg path: Gateway fetches tickets from a TCP KDC (`kdc` crate from
 //! sspi-rs) and completes CredSSP with a fake RDP acceptor. The Gateway-facing client uses
 //! NTLM so the test does not depend on the in-process synthetic KDC.
+//!
+//! RDCleanPath coverage drives the public `ironrdp-agent` 0.1.0 CLI (`cargo install
+//! ironrdp-agent --version 0.1.0`) over `ws://127.0.0.1/jet/rdp`.
 
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -1332,6 +1337,268 @@ impl FakeClosedTarget {
     fn accepted(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
     }
+}
+
+const IRONRDP_AGENT_VERSION: &str = "0.1.0";
+const RDCLEANPATH_INJECT_LOG: &str = "Switching to RdpProxy for credential injection (WebSocket)";
+const RDCLEANPATH_FORWARD_LOG: &str = "RDP-TLS forwarding (RDCleanPath)";
+
+fn ironrdp_agent_bin() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("IRONRDP_AGENT") {
+        return Some(PathBuf::from(path));
+    }
+    let name = if cfg!(windows) {
+        "ironrdp-agent.exe"
+    } else {
+        "ironrdp-agent"
+    };
+    if let Ok(home) = std::env::var("CARGO_HOME") {
+        let path = PathBuf::from(home).join("bin").join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let cargo_home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .map(|home| home.join(".cargo").join("bin").join(name));
+    if let Some(path) = cargo_home
+        && path.is_file()
+    {
+        return Some(path);
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn require_ironrdp_agent() -> anyhow::Result<Option<PathBuf>> {
+    let Some(bin) = ironrdp_agent_bin() else {
+        eprintln!(
+            "skipping RDCleanPath ironrdp-agent test: cargo install ironrdp-agent --version {IRONRDP_AGENT_VERSION}"
+        );
+        return Ok(None);
+    };
+    let output = std::process::Command::new(&bin)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("run {} --version", bin.display()))?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    anyhow::ensure!(
+        version.contains(IRONRDP_AGENT_VERSION),
+        "expected ironrdp-agent {IRONRDP_AGENT_VERSION}, got {version:?} from {}",
+        bin.display()
+    );
+    Ok(Some(bin))
+}
+
+fn ironrdp_agent_endpoint() -> String {
+    let name = format!("ironrdp-e2e-{}", next_id().replace('-', ""));
+    if cfg!(windows) {
+        format!(r"\\.\pipe\{name}")
+    } else {
+        std::env::temp_dir().join(format!("{name}.sock")).display().to_string()
+    }
+}
+
+async fn start_ironrdp_daemon(bin: &Path, endpoint: &str) -> anyhow::Result<tokio::process::Child> {
+    let child = tokio::process::Command::new(bin)
+        .args(["--endpoint", endpoint, "daemon-start"])
+        .kill_on_drop(true)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("start ironrdp-agent daemon")?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = tokio::process::Command::new(bin)
+            .args(["--endpoint", endpoint, "status"])
+            .output()
+            .await
+            .context("ironrdp-agent status")?;
+        if status.status.success() {
+            return Ok(child);
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "ironrdp-agent daemon not ready at {endpoint}: {}",
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn connect_ironrdp_rdcleanpath(
+    bin: &Path,
+    endpoint: &str,
+    server: &str,
+    token: &str,
+    http_port: u16,
+) -> anyhow::Result<tokio::process::Child> {
+    let url = format!("ws://127.0.0.1:{http_port}/jet/rdp");
+    tokio::process::Command::new(bin)
+        .args([
+            "--endpoint",
+            endpoint,
+            "connect",
+            "--server",
+            server,
+            "--username",
+            PROXY_USER,
+            "--password",
+            PROXY_PASSWORD,
+            "--prop",
+            &format!("ironrdp_rdcleanpathurl:s:{url}"),
+            "--prop",
+            &format!("ironrdp_rdcleanpathtoken:s:{token}"),
+        ])
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("start ironrdp-agent connect")
+}
+
+async fn agent_query_logs(bin: &Path, endpoint: &str) -> String {
+    tokio::process::Command::new(bin)
+        .args(["--endpoint", endpoint, "query-logs"])
+        .output()
+        .await
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
+    let Some(bin) = require_ironrdp_agent()? else {
+        return Ok(());
+    };
+    install_crypto_provider();
+    let rdp = MockRdp::start_ntlm().await?;
+    let mut gateway = GatewayProc::start(false).await?;
+    let endpoint = ironrdp_agent_endpoint();
+    let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+
+    let mut connect = connect_ironrdp_rdcleanpath(
+        &bin,
+        &endpoint,
+        &format!("{SERVICE_HOST}:{}", rdp.port),
+        &token,
+        gateway.config.http_port(),
+    )
+    .await?;
+    let wait = rdp.wait_credssp().await;
+    let agent_logs = agent_query_logs(&bin, &endpoint).await;
+    wait.with_context(|| {
+        format!(
+            "RDCleanPath NTLM target CredSSP; gateway logs:\n{}\nagent logs:\n{agent_logs}",
+            gateway.logs.snapshot()
+        )
+    })?;
+    let logs = gateway.logs.snapshot();
+    anyhow::ensure!(
+        logs.contains(RDCLEANPATH_INJECT_LOG),
+        "RDCleanPath must take the injection path; logs:\n{logs}"
+    );
+    anyhow::ensure!(
+        !logs.contains(RDCLEANPATH_FORWARD_LOG),
+        "RDCleanPath injection must not ordinary-forward; logs:\n{logs}"
+    );
+    anyhow::ensure!(
+        rdp.finished_account().as_deref() == Some(TARGET_USER),
+        "RDP NTLM CredSSP Finished account must be {TARGET_USER}; got={:?}",
+        rdp.finished_account()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == PROXY_USER),
+        "RDCleanPath forwards the client X.224 cookie; cookies={:?}",
+        rdp.cookies()
+    );
+
+    let _ = connect.start_kill();
+    let _ = daemon.start_kill();
+    let _ = gateway.process.start_kill();
+    Ok(())
+}
+
+#[tokio::test]
+async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
+    let Some(bin) = require_ironrdp_agent()? else {
+        return Ok(());
+    };
+    install_crypto_provider();
+    let kdc = MockKdc::start().await?;
+    let rdp = MockRdp::start_kerberos(kdc.url()).await?;
+    let mut gateway = GatewayProc::start(true).await?;
+    let endpoint = ironrdp_agent_endpoint();
+    let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
+
+    let jti = next_id();
+    let jet_aid = next_id();
+    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &token,
+        KERBEROS_TARGET_USER,
+        300,
+        Some(&kdc.url()),
+    )
+    .await?;
+
+    let mut connect = connect_ironrdp_rdcleanpath(
+        &bin,
+        &endpoint,
+        &format!("{SERVICE_HOST}:{}", rdp.port),
+        &token,
+        gateway.config.http_port(),
+    )
+    .await?;
+    let wait = rdp.wait_credssp().await;
+    let agent_logs = agent_query_logs(&bin, &endpoint).await;
+    wait.with_context(|| {
+        format!(
+            "RDCleanPath Kerberos target CredSSP; gateway logs:\n{}\nagent logs:\n{agent_logs}",
+            gateway.logs.snapshot()
+        )
+    })?;
+    assert_target_kdc_as_and_tgs(&kdc)?;
+    let logs = gateway.logs.snapshot();
+    anyhow::ensure!(
+        logs.contains(RDCLEANPATH_INJECT_LOG),
+        "RDCleanPath must take the injection path; logs:\n{logs}"
+    );
+    anyhow::ensure!(
+        !logs.contains(RDCLEANPATH_FORWARD_LOG),
+        "RDCleanPath injection must not ordinary-forward; logs:\n{logs}"
+    );
+    anyhow::ensure!(
+        rdp.finished_account().as_deref() == Some("administrator"),
+        "RDP CredSSP Finished account must be administrator; got={:?}",
+        rdp.finished_account()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == PROXY_USER),
+        "RDCleanPath forwards the client X.224 cookie; cookies={:?}",
+        rdp.cookies()
+    );
+
+    let _ = connect.start_kill();
+    let _ = daemon.start_kill();
+    let _ = gateway.process.start_kill();
+    Ok(())
 }
 
 const CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
