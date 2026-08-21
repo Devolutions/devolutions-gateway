@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, Notify, watch};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 use webm_iterable::WebmIterator;
-use webm_iterable::errors::{TagIteratorError, TagWriterError};
+use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec};
 
 pub(crate) mod block_tag;
@@ -96,7 +96,16 @@ pub fn webm_stream(
     let mut header_writer = HeaderWriter::new(chunk_writer);
     perf_debug!(?headers);
     for header in &headers {
-        header_writer.write(header)?;
+        if let Err(e) = header_writer.write(header) {
+            // A client that disconnects while we are still streaming the headers closes the
+            // destination channel. Treat this exactly like the main encode loop does below:
+            // it is normal shutdown, not a streaming failure.
+            if ChannelWriterError::is_in_chain(&e) {
+                debug!("Client went away during header write; ending stream");
+                return Ok(());
+            }
+            return Err(e);
+        }
     }
 
     let (mut encode_writer, cut_block_hit_marker) = header_writer.into_encoded_writer(encode_writer_config)?;
@@ -168,20 +177,12 @@ pub fn webm_stream(
                 match encode_writer.write(tag) {
                     Ok(WriterResult::Continue) => continue,
                     Err(e) => {
-                        let Some(TagWriterError::WriteError { source }) = e.downcast_ref::<TagWriterError>() else {
-                            break Err(e);
-                        };
-
-                        if source.kind() != std::io::ErrorKind::Other {
-                            break Err(e);
+                        // A closed destination channel means the client/consumer is gone:
+                        // normal shutdown, not a failure.
+                        if ChannelWriterError::is_in_chain(&e) {
+                            break Ok(());
                         }
-                        let Some(ChannelWriterError::ChannelClosed) =
-                            source.get_ref().and_then(|e| e.downcast_ref::<ChannelWriterError>())
-                        else {
-                            break Err(e);
-                        };
-                        // Channel is closed, we can break
-                        break Ok(());
+                        break Err(e);
                     }
                 }
             }
@@ -245,6 +246,13 @@ fn spawn_sending_task<W>(
     let ws_frame = Arc::new(Mutex::new(ws_frame));
     let ws_frame_clone = Arc::clone(&ws_frame);
     let mut handle_shutdown_rx = shutdown_rx.clone();
+
+    // Both the message-handler task and the control task can reach a termination path, but
+    // the client must receive at most one terminal frame (End/Error). This flag arbitrates:
+    // whoever flips it first sends the terminal frame, the other skips it.
+    let terminal_sent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminal_sent_handle = Arc::clone(&terminal_sent);
+    let terminal_sent_control = terminal_sent;
 
     // Spawn a dedicated task to handle incoming messages from the client
     // Reasoning: tokio::select! will stuck on `chunk_receiver.recv()` when there's no more data to receive
@@ -310,10 +318,10 @@ fn spawn_sending_task<W>(
         let shutdown_reason = handle_shutdown_rx.borrow().clone();
         match shutdown_reason {
             StreamShutdown::Error(err) => {
-                ws_send(&ws_frame, protocol::ServerMessage::Error(err)).await;
+                ws_send_terminal_once(&terminal_sent_handle, &ws_frame, protocol::ServerMessage::Error(err)).await;
             }
             _ => {
-                ws_send(&ws_frame, protocol::ServerMessage::End).await;
+                ws_send_terminal_once(&terminal_sent_handle, &ws_frame, protocol::ServerMessage::End).await;
             }
         }
         let _ = ws_frame.lock().await.get_mut().shutdown().await;
@@ -327,14 +335,19 @@ fn spawn_sending_task<W>(
             let reason = shutdown_rx.borrow().clone();
             match reason {
                 StreamShutdown::Error(err) => {
-                    ws_send(&ws_frame_clone, protocol::ServerMessage::Error(err)).await;
+                    ws_send_terminal_once(
+                        &terminal_sent_control,
+                        &ws_frame_clone,
+                        protocol::ServerMessage::Error(err),
+                    )
+                    .await;
                 }
                 StreamShutdown::ExternalShutdown => {
                     info!("Received shutdown signal");
-                    ws_send(&ws_frame_clone, protocol::ServerMessage::End).await;
+                    ws_send_terminal_once(&terminal_sent_control, &ws_frame_clone, protocol::ServerMessage::End).await;
                 }
                 StreamShutdown::ClientDisconnected => {
-                    ws_send(&ws_frame_clone, protocol::ServerMessage::End).await;
+                    ws_send_terminal_once(&terminal_sent_control, &ws_frame_clone, protocol::ServerMessage::End).await;
                 }
                 StreamShutdown::Running => {
                     // Spurious wake, shouldn't happen since we only send non-Running values
@@ -365,6 +378,24 @@ fn spawn_sending_task<W>(
         let _ = ws_frame.lock().await.send(message).await.inspect_err(|e| {
             warn!(error = %e, "Failed to send message to client");
         });
+    }
+
+    /// Sends a terminal frame (End/Error) only if no terminal frame has been sent yet.
+    ///
+    /// The handler and control tasks can both reach a termination path; this guarantees the
+    /// client sees a single terminal frame regardless of which task gets there first.
+    async fn ws_send_terminal_once<W: tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static>(
+        terminal_sent: &std::sync::atomic::AtomicBool,
+        ws_frame: &Arc<Mutex<Framed<W, ProtocolCodeC>>>,
+        message: protocol::ServerMessage<'_>,
+    ) {
+        use std::sync::atomic::Ordering;
+        if terminal_sent
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            ws_send(ws_frame, message).await;
+        }
     }
 }
 
