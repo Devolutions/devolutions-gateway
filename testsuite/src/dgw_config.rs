@@ -45,6 +45,9 @@ pub struct DgwConfig {
     /// Enable unstable features.
     #[builder(default = false)]
     enable_unstable: bool,
+    /// Enable Kerberos credential injection (also requires `enable_unstable`).
+    #[builder(default = false)]
+    kerberos_credential_injection: bool,
     /// Override the recording path in the gateway config.
     ///
     /// When `None`, the gateway uses its default (`<data_dir>/recordings`).
@@ -84,6 +87,7 @@ impl DgwConfigHandle {
             disable_token_validation,
             verbosity_profile,
             enable_unstable,
+            kerberos_credential_injection,
             recording_path,
             agent_tunnel,
         } = config;
@@ -137,7 +141,8 @@ impl DgwConfigHandle {
     "VerbosityProfile": "{verbosity_profile}",
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
-        "enable_unstable": {enable_unstable}
+        "enable_unstable": {enable_unstable},
+        "kerberos_credential_injection": {kerberos_credential_injection}
     }}{recording_path_json}{agent_tunnel_json}
 }}"#
         );
