@@ -46,6 +46,10 @@ fn preflight_request(operations: serde_json::Value) -> anyhow::Result<Request<Bo
     Ok(request)
 }
 
+fn token_exp() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp() + 3600
+}
+
 fn unsigned_jws(payload: serde_json::Value) -> anyhow::Result<String> {
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let header = engine.encode(r#"{"alg":"RS256"}"#);
@@ -84,7 +88,8 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
         "jti": jti,
-        "dst_hst": "target.example:3389"
+        "dst_hst": "target.example:3389",
+        "exp": token_exp()
     }))?;
 
     let op_id = Uuid::new_v4();
@@ -124,7 +129,8 @@ async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
         "jti": jti,
-        "dst_hst": "target.example:3389"
+        "dst_hst": "target.example:3389",
+        "exp": token_exp()
     }))?;
 
     let op_id = Uuid::new_v4();
@@ -318,7 +324,8 @@ async fn test_provision_credentials_and_connection_options_fold() -> anyhow::Res
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
         "jti": jti,
-        "dst_hst": "target.example:3389"
+        "dst_hst": "target.example:3389",
+        "exp": token_exp()
     }))?;
 
     let ops = json!([

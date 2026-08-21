@@ -8,7 +8,8 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::CredentialService;
+use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
+use crate::provisioning::{MappingStatus, ProvisioningStore};
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -27,7 +28,8 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
-    credentials: CredentialService,
+    provisioning: ProvisioningStore,
+    synthetic_kdc_registry: SyntheticKdcRegistry,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -51,7 +53,8 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
-            credentials,
+            provisioning,
+            synthetic_kdc_registry,
             agent_tunnel_handle,
         } = self;
 
@@ -113,6 +116,46 @@ where
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
+                let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
+                let mapping_status = if is_rdp {
+                    provisioning.mapping_status(claims.jti)
+                } else {
+                    MappingStatus::Absent
+                };
+                let inject = match mapping_status {
+                    MappingStatus::RequiredMissing => anyhow::bail!(
+                        "credential-injection material for {} is missing or expired; re-provision to retry",
+                        claims.jti
+                    ),
+                    MappingStatus::Available => true,
+                    MappingStatus::Absent => false,
+                };
+
+                // Checkout before dialing so missing Kerberos material cannot open an upstream socket.
+                let credential_injection = if inject {
+                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
+                        conf.debug.enable_unstable,
+                        conf.debug.kerberos_credential_injection,
+                    );
+                    Some(
+                        CredentialInjection::checkout(
+                            &provisioning,
+                            &synthetic_kdc_registry,
+                            claims.jti,
+                            token,
+                            kerberos_enabled,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "credential-injection material for {} is missing or expired; re-provision to retry",
+                                claims.jti
+                            )
+                        })?,
+                    )
+                } else {
+                    None
+                };
+
                 let ConnectedUpstream {
                     leg: mut server_stream,
                     server_addr,
@@ -128,8 +171,6 @@ where
 
                 span.record("target", selected_target.to_string());
 
-                let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
-
                 let info = SessionInfo::builder()
                     .id(claims.jet_aid)
                     .application_protocol(claims.jet_ap)
@@ -143,23 +184,10 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
-                // We support proxy-based credential injection for RDP.
-                // If a credential mapping has been pushed, we automatically switch to this mode.
-                // Otherwise, we continue the generic procedure.
-                //
-                // RdpProxy is generic over the server stream, so credential injection works
-                // regardless of whether the upstream is direct TCP or tunnelled via an agent.
-                // The credential store is keyed on the association token's JTI, so a direct
-                // lookup by `claims.jti` is the primary path.
-                if is_rdp
-                    && let Some(entry) = credentials.get(claims.jti)
-                    && entry.mapping.is_some()
-                {
-                    anyhow::ensure!(token == entry.token, "token mismatch");
-                    let credential_injection_kdc = credentials.kdc_for(claims.jti)?;
-
+                if let Some(credential_injection) = credential_injection {
                     info!(
-                        jti = %credential_injection_kdc.jti(),
+                        jti = %credential_injection.jti(),
+                        kerberos = credential_injection.uses_kerberos(),
                         "RDP-TLS forwarding with credential injection"
                     );
 
@@ -179,7 +207,7 @@ where
                         .server_stream(server_stream)
                         .sessions(sessions)
                         .subscriber_tx(subscriber_tx)
-                        .credential_injection_kdc(credential_injection_kdc)
+                        .credential_injection(credential_injection)
                         .client_stream_leftover_bytes(leftover_bytes)
                         .server_dns_name(selected_target.host().to_owned())
                         .disconnect_interest(disconnect_interest)
