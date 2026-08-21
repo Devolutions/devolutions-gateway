@@ -14,7 +14,7 @@ use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
-use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
@@ -135,6 +135,7 @@ where
 
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
+                recordings.clip_started(session_id).await?;
                 // Wrap SignalWriter inside a BufWriter to reduce the number of flushes.
                 let (file, flush_signal) = SignalWriter::new(file);
                 // larger buffer size to reduce the number of flushes
@@ -147,7 +148,7 @@ where
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    recordings.new_chunk_appended(session_id)?;
+                                    recordings.new_chunk_appended(session_id).await?;
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -176,8 +177,22 @@ where
                 };
 
                 signal_loop.abort();
+                let _ = signal_loop.await;
 
-                res
+                let flush_result = file.flush().await;
+                if flush_result.is_ok() {
+                    recordings.new_chunk_appended(session_id).await?;
+                }
+
+                match (res, flush_result) {
+                    (Err(error), _) => Err(error),
+                    (Ok(_), Err(error)) if is_storage_full(&error) => {
+                        warn!(%session_id, "Recording storage is full; closing push stream");
+                        Ok(PushOutcome::StorageFull)
+                    }
+                    (Ok(_), Err(error)) => Err(anyhow::Error::new(error).context("flush JREC recording file")),
+                    (Ok(outcome), Ok(())) => Ok(outcome),
+                }
             }
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
@@ -243,6 +258,27 @@ struct OnGoingRecording {
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
+    stream_state: watch::Sender<RecordingStreamState>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RecordingStreamClip {
+    pub(crate) sequence: u64,
+    pub(crate) path: Utf8PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ActiveRecordingStreamClip {
+    pub(crate) sequence: u64,
+    pub(crate) ready: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RecordingStreamState {
+    pub(crate) clips: Arc<Vec<RecordingStreamClip>>,
+    pub(crate) active: Option<ActiveRecordingStreamClip>,
+    pub(crate) ended: bool,
+    revision: u64,
 }
 
 enum RecordingManagerMessage {
@@ -258,6 +294,12 @@ enum RecordingManagerMessage {
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
     Disconnect {
+        id: Uuid,
+    },
+    ClipStarted {
+        id: Uuid,
+    },
+    ChunkAppended {
         id: Uuid,
     },
     GetState {
@@ -278,6 +320,10 @@ enum RecordingManagerMessage {
     SubscribeToSessionEndNotification {
         id: Uuid,
         channel: oneshot::Sender<Arc<Notify>>,
+    },
+    SubscribeToStream {
+        id: Uuid,
+        channel: oneshot::Sender<watch::Receiver<RecordingStreamState>>,
     },
 }
 
@@ -301,6 +347,8 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("kind", kind)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::ClipStarted { id } => f.debug_struct("ClipStarted").field("id", id).finish(),
+            RecordingManagerMessage::ChunkAppended { id } => f.debug_struct("ChunkAppended").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -319,6 +367,10 @@ impl fmt::Debug for RecordingManagerMessage {
             RecordingManagerMessage::ListFiles { id, channel: _ } => {
                 f.debug_struct("ListFiles").field("id", id).finish()
             }
+            RecordingManagerMessage::SubscribeToStream { id, channel: _ } => f
+                .debug_struct("SubscribeToStream")
+                .field("id", id)
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -411,24 +463,48 @@ impl RecordingMessageSender {
         senders.push(tx);
     }
 
-    pub(crate) fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {
+    async fn clip_started(&self, recording_id: Uuid) -> anyhow::Result<()> {
+        self.channel
+            .send(RecordingManagerMessage::ClipStarted { id: recording_id })
+            .await
+            .ok()
+            .context("couldn't send ClipStarted message")
+    }
+
+    pub(crate) async fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {
         let senders = { self.flush_map.lock().remove(&recording_id) };
 
-        let Some(senders) = senders else {
-            return Ok(());
-        };
-
-        for tx in senders {
-            let _ = tx.send(());
+        if let Some(senders) = senders {
+            for tx in senders {
+                let _ = tx.send(());
+            }
         }
 
-        Ok(())
+        self.channel
+            .send(RecordingManagerMessage::ChunkAppended { id: recording_id })
+            .await
+            .ok()
+            .context("couldn't send ChunkAppended message")
     }
 
     pub(crate) async fn subscribe_to_recording_finish(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
+                id: recording_id,
+                channel: tx,
+            })
+            .await?;
+        Ok(rx.await?)
+    }
+
+    pub(crate) async fn subscribe_to_stream(
+        &self,
+        recording_id: Uuid,
+    ) -> anyhow::Result<watch::Receiver<RecordingStreamState>> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::SubscribeToStream {
                 id: recording_id,
                 channel: tx,
             })
@@ -541,10 +617,14 @@ impl RecordingManagerTask {
             anyhow::bail!("concurrent recording for the same session is not supported");
         }
 
+        let existing_stream_state = self
+            .ongoing_recordings
+            .get(&id)
+            .map(|ongoing| ongoing.stream_state.clone());
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        let recording_file = if recording_path.exists() {
+        let (manifest, recording_file) = if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
 
             let mut existing_manifest =
@@ -566,7 +646,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("override existing manifest")?;
 
-            recording_file
+            (existing_manifest, recording_file)
         } else {
             debug!(path = %recording_path, "Create recording directory");
 
@@ -596,7 +676,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("write initial manifest to disk")?;
 
-            recording_file
+            (initial_manifest, recording_file)
         };
 
         let active_recording_count = self.rx.active_recordings.insert(id);
@@ -614,6 +694,45 @@ impl RecordingManagerTask {
             .map(|info| info.recording_policy)
             .unwrap_or(false);
 
+        let sequence = manifest
+            .files
+            .len()
+            .checked_sub(1)
+            .context("recording manifest has no files")?;
+        let sequence = u64::try_from(sequence).context("recording sequence does not fit in u64")?;
+        let clip = RecordingStreamClip {
+            sequence,
+            path: recording_file.clone(),
+        };
+        let stream_state = if let Some(stream_state) = existing_stream_state {
+            stream_state.send_modify(|state| {
+                Arc::make_mut(&mut state.clips).push(clip.clone());
+                state.active = Some(ActiveRecordingStreamClip { sequence, ready: false });
+                state.ended = false;
+                state.revision = state.revision.saturating_add(1);
+            });
+            stream_state
+        } else {
+            let clips = manifest
+                .files
+                .iter()
+                .enumerate()
+                .map(|(sequence, file)| {
+                    Ok(RecordingStreamClip {
+                        sequence: u64::try_from(sequence).context("recording sequence does not fit in u64")?,
+                        path: recording_path.join(&file.file_name),
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let state = RecordingStreamState {
+                clips: Arc::new(clips),
+                active: Some(ActiveRecordingStreamClip { sequence, ready: false }),
+                ended: false,
+                revision: 0,
+            };
+            watch::channel(state).0
+        };
+
         self.ongoing_recordings.insert(
             id,
             OnGoingRecording {
@@ -621,6 +740,7 @@ impl RecordingManagerTask {
                 manifest_path,
                 session_must_be_recorded,
                 disconnected_ttl,
+                stream_state,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -635,6 +755,54 @@ impl RecordingManagerTask {
         }
 
         Ok(recording_file)
+    }
+
+    fn handle_clip_started(&mut self, id: Uuid) -> anyhow::Result<()> {
+        let ongoing = self
+            .ongoing_recordings
+            .get(&id)
+            .with_context(|| format!("unknown recording for ID {id}"))?;
+        let active = ongoing
+            .stream_state
+            .borrow()
+            .active
+            .context("recording has no active clip")?;
+
+        if !matches!(ongoing.state, OnGoingRecordingState::Connected) || active.ready {
+            anyhow::bail!("recording clip can’t be started in its current state");
+        }
+
+        ongoing.stream_state.send_modify(|state| {
+            state.active = Some(ActiveRecordingStreamClip {
+                sequence: active.sequence,
+                ready: true,
+            });
+            state.revision = state.revision.saturating_add(1);
+        });
+
+        Ok(())
+    }
+
+    fn handle_chunk_appended(&mut self, id: Uuid) -> anyhow::Result<()> {
+        let ongoing = self
+            .ongoing_recordings
+            .get(&id)
+            .with_context(|| format!("unknown recording for ID {id}"))?;
+        let active = ongoing
+            .stream_state
+            .borrow()
+            .active
+            .context("recording has no active clip")?;
+
+        if !active.ready {
+            anyhow::bail!("recording clip is not ready");
+        }
+
+        ongoing.stream_state.send_modify(|state| {
+            state.revision = state.revision.saturating_add(1);
+        });
+
+        Ok(())
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
@@ -670,6 +838,12 @@ impl RecordingManagerTask {
         manifest
             .save_to_file(&ongoing.manifest_path)
             .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+
+        ongoing.stream_state.send_modify(|state| {
+            state.active = None;
+            state.ended = true;
+            state.revision = state.revision.saturating_add(1);
+        });
 
         // Notify all the streamers that recording has ended.
         if let Some(notify) = self.recording_end_notifier.get(&id) {
@@ -738,6 +912,11 @@ impl RecordingManagerTask {
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
+                    ongoing.stream_state.send_modify(|state| {
+                        state.active = None;
+                        state.ended = true;
+                        state.revision = state.revision.saturating_add(1);
+                    });
 
                     // Check the recording policy of the associated session and kill it if necessary.
                     if ongoing.session_must_be_recorded {
@@ -796,6 +975,14 @@ impl RecordingManagerTask {
             self.recording_end_notifier.insert(id, Arc::clone(&notify));
             Ok(notify)
         }
+    }
+
+    fn subscribe_stream(&self, id: Uuid) -> anyhow::Result<watch::Receiver<RecordingStreamState>> {
+        let ongoing = self
+            .ongoing_recordings
+            .get(&id)
+            .with_context(|| format!("unknown recording for ID {id}"))?;
+        Ok(ongoing.stream_state.subscribe())
     }
 }
 
@@ -877,6 +1064,16 @@ async fn recording_manager_task(
                             }
                         }
                     }
+                    RecordingManagerMessage::ClipStarted { id } => {
+                        if let Err(error) = manager.handle_clip_started(id) {
+                            error!(%error, "handle_clip_started");
+                        }
+                    }
+                    RecordingManagerMessage::ChunkAppended { id } => {
+                        if let Err(error) = manager.handle_chunk_appended(id) {
+                            error!(%error, "handle_chunk_appended");
+                        }
+                    }
                     RecordingManagerMessage::GetState { id, channel } => {
                         let response = manager.ongoing_recordings.get(&id).map(|ongoing| ongoing.state.clone());
                         let _ = channel.send(response);
@@ -902,6 +1099,14 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
                         }
                     },
+                    RecordingManagerMessage::SubscribeToStream { id, channel } => {
+                        match manager.subscribe_stream(id) {
+                            Ok(stream) => {
+                                let _ = channel.send(stream);
+                            }
+                            Err(error) => error!(%error, "subscribe to recording stream"),
+                        }
+                    }
                     RecordingManagerMessage::ListFiles { id, channel } => {
                         match manager.ongoing_recordings.get(&id) {
                             Some(recording) => {
