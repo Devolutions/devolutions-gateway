@@ -198,7 +198,7 @@ enum ObservedKdcReply {
 
 #[derive(Clone)]
 enum MockRdpMode {
-    Kerberos { kdc_url: String },
+    Kerberos { kdc_url: Option<String> },
     Ntlm,
 }
 
@@ -211,7 +211,7 @@ struct MockRdp {
 
 impl MockRdp {
     async fn start_kerberos(kdc_url: String) -> anyhow::Result<Self> {
-        Self::start(MockRdpMode::Kerberos { kdc_url }).await
+        Self::start(MockRdpMode::Kerberos { kdc_url: Some(kdc_url) }).await
     }
 
     async fn start_ntlm() -> anyhow::Result<Self> {
@@ -254,7 +254,7 @@ impl MockRdp {
                                 peer,
                                 acceptor,
                                 public_key,
-                                kdc_url,
+                                kdc_url.as_deref(),
                                 &cookies,
                                 &finished_account,
                             )
@@ -311,7 +311,7 @@ async fn accept_kerberos_rdp(
     peer: std::net::SocketAddr,
     acceptor: tokio_rustls::TlsAcceptor,
     public_key: Vec<u8>,
-    kdc_url: &str,
+    kdc_url: Option<&str>,
     cookies: &Mutex<Vec<String>>,
     finished_account: &Mutex<Option<String>>,
 ) -> anyhow::Result<()> {
@@ -339,7 +339,10 @@ async fn accept_kerberos_rdp(
     };
     let kerberos_config = sspi::KerberosServerConfig {
         kerberos_config: sspi::KerberosConfig {
-            kdc_url: Some(kdc_url.parse().context("parse mock KDC URL")?),
+            kdc_url: kdc_url
+                .map(|url| url.parse())
+                .transpose()
+                .context("parse mock KDC URL")?,
             client_computer_name: peer.to_string(),
         },
         server_properties: sspi::kerberos::ServerProperties::new(
@@ -715,7 +718,10 @@ async fn send_kdc_http(
         .read_line(&mut status_line)
         .await
         .context("read KDC proxy status")?;
-    anyhow::ensure!(status_line.contains("200"), "KDC proxy HTTP status was {status_line:?}");
+    anyhow::ensure!(
+        status_line.starts_with("HTTP/1.1 200") || status_line.starts_with("HTTP/1.0 200"),
+        "KDC proxy HTTP status was {status_line:?}"
+    );
 
     let mut content_length = None;
     loop {
@@ -1042,9 +1048,22 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
         "synthetic KDC AS-REQ must be proxy user injected-proxy-user@{REALM}; requests={requests:?}"
     );
     anyhow::ensure!(
+        requests.iter().any(|req| matches!(
+            req,
+            ObservedKdcReq::Tgs { sname, realm }
+                if *sname == ["TERMSRV", SERVICE_HOST] && realm.eq_ignore_ascii_case(REALM)
+        )),
+        "synthetic KDC TGS-REQ must be TERMSRV/{SERVICE_HOST}; requests={requests:?}"
+    );
+    anyhow::ensure!(
         rdp.finished_account().as_deref() == Some("administrator"),
         "RDP CredSSP Finished account must be administrator; got={:?}",
         rdp.finished_account()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
+        "RDP X.224 cookie must be {KERBEROS_TARGET_USER}; cookies={:?}",
+        rdp.cookies()
     );
 
     let _ = gateway.process.start_kill();
@@ -1079,12 +1098,43 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
         logs.contains("kerberos=true"),
         "wrong password must still start Kerberos injection; logs:\n{logs}"
     );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if kdc.requests().iter().any(|req| {
+            matches!(
+                req,
+                ObservedKdcReq::As { cname, realm }
+                    if cname.eq_ignore_ascii_case("administrator") && realm.eq_ignore_ascii_case(REALM)
+            )
+        }) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "timed out waiting for AS-REQ as administrator; requests={:?}",
+                kdc.requests()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     tokio::time::sleep(Duration::from_secs(2)).await;
     anyhow::ensure!(
         !rdp.credssp_ok() && rdp.finished_account().is_none(),
         "wrong target password must not complete Kerberos CredSSP; account={:?}; logs:\n{}",
         rdp.finished_account(),
         gateway.logs.snapshot()
+    );
+    anyhow::ensure!(
+        !kdc.requests()
+            .iter()
+            .any(|req| matches!(req, ObservedKdcReq::Tgs { .. })),
+        "wrong password must not obtain a TGS; requests={:?}",
+        kdc.requests()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
+        "wrong password still rewrites the X.224 cookie; cookies={:?}",
+        rdp.cookies()
     );
     let logs = gateway.logs.snapshot();
     anyhow::ensure!(
@@ -1096,10 +1146,43 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     Ok(())
 }
 
+struct RefusingKdc {
+    port: u16,
+    accepted: Arc<AtomicUsize>,
+}
+
+impl RefusingKdc {
+    async fn start() -> anyhow::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.context("bind refusing KDC")?;
+        let port = listener.local_addr()?.port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted_task = Arc::clone(&accepted);
+        tokio::spawn(async move {
+            loop {
+                let Ok((_stream, _)) = listener.accept().await else {
+                    break;
+                };
+                accepted_task.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        Ok(Self { port, accepted })
+    }
+
+    fn url(&self) -> String {
+        format!("tcp://127.0.0.1:{}", self.port)
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
+    }
+}
+
 #[tokio::test]
 async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     install_crypto_provider();
-    let rdp = MockRdp::start_kerberos("tcp://127.0.0.1:1".to_owned()).await?;
+    let kdc = RefusingKdc::start().await?;
+    let rdp_kdc = MockKdc::start().await?;
+    let rdp = MockRdp::start_kerberos(rdp_kdc.url()).await?;
     let mut gateway = GatewayProc::start(true).await?;
 
     let jti = next_id();
@@ -1110,7 +1193,7 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
         &token,
         KERBEROS_TARGET_USER,
         300,
-        Some("tcp://127.0.0.1:1"),
+        Some(&kdc.url()),
     )
     .await?;
 
@@ -1121,12 +1204,29 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
         logs.contains("kerberos=true"),
         "KDC down must still start Kerberos injection; logs:\n{logs}"
     );
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while kdc.accepted() == 0 {
+        if Instant::now() >= deadline {
+            anyhow::bail!("Gateway never TCP-connected the provisioned KDC");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
     anyhow::ensure!(
         !rdp.credssp_ok() && rdp.finished_account().is_none(),
         "unreachable KDC must not complete CredSSP; account={:?}; logs:\n{}",
         rdp.finished_account(),
         gateway.logs.snapshot()
+    );
+    anyhow::ensure!(
+        rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
+        "KDC down still rewrites the X.224 cookie; cookies={:?}",
+        rdp.cookies()
+    );
+    anyhow::ensure!(
+        kdc.accepted() >= 1,
+        "Gateway must TCP-connect the provisioned KDC; accepted={}",
+        kdc.accepted()
     );
     let logs = gateway.logs.snapshot();
     anyhow::ensure!(
@@ -1159,7 +1259,6 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
         !logs.contains(FORWARD_LOG) && !logs.contains(INJECT_LOG),
         "missing krb_kdc must fail closed; logs:\n{logs}"
     );
-
     let _ = gateway.process.start_kill();
     Ok(())
 }
