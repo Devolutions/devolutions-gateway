@@ -471,16 +471,6 @@ async fn handle_with_credential_injection(
         .clone()
         .context("missing token in RDCleanPath PDU")?;
 
-    let ConnectedRdpServer {
-        tls_stream: server_stream,
-        server_addr,
-        selected_target: destination,
-        x224_rsp,
-    } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
-        .await
-        .context("RDCleanPath connection failed")?;
-    let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
-
     let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
         conf.debug.enable_unstable,
         conf.debug.kerberos_credential_injection,
@@ -491,7 +481,18 @@ async fn handle_with_credential_injection(
         claims.jti,
         &token,
         kerberos_enabled,
-    )?;
+    )
+    .context("checkout credential-injection material before connecting upstream")?;
+
+    let ConnectedRdpServer {
+        tls_stream: server_stream,
+        server_addr,
+        selected_target: destination,
+        x224_rsp,
+    } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
+        .await
+        .context("RDCleanPath connection failed")?;
+    let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
 
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
         gateway_hostname,

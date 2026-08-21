@@ -131,6 +131,31 @@ where
                     MappingStatus::Absent => false,
                 };
 
+                // Checkout before dialing so missing Kerberos material cannot open an upstream socket.
+                let credential_injection = if inject {
+                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
+                        conf.debug.enable_unstable,
+                        conf.debug.kerberos_credential_injection,
+                    );
+                    Some(
+                        CredentialInjection::checkout(
+                            &provisioning,
+                            &synthetic_kdc_registry,
+                            claims.jti,
+                            token,
+                            kerberos_enabled,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "credential-injection material for {} is missing or expired; re-provision to retry",
+                                claims.jti
+                            )
+                        })?,
+                    )
+                } else {
+                    None
+                };
+
                 let ConnectedUpstream {
                     leg: mut server_stream,
                     server_addr,
@@ -159,25 +184,7 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
-                if inject {
-                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
-                        conf.debug.enable_unstable,
-                        conf.debug.kerberos_credential_injection,
-                    );
-                    let credential_injection = CredentialInjection::checkout(
-                        &provisioning,
-                        &synthetic_kdc_registry,
-                        claims.jti,
-                        token,
-                        kerberos_enabled,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "credential-injection material for {} is missing or expired; re-provision to retry",
-                            claims.jti
-                        )
-                    })?;
-
+                if let Some(credential_injection) = credential_injection {
                     info!(
                         jti = %credential_injection.jti(),
                         kerberos = credential_injection.uses_kerberos(),
