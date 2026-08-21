@@ -7526,6 +7526,7 @@ dependencies = [
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
+ "picky-asn1-der",
  "picky-krb",
  "proxy-socks",
  "rstest",
