@@ -476,6 +476,11 @@ async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
 
     let _second = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
     let logs = gateway.logs.wait_count(INJECT_LOG, 2).await?;
+    assert_eq!(
+        logs.matches(INJECT_LOG).count(),
+        2,
+        "reconnect must inject exactly twice; logs:\n{logs}"
+    );
     assert!(
         !logs.contains(FORWARD_LOG),
         "reconnect must keep injecting, not ordinary-forward; logs:\n{logs}"
@@ -514,7 +519,11 @@ async fn required_missing_fails_closed() -> anyhow::Result<()> {
         "expired mapping must fail closed, never silent ordinary forward; logs:\n{logs}"
     );
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        anyhow::ensure!(target.accepted() == 0, "fail-closed routing must not connect upstream");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert_eq!(target.accepted(), 0, "fail-closed routing must not connect upstream");
 
     let _ = gateway.process.start_kill();
