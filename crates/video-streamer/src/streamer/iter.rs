@@ -14,26 +14,17 @@ const INPUT_CHUNK_SIZE: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LastKeyFrameInfo {
-    NotMet {
-        cluster_start_position: Option<usize>,
-        cluster_timestamp: Option<u64>,
-    },
-    Met {
-        position: usize,
-        cluster_timestamp: u64,
-        cluster_start_position: usize,
-    },
+    NotMet { cluster_timestamp: Option<u64> },
+    Met { position: usize, cluster_timestamp: u64 },
 }
 
 pub(crate) struct WebmPositionedIterator<R: Read + Seek + Reopenable> {
     reader: R,
     decoder: TagDecoder<MatroskaSpec>,
     input: BytesMut,
-    // Absolute file offset of the last tag emitted.
     previous_emitted_tag_postion: usize,
-    // Absolute file offset of the last block group/simple block that is a keyframe.
     last_key_frame_info: LastKeyFrameInfo,
-    // Absolute file offset where the current decoder's position 0 maps.
+    // File offset of decoder position 0 after the last seek.
     rollback_record: Option<usize>,
     codec: VpxCodec,
 }
@@ -63,7 +54,6 @@ where
             rollback_record: None,
             last_key_frame_info: LastKeyFrameInfo::NotMet {
                 cluster_timestamp: None,
-                cluster_start_position: None,
             },
             codec,
         }
@@ -162,42 +152,18 @@ where
                     "Key Frame Found"
                 );
                 match self.last_key_frame_info {
-                    LastKeyFrameInfo::NotMet {
-                        cluster_timestamp,
-                        cluster_start_position,
-                    } => {
+                    LastKeyFrameInfo::NotMet { cluster_timestamp } => {
                         let Some(cluster_timestamp) = cluster_timestamp else {
                             return Err(IteratorError::ValueExpected("cluster_timestamp"));
-                        };
-                        let Some(cluster_start_position) = cluster_start_position else {
-                            return Err(IteratorError::ValueExpected("cluster_start_position"));
                         };
                         self.last_key_frame_info = LastKeyFrameInfo::Met {
                             position: self.previous_emitted_tag_postion,
                             cluster_timestamp,
-                            cluster_start_position,
                         };
                     }
                     LastKeyFrameInfo::Met { ref mut position, .. } => {
                         *position = self.previous_emitted_tag_postion;
                     }
-                }
-            }
-        }
-
-        if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            match self.last_key_frame_info {
-                LastKeyFrameInfo::NotMet {
-                    ref mut cluster_start_position,
-                    ..
-                } => {
-                    cluster_start_position.replace(self.previous_emitted_tag_postion);
-                }
-                LastKeyFrameInfo::Met {
-                    ref mut cluster_start_position,
-                    ..
-                } => {
-                    *cluster_start_position = self.previous_emitted_tag_postion;
                 }
             }
         }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use channel_writer::{ChannelWriter, ChannelWriterError, ChannelWriterReceiver};
-use ebml_iterable::error::CorruptedFileError;
 use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
@@ -9,7 +8,7 @@ use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 use tokio::sync::{Mutex, Notify, watch};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
-use webm_iterable::errors::{TagIteratorError, TagWriterError};
+use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec};
 
 pub(crate) mod block_tag;
@@ -48,12 +47,8 @@ pub fn webm_stream(
     let encode_writer_config = EncodeWriterConfig::try_from((headers.as_slice(), &config))?;
     webm_itr.set_codec(encode_writer_config.codec);
 
-    // we run to the last cluster, skipping everything that has been played
-    while let Some(tag) = webm_itr.next() {
-        if let Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. })) = tag {
-            break;
-        }
-    }
+    // Skip already-recorded tags. Incomplete trailing input is `None`.
+    while let Some(Ok(_)) = webm_itr.next() {}
 
     let cut_block_position = webm_itr.previous_emitted_tag_postion();
 
@@ -124,18 +119,15 @@ pub fn webm_stream(
 
     let result = loop {
         match webm_itr.next() {
-            Some(Err(IteratorError::InnerError(TagIteratorError::ReadError { source }))) => {
+            Some(Err(IteratorError::IOError(source))) => {
                 return Err(source.into());
             }
-            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. })))
-            // Sometimes the file is not corrupted, it's just that specific tag is still on the fly
-            | Some(Err(IteratorError::InnerError(TagIteratorError::CorruptedFileData(
-                CorruptedFileError::InvalidTagData { .. },
-            ))))
-            | None => {
-                perf_trace!("End of file reached or invalid tag data hit, retrying");
+            None => {
+                perf_trace!("End of file reached, retrying");
                 if retry_count >= MAX_RETRY_COUNT {
-                    anyhow::bail!("reached max retry count, the webm iterator cannot proceed with the current streaming file");
+                    anyhow::bail!(
+                        "reached max retry count, the webm iterator cannot proceed with the current streaming file"
+                    );
                 }
 
                 retry_count += 1;
