@@ -5,19 +5,25 @@ import { t } from '../i18n';
 import { showNotification } from '../notification';
 
 export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
-  // Create element with correct spelling
   const shadowPlayer = document.createElement('shadow-player') as ShadowPlayer;
+  shadowPlayer.setAttribute('controls', '');
+  shadowPlayer.setControlLabels({
+    play: t('controls.play'),
+    pause: t('controls.pause'),
+    mute: t('controls.mute'),
+    unmute: t('controls.unmute'),
+    volume: t('controls.volume'),
+    timeline: t('controls.timeline'),
+    fullscreen: t('controls.fullscreen'),
+    exitFullscreen: t('controls.exitFullscreen'),
+    clip: t('controls.clip'),
+  });
 
-  // Append to DOM
   document.body.appendChild(shadowPlayer);
 
-  // Wait for element to be initialized
   await customElements.whenDefined('shadow-player');
-
-  // Wait for next microtask to ensure connectedCallback has run
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // Now safe to call methods
   shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl());
   shadowPlayer.play();
 
