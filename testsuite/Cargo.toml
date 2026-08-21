@@ -38,6 +38,13 @@ mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
 rstest = "0.25"
+jmux-proxy = { path = "../crates/jmux-proxy" }
+# `test-util` provides the paused clock used to assert flush behavior deterministically.
+tokio = { version = "1", features = ["test-util"] }
+hyper = { version = "1", features = ["server", "client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 tempfile = "3"

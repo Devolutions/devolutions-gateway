@@ -3,6 +3,7 @@
 #![allow(clippy::print_stderr, reason = "test code uses print for diagnostics")]
 
 mod cli;
+mod jmux_flow_control;
 mod mcp_proxy;
 mod network_scanner;
 mod sysevent;
