@@ -9,7 +9,6 @@ use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 use tokio::sync::{Mutex, Notify, watch};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
-use webm_iterable::WebmIterator;
 use webm_iterable::errors::{TagIteratorError, TagWriterError};
 use webm_iterable::matroska_spec::{Master, MatroskaSpec};
 
@@ -34,21 +33,20 @@ pub fn webm_stream(
     config: StreamingConfig,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    let mut raw_itr = WebmIterator::new(input_stream, &[MatroskaSpec::BlockGroup(Master::Start)]);
+    let mut webm_itr = WebmPositionedIterator::new(input_stream, cadeau::xmf::vpx::VpxCodec::VP8);
     let mut headers = vec![];
 
-    // we extract all the headers before the first cluster
-    for tag in raw_itr.by_ref() {
-        let tag = tag?;
-        if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            break;
+    // Extract all headers before the first cluster.
+    loop {
+        match webm_itr.next() {
+            Some(Ok(MatroskaSpec::Cluster(Master::Start))) => break,
+            Some(Ok(tag)) => headers.push(tag),
+            Some(Err(error)) => return Err(error.into()),
+            None => anyhow::bail!("recording ended before the first cluster"),
         }
-
-        headers.push(tag);
     }
     let encode_writer_config = EncodeWriterConfig::try_from((headers.as_slice(), &config))?;
-    let cluster_start_position = raw_itr.last_emitted_tag_offset();
-    let mut webm_itr = WebmPositionedIterator::new(raw_itr, encode_writer_config.codec, cluster_start_position);
+    webm_itr.set_codec(encode_writer_config.codec);
 
     // we run to the last cluster, skipping everything that has been played
     while let Some(tag) = webm_itr.next() {
@@ -146,8 +144,7 @@ pub fn webm_stream(
                 // the source unconsumed guarantees every clone will detect any pending shutdown.
                 match when_eof(&when_new_chunk_appended, shutdown_rx.clone()) {
                     WhenEofControlFlow::Continue => {
-                        webm_itr.rollback_to_last_successful_tag()?;
-                        webm_itr.skip(1)?;
+                        webm_itr.refresh_from_disk()?;
                     }
                     WhenEofControlFlow::Break => {
                         break Ok(());
