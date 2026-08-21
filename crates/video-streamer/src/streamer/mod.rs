@@ -48,7 +48,13 @@ pub fn webm_stream(
     webm_itr.set_codec(encode_writer_config.codec);
 
     // Skip already-recorded tags. Incomplete trailing input is `None`.
-    while let Some(Ok(_)) = webm_itr.next() {}
+    loop {
+        match webm_itr.next() {
+            Some(Ok(_)) => {}
+            Some(Err(error)) => return Err(error.into()),
+            None => break,
+        }
+    }
 
     let cut_block_position = webm_itr.previous_emitted_tag_postion();
 
