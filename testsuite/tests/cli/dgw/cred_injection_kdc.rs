@@ -1259,6 +1259,12 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
         !logs.contains(FORWARD_LOG) && !logs.contains(INJECT_LOG),
         "missing krb_kdc must fail closed; logs:\n{logs}"
     );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    anyhow::ensure!(
+        rdp.accepted() == 0,
+        "missing krb_kdc must not dial the target; accepted={}",
+        rdp.accepted()
+    );
     let _ = gateway.process.start_kill();
     Ok(())
 }
@@ -1303,20 +1309,28 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
 
 struct FakeClosedTarget {
     port: u16,
+    accepted: Arc<AtomicUsize>,
 }
 
 impl FakeClosedTarget {
     async fn start() -> anyhow::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await.context("bind closed target")?;
         let port = listener.local_addr()?.port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted_task = Arc::clone(&accepted);
         tokio::spawn(async move {
             loop {
                 let Ok((_stream, _)) = listener.accept().await else {
                     break;
                 };
+                accepted_task.fetch_add(1, Ordering::SeqCst);
             }
         });
-        Ok(Self { port })
+        Ok(Self { port, accepted })
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
     }
 }
 
