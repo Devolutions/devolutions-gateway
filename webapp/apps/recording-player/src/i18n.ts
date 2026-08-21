@@ -8,6 +8,15 @@ export type TranslationKeys =
   | 'notifications.unauthorized'
   | 'notifications.unknownError'
   | 'notifications.protocolError'
+  | 'controls.play'
+  | 'controls.pause'
+  | 'controls.mute'
+  | 'controls.unmute'
+  | 'controls.volume'
+  | 'controls.timeline'
+  | 'controls.fullscreen'
+  | 'controls.exitFullscreen'
+  | 'controls.clip'
   | 'ui.close';
 
 /**

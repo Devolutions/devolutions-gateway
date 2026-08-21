@@ -1,41 +1,46 @@
-import { ClientMessage, ServerMessage, parseClientMessage, parseServerMessage } from './protocol';
+import { ClientMessage, parseClientMessage, parseServerMessage, ServerMessage } from './protocol';
 
 export class ServerWebSocket {
-  ws: WebSocket;
+  private readonly socket: WebSocket;
+
   constructor(url: string) {
-    this.ws = new WebSocket(url);
+    this.socket = new WebSocket(url);
+    this.socket.binaryType = 'arraybuffer';
   }
 
-  onopen(callback: (ev: Event) => unknown) {
-    this.ws.onopen = callback;
+  onopen(callback: (event: Event) => void): void {
+    this.socket.onopen = callback;
   }
 
-  onmessage(callback: (ev: ServerMessage) => unknown) {
-    this.ws.onmessage = (ev) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const arrayBuffer = reader.result as ArrayBuffer;
-        const serverResponse = parseServerMessage(arrayBuffer);
-        callback(serverResponse);
-      };
-
-      reader.readAsArrayBuffer(ev.data);
+  onmessage(callback: (message: ServerMessage) => Promise<void> | void, onFailure: (error: unknown) => void): void {
+    this.socket.onmessage = (event) => {
+      try {
+        if (!(event.data instanceof ArrayBuffer)) {
+          throw new Error('Server sent a non-binary message');
+        }
+        Promise.resolve(callback(parseServerMessage(event.data))).catch(onFailure);
+      } catch (error) {
+        onFailure(error);
+      }
     };
   }
 
-  onclose(callback: (ev: CloseEvent) => unknown) {
-    this.ws.onclose = callback;
+  onclose(callback: (event: CloseEvent) => void): void {
+    this.socket.onclose = callback;
   }
 
-  onerror(callback: (ev: Event) => unknown) {
-    this.ws.onerror = callback;
+  onerror(callback: (event: Event) => void): void {
+    this.socket.onerror = callback;
   }
 
-  send<T extends ClientMessage>(data: T) {
-    this.ws.send(parseClientMessage(data));
+  send(message: ClientMessage): void {
+    if (this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not open');
+    }
+    this.socket.send(parseClientMessage(message));
   }
 
-  isClosed() {
-    return this.ws.readyState === WebSocket.CLOSED;
+  close(code: number, reason: string): void {
+    this.socket.close(code, reason);
   }
 }
