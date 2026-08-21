@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use base64::Engine as _;
+use ironrdp_pdu::nego::{ConnectionRequest, NegoRequestData};
+use ironrdp_pdu::x224::X224;
 use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{DgwConfig, DgwConfigHandle, VerbosityProfile};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
@@ -144,7 +146,7 @@ impl LogBuffer {
 struct FakeRdpTarget {
     port: u16,
     accepted: Arc<AtomicUsize>,
-    payloads: Arc<Mutex<Vec<Vec<u8>>>>,
+    cookies: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeRdpTarget {
@@ -152,9 +154,9 @@ impl FakeRdpTarget {
         let listener = TcpListener::bind("127.0.0.1:0").await.context("bind fake RDP target")?;
         let port = listener.local_addr().context("fake RDP local_addr")?.port();
         let accepted = Arc::new(AtomicUsize::new(0));
-        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let cookies = Arc::new(Mutex::new(Vec::new()));
         let accepted_task = Arc::clone(&accepted);
-        let payloads_task = Arc::clone(&payloads);
+        let cookies_task = Arc::clone(&cookies);
 
         tokio::spawn(async move {
             loop {
@@ -162,14 +164,15 @@ impl FakeRdpTarget {
                     break;
                 };
                 accepted_task.fetch_add(1, Ordering::SeqCst);
-                let payloads = Arc::clone(&payloads_task);
+                let cookies = Arc::clone(&cookies_task);
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 4096];
                     // CredSSP cert generation can delay the rewritten X.224 CR.
                     if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut buf)).await
                         && n > 0
+                        && let Some(cookie) = decode_x224_cookie(&buf[..n])
                     {
-                        payloads.lock().expect("payload mutex").push(buf[..n].to_vec());
+                        cookies.lock().expect("cookie mutex").push(cookie);
                     }
                     // Keep the accepted socket open so the proxy can finish writing the CR.
                     tokio::time::sleep(Duration::from_secs(30)).await;
@@ -180,7 +183,7 @@ impl FakeRdpTarget {
         Ok(Self {
             port,
             accepted,
-            payloads,
+            cookies,
         })
     }
 
@@ -188,23 +191,31 @@ impl FakeRdpTarget {
         self.accepted.load(Ordering::SeqCst)
     }
 
-    async fn wait_payloads(&self, count: usize) -> anyhow::Result<Vec<Vec<u8>>> {
+    async fn wait_cookies(&self, count: usize) -> anyhow::Result<Vec<String>> {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             {
-                let payloads = self.payloads.lock().expect("payload mutex");
-                if payloads.len() >= count {
-                    return Ok(payloads.clone());
+                let cookies = self.cookies.lock().expect("cookie mutex");
+                if cookies.len() >= count {
+                    return Ok(cookies.clone());
                 }
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
-                    "timed out waiting for {count} target payload(s); accepted={}",
+                    "timed out waiting for {count} decoded X.224 cookie(s); accepted={}",
                     self.accepted()
                 );
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+}
+
+fn decode_x224_cookie(payload: &[u8]) -> Option<String> {
+    let cr: X224<ConnectionRequest> = ironrdp_core::decode(payload).ok()?;
+    match cr.0.nego_data {
+        Some(NegoRequestData::Cookie(cookie)) => Some(cookie.0),
+        _ => None,
     }
 }
 
@@ -416,16 +427,6 @@ async fn connect_rdp_client(gateway_tcp: u16, association_jwt: &str) -> anyhow::
     Ok(stream)
 }
 
-fn cookie_line(username: &str) -> String {
-    format!("Cookie: mstshash={username}")
-}
-
-fn payloads_contain(payloads: &[Vec<u8>], needle: &str) -> bool {
-    payloads
-        .iter()
-        .any(|payload| String::from_utf8_lossy(payload).contains(needle))
-}
-
 #[tokio::test]
 async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -447,14 +448,11 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
         "injection must not fall back to ordinary forward; logs:\n{logs}"
     );
 
-    let payloads = target.wait_payloads(1).await?;
-    assert!(
-        payloads_contain(&payloads, &cookie_line(TARGET_USER)),
-        "target should see injected cookie; payloads={payloads:?}"
-    );
-    assert!(
-        !payloads_contain(&payloads, &cookie_line(CLIENT_COOKIE)),
-        "target must not see the client cookie; payloads={payloads:?}"
+    let cookies = target.wait_cookies(1).await?;
+    assert_eq!(
+        cookies,
+        vec![TARGET_USER],
+        "decoded X.224 cookie must be the injected user"
     );
 
     let _ = gateway.process.start_kill();
@@ -473,7 +471,7 @@ async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
 
     let first = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
     gateway.logs.wait_count(INJECT_LOG, 1).await?;
-    target.wait_payloads(1).await?;
+    target.wait_cookies(1).await?;
     drop(first);
 
     let _second = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
@@ -483,13 +481,11 @@ async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
         "reconnect must keep injecting, not ordinary-forward; logs:\n{logs}"
     );
 
-    let payloads = target.wait_payloads(2).await?;
-    assert_eq!(payloads.len(), 2, "both connections should reach the fake RDP target");
-    assert!(
-        payloads
-            .iter()
-            .all(|payload| String::from_utf8_lossy(payload).contains(&cookie_line(TARGET_USER))),
-        "both reconnects should inject the target cookie; payloads={payloads:?}"
+    let cookies = target.wait_cookies(2).await?;
+    assert_eq!(
+        cookies,
+        vec![TARGET_USER, TARGET_USER],
+        "both decoded X.224 cookies must be the injected user"
     );
 
     let _ = gateway.process.start_kill();
@@ -541,14 +537,11 @@ async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
         "absent mapping should ordinary-forward; logs:\n{logs}"
     );
 
-    let payloads = target.wait_payloads(1).await?;
-    assert!(
-        payloads_contain(&payloads, &cookie_line(CLIENT_COOKIE)),
-        "ordinary forward should keep the client cookie; payloads={payloads:?}"
-    );
-    assert!(
-        !payloads_contain(&payloads, &cookie_line(TARGET_USER)),
-        "ordinary forward must not invent an injection cookie; payloads={payloads:?}"
+    let cookies = target.wait_cookies(1).await?;
+    assert_eq!(
+        cookies,
+        vec![CLIENT_COOKIE],
+        "ordinary forward must keep the decoded client cookie"
     );
 
     let _ = gateway.process.start_kill();
@@ -613,6 +606,11 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
     );
     let logs = gateway.logs.wait_count(PUBLISHED_KDC_LOG, 2).await?;
     assert_eq!(
+        logs.matches(PUBLISHED_KDC_LOG).count(),
+        2,
+        "re-provision must publish exactly one extra synthetic KDC; logs:\n{logs}"
+    );
+    assert_eq!(
         logs.matches(REGISTERED_KDC_LOG).count(),
         3,
         "each connection should register a synthetic KDC lease; logs:\n{logs}"
@@ -622,12 +620,15 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
         "Kerberos injection must not ordinary-forward; logs:\n{logs}"
     );
 
-    let payloads = target.wait_payloads(3).await?;
-    assert!(
-        payloads
-            .iter()
-            .all(|payload| String::from_utf8_lossy(payload).contains(&cookie_line(KERBEROS_TARGET_USER))),
-        "each generation should inject the Kerberos target username; payloads={payloads:?}"
+    let cookies = target.wait_cookies(3).await?;
+    assert_eq!(
+        cookies,
+        vec![
+            KERBEROS_TARGET_USER.to_owned(),
+            KERBEROS_TARGET_USER.to_owned(),
+            KERBEROS_TARGET_USER.to_owned()
+        ],
+        "each decoded X.224 cookie must be the Kerberos target user"
     );
 
     let _ = gateway.process.start_kill();
