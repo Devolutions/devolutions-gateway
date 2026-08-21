@@ -5,35 +5,43 @@ use anyhow::Context;
 use axum::body::Body;
 use axum::extract::ws::{CloseFrame, Utf8Bytes, WebSocket};
 use axum::response::Response;
-use futures::SinkExt;
+use bytes::Bytes;
+use devolutions_gateway_task::ShutdownSignal;
+use futures::{SinkExt, Stream, stream};
 use terminal_streamer::terminal_stream;
-use tokio::fs::OpenOptions;
-use tokio::sync::Notify;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::AsyncReadExt;
+use tokio::sync::{Notify, watch};
 use uuid::Uuid;
-use video_streamer::config::CpuCount;
-use video_streamer::{ReOpenableFile, webm_stream};
+use video_streamer::{RecordingEvent, SessionConfig, StartAt, stream_session};
 
+use crate::recording::{RecordingMessageSender, RecordingStreamState};
 use crate::token::RecordingFileType;
 
-pub(crate) async fn stream_file(
-    path: &camino::Utf8Path,
+pub(crate) async fn stream_recording(
     ws: axum::extract::WebSocketUpgrade,
-    shutdown_notify: Arc<Notify>,
-    recordings: crate::recording::RecordingMessageSender,
+    shutdown_signal: ShutdownSignal,
+    recordings: RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
-    let streaming_type = validate_streaming_file(path).await?;
-
-    let when_new_chunk_appended = move || {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        recordings.add_new_chunk_listener(recording_id, tx);
-        rx
-    };
-
-    let path = Arc::new(path.to_owned());
+    let stream_state = recordings.subscribe_to_stream(recording_id).await?;
+    let path = stream_state
+        .borrow()
+        .clips
+        .last()
+        .context("recording has no clips")?
+        .path
+        .clone();
+    let streaming_type = validate_streaming_file(&path).await?;
     let upgrade_result = match streaming_type {
         StreamingType::Terminal => {
-            let shutdown_notify = Arc::clone(&shutdown_notify);
+            let shutdown_notify = recordings.subscribe_to_recording_finish(recording_id).await?;
+            let when_new_chunk_appended = move || {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                recordings.add_new_chunk_listener(recording_id, tx);
+                rx
+            };
+            let path = Arc::new(path);
             ws.on_upgrade(move |socket| async move {
                 if let Err(e) = setup_terminal_streaming(&path, socket, shutdown_notify, when_new_chunk_appended).await
                 {
@@ -41,14 +49,11 @@ pub(crate) async fn stream_file(
                 }
             })
         }
-        StreamingType::WebM => {
-            let shutdown_notify = Arc::clone(&shutdown_notify);
-            ws.on_upgrade(move |socket| async move {
-                if let Err(e) = setup_webm_streaming(&path, socket, shutdown_notify, when_new_chunk_appended).await {
-                    error!(error = ?e, "WebM streaming failed");
-                }
-            })
-        }
+        StreamingType::WebM => ws.on_upgrade(move |socket| async move {
+            if let Err(e) = setup_webm_streaming(stream_state, socket, shutdown_signal).await {
+                error!(error = ?e, "WebM streaming failed");
+            }
+        }),
     };
 
     Ok(upgrade_result)
@@ -150,45 +155,168 @@ async fn setup_terminal_streaming(
 }
 
 async fn setup_webm_streaming(
-    path: &camino::Utf8Path,
+    stream_state: watch::Receiver<RecordingStreamState>,
     socket: WebSocket,
-    shutdown_notify: Arc<Notify>,
-    when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()> + Send + 'static,
+    shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
-    let streaming_file = ReOpenableFile::open(path).with_context(|| format!("failed to open file: {path:?}"))?;
-    let streamer_config = video_streamer::StreamingConfig {
-        encoder_threads: CpuCount::default(),
-        adaptive_frame_skip: true,
-    };
-
-    let (websocket_stream, close_handle) =
-        crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
-    let streaming_result = tokio::task::spawn_blocking(move || {
-        webm_stream(
-            websocket_stream,
-            streaming_file,
-            shutdown_notify,
-            streamer_config,
-            when_new_chunk_appended,
-        )
-        .context("webm_stream failed")?;
-        Ok::<_, anyhow::Error>(())
-    })
-    .await;
+    let source = recording_event_stream(stream_state)?;
+    let (websocket_stream, close_handle) = crate::ws::handle_messages(
+        socket,
+        crate::ws::KeepAliveShutdownSignal(shutdown_signal),
+        Duration::from_secs(45),
+    );
+    let streaming_result = stream_session(source, websocket_stream, SessionConfig::default()).await;
 
     match streaming_result {
-        Err(e) => {
-            error!(error=?e, "Streaming file task join failed");
-            Err(anyhow::anyhow!("Streaming task failed"))
-        }
-        Ok(Err(e)) => {
+        Err(error) => {
             close_handle.server_error("webm streaming failure".to_owned()).await;
-            error!(error = format!("{e:#}"), "Streaming file failed");
-            Err(e)
+            error!(error = format!("{error:#}"), "WebM streaming failed");
+            Err(error)
         }
-        Ok(Ok(())) => {
+        Ok(()) => {
             close_handle.normal_close().await;
             Ok(())
         }
     }
+}
+
+struct CurrentRecordingClip {
+    sequence: u64,
+    file: File,
+    caught_up: bool,
+}
+
+struct RecordingEventSource {
+    stream_state: watch::Receiver<RecordingStreamState>,
+    next_clip: usize,
+    current_clip: Option<CurrentRecordingClip>,
+    next_start_at: StartAt,
+    ended: bool,
+}
+
+impl RecordingEventSource {
+    fn new(mut stream_state: watch::Receiver<RecordingStreamState>) -> anyhow::Result<Self> {
+        let state = stream_state.borrow_and_update().clone();
+        let (next_clip, next_start_at) = match state.active {
+            Some(active) => (
+                usize::try_from(active.sequence).context("recording sequence does not fit in usize")?,
+                if active.ready {
+                    StartAt::LiveEdge
+                } else {
+                    StartAt::Beginning
+                },
+            ),
+            None => (state.clips.len(), StartAt::Beginning),
+        };
+
+        Ok(Self {
+            stream_state,
+            next_clip,
+            current_clip: None,
+            next_start_at,
+            ended: false,
+        })
+    }
+
+    async fn next_event(&mut self) -> anyhow::Result<Option<RecordingEvent>> {
+        const READ_BUFFER_SIZE: usize = 64 * 1024;
+
+        if self.ended {
+            return Ok(None);
+        }
+
+        loop {
+            let state = self.stream_state.borrow_and_update().clone();
+
+            if let Some(current_clip) = self.current_clip.as_mut() {
+                let mut bytes = vec![0; READ_BUFFER_SIZE];
+                let read = current_clip.file.read(&mut bytes).await?;
+                if read > 0 {
+                    bytes.truncate(read);
+                    return Ok(Some(RecordingEvent::Bytes(Bytes::from(bytes))));
+                }
+
+                if !current_clip.caught_up {
+                    current_clip.caught_up = true;
+                    return Ok(Some(RecordingEvent::CaughtUp));
+                }
+
+                if state
+                    .active
+                    .is_some_and(|active| active.sequence == current_clip.sequence)
+                {
+                    self.stream_state
+                        .changed()
+                        .await
+                        .context("recording stream state closed")?;
+                    continue;
+                }
+
+                self.current_clip = None;
+                self.next_clip = self.next_clip.checked_add(1).context("recording clip index overflow")?;
+                return Ok(Some(RecordingEvent::ClipEnded));
+            }
+
+            if let Some(clip) = state.clips.get(self.next_clip) {
+                let expected_sequence =
+                    u64::try_from(self.next_clip).context("recording clip index does not fit in u64")?;
+                if clip.sequence != expected_sequence {
+                    anyhow::bail!("recording clip sequence is not contiguous");
+                }
+
+                if state
+                    .active
+                    .is_some_and(|active| active.sequence == clip.sequence && !active.ready)
+                {
+                    self.stream_state
+                        .changed()
+                        .await
+                        .context("recording stream state closed")?;
+                    continue;
+                }
+
+                if clip.path.extension() != Some(RecordingFileType::WebM.extension()) {
+                    anyhow::bail!("recording clip is not WebM");
+                }
+
+                let file = File::open(&clip.path)
+                    .await
+                    .with_context(|| format!("failed to open recording clip: {}", clip.path))?;
+                let start_at = std::mem::replace(&mut self.next_start_at, StartAt::Beginning);
+                self.current_clip = Some(CurrentRecordingClip {
+                    sequence: clip.sequence,
+                    file,
+                    caught_up: false,
+                });
+                return Ok(Some(RecordingEvent::ClipStarted {
+                    sequence: clip.sequence,
+                    start_at,
+                }));
+            }
+
+            if state.ended {
+                self.ended = true;
+                return Ok(Some(RecordingEvent::SessionEnded));
+            }
+
+            self.stream_state
+                .changed()
+                .await
+                .context("recording stream state closed")?;
+        }
+    }
+}
+
+fn recording_event_stream(
+    stream_state: watch::Receiver<RecordingStreamState>,
+) -> anyhow::Result<impl Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static> {
+    let source = RecordingEventSource::new(stream_state)?;
+    Ok(stream::unfold(Some(source), |source| async move {
+        let mut source = source?;
+        match source.next_event().await {
+            Ok(Some(event)) => Some((Ok(event), Some(source))),
+            Ok(None) => None,
+            Err(error) => Some((Err(error), None)),
+        }
+    }))
 }
