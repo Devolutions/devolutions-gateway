@@ -8614,6 +8614,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "bytes 1.12.1",
  "cadeau",
  "criterion",
  "ebml-iterable",
