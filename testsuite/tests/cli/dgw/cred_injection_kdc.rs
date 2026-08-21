@@ -560,11 +560,11 @@ async fn connect_ntlm_client(
 }
 
 async fn complete_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, false, None).await
+    complete_client_credssp(tls, PROXY_USER, None, false, None, None).await
 }
 
 async fn complete_raw_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, true, None).await
+    complete_client_credssp(tls, PROXY_USER, None, true, None, None).await
 }
 
 async fn complete_client_credssp(
@@ -573,6 +573,7 @@ async fn complete_client_credssp(
     kdc_proxy_url: Option<&str>,
     raw_ntlm: bool,
     proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
+    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
 ) -> anyhow::Result<()> {
     use sspi::credssp::{ClientMode, ClientState, CredSspClient, CredSspMode, TsRequest};
     use sspi::ntlm::NtlmConfig;
@@ -622,7 +623,7 @@ async fn complete_client_credssp(
     for _ in 0..8 {
         let client_state = {
             let mut generator = client.process(std::mem::take(&mut ts_request));
-            resolve_sspi_client(&mut generator, proxy_replies).await?
+            resolve_sspi_client(&mut generator, proxy_replies, proxy_requests).await?
         };
         let (outbound, finished) = match client_state {
             ClientState::ReplyNeeded(request) => (request, false),
@@ -653,6 +654,7 @@ async fn resolve_sspi_client(
         sspi::Result<sspi::credssp::ClientState>,
     >,
     proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
+    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
     let mut state = generator.start();
     loop {
@@ -660,7 +662,7 @@ async fn resolve_sspi_client(
             GeneratorState::Suspended(request) => {
                 let reply = match request.url.scheme() {
                     "tcp" | "udp" => send_kdc_tcp(&request).await?,
-                    "http" | "https" => send_kdc_http(&request, proxy_replies).await?,
+                    "http" | "https" => send_kdc_http(&request, proxy_replies, proxy_requests).await?,
                     other => anyhow::bail!("unsupported KDC scheme {other}: {}", request.url),
                 };
                 state = generator.resume(Ok(reply));
@@ -675,6 +677,7 @@ async fn resolve_sspi_client(
 async fn send_kdc_http(
     request: &sspi::generator::NetworkRequest,
     proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
+    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
 ) -> anyhow::Result<Vec<u8>> {
     let host = request.url.host_str().context("KDC proxy host")?;
     let port = request.url.port_or_known_default().unwrap_or(80);
@@ -699,6 +702,12 @@ async fn send_kdc_http(
         .context("write KDC proxy headers")?;
     stream.write_all(&request.data).await.context("write KDC proxy body")?;
     stream.flush().await.context("flush KDC proxy")?;
+    if let Ok(message) = KdcProxyMessage::from_raw(&request.data)
+        && let Some(log) = proxy_requests
+    {
+        let kerb = message.kerb_message.0.0.get(4..).unwrap_or(&message.kerb_message.0.0);
+        log.lock().expect("proxy request mutex").push(observe_kdc_req(kerb));
+    }
 
     let mut reader = BufReader::new(stream);
     let mut status_line = String::new();
@@ -988,15 +997,23 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
 
     let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &jti)?;
     let proxy_replies = Mutex::new(Vec::new());
+    let proxy_requests = Mutex::new(Vec::new());
     let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
-    complete_client_credssp(tls, PROXY_KERBEROS_USER, Some(&kdc_proxy), false, Some(&proxy_replies))
-        .await
-        .with_context(|| {
-            format!(
-                "client-leg Kerberos CredSSP; gateway logs:\n{}",
-                gateway.logs.snapshot()
-            )
-        })?;
+    complete_client_credssp(
+        tls,
+        PROXY_KERBEROS_USER,
+        Some(&kdc_proxy),
+        false,
+        Some(&proxy_replies),
+        Some(&proxy_requests),
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "client-leg Kerberos CredSSP; gateway logs:\n{}",
+            gateway.logs.snapshot()
+        )
+    })?;
     rdp.wait_credssp().await.with_context(|| {
         format!(
             "target-leg Kerberos CredSSP; gateway logs:\n{}",
@@ -1014,6 +1031,15 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     anyhow::ensure!(
         replies.contains(&ObservedKdcReply::AsRep) && replies.contains(&ObservedKdcReply::TgsRep),
         "/jet/KdcProxy must return AS-REP and TGS-REP (PREAUTH KRB-ERROR is allowed first); replies={replies:?}"
+    );
+    let requests = proxy_requests.lock().expect("proxy request mutex").clone();
+    anyhow::ensure!(
+        requests.iter().any(|req| matches!(
+            req,
+            ObservedKdcReq::As { cname, realm }
+                if cname.eq_ignore_ascii_case("injected-proxy-user") && realm.eq_ignore_ascii_case(REALM)
+        )),
+        "synthetic KDC AS-REQ must be proxy user injected-proxy-user@{REALM}; requests={requests:?}"
     );
     anyhow::ensure!(
         rdp.finished_account().as_deref() == Some("administrator"),
@@ -1048,6 +1074,11 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
 
     let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
     let _ = complete_ntlm_credssp(tls).await;
+    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
+    anyhow::ensure!(
+        logs.contains("kerberos=true"),
+        "wrong password must still start Kerberos injection; logs:\n{logs}"
+    );
     tokio::time::sleep(Duration::from_secs(2)).await;
     anyhow::ensure!(
         !rdp.credssp_ok() && rdp.finished_account().is_none(),
@@ -1085,6 +1116,11 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
 
     let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
     let _ = complete_ntlm_credssp(tls).await;
+    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
+    anyhow::ensure!(
+        logs.contains("kerberos=true"),
+        "KDC down must still start Kerberos injection; logs:\n{logs}"
+    );
     tokio::time::sleep(Duration::from_secs(2)).await;
     anyhow::ensure!(
         !rdp.credssp_ok() && rdp.finished_account().is_none(),
@@ -1120,7 +1156,7 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     stream.flush().await.context("flush CR")?;
     let logs = gateway.logs.wait_contains(MISSING_LOG).await?;
     anyhow::ensure!(
-        !logs.contains(FORWARD_LOG),
+        !logs.contains(FORWARD_LOG) && !logs.contains(INJECT_LOG),
         "missing krb_kdc must fail closed; logs:\n{logs}"
     );
 
