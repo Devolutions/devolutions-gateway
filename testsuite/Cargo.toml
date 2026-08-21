@@ -57,6 +57,7 @@ network-scanner-proto = { path = "../crates/network-scanner-proto" }
 nonempty = "0.12"
 private-fs.path = "../crates/private-fs"
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
+picky-asn1-der = "0.5"
 picky-krb = "0.12"
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
