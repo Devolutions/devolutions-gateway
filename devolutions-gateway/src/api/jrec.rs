@@ -949,7 +949,11 @@ impl From<StreamerCloseCode> for CloseFrame {
 }
 
 async fn shadow_recording(
-    State(DgwState { recordings, .. }): State<DgwState>,
+    State(DgwState {
+        recordings,
+        shutdown_signal,
+        ..
+    }): State<DgwState>,
     extract::Path(id): extract::Path<Uuid>,
     JrecToken(claims): JrecToken,
     ws: WebSocketUpgrade,
@@ -962,31 +966,22 @@ async fn shadow_recording(
         return close_with_error(ws, StreamerCloseCode::StreamingEnded);
     }
 
-    let Ok(Some(crate::recording::OnGoingRecordingState::Connected)) = recordings.get_state(id).await else {
-        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
-    };
-
     if !xmf::is_init() {
         warn!(%id, "Shadow recording rejected: XMF native library is not loaded");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     }
-
-    let Ok(notify) = recordings.subscribe_to_recording_finish(id).await else {
-        warn!(%id, "Shadow recording rejected: failed to subscribe to recording finish");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
-    };
 
     let Ok(recording_files) = recordings.list_files(id).await else {
         warn!(%id, "Shadow recording rejected: failed to list recording files");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
-    let Some(recording_path) = recording_files.last() else {
+    if recording_files.is_empty() {
         warn!(%id, "Shadow recording rejected: no recording files found");
         return close_with_error(ws, StreamerCloseCode::InternalError);
-    };
+    }
 
-    return crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
+    return crate::streaming::stream_recording(ws, shutdown_signal, recordings, id)
         .await
         .map_err(|_| HttpError::internal().msg("failed to stream file"));
 
