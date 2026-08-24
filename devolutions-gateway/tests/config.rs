@@ -476,5 +476,12 @@ fn agent_tunnel_listen_port(#[case] json: &str, #[case] expected_listen_port: u1
     let conf_file = serde_json::from_str::<ConfFile>(json).unwrap();
     let agent_tunnel = conf_file.agent_tunnel.unwrap_or_default();
 
-    assert_eq!(agent_tunnel.listen_port, expected_listen_port);
+    assert_eq!(agent_tunnel.listen_port.get(), expected_listen_port);
+}
+
+#[test]
+fn agent_tunnel_zero_port_is_rejected() {
+    let result = serde_json::from_str::<ConfFile>(r#"{"Listeners":[],"AgentTunnel":{"ListenPort":0}}"#);
+
+    assert!(result.is_err());
 }

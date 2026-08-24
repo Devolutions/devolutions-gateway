@@ -299,7 +299,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     // resolution returns an IPv6 address for the configured gateway endpoint).
     // The listener crate explicitly clears `IPV6_V6ONLY` for portability across
     // OSes, and falls back to IPv4 if the host has IPv6 disabled.
-    let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
+    let listen_addr =
+        std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port.get()));
 
     let (agent_tunnel_listener, agent_tunnel_handle) =
         agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), hostname, authorization_store)
@@ -309,7 +310,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(agent_tunnel_listener);
 
     info!(
-        port = conf.agent_tunnel.listen_port,
+        port = conf.agent_tunnel.listen_port.get(),
         "Agent tunnel QUIC listener started",
     );
 

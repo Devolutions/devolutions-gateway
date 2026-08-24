@@ -144,6 +144,8 @@ Describe 'Devolutions Gateway config' {
 				$AgentTunnel = New-DGatewayAgentTunnelConfig -ListenPort 9443
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 9443
+
+				{ New-DGatewayAgentTunnelConfig -ListenPort 0 } | Should -Throw
 			}
 
 			It 'Sets basic standalone configuration' {

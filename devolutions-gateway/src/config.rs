@@ -1357,12 +1357,12 @@ pub mod dto {
     pub struct AgentTunnelConf {
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
-        pub listen_port: u16,
+        pub listen_port: std::num::NonZeroU16,
     }
 
     impl AgentTunnelConf {
-        fn default_listen_port() -> u16 {
-            4433
+        fn default_listen_port() -> std::num::NonZeroU16 {
+            std::num::NonZeroU16::new(4433).expect("default port is non-zero")
         }
     }
 

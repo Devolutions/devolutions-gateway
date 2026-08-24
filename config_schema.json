@@ -517,7 +517,7 @@
       "properties": {
         "ListenPort": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 65535,
           "default": 4433,
           "description": "UDP port for the QUIC listener."
