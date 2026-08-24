@@ -286,6 +286,9 @@ pub enum RecordingFileType {
 }
 
 impl RecordingFileType {
+    pub const WEBM_CONTENT_TYPE: &'static str = "video/webm";
+    pub const TRP_CONTENT_TYPE: &'static str = "application/vnd.devolutions.trp";
+    pub const ASCIICAST_CONTENT_TYPE: &'static str = "application/x-asciicast";
     pub const SLOG_CONTENT_TYPE: &'static str = "application/x-ndjson";
 
     pub const fn format_name(self) -> &'static str {
@@ -316,10 +319,12 @@ impl RecordingFileType {
         }
     }
 
-    pub const fn content_type(self) -> Option<&'static str> {
+    pub const fn content_type(self) -> &'static str {
         match self {
-            RecordingFileType::SessionRecordingLog => Some(Self::SLOG_CONTENT_TYPE),
-            RecordingFileType::WebM | RecordingFileType::TRP | RecordingFileType::Asciicast => None,
+            RecordingFileType::WebM => Self::WEBM_CONTENT_TYPE,
+            RecordingFileType::TRP => Self::TRP_CONTENT_TYPE,
+            RecordingFileType::Asciicast => Self::ASCIICAST_CONTENT_TYPE,
+            RecordingFileType::SessionRecordingLog => Self::SLOG_CONTENT_TYPE,
         }
     }
 }
@@ -1889,5 +1894,19 @@ mod tests {
 
         assert_ne!(claims.jti, Uuid::nil());
         assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
+    }
+
+    #[test]
+    fn recording_file_types_have_concrete_content_types() {
+        let expected = [
+            (RecordingFileType::WebM, "video/webm"),
+            (RecordingFileType::TRP, "application/vnd.devolutions.trp"),
+            (RecordingFileType::Asciicast, "application/x-asciicast"),
+            (RecordingFileType::SessionRecordingLog, "application/x-ndjson"),
+        ];
+
+        for (recording_file_type, expected_content_type) in expected {
+            assert_eq!(recording_file_type.content_type(), expected_content_type);
+        }
     }
 }

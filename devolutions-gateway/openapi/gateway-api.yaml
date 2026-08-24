@@ -315,6 +315,22 @@ paths:
         '200':
           description: Recording file
           content:
+            video/webm:
+              schema:
+                type: string
+                format: binary
+            application/x-asciicast:
+              schema:
+                type: string
+                format: binary
+            application/vnd.devolutions.trp:
+              schema:
+                type: string
+                format: binary
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
             application/octet-stream:
               schema:
                 type: string
@@ -2280,4 +2296,3 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing usage of the standalone web application
-
