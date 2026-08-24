@@ -11,5 +11,6 @@ mod preflight;
 mod recording_search;
 mod subscriber;
 mod tls_anchoring;
+mod tls_fixtures;
 mod traffic_audit;
 mod wildcard_listener;

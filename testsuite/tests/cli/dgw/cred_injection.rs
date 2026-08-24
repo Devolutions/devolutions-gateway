@@ -14,6 +14,7 @@ use anyhow::Context as _;
 use base64::Engine as _;
 use ironrdp_pdu::nego::{ConnectionRequest, NegoRequestData};
 use ironrdp_pdu::x224::X224;
+use ironrdp_tokio::TokioFramed;
 use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{DgwConfig, DgwConfigHandle, VerbosityProfile};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
@@ -160,17 +161,16 @@ impl FakeRdpTarget {
 
         tokio::spawn(async move {
             loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
+                let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
                 accepted_task.fetch_add(1, Ordering::SeqCst);
                 let cookies = Arc::clone(&cookies_task);
                 tokio::spawn(async move {
-                    let mut buf = vec![0u8; 4096];
+                    let mut framed = TokioFramed::new(stream);
                     // CredSSP cert generation can delay the rewritten X.224 CR.
-                    if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut buf)).await
-                        && n > 0
-                        && let Some(cookie) = decode_x224_cookie(&buf[..n])
+                    if let Ok(Ok((_, request))) = tokio::time::timeout(Duration::from_secs(30), framed.read_pdu()).await
+                        && let Some(cookie) = decode_x224_cookie(&request)
                     {
                         cookies.lock().expect("cookie mutex").push(cookie);
                     }
