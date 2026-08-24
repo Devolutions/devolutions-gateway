@@ -331,6 +331,10 @@ paths:
               schema:
                 type: string
                 format: binary
+            application/json:
+              schema:
+                type: string
+                format: binary
             application/octet-stream:
               schema:
                 type: string
@@ -2296,3 +2300,4 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing usage of the standalone web application
+

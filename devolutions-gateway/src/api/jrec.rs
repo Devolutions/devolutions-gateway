@@ -572,6 +572,7 @@ pub(crate) async fn pull_recording_session(
                 "application/x-asciicast",
                 "application/vnd.devolutions.trp",
                 "application/x-ndjson",
+                "application/json",
                 "application/octet-stream",
             ],
         ),
