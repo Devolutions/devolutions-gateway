@@ -108,6 +108,10 @@
       "$ref": "#/definitions/ProxyConf",
       "description": "HTTP/SOCKS proxy configuration for outbound requests."
     },
+    "AgentTunnel": {
+      "$ref": "#/definitions/AgentTunnelConf",
+      "description": "QUIC-based agent tunnel configuration."
+    },
     "LogFile": {
       "type": "string",
       "description": "Path to the log file."
@@ -504,6 +508,24 @@
             "type": "string"
           },
           "description": "Bypass list with NO_PROXY semantics. Supports: wildcard '*', exact hostname 'example.com', domain suffix '.corp.local', IP address '127.0.0.1', CIDR range '10.0.0.0/8'. Only used when Mode is Manual."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentTunnelConf": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the agent tunnel listener is enabled."
+        },
+        "ListenPort": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 4433,
+          "description": "UDP port for the QUIC listener."
         }
       },
       "additionalProperties": false

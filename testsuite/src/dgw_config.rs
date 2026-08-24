@@ -134,7 +134,11 @@ impl DgwConfigHandle {
                 at_config.enabled
             )
         } else {
-            String::new()
+            r#",
+    "AgentTunnel": {
+        "Enabled": false
+    }"#
+            .to_owned()
         };
 
         let hostname_json = hostname

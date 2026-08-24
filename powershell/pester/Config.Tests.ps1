@@ -136,6 +136,18 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.LoginLimitRate | Should -Be 8
 			}
 
+			It 'Sets agent tunnel configuration' {
+				$AgentTunnel = New-DGatewayAgentTunnelConfig -ListenPort 8443
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $true
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 8443
+
+				$AgentTunnel = New-DGatewayAgentTunnelConfig -Enabled $false -ListenPort 9443
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $false
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 9443
+			}
+
 			It 'Sets basic standalone configuration' {
 				$Hostname = "localhost"
 				$HttpListener = New-DGatewayListener 'http://*:7172' 'http://*:7172'

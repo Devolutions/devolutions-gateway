@@ -35,7 +35,8 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/webapp", webapp::make_router(state.clone()))
         .nest("/jet/net", net::make_router(state.clone()))
         .nest("/jet/traffic", traffic::make_router(state.clone()))
-        .nest("/jet/update", update::make_router(state.clone()));
+        .nest("/jet/update", update::make_router(state.clone()))
+        .nest("/jet/tunnel", tunnel::make_router(state.clone()));
 
     if state.conf_handle.get_conf().web_app.enabled {
         router = router.route(
@@ -45,7 +46,6 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
     }
 
     if state.conf_handle.get_conf().debug.enable_unstable {
-        router = router.nest("/jet/tunnel", tunnel::make_router(state.clone()));
         router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
     }
 

@@ -640,7 +640,6 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         .hostname("localhost".to_owned())
         .provisioner_public_key_data(public_key_data)
         .agent_tunnel(AgentTunnelConfig::builder().build())
-        .enable_unstable(true)
         .build()
         .init()
         .expect("initialize gateway config");
@@ -775,7 +774,6 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         .listener_host("0.0.0.0")
         .provisioner_public_key_data(public_key_data)
         .agent_tunnel(AgentTunnelConfig::builder().build())
-        .enable_unstable(true)
         .build()
         .init()
         .expect("initialize gateway config");
