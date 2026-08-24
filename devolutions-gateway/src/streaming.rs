@@ -188,6 +188,49 @@ async fn setup_webm_streaming(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn validates_streaming_behavior_from_file_extension() {
+        let webm_type = validate_streaming_file(camino::Utf8Path::new("recording-0.webm"))
+            .await
+            .expect("webm should be accepted");
+        assert!(matches!(webm_type, StreamingType::WebM));
+
+        let cast_type = validate_streaming_file(camino::Utf8Path::new("recording-0.cast"))
+            .await
+            .expect("cast should be accepted");
+        assert!(matches!(
+            cast_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)
+        ));
+
+        let trp_type = validate_streaming_file(camino::Utf8Path::new("recording-0.trp"))
+            .await
+            .expect("trp should be accepted");
+        assert!(matches!(
+            trp_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)
+        ));
+
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0.slog"))
+                .await
+                .is_err(),
+            "slog should be rejected for streaming"
+        );
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0.bin"))
+                .await
+                .is_err(),
+            "unknown extension should be rejected"
+        );
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0"))
+                .await
+                .is_err(),
+            "missing extension should be rejected"
+        );
+    }
+
     #[test]
     fn maps_recording_file_type_to_streaming_type() {
         let asciicast_type =

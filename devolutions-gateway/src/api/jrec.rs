@@ -1033,23 +1033,22 @@ mod tests {
 
     #[test]
     fn detects_recording_file_content_types() {
-        assert_eq!(
-            recording_file_content_type(Utf8Path::new("recording-0.webm")),
-            Some("video/webm")
-        );
-        assert_eq!(
-            recording_file_content_type(Utf8Path::new("recording-0.trp")),
-            Some("application/vnd.devolutions.trp")
-        );
-        assert_eq!(
-            recording_file_content_type(Utf8Path::new("recording-0.cast")),
-            Some("application/x-asciicast")
-        );
-        assert_eq!(
-            recording_file_content_type(Utf8Path::new("recording-0.slog")),
-            Some("application/x-ndjson")
-        );
-        assert_eq!(recording_file_content_type(Utf8Path::new("recording-0.bin")), None);
+        let expected_content_types = [
+            ("recording-0.webm", Some("video/webm")),
+            ("recording-0.trp", Some("application/vnd.devolutions.trp")),
+            ("recording-0.cast", Some("application/x-asciicast")),
+            ("recording-0.slog", Some("application/x-ndjson")),
+            ("recording.json", None),
+            ("recording-0.bin", None),
+        ];
+
+        for (file_name, expected_content_type) in expected_content_types {
+            assert_eq!(
+                recording_file_content_type(Utf8Path::new(file_name)),
+                expected_content_type,
+                "unexpected content type for {file_name}"
+            );
+        }
     }
 
     #[tokio::test]
