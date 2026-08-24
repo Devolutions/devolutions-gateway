@@ -40,7 +40,6 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
 ipnetwork = "0.20"
-ironrdp-acceptor = "0.10"
 ironrdp-connector = "0.10"
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
