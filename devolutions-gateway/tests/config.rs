@@ -469,13 +469,12 @@ fn sample_parsing(#[case] sample: Sample) {
 }
 
 #[rstest]
-#[case(r#"{"Listeners":[]}"#, true)]
-#[case(r#"{"Listeners":[],"AgentTunnel":{}}"#, true)]
-#[case(r#"{"Listeners":[],"AgentTunnel":{"Enabled":false}}"#, false)]
-fn agent_tunnel_enabled_by_default(#[case] json: &str, #[case] expected_enabled: bool) {
+#[case(r#"{"Listeners":[]}"#, 4433)]
+#[case(r#"{"Listeners":[],"AgentTunnel":{}}"#, 4433)]
+#[case(r#"{"Listeners":[],"AgentTunnel":{"ListenPort":8443}}"#, 8443)]
+fn agent_tunnel_listen_port(#[case] json: &str, #[case] expected_listen_port: u16) {
     let conf_file = serde_json::from_str::<ConfFile>(json).unwrap();
     let agent_tunnel = conf_file.agent_tunnel.unwrap_or_default();
 
-    assert_eq!(agent_tunnel.enabled, expected_enabled);
-    assert_eq!(agent_tunnel.listen_port, 4433);
+    assert_eq!(agent_tunnel.listen_port, expected_listen_port);
 }

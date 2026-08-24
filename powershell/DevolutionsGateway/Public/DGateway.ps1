@@ -282,13 +282,11 @@ function New-DGatewayWebAppConfig() {
 }
 
 class DGatewayAgentTunnelConfig {
-    [bool] $Enabled
     [System.UInt16] $ListenPort
 
     DGatewayAgentTunnelConfig() { }
 
-    DGatewayAgentTunnelConfig([bool] $Enabled, [System.UInt16] $ListenPort) {
-        $this.Enabled = $Enabled
+    DGatewayAgentTunnelConfig([System.UInt16] $ListenPort) {
         $this.ListenPort = $ListenPort
     }
 }
@@ -297,11 +295,10 @@ function New-DGatewayAgentTunnelConfig() {
     [CmdletBinding()]
     [OutputType('DGatewayAgentTunnelConfig')]
     param(
-        [bool] $Enabled = $true,
         [System.UInt16] $ListenPort = 4433
     )
 
-    [DGatewayAgentTunnelConfig]::new($Enabled, $ListenPort)
+    [DGatewayAgentTunnelConfig]::new($ListenPort)
 }
 
 enum VerbosityProfile {

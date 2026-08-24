@@ -275,55 +275,43 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
-    // Initialize agent tunnel if configured.
-    let agent_tunnel_handle = if conf.agent_tunnel.enabled {
-        let data_dir = config::get_data_dir();
-        let hostname = &conf.hostname;
+    let data_dir = config::get_data_dir();
+    let hostname = &conf.hostname;
 
-        let authorization_database = data_dir.join("agent_tunnel.db");
-        let ca_manager = if authorization_database.exists() {
-            agent_tunnel::cert::CaManager::load(&data_dir)
-        } else {
-            agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
-        }
-        .context("failed to initialize agent tunnel CA")?;
-        let ca_spki_sha256 = ca_manager
-            .ca_spki_sha256()
-            .context("failed to identify agent tunnel CA")?;
-        let authorization_store =
-            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(authorization_database.as_str(), ca_spki_sha256)
-                .await
-                .context("failed to initialize Agent authorization database")?;
-        let authorization_store: agent_tunnel::authorization::DynAgentAuthorizationStore =
-            Arc::new(authorization_store);
-
-        // Bind to the IPv6 unspecified address so the listener is dual-stack and
-        // accepts both IPv4 and IPv6 agent connections (matters when an agent's DNS
-        // resolution returns an IPv6 address for the configured gateway endpoint).
-        // The listener crate explicitly clears `IPV6_V6ONLY` for portability across
-        // OSes, and falls back to IPv4 if the host has IPv6 disabled.
-        let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
-
-        let (listener, handle) = agent_tunnel::AgentTunnelListener::bind(
-            listen_addr,
-            Arc::clone(&ca_manager),
-            hostname,
-            authorization_store,
-        )
-        .await
-        .context("failed to bind agent tunnel listener")?;
-
-        tasks.register(listener);
-
-        info!(
-            port = conf.agent_tunnel.listen_port,
-            "Agent tunnel QUIC listener started",
-        );
-
-        Some(Arc::new(handle))
+    let authorization_database = data_dir.join("agent_tunnel.db");
+    let ca_manager = if authorization_database.exists() {
+        agent_tunnel::cert::CaManager::load(&data_dir)
     } else {
-        None
-    };
+        agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
+    }
+    .context("failed to initialize agent tunnel CA")?;
+    let ca_spki_sha256 = ca_manager
+        .ca_spki_sha256()
+        .context("failed to identify agent tunnel CA")?;
+    let authorization_store =
+        agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(authorization_database.as_str(), ca_spki_sha256)
+            .await
+            .context("failed to initialize Agent authorization database")?;
+    let authorization_store: agent_tunnel::authorization::DynAgentAuthorizationStore = Arc::new(authorization_store);
+
+    // Bind to the IPv6 unspecified address so the listener is dual-stack and
+    // accepts both IPv4 and IPv6 agent connections (matters when an agent's DNS
+    // resolution returns an IPv6 address for the configured gateway endpoint).
+    // The listener crate explicitly clears `IPV6_V6ONLY` for portability across
+    // OSes, and falls back to IPv4 if the host has IPv6 disabled.
+    let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
+
+    let (agent_tunnel_listener, agent_tunnel_handle) =
+        agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), hostname, authorization_store)
+            .await
+            .context("failed to bind agent tunnel listener")?;
+
+    tasks.register(agent_tunnel_listener);
+
+    info!(
+        port = conf.agent_tunnel.listen_port,
+        "Agent tunnel QUIC listener started",
+    );
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -338,7 +326,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         synthetic_kdc_registry: synthetic_kdc_registry.clone(),
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
-        agent_tunnel_handle,
+        agent_tunnel_handle: Some(Arc::new(agent_tunnel_handle)),
     };
 
     for listener in &conf.listeners {

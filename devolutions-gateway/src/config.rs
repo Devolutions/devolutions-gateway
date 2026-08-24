@@ -1355,19 +1355,12 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct AgentTunnelConf {
-        /// Whether the agent tunnel listener is enabled
-        #[serde(default = "AgentTunnelConf::default_enabled")]
-        pub enabled: bool,
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
         pub listen_port: u16,
     }
 
     impl AgentTunnelConf {
-        fn default_enabled() -> bool {
-            true
-        }
-
         fn default_listen_port() -> u16 {
             4433
         }
@@ -1376,7 +1369,6 @@ pub mod dto {
     impl Default for AgentTunnelConf {
         fn default() -> Self {
             Self {
-                enabled: Self::default_enabled(),
                 listen_port: Self::default_listen_port(),
             }
         }

@@ -21,17 +21,6 @@ impl fmt::Display for VerbosityProfile {
     }
 }
 
-/// Configuration for the agent tunnel feature in tests.
-#[derive(Clone, TypedBuilder)]
-pub struct AgentTunnelConfig {
-    /// Whether the agent tunnel is enabled.
-    #[builder(default = true)]
-    pub enabled: bool,
-    /// UDP port for the QUIC listener.
-    #[builder(default, setter(into))]
-    pub listen_port: Option<u16>,
-}
-
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
     #[builder(default, setter(into))]
@@ -57,9 +46,6 @@ pub struct DgwConfig {
     /// Pass a path that does not yet exist to test behaviour before the folder is created.
     #[builder(default, setter(into))]
     recording_path: Option<std::path::PathBuf>,
-    /// Agent tunnel (QUIC) configuration.
-    #[builder(default, setter(into))]
-    agent_tunnel: Option<AgentTunnelConfig>,
 }
 
 fn find_unused_port() -> u16 {
@@ -103,7 +89,6 @@ impl DgwConfigHandle {
             verbosity_profile,
             enable_unstable,
             recording_path,
-            agent_tunnel,
         } = config;
 
         let tempdir = tempfile::tempdir().context("create tempdir")?;
@@ -123,23 +108,13 @@ impl DgwConfigHandle {
             String::new()
         };
 
-        let agent_tunnel_json = if let Some(at_config) = agent_tunnel {
-            let listen_port = at_config.listen_port.unwrap_or_else(find_unused_udp_port);
-            format!(
-                r#",
-    "AgentTunnel": {{
-        "Enabled": {},
-        "ListenPort": {listen_port}
-    }}"#,
-                at_config.enabled
-            )
-        } else {
+        let agent_tunnel_port = find_unused_udp_port();
+        let agent_tunnel_json = format!(
             r#",
-    "AgentTunnel": {
-        "Enabled": false
-    }"#
-            .to_owned()
-        };
+    "AgentTunnel": {{
+        "ListenPort": {agent_tunnel_port}
+    }}"#
+        );
 
         let hostname_json = hostname
             .map(|hostname| {

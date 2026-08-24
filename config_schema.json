@@ -515,11 +515,6 @@
     "AgentTunnelConf": {
       "type": "object",
       "properties": {
-        "Enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether the agent tunnel listener is enabled."
-        },
         "ListenPort": {
           "type": "integer",
           "minimum": 0,
