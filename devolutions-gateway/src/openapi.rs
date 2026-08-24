@@ -38,6 +38,10 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::monitoring::handle_drain_log,
         crate::api::traffic::post_traffic_claim,
         crate::api::traffic::post_traffic_ack,
+        crate::api::tunnel::enroll_agent,
+        crate::api::tunnel::list_agents,
+        crate::api::tunnel::get_agent,
+        crate::api::tunnel::delete_agent,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -99,6 +103,10 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::traffic::TrafficEventResponse,
         crate::api::traffic::EventOutcomeResponse,
         crate::api::traffic::TransportProtocolResponse,
+        crate::api::tunnel::EnrollRequest,
+        crate::api::tunnel::EnrollResponse,
+        crate::api::tunnel::AgentDomainAdvertisement,
+        crate::api::tunnel::AgentInfo,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -214,6 +222,17 @@ impl Modify for SecurityAddon {
                     .description(Some(
                         "Token allowing usage of the network exploration endpoints".to_owned(),
                     ))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "enrollment_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some("Single-use token authorizing Agent Tunnel enrollment".to_owned()))
                     .build(),
             ),
         );

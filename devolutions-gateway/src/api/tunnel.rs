@@ -10,6 +10,7 @@ use crate::http::HttpError;
 use crate::token::EnrollmentTokenClaims;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity).
     pub agent_id: Uuid,
@@ -21,6 +22,7 @@ pub struct EnrollRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollResponse {
     /// Assigned agent ID.
     pub agent_id: Uuid,
@@ -36,6 +38,7 @@ pub struct EnrollResponse {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentDomainAdvertisement {
     /// Domain route advertised by the Agent.
     pub domain: String,
@@ -55,6 +58,7 @@ pub enum AgentStatus {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentInfo {
     /// Stable Agent identity.
     pub agent_id: Uuid,
@@ -85,7 +89,22 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
-async fn enroll_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    operation_id = "EnrollAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/enroll",
+    request_body(content = EnrollRequest, description = "Agent identity and certificate signing request", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Agent enrolled", body = EnrollResponse),
+        (status = 400, description = "Invalid agent name, request body, or certificate signing request"),
+        (status = 401, description = "Invalid or missing enrollment token"),
+        (status = 409, description = "Agent ID already registered"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("enrollment_token" = [])),
+))]
+pub(crate) async fn enroll_agent(
     crate::extract::EnrollmentToken(token_claims): crate::extract::EnrollmentToken,
     State(DgwState {
         conf_handle,
@@ -245,7 +264,20 @@ fn agent_info(
 }
 
 /// List accepted agents and their current status.
-async fn list_agents(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "ListAgents",
+    tag = "Agent",
+    path = "/jet/tunnel/agents",
+    responses(
+        (status = 200, description = "Accepted agents and their current status", body = [AgentInfo]),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.read"])),
+))]
+pub(crate) async fn list_agents(
     State(DgwState {
         agent_tunnel_handle, ..
     }): State<DgwState>,
@@ -269,7 +301,24 @@ async fn list_agents(
 }
 
 /// Get a single agent by ID.
-async fn get_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "GetAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/agents/{agent_id}",
+    params(
+        ("agent_id" = Uuid, Path, description = "Agent ID")
+    ),
+    responses(
+        (status = 200, description = "Agent status", body = AgentInfo),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Agent not found"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.read"])),
+))]
+pub(crate) async fn get_agent(
     _access: AgentManagementReadAccess,
     State(DgwState {
         agent_tunnel_handle, ..
@@ -291,7 +340,24 @@ async fn get_agent(
 }
 
 /// Delete an accepted agent by ID.
-async fn delete_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    operation_id = "DeleteAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/agents/{agent_id}",
+    params(
+        ("agent_id" = Uuid, Path, description = "Agent ID")
+    ),
+    responses(
+        (status = 204, description = "Agent deleted"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Agent not found"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.delete"])),
+))]
+pub(crate) async fn delete_agent(
     _access: AgentManagementDeleteAccess,
     State(DgwState {
         agent_tunnel_handle, ..

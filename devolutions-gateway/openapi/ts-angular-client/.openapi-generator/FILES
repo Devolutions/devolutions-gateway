@@ -1,6 +1,7 @@
 .gitignore
 README.md
 api.module.ts
+api/agent.service.ts
 api/api.ts
 api/config.service.ts
 api/diagnostics.service.ts
@@ -22,6 +23,8 @@ model/accessScope.ts
 model/ackRequest.ts
 model/ackResponse.ts
 model/addressFamily.ts
+model/agentDomainAdvertisement.ts
+model/agentInfo.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts
@@ -33,6 +36,8 @@ model/configPatch.ts
 model/connectionMode.ts
 model/dataEncoding.ts
 model/deleteManyResult.ts
+model/enrollRequest.ts
+model/enrollResponse.ts
 model/eventOutcomeResponse.ts
 model/getUpdateProductsResponse.ts
 model/getUpdateScheduleResponse.ts

@@ -23,6 +23,11 @@ Protocol-aware fine-grained relay server
 == Access
 
 
+* *Bearer* Authentication `enrollment_token`
+
+
+
+
 * *Bearer* Authentication `jrec_token`
 
 
@@ -55,6 +60,387 @@ Protocol-aware fine-grained relay server
 
 
 == Endpoints
+
+
+[.Agent]
+=== Agent
+
+
+[.deleteAgent]
+==== deleteAgent
+
+`DELETE /jet/tunnel/agents/{agent_id}`
+
+Delete an accepted agent by ID.
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/tunnel/agents/\{agent_id\}/DELETE/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| agent_id
+| Agent ID 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 204
+| Agent deleted
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| Agent not found
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tunnel/agents/\{agent_id\}/DELETE/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.enrollAgent]
+==== enrollAgent
+
+`POST /jet/tunnel/enroll`
+
+Enroll a new agent.
+
+===== Description
+
+Requires a Bearer token: an `ENROLLMENT` JWT signed by the configured provisioner key (e.g. DVLS, Hub, PAM service, or any other compatible provisioner).  The agent generates its own key pair and sends a CSR. The gateway signs it and returns the certificate. The private key never leaves the agent.
+
+
+// markup not found, no include::{specDir}jet/tunnel/enroll/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `enrollment_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| EnrollRequest
+| Agent identity and certificate signing request <<EnrollRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<EnrollResponse>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Agent enrolled
+|  <<EnrollResponse>>
+
+
+| 400
+| Invalid agent name, request body, or certificate signing request
+|  <<>>
+
+
+| 401
+| Invalid or missing enrollment token
+|  <<>>
+
+
+| 409
+| Agent ID already registered
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tunnel/enroll/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.getAgent]
+==== getAgent
+
+`GET /jet/tunnel/agents/{agent_id}`
+
+Get a single agent by ID.
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/tunnel/agents/\{agent_id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| agent_id
+| Agent ID 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+<<AgentInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Agent status
+|  <<AgentInfo>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| Agent not found
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tunnel/agents/\{agent_id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.listAgents]
+==== listAgents
+
+`GET /jet/tunnel/agents`
+
+List accepted agents and their current status.
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/tunnel/agents/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+array[<<AgentInfo>>]
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Accepted agents and their current status
+| List[<<AgentInfo>>] 
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tunnel/agents/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
 
 
 [.Config]
@@ -3052,6 +3438,106 @@ endif::internal-generation[]
 |===
 
 
+[#AgentDomainAdvertisement]
+=== _AgentDomainAdvertisement_ 
+
+
+
+
+[.fields-AgentDomainAdvertisement]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| auto_detected
+| X
+| 
+|   Boolean  
+| 
+|     
+
+| domain
+| X
+| 
+|   String  
+| 
+|     
+
+|===
+
+
+
+[#AgentInfo]
+=== _AgentInfo_ 
+
+
+
+
+[.fields-AgentInfo]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| agent_id
+| X
+| 
+|   UUID  
+| 
+| uuid    
+
+| cert_fingerprint
+| 
+| X
+|   String  
+| 
+|     
+
+| domains
+| 
+| X
+|   List   of <<AgentDomainAdvertisement>>
+| 
+|     
+
+| is_online
+| X
+| 
+|   Boolean  
+| 
+|     
+
+| last_seen_ms
+| 
+| X
+|   Long  
+| 
+| int64    
+
+| name
+| X
+| 
+|   String  
+| 
+|     
+
+| route_epoch
+| 
+| X
+|   Long  
+| 
+| int64    
+
+| subnets
+| 
+| X
+|   List   of <<string>>
+| 
+|     
+
+|===
+
+
+
 [#AppCredential]
 === _AppCredential_ 
 
@@ -3431,6 +3917,92 @@ Service configuration diagnostic
 | 
 |   Integer  
 | Number of recordings not found
+|     
+
+|===
+
+
+
+[#EnrollRequest]
+=== _EnrollRequest_ 
+
+
+
+
+[.fields-EnrollRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| agent_hostname
+| 
+| X
+|   String  
+| Optional hostname of the agent machine (added as DNS SAN in the issued certificate).
+|     
+
+| agent_id
+| X
+| 
+|   UUID  
+| Agent-generated UUID (the agent owns its identity).
+| uuid    
+
+| csr_pem
+| X
+| 
+|   String  
+| PEM-encoded Certificate Signing Request from the agent.
+|     
+
+|===
+
+
+
+[#EnrollResponse]
+=== _EnrollResponse_ 
+
+
+
+
+[.fields-EnrollResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| agent_id
+| X
+| 
+|   UUID  
+| Assigned agent ID.
+| uuid    
+
+| client_cert_pem
+| X
+| 
+|   String  
+| PEM-encoded client certificate (signed by the gateway CA).
+|     
+
+| gateway_ca_cert_pem
+| X
+| 
+|   String  
+| PEM-encoded gateway CA certificate (for server verification).
+|     
+
+| quic_endpoint
+| X
+| 
+|   String  
+| QUIC endpoint to connect to (`host:port`).
+|     
+
+| server_spki_sha256
+| X
+| 
+|   String  
+| SHA-256 hash of the server certificate's SPKI (hex-encoded). Used by the agent to pin the server's public key.
 |     
 
 |===
