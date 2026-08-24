@@ -7516,7 +7516,6 @@ dependencies = [
  "escargot",
  "expect-test",
  "fastrand",
- "ironrdp-acceptor",
  "ironrdp-connector",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
