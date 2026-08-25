@@ -2,6 +2,8 @@ import { ClientMessage, parseClientMessage, parseServerMessage, ServerMessage } 
 
 export class ServerWebSocket {
   private readonly socket: WebSocket;
+  private pendingEvent = Promise.resolve();
+  private closed = false;
 
   constructor(url: string) {
     this.socket = new WebSocket(url);
@@ -14,33 +16,47 @@ export class ServerWebSocket {
 
   onmessage(callback: (message: ServerMessage) => Promise<void> | void, onFailure: (error: unknown) => void): void {
     this.socket.onmessage = (event) => {
-      try {
-        if (!(event.data instanceof ArrayBuffer)) {
-          throw new Error('Server sent a non-binary message');
+      this.enqueueEvent(async () => {
+        try {
+          if (!(event.data instanceof ArrayBuffer)) {
+            throw new Error('Server sent a non-binary message');
+          }
+          await callback(parseServerMessage(event.data));
+        } catch (error) {
+          onFailure(error);
         }
-        Promise.resolve(callback(parseServerMessage(event.data))).catch(onFailure);
-      } catch (error) {
-        onFailure(error);
-      }
+      });
     };
   }
 
   onclose(callback: (event: CloseEvent) => void): void {
-    this.socket.onclose = callback;
+    this.socket.onclose = (event) => {
+      this.closed = true;
+      this.enqueueEvent(() => callback(event));
+    };
   }
 
   onerror(callback: (event: Event) => void): void {
-    this.socket.onerror = callback;
+    this.socket.onerror = (event) => this.enqueueEvent(() => callback(event));
   }
 
   send(message: ClientMessage): void {
-    if (this.socket.readyState !== WebSocket.OPEN) {
+    if (!this.isOpen()) {
       throw new Error('WebSocket is not open');
     }
     this.socket.send(parseClientMessage(message));
   }
 
+  isOpen(): boolean {
+    return !this.closed && this.socket.readyState === WebSocket.OPEN;
+  }
+
   close(code: number, reason: string): void {
     this.socket.close(code, reason);
+  }
+
+  private enqueueEvent(callback: () => Promise<void> | void): void {
+    const event = this.pendingEvent.then(callback);
+    this.pendingEvent = event.catch(() => undefined);
   }
 }

@@ -8,13 +8,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "devDependencies": {
+    "jsdom": "^20.0.3",
     "ts-node": "^10.9.2",
     "typescript": "~5.6.2",
     "vite": "^5.4.9",
     "vite-plugin-dts": "^4.3.0",
-    "vite-plugin-static-copy": "^2.3.0"
+    "vite-plugin-static-copy": "^2.3.0",
+    "vitest": "^3.1.1"
   }
 }
