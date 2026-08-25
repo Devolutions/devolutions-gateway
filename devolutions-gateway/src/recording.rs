@@ -279,6 +279,62 @@ pub(crate) struct RecordingStreamState {
     revision: u64,
 }
 
+impl RecordingStreamState {
+    pub(crate) fn mark_disconnected(&mut self) {
+        self.active = None;
+        self.ended = false;
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    pub(crate) fn mark_ended(&mut self) {
+        self.active = None;
+        self.ended = true;
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        clips: Vec<RecordingStreamClip>,
+        active: Option<ActiveRecordingStreamClip>,
+        ended: bool,
+    ) -> Self {
+        Self {
+            clips: Arc::new(clips),
+            active,
+            ended,
+            revision: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod stream_state_tests {
+    use super::*;
+
+    #[test]
+    fn disconnect_is_not_a_confirmed_session_end() {
+        let mut state = RecordingStreamState {
+            clips: Arc::new(Vec::new()),
+            active: Some(ActiveRecordingStreamClip {
+                sequence: 0,
+                ready: true,
+            }),
+            ended: false,
+            revision: 0,
+        };
+
+        state.mark_disconnected();
+        assert!(state.active.is_none());
+        assert!(!state.ended);
+        assert_eq!(state.revision, 1);
+
+        state.mark_ended();
+        assert!(state.active.is_none());
+        assert!(state.ended);
+        assert_eq!(state.revision, 2);
+    }
+}
+
 enum RecordingManagerMessage {
     Connect {
         id: Uuid,
@@ -815,13 +871,11 @@ impl RecordingManagerTask {
             .save_to_file(&ongoing.manifest_path)
             .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
 
-        ongoing.stream_state.send_modify(|state| {
-            state.active = None;
-            state.ended = true;
-            state.revision = state.revision.saturating_add(1);
-        });
+        ongoing
+            .stream_state
+            .send_modify(RecordingStreamState::mark_disconnected);
 
-        // Notify all the streamers that recording has ended.
+        // Wake terminal-recording streamers waiting for this clip to stop.
         if let Some(notify) = self.recording_end_notifier.get(&id) {
             notify.notify_waiters();
         }
@@ -860,11 +914,7 @@ impl RecordingManagerTask {
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
-                    ongoing.stream_state.send_modify(|state| {
-                        state.active = None;
-                        state.ended = true;
-                        state.revision = state.revision.saturating_add(1);
-                    });
+                    ongoing.stream_state.send_modify(RecordingStreamState::mark_ended);
 
                     // Check the recording policy of the associated session and kill it if necessary.
                     if ongoing.session_must_be_recorded {

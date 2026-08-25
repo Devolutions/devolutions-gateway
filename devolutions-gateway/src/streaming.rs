@@ -320,3 +320,117 @@ fn recording_event_stream(
         }
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::recording::{ActiveRecordingStreamClip, RecordingStreamClip};
+
+    struct ScratchDirectory(camino::Utf8PathBuf);
+
+    impl Drop for ScratchDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_waits_for_the_next_clip_before_ending_the_session() {
+        let scratch = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join("streaming-tests")
+            .join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&scratch).expect("create test directory");
+        let _cleanup = ScratchDirectory(scratch.clone());
+
+        let first_path = scratch.join("recording-0.webm");
+        let second_path = scratch.join("recording-1.webm");
+        fs::write(&first_path, b"first").expect("write first clip");
+        fs::write(&second_path, b"second").expect("write second clip");
+
+        let first_clip = RecordingStreamClip {
+            sequence: 0,
+            path: first_path,
+        };
+        let state = RecordingStreamState::for_test(
+            vec![first_clip],
+            Some(ActiveRecordingStreamClip {
+                sequence: 0,
+                ready: true,
+            }),
+            false,
+        );
+        let (sender, receiver) = watch::channel(state);
+        let mut source = RecordingEventSource::new(receiver).expect("create recording event source");
+
+        assert_eq!(
+            source.next_event().await.expect("read first start"),
+            Some(RecordingEvent::ClipStarted {
+                sequence: 0,
+                start_at: StartAt::LiveEdge,
+            })
+        );
+        assert_eq!(
+            source.next_event().await.expect("read first bytes"),
+            Some(RecordingEvent::Bytes(Bytes::from_static(b"first")))
+        );
+        assert_eq!(
+            source.next_event().await.expect("catch up first clip"),
+            Some(RecordingEvent::CaughtUp)
+        );
+
+        sender.send_modify(RecordingStreamState::mark_disconnected);
+        assert_eq!(
+            source.next_event().await.expect("end first clip"),
+            Some(RecordingEvent::ClipEnded)
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), source.next_event())
+                .await
+                .is_err(),
+            "a reconnectable disconnect must not emit SessionEnded"
+        );
+
+        sender.send_modify(|state| {
+            Arc::make_mut(&mut state.clips).push(RecordingStreamClip {
+                sequence: 1,
+                path: second_path,
+            });
+            state.active = Some(ActiveRecordingStreamClip {
+                sequence: 1,
+                ready: true,
+            });
+            state.ended = false;
+        });
+        assert_eq!(
+            source.next_event().await.expect("read second start"),
+            Some(RecordingEvent::ClipStarted {
+                sequence: 1,
+                start_at: StartAt::Beginning,
+            })
+        );
+        assert_eq!(
+            source.next_event().await.expect("read second bytes"),
+            Some(RecordingEvent::Bytes(Bytes::from_static(b"second")))
+        );
+        assert_eq!(
+            source.next_event().await.expect("catch up second clip"),
+            Some(RecordingEvent::CaughtUp)
+        );
+
+        sender.send_modify(RecordingStreamState::mark_disconnected);
+        assert_eq!(
+            source.next_event().await.expect("end second clip"),
+            Some(RecordingEvent::ClipEnded)
+        );
+        sender.send_modify(RecordingStreamState::mark_ended);
+        assert_eq!(
+            source.next_event().await.expect("end session"),
+            Some(RecordingEvent::SessionEnded)
+        );
+        assert_eq!(source.next_event().await.expect("finish source"), None);
+    }
+}
