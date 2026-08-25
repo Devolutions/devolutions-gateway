@@ -471,18 +471,9 @@ async fn handle_with_credential_injection(
         .clone()
         .context("missing token in RDCleanPath PDU")?;
 
-    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
-        conf.debug.enable_unstable,
-        conf.debug.kerberos_credential_injection,
-    );
-    let credential_injection = CredentialInjection::checkout(
-        provisioning,
-        synthetic_kdc_registry,
-        claims.jti,
-        &token,
-        kerberos_enabled,
-    )
-    .context("checkout credential-injection material before connecting upstream")?;
+    let credential_injection =
+        CredentialInjection::checkout(provisioning, synthetic_kdc_registry, claims.jti, &token, true)
+            .context("checkout credential-injection material before connecting upstream")?;
 
     let ConnectedRdpServer {
         tls_stream: server_stream,

@@ -1418,12 +1418,7 @@ pub mod dto {
         #[serde(default = "ws_keep_alive_interval_default_value")]
         pub ws_keep_alive_interval: u64,
 
-        /// Enable proxy-based RDP credential injection against Kerberos-enforced targets
-        ///
-        /// Turns on the in-process KDC acceptor the Gateway presents to the client when injecting
-        /// credentials for accounts that can't fall back to NTLM (e.g. AD Protected Users).
-        /// Target-side KDC routing is not configured here. Off by default; still requires
-        /// `enable_unstable`.
+        /// Ignored. Kerberos credential injection is stable and no longer gated here.
         #[serde(default)]
         pub kerberos_credential_injection: bool,
 
