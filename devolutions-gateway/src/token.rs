@@ -1291,9 +1291,10 @@ pub fn extract_exp(token: &str) -> anyhow::Result<i64> {
 /// Latest instant at which Gateway will still accept a token with this `exp`.
 ///
 /// Includes the hardcoded JWT clock-skew leeway.
-pub(crate) fn token_acceptance_deadline(exp: i64) -> time::OffsetDateTime {
+pub(crate) fn token_acceptance_deadline(exp: i64) -> anyhow::Result<time::OffsetDateTime> {
     let timestamp = exp.saturating_add(i64::from(LEEWAY_SECS));
-    time::OffsetDateTime::from_unix_timestamp(timestamp).unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .context("token expiration is outside the supported timestamp range")
 }
 
 pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {

@@ -354,6 +354,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
 
+    tasks.register(devolutions_gateway::credential_injection::CleanupTask {
+        handle: synthetic_kdc_registry,
+    });
+
     tasks.register(devolutions_log::LogDeleterTask::<GatewayLog>::new(
         conf.log_file.clone(),
     ));

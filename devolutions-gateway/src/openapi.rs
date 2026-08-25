@@ -393,7 +393,11 @@ struct PreflightOperation {
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
-    /// Minimum persistence duration in seconds for the data provisioned via this operation.
+    /// Retention duration in seconds for data provisioned by this operation.
+    ///
+    /// For "provision-credentials", this is the maximum staging time before the first credential
+    /// checkout. After checkout, Gateway retains the credentials for later connections authorized
+    /// for the same association.
     ///
     /// Optional parameter for "provision-token", "provision-credentials", and
     /// "provision-connection-options" kinds.

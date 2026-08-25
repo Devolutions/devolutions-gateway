@@ -13,16 +13,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use async_trait::async_trait;
 use chacha20poly1305::aead::OsRng;
 use chacha20poly1305::aead::rand_core::RngCore as _;
+use devolutions_gateway_task::{ShutdownSignal, Task};
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::NetworkRequest;
 use parking_lot::Mutex;
 use picky_krb::messages::KdcProxyMessage;
 use secrecy::{ExposeSecret as _, SecretBox, SecretString};
 use thiserror::Error;
+use tokio::sync::Notify;
 use url::Url;
 use uuid::Uuid;
+use zeroize::Zeroize as _;
 
 use crate::credential::{AppCredential, AppCredentialMapping};
 use crate::provisioning::{ProvisioningEntry, ProvisioningStore};
@@ -80,6 +84,11 @@ pub(crate) enum CredentialInjection {
 /// Kerberos injection: credentials, target KDC URL, and the session synthetic KDC.
 pub(crate) struct KerberosCredentialInjection {
     credential_mapping: AppCredentialMapping,
+    session: KerberosSessionMaterial,
+}
+
+#[derive(Debug, Clone)]
+struct KerberosSessionMaterial {
     target_kdc: Url,
     synthetic: Arc<CredentialInjectionKdc>,
 }
@@ -100,9 +109,9 @@ impl PreparedCredentialInjection {
     ) -> CredentialInjection {
         match self {
             Self::Kerberos(injection) => {
-                let registration = registry.register(Arc::clone(&injection.synthetic), provision_generation);
+                let registration = registry.register(Arc::clone(&injection.session.synthetic), provision_generation);
                 debug!(
-                    jti = %injection.synthetic.jti(),
+                    jti = %injection.session.synthetic.jti(),
                     "Registered synthetic KDC for credential-injection session"
                 );
                 CredentialInjection::Kerberos(injection, registration)
@@ -114,19 +123,19 @@ impl PreparedCredentialInjection {
 
 impl KerberosCredentialInjection {
     pub(crate) fn synthetic_kdc(&self) -> &CredentialInjectionKdc {
-        &self.synthetic
+        &self.session.synthetic
     }
 
     pub(crate) fn target_kdc(&self) -> &Url {
-        &self.target_kdc
+        &self.session.target_kdc
     }
 }
 
 impl fmt::Debug for KerberosCredentialInjection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("KerberosCredentialInjection")
-            .field("target_kdc", &self.target_kdc)
-            .field("synthetic", &self.synthetic)
+            .field("target_kdc", &self.session.target_kdc)
+            .field("synthetic", &self.session.synthetic)
             .finish_non_exhaustive()
     }
 }
@@ -166,11 +175,12 @@ impl CredentialInjection {
         let generation = entry.generation;
         let kdc_expires_at = entry.kdc_expires_at;
         registry.discard_stale_session_kdc(jti, generation);
-        let prepared = Self::from_provisioned(jti, entry, kerberos_enabled)?;
+        let session = registry.session_kerberos_material(jti, generation);
+        let prepared = Self::from_provisioned_with_session(jti, entry, kerberos_enabled, session)?;
         let prepared = match prepared {
             PreparedCredentialInjection::Kerberos(mut injection) => {
                 let expires_at = kdc_expires_at.context("mapped Kerberos row has no token deadline")?;
-                injection.synthetic = registry.intern_session_kdc(jti, generation, expires_at, injection.synthetic);
+                injection.session = registry.intern_session_kerberos(jti, generation, expires_at, injection.session);
                 PreparedCredentialInjection::Kerberos(injection)
             }
             ntlm @ PreparedCredentialInjection::Ntlm(_) => ntlm,
@@ -180,7 +190,7 @@ impl CredentialInjection {
 
     pub(crate) fn jti(&self) -> Uuid {
         match self {
-            Self::Kerberos(k, _) => k.synthetic.jti(),
+            Self::Kerberos(k, _) => k.session.synthetic.jti(),
             Self::Ntlm(ntlm) => ntlm.jti(),
         }
     }
@@ -214,10 +224,20 @@ impl CredentialInjection {
     ///
     /// Does not publish to [`SyntheticKdcRegistry`]; call
     /// [`PreparedCredentialInjection::register_if_kerberos`] next.
+    #[cfg(test)]
     pub(crate) fn from_provisioned(
         jti: Uuid,
         credential_entry: ProvisioningEntry,
         kerberos_enabled: bool,
+    ) -> anyhow::Result<PreparedCredentialInjection> {
+        Self::from_provisioned_with_session(jti, credential_entry, kerberos_enabled, None)
+    }
+
+    fn from_provisioned_with_session(
+        jti: Uuid,
+        credential_entry: ProvisioningEntry,
+        kerberos_enabled: bool,
+        session: Option<KerberosSessionMaterial>,
     ) -> anyhow::Result<PreparedCredentialInjection> {
         let ProvisioningEntry {
             token,
@@ -240,6 +260,13 @@ impl CredentialInjection {
             }));
         }
 
+        if let Some(session) = session {
+            return Ok(PreparedCredentialInjection::Kerberos(KerberosCredentialInjection {
+                credential_mapping: mapping,
+                session,
+            }));
+        }
+
         // Kerberos path: username must parse (select_kerberos_for_target already required a domain).
         sspi::Username::parse(target_username)
             .with_context(|| format!("invalid target credential username for credential-injection session {jti}"))?;
@@ -258,8 +285,10 @@ impl CredentialInjection {
 
         Ok(PreparedCredentialInjection::Kerberos(KerberosCredentialInjection {
             credential_mapping: mapping,
-            target_kdc,
-            synthetic: Arc::new(synthetic),
+            session: KerberosSessionMaterial {
+                target_kdc,
+                synthetic: Arc::new(synthetic),
+            },
         }))
     }
 }
@@ -304,6 +333,12 @@ impl fmt::Debug for CredentialInjectionKdc {
     }
 }
 
+impl Drop for CredentialInjectionKdc {
+    fn drop(&mut self) {
+        zeroize_kdc_config(&mut self.kdc_config);
+    }
+}
+
 impl CredentialInjectionKdc {
     fn new(
         jti: Uuid,
@@ -315,14 +350,14 @@ impl CredentialInjectionKdc {
         let acceptor_principal_name = "jet".to_owned();
         let acceptor_password = SecretString::from(hex::encode(random_32_bytes()));
         let acceptor_long_term_key = SecretBox::new(Box::new(random_32_bytes()));
-        let krbtgt_key = random_32_bytes();
+        let krbtgt_key = SecretBox::new(Box::new(random_32_bytes()));
 
         let kdc_config = build_kdc_config(
             &realm,
             proxy_credential,
             &acceptor_principal_name,
             acceptor_password.expose_secret(),
-            &krbtgt_key,
+            krbtgt_key.expose_secret(),
             acceptor_long_term_key.expose_secret(),
         )?;
 
@@ -512,6 +547,19 @@ fn build_kdc_config(
     })
 }
 
+fn zeroize_kdc_config(config: &mut kdc::config::KerberosServer) {
+    for user in &mut config.users {
+        user.password.zeroize();
+    }
+    config.krbtgt_key.zeroize();
+    if let Some(key) = &mut config.ticket_decryption_key {
+        key.zeroize();
+    }
+    if let Some(user) = &mut config.service_user {
+        user.password.zeroize();
+    }
+}
+
 fn principal_for_realm(user_name: &str, realm: &str) -> String {
     if user_name.contains('@') {
         user_name.to_owned()
@@ -547,12 +595,13 @@ fn random_32_bytes() -> Vec<u8> {
 #[derive(Debug, Clone)]
 pub struct SyntheticKdcRegistry {
     inner: Arc<Mutex<RegistryInner>>,
+    cleanup_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Default)]
 struct RegistryInner {
     live: HashMap<Uuid, PublishedSyntheticKdc>,
-    session: HashMap<Uuid, SessionSyntheticKdc>,
+    session: HashMap<Uuid, SessionKerberosEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -563,10 +612,10 @@ struct PublishedSyntheticKdc {
 }
 
 #[derive(Debug, Clone)]
-struct SessionSyntheticKdc {
+struct SessionKerberosEntry {
     provision_generation: u64,
     expires_at: time::OffsetDateTime,
-    kdc: Arc<CredentialInjectionKdc>,
+    material: KerberosSessionMaterial,
 }
 
 fn generation_is_newer(candidate: u64, than: u64) -> bool {
@@ -611,6 +660,7 @@ impl SyntheticKdcRegistry {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(RegistryInner::default())),
+            cleanup_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -649,34 +699,47 @@ impl SyntheticKdcRegistry {
         self.inner.lock().live.get(&jti).map(|entry| Arc::clone(&entry.kdc))
     }
 
-    /// Drop interned KDCs that are expired or older than this provisioning generation.
+    /// Drop an interned KDC older than this provisioning generation.
     pub(crate) fn discard_stale_session_kdc(&self, jti: Uuid, provision_generation: u64) {
-        let now = time::OffsetDateTime::now_utc();
         let mut inner = self.inner.lock();
-        inner.session.retain(|_, entry| now < entry.expires_at);
         if inner
             .session
             .get(&jti)
             .is_some_and(|entry| generation_is_newer(provision_generation, entry.provision_generation))
         {
             inner.session.remove(&jti);
+            self.cleanup_notify.notify_one();
         }
     }
 
-    /// Reuse the synthetic KDC for this provisioning generation until `expires_at`.
+    fn session_kerberos_material(&self, jti: Uuid, provision_generation: u64) -> Option<KerberosSessionMaterial> {
+        let now = time::OffsetDateTime::now_utc();
+        let mut inner = self.inner.lock();
+        let entry = inner.session.get(&jti)?;
+        if now >= entry.expires_at {
+            inner.session.remove(&jti);
+            self.cleanup_notify.notify_one();
+            return None;
+        }
+        (entry.provision_generation == provision_generation).then(|| entry.material.clone())
+    }
+
+    /// Reuse the Kerberos session material for this provisioning generation until `expires_at`.
     ///
     /// A later `provision-credentials` bumps the generation and replaces the cached KDC.
     /// An older generation never overwrites a newer interned KDC.
-    pub(crate) fn intern_session_kdc(
+    fn intern_session_kerberos(
         &self,
         jti: Uuid,
         provision_generation: u64,
         expires_at: time::OffsetDateTime,
-        kdc: Arc<CredentialInjectionKdc>,
-    ) -> Arc<CredentialInjectionKdc> {
+        material: KerberosSessionMaterial,
+    ) -> KerberosSessionMaterial {
         let now = time::OffsetDateTime::now_utc();
         let mut inner = self.inner.lock();
-        inner.session.retain(|_, entry| now < entry.expires_at);
+        if inner.session.get(&jti).is_some_and(|entry| now >= entry.expires_at) {
+            inner.session.remove(&jti);
+        }
         if now >= expires_at {
             if inner
                 .session
@@ -684,26 +747,36 @@ impl SyntheticKdcRegistry {
                 .is_some_and(|entry| entry.provision_generation == provision_generation)
             {
                 inner.session.remove(&jti);
+                self.cleanup_notify.notify_one();
             }
-            return kdc;
+            return material;
         }
         if let Some(existing) = inner.session.get(&jti) {
             if existing.provision_generation == provision_generation {
-                return Arc::clone(&existing.kdc);
+                return existing.material.clone();
             }
             if generation_is_newer(existing.provision_generation, provision_generation) {
-                return kdc;
+                return material;
             }
         }
         inner.session.insert(
             jti,
-            SessionSyntheticKdc {
+            SessionKerberosEntry {
                 provision_generation,
                 expires_at,
-                kdc: Arc::clone(&kdc),
+                material: material.clone(),
             },
         );
-        kdc
+        self.cleanup_notify.notify_one();
+        material
+    }
+
+    fn remove_expired_session_kdcs(&self, now: time::OffsetDateTime) {
+        self.inner.lock().session.retain(|_, entry| now < entry.expires_at);
+    }
+
+    fn next_session_expiry(&self) -> Option<time::OffsetDateTime> {
+        self.inner.lock().session.values().map(|entry| entry.expires_at).min()
     }
 
     #[cfg(test)]
@@ -718,8 +791,53 @@ impl SyntheticKdcRegistry {
             .lock()
             .session
             .get(&jti)
-            .and_then(|entry| (now < entry.expires_at).then(|| Arc::clone(&entry.kdc)))
+            .and_then(|entry| (now < entry.expires_at).then(|| Arc::clone(&entry.material.synthetic)))
     }
+}
+
+pub struct CleanupTask {
+    pub handle: SyntheticKdcRegistry,
+}
+
+#[async_trait]
+impl Task for CleanupTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "synthetic KDC cleanup";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        cleanup_task(self.handle, shutdown_signal).await;
+        Ok(())
+    }
+}
+
+#[tracing::instrument(skip_all)]
+async fn cleanup_task(handle: SyntheticKdcRegistry, mut shutdown_signal: ShutdownSignal) {
+    tracing::debug!("Task started");
+
+    loop {
+        let now = time::OffsetDateTime::now_utc();
+        handle.remove_expired_session_kdcs(now);
+
+        match handle.next_session_expiry() {
+            Some(deadline) => {
+                let delay = (deadline - now).try_into().unwrap_or_default();
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = handle.cleanup_notify.notified() => {}
+                    _ = shutdown_signal.wait() => break,
+                }
+            }
+            None => {
+                tokio::select! {
+                    _ = handle.cleanup_notify.notified() => {}
+                    _ = shutdown_signal.wait() => break,
+                }
+            }
+        }
+    }
+
+    tracing::debug!("Task terminated");
 }
 
 #[cfg(test)]
@@ -791,6 +909,13 @@ mod tests {
             &mapping.proxy,
         )
         .expect("valid KDC")
+    }
+
+    fn kerberos_material(kdc: Arc<CredentialInjectionKdc>) -> KerberosSessionMaterial {
+        KerberosSessionMaterial {
+            target_kdc: Url::parse("tcp://dc.example:88").expect("url"),
+            synthetic: kdc,
+        }
     }
 
     fn network_request(url: &str) -> NetworkRequest {
@@ -919,13 +1044,95 @@ mod tests {
     }
 
     #[test]
+    fn checkout_reuses_kerberos_session_after_connection_options_expire() {
+        let jti = Uuid::new_v4();
+        let token = association_token(jti);
+        let store = ProvisioningStore::new();
+        store
+            .insert_credentials(
+                token.clone(),
+                Some(cleartext_mapping_with_target_username("administrator@example.invalid")),
+                time::Duration::minutes(5),
+            )
+            .expect("insert");
+        store.insert_connection_options(jti, kdc_options(), time::Duration::minutes(5));
+        let registry = SyntheticKdcRegistry::new();
+
+        let first_injection = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("first");
+        let first = first_injection.as_kerberos().expect("kerberos");
+        let first_kdc = std::ptr::from_ref(first.synthetic_kdc());
+        let first_target_kdc = first.target_kdc().clone();
+        drop(first_injection);
+
+        store.insert_connection_options(
+            jti,
+            TargetConnectionOptions::new(Some("tcp://replacement.example:88")).expect("options"),
+            time::Duration::seconds(-1),
+        );
+
+        let second = CredentialInjection::checkout(&store, &registry, jti, &token, true).expect("reconnect");
+        let second = second.as_kerberos().expect("kerberos");
+        assert_eq!(std::ptr::from_ref(second.synthetic_kdc()), first_kdc);
+        assert_eq!(second.target_kdc(), &first_target_kdc);
+    }
+
+    #[test]
     fn interned_kdc_is_not_kept_past_deadline() {
         let jti = Uuid::new_v4();
         let registry = SyntheticKdcRegistry::new();
         let kdc = Arc::new(dummy_kdc(jti));
-        let expired = time::OffsetDateTime::now_utc() - time::Duration::seconds(1);
-        registry.intern_session_kdc(jti, 1, expired, kdc);
+        let deadline = time::OffsetDateTime::now_utc() + time::Duration::minutes(5);
+        registry.intern_session_kerberos(jti, 1, deadline, kerberos_material(kdc));
+        registry.remove_expired_session_kdcs(deadline + time::Duration::seconds(1));
         assert!(!registry.session_kdc_live(jti));
+    }
+
+    #[test]
+    fn session_cache_expiry_keeps_active_registration() {
+        let jti = Uuid::new_v4();
+        let registry = SyntheticKdcRegistry::new();
+        let kdc = Arc::new(dummy_kdc(jti));
+        let deadline = time::OffsetDateTime::now_utc() + time::Duration::minutes(5);
+        registry.intern_session_kerberos(jti, 1, deadline, kerberos_material(Arc::clone(&kdc)));
+        let registration = registry.register(Arc::clone(&kdc), 1);
+
+        registry.remove_expired_session_kdcs(deadline + time::Duration::seconds(1));
+
+        assert!(!registry.session_kdc_live(jti));
+        assert!(Arc::ptr_eq(&registry.get(jti).expect("active KDC"), &kdc));
+        drop(registration);
+        assert!(registry.get(jti).is_none());
+    }
+
+    #[test]
+    fn zeroize_kdc_config_clears_secret_copies() {
+        let mut kdc = dummy_kdc(Uuid::new_v4());
+        assert!(kdc.kdc_config.users.iter().any(|user| !user.password.is_empty()));
+        assert!(!kdc.kdc_config.krbtgt_key.is_empty());
+        assert!(
+            kdc.kdc_config
+                .ticket_decryption_key
+                .as_ref()
+                .is_some_and(|key| !key.is_empty())
+        );
+        assert!(
+            kdc.kdc_config
+                .service_user
+                .as_ref()
+                .is_some_and(|user| !user.password.is_empty())
+        );
+
+        zeroize_kdc_config(&mut kdc.kdc_config);
+
+        assert!(kdc.kdc_config.users.iter().all(|user| user.password.is_empty()));
+        assert!(kdc.kdc_config.krbtgt_key.is_empty());
+        assert!(kdc.kdc_config.ticket_decryption_key.as_ref().is_some_and(Vec::is_empty));
+        assert!(
+            kdc.kdc_config
+                .service_user
+                .as_ref()
+                .is_some_and(|user| user.password.is_empty())
+        );
     }
 
     #[test]
@@ -1044,10 +1251,10 @@ mod tests {
         let newer = Arc::new(dummy_kdc(jti));
         let older = Arc::new(dummy_kdc(jti));
         let deadline = time::OffsetDateTime::now_utc() + time::Duration::minutes(5);
-        let interned = registry.intern_session_kdc(jti, 2, deadline, Arc::clone(&newer));
-        assert!(Arc::ptr_eq(&interned, &newer));
-        let rejected = registry.intern_session_kdc(jti, 1, deadline, Arc::clone(&older));
-        assert!(Arc::ptr_eq(&rejected, &older));
+        let interned = registry.intern_session_kerberos(jti, 2, deadline, kerberos_material(Arc::clone(&newer)));
+        assert!(Arc::ptr_eq(&interned.synthetic, &newer));
+        let rejected = registry.intern_session_kerberos(jti, 1, deadline, kerberos_material(Arc::clone(&older)));
+        assert!(Arc::ptr_eq(&rejected.synthetic, &older));
         assert!(Arc::ptr_eq(&registry.interned_kdc(jti).expect("kept"), &newer));
         registry.discard_stale_session_kdc(jti, 1);
         assert!(Arc::ptr_eq(&registry.interned_kdc(jti).expect("still kept"), &newer));

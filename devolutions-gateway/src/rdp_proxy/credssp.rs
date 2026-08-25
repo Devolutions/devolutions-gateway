@@ -230,17 +230,16 @@ where
     let credentials = injection.target_credential();
     let kerberos_config = client_kerberos_config(injection)?;
 
-    // Decrypt password into short-lived buffer.
     let (username, decrypted_password) = credentials
         .decrypt_password()
         .context("failed to decrypt credentials")?;
 
+    // TODO: Pass a zeroizing password type once ironrdp-connector accepts one, so this temporary
+    // plaintext allocation is cleared before release.
     let credentials = ironrdp_connector::Credentials::UsernamePassword {
         username,
         password: decrypted_password.expose_secret().to_owned(),
     };
-    // decrypted_password drops here, zeroizing its buffer; note: a copy of the plaintext
-    // remains in `credentials` above, which is a regular String (downstream API limitation).
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,

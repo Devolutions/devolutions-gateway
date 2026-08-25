@@ -123,10 +123,6 @@ where
                     MappingStatus::Absent
                 };
                 let inject = match mapping_status {
-                    MappingStatus::RequiredMissing => anyhow::bail!(
-                        "credential-injection material for {} is missing or expired; re-provision to retry",
-                        claims.jti
-                    ),
                     MappingStatus::Available => true,
                     MappingStatus::Absent => false,
                 };

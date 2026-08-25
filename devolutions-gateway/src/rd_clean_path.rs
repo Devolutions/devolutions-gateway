@@ -618,12 +618,7 @@ pub async fn handle(
     };
 
     let mapping_status = provisioning.mapping_status(auth.claims.jti);
-    if is_vmconnect_request(&cleanpath_pdu)
-        && matches!(
-            mapping_status,
-            MappingStatus::Available | MappingStatus::RequiredMissing
-        )
-    {
+    if is_vmconnect_request(&cleanpath_pdu) && mapping_status == MappingStatus::Available {
         let response = RDCleanPathPdu::new_http_error(400);
         send_clean_path_response(&mut client_stream, &response).await?;
         anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
@@ -645,17 +640,6 @@ pub async fn handle(
                 agent_tunnel_handle.clone(),
             )
             .await;
-        }
-        MappingStatus::RequiredMissing => {
-            let error = CleanPathError::BadRequest(anyhow::anyhow!(
-                "credential-injection material for {} is missing or expired; re-provision to retry",
-                auth.claims.jti
-            ));
-            let response = RDCleanPathPdu::from(&error);
-            send_clean_path_response(&mut client_stream, &response).await?;
-            return anyhow::Error::new(error)
-                .context("an error occurred when processing cleanpath PDU")
-                .pipe(Err)?;
         }
         MappingStatus::Absent => {}
     }
