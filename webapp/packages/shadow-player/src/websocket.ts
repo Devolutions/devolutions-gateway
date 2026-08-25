@@ -1,41 +1,62 @@
-import { ClientMessage, ServerMessage, parseClientMessage, parseServerMessage } from './protocol';
+import { ClientMessage, parseClientMessage, parseServerMessage, ServerMessage } from './protocol';
 
 export class ServerWebSocket {
-  ws: WebSocket;
+  private readonly socket: WebSocket;
+  private pendingEvent = Promise.resolve();
+  private closed = false;
+
   constructor(url: string) {
-    this.ws = new WebSocket(url);
+    this.socket = new WebSocket(url);
+    this.socket.binaryType = 'arraybuffer';
   }
 
-  onopen(callback: (ev: Event) => unknown) {
-    this.ws.onopen = callback;
+  onopen(callback: (event: Event) => void): void {
+    this.socket.onopen = callback;
   }
 
-  onmessage(callback: (ev: ServerMessage) => unknown) {
-    this.ws.onmessage = (ev) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const arrayBuffer = reader.result as ArrayBuffer;
-        const serverResponse = parseServerMessage(arrayBuffer);
-        callback(serverResponse);
-      };
-
-      reader.readAsArrayBuffer(ev.data);
+  onmessage(callback: (message: ServerMessage) => Promise<void> | void, onFailure: (error: unknown) => void): void {
+    this.socket.onmessage = (event) => {
+      this.enqueueEvent(async () => {
+        try {
+          if (!(event.data instanceof ArrayBuffer)) {
+            throw new Error('Server sent a non-binary message');
+          }
+          await callback(parseServerMessage(event.data));
+        } catch (error) {
+          onFailure(error);
+        }
+      });
     };
   }
 
-  onclose(callback: (ev: CloseEvent) => unknown) {
-    this.ws.onclose = callback;
+  onclose(callback: (event: CloseEvent) => void): void {
+    this.socket.onclose = (event) => {
+      this.closed = true;
+      this.enqueueEvent(() => callback(event));
+    };
   }
 
-  onerror(callback: (ev: Event) => unknown) {
-    this.ws.onerror = callback;
+  onerror(callback: (event: Event) => void): void {
+    this.socket.onerror = (event) => this.enqueueEvent(() => callback(event));
   }
 
-  send<T extends ClientMessage>(data: T) {
-    this.ws.send(parseClientMessage(data));
+  send(message: ClientMessage): void {
+    if (!this.isOpen()) {
+      throw new Error('WebSocket is not open');
+    }
+    this.socket.send(parseClientMessage(message));
   }
 
-  isClosed() {
-    return this.ws.readyState === WebSocket.CLOSED;
+  isOpen(): boolean {
+    return !this.closed && this.socket.readyState === WebSocket.OPEN;
+  }
+
+  close(code: number, reason: string): void {
+    this.socket.close(code, reason);
+  }
+
+  private enqueueEvent(callback: () => Promise<void> | void): void {
+    const event = this.pendingEvent.then(callback);
+    this.pendingEvent = event.catch(() => undefined);
   }
 }

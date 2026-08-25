@@ -6,6 +6,17 @@
     "unknownError": "Unbekannter Fehler, bitte versuchen Sie es erneut",
     "protocolError": "Ein Fehler ist aufgetreten: {{error}}"
   },
+  "controls": {
+    "play": "Wiedergabe",
+    "pause": "Pause",
+    "mute": "Stummschalten",
+    "unmute": "Stummschaltung aufheben",
+    "volume": "Lautstärke",
+    "timeline": "Aufzeichnungszeitachse",
+    "fullscreen": "Vollbild",
+    "exitFullscreen": "Vollbild beenden",
+    "clip": "Clip"
+  },
   "ui": {
     "close": "Schließen"
   }
