@@ -1,6 +1,7 @@
 export class ReactiveSourceBuffer {
   private readonly sourceBuffer: SourceBuffer;
   private readonly allBuffers: Blob[] = [];
+  private pendingOperation = Promise.resolve();
   private debug = false;
 
   constructor(mediaSource: MediaSource, codec: string) {
@@ -11,7 +12,17 @@ export class ReactiveSourceBuffer {
     this.debug = debug;
   }
 
-  async appendBuffer(buffer: Uint8Array): Promise<void> {
+  appendBuffer(buffer: Uint8Array): Promise<void> {
+    const operation = this.pendingOperation.then(() => this.append(buffer));
+    this.pendingOperation = operation;
+    return operation;
+  }
+
+  whenIdle(): Promise<void> {
+    return this.pendingOperation;
+  }
+
+  private async append(buffer: Uint8Array): Promise<void> {
     if (this.sourceBuffer.updating) {
       throw new Error('SourceBuffer is already updating');
     }

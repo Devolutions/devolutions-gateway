@@ -10,6 +10,7 @@ export class PlaybackClip {
   private sourceBuffer: ReactiveSourceBuffer | null = null;
   private debug = false;
   private complete = false;
+  private finishing: Promise<void> | null = null;
 
   constructor(readonly metadata: SegmentStartedMessage) {
     this.video.src = this.objectUrl;
@@ -50,15 +51,25 @@ export class PlaybackClip {
     await this.sourceBuffer.appendBuffer(data);
   }
 
-  finish(): void {
-    if (this.complete) {
+  async finish(): Promise<void> {
+    await this.opened;
+    if (this.finishing) {
+      return this.finishing;
+    }
+    const sourceBuffer = this.sourceBuffer;
+    if (this.complete || !sourceBuffer) {
       return;
     }
-    if (this.mediaSource.readyState !== 'open') {
-      throw new Error('Cannot finish a MediaSource that is not open');
-    }
-    this.mediaSource.endOfStream();
+
     this.complete = true;
+    this.finishing = (async () => {
+      await sourceBuffer.whenIdle();
+      if (this.mediaSource.readyState !== 'open') {
+        throw new Error('Cannot finish a MediaSource that is not open');
+      }
+      this.mediaSource.endOfStream();
+    })();
+    return this.finishing;
   }
 
   setDebug(debug: boolean): void {
