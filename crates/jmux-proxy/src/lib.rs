@@ -41,7 +41,21 @@ pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
-const JMUX_FLUSH_DELAY: core::time::Duration = core::time::Duration::from_millis(10);
+
+/// Backstop for flushing buffered messages, measured from the first unflushed byte.
+///
+/// Never reset by later messages, so a steady stream cannot postpone a flush indefinitely.
+/// Tokio's timer granularity is around a millisecond, so this bounds latency rather than
+/// providing fine control; the drain check below is what keeps latency low in practice.
+const JMUX_FLUSH_COALESCING_WINDOW: core::time::Duration = core::time::Duration::from_millis(1);
+
+/// Minimum spacing between flushes triggered by the send queue running dry.
+///
+/// Flushing every time the queue drains is ideal for latency but ruinous for throughput: a
+/// relay's producer is paced by the network, so under a bulk transfer the queue drains
+/// constantly and each drain would write out a partial buffer. Spacing those flushes lets
+/// bulk traffic keep filling the write buffer while a lone message still goes out promptly.
+const JMUX_FLUSH_MIN_SPACING: core::time::Duration = core::time::Duration::from_micros(50);
 
 // The JMUX channel will require at most `MAXIMUM_PACKET_SIZE_IN_BYTES × JMUX_MESSAGE_CHANNEL_SIZE` bytes to be kept alive.
 const JMUX_MESSAGE_MPSC_CHANNEL_SIZE: usize = 512;
@@ -385,28 +399,58 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
         let mut jmux_writer = tokio::io::BufWriter::with_capacity(16 * 1024, jmux_writer);
         let mut buf = bytes::BytesMut::new();
         let mut needs_flush = false;
-        let flush_timer = tokio::time::sleep(JMUX_FLUSH_DELAY);
-        tokio::pin!(flush_timer);
+        // `None` until the first flush, so the first message out is never held back.
+        let mut last_flush: Option<tokio::time::Instant> = None;
+        let flush_deadline = tokio::time::sleep(JMUX_FLUSH_COALESCING_WINDOW);
+        tokio::pin!(flush_deadline);
 
-        loop {
+        'outer: loop {
             tokio::select! {
                 msg = msg_to_send_rx.recv() => {
-                    let Some(msg) = msg else {
+                    let Some(mut msg) = msg else {
                         break;
                     };
 
-                    trace!(?msg, "Send channel message");
+                    // Write out everything already queued before considering a flush, so that
+                    // bursts are coalesced into as few writes as possible.
+                    // INVARIANT: `msg` always holds a message that has not been encoded yet.
+                    loop {
+                        trace!(?msg, "Send channel message");
 
-                    buf.clear();
-                    msg.encode(&mut buf)?;
+                        buf.clear();
+                        msg.encode(&mut buf)?;
 
-                    jmux_writer.write_all(&buf).await?;
-                    needs_flush = true;
-                    flush_timer.as_mut().reset(tokio::time::Instant::now() + JMUX_FLUSH_DELAY);
+                        jmux_writer.write_all(&buf).await?;
+
+                        if !needs_flush {
+                            flush_deadline
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + JMUX_FLUSH_COALESCING_WINDOW);
+                            needs_flush = true;
+                        }
+
+                        match msg_to_send_rx.try_recv() {
+                            Ok(next) => msg = next,
+                            Err(mpsc::error::TryRecvError::Empty) => break,
+                            Err(mpsc::error::TryRecvError::Disconnected) => break 'outer,
+                        }
+                    }
+
+                    // The queue ran dry, so there is nothing left to batch with: flush, unless
+                    // a flush just happened and more traffic is plainly still flowing.
+                    let flushed_recently = last_flush
+                        .is_some_and(|instant| instant.elapsed() < JMUX_FLUSH_MIN_SPACING);
+
+                    if !flushed_recently {
+                        jmux_writer.flush().await?;
+                        needs_flush = false;
+                        last_flush = Some(tokio::time::Instant::now());
+                    }
                 }
-                _ = flush_timer.as_mut(), if needs_flush => {
+                _ = flush_deadline.as_mut(), if needs_flush => {
                     jmux_writer.flush().await?;
                     needs_flush = false;
+                    last_flush = Some(tokio::time::Instant::now());
                 }
             }
         }
@@ -1196,6 +1240,12 @@ impl StreamResolverTask {
                 for socket_addr in socket_addrs {
                     match TcpStream::connect(socket_addr).await {
                         Ok(stream) => {
+                            // Nagle's algorithm is deliberately left enabled here. Disabling it
+                            // costs about 25% of bulk throughput, because `DataWriterTask` writes
+                            // every ~4 kiB chunk straight to this socket with no buffering, so
+                            // each one would go out as its own undersized segment. Buffering
+                            // those writes first would make `TCP_NODELAY` affordable.
+
                             // Update channel with resolved target IP and connect time.
                             channel.target_ip = Some(socket_addr.ip());
                             channel.connect_at = SystemTime::now();
