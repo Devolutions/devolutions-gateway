@@ -17,6 +17,12 @@ export type ShadowPlayerError =
       inner: ErrorEvent;
     }
   | {
+      type: 'websocket-close';
+      code: number;
+      reason: string;
+      wasClean: boolean;
+    }
+  | {
       type: 'protocol';
       inner: ErrorMessage;
     }
@@ -30,6 +36,7 @@ export type ShadowPlayerError =
     };
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
+type TerminalOutcome = 'none' | 'end' | 'error' | 'closed';
 
 export class ShadowPlayer extends HTMLElement {
   _videoElement: HTMLVideoElement | null = null;
@@ -49,6 +56,7 @@ export class ShadowPlayer extends HTMLElement {
   private awaitingResponse = false;
   private shouldPlay = false;
   private streamEnded = false;
+  private terminalOutcome: TerminalOutcome = 'closed';
   private muted = true;
   private volume = 1;
   private controls: PlaybackControls | null = null;
@@ -93,10 +101,13 @@ export class ShadowPlayer extends HTMLElement {
       return;
     }
 
-    if (name === 'autoplay' && newValue !== null) {
-      this.shouldPlay = true;
+    if (name === 'autoplay') {
+      if (newValue !== null) {
+        this.shouldPlay = true;
+      }
+      return;
     }
-    if (name === 'controls') {
+    if (name === 'controls' || name === 'loop') {
       return;
     }
     if (name === 'muted') {
@@ -220,7 +231,7 @@ export class ShadowPlayer extends HTMLElement {
     if (this.activateNextClip()) {
       return;
     }
-    if (this.streamEnded && this.activeClip?.video.ended) {
+    if (this.isSequencePlaybackComplete()) {
       this.replay();
     }
   }
@@ -253,6 +264,7 @@ export class ShadowPlayer extends HTMLElement {
       return;
     }
 
+    this.terminalOutcome = 'none';
     this.streamEnded = false;
     this._replayButton?.classList.remove('visible');
     this.renderPlayerControls();
@@ -273,7 +285,7 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private async handleServerMessage(websocket: ServerWebSocket, message: ServerMessage): Promise<void> {
-    if (this.websocket !== websocket) {
+    if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
       return;
     }
     if (!this.awaitingResponse) {
@@ -282,38 +294,40 @@ export class ShadowPlayer extends HTMLElement {
     this.awaitingResponse = false;
 
     if (message.type === 'segment-started') {
+      await this.startSegment(websocket, message);
       this.sendRequest(websocket, 'pull');
-      await this.startSegment(message);
       return;
     }
     if (message.type === 'chunk') {
-      if (!this.receivingClip) {
+      const clip = this.receivingClip;
+      if (!clip) {
         throw new Error('Received a chunk before a segment started');
       }
+      await clip.append(message.data);
       this.sendRequest(websocket, 'pull');
-      await this.receivingClip.append(message.data);
       return;
     }
     if (message.type === 'error') {
-      this.onErrorCallback?.({ type: 'protocol', inner: message });
+      this.reportTerminalError({ type: 'protocol', inner: message });
       return;
     }
 
-    this.finishReceivingClip();
-    this.streamEnded = true;
-    this.renderPlayerControls();
-    if (this.activeClip?.video.ended) {
-      this.showReplayButton();
+    await this.finishReceivingClip();
+    if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
+      return;
     }
-    this.onEndCallback?.();
+    this.completeStream();
   }
 
-  private async startSegment(metadata: SegmentStartedMessage): Promise<void> {
+  private async startSegment(websocket: ServerWebSocket, metadata: SegmentStartedMessage): Promise<void> {
     if (metadata.sequence !== this.clips.length) {
       throw new Error(`Expected segment ${this.clips.length}, received ${metadata.sequence}`);
     }
 
-    this.finishReceivingClip();
+    await this.finishReceivingClip();
+    if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
+      return;
+    }
     const clip = new PlaybackClip(metadata);
     clip.setDebug(this.debug);
     this.configureVideo(clip);
@@ -324,12 +338,13 @@ export class ShadowPlayer extends HTMLElement {
     await clip.open();
   }
 
-  private finishReceivingClip(): void {
+  private async finishReceivingClip(): Promise<void> {
     const clip = this.receivingClip;
     if (!clip) {
       return;
     }
-    clip.finish();
+    this.receivingClip = null;
+    await clip.finish();
     this.renderAllSegments();
   }
 
@@ -339,7 +354,13 @@ export class ShadowPlayer extends HTMLElement {
     video.muted = this.muted;
     video.volume = this.volume;
     for (const attribute of ShadowPlayer.observedAttributes) {
-      if (attribute !== 'src' && attribute !== 'controls' && attribute !== 'muted') {
+      if (
+        attribute !== 'src' &&
+        attribute !== 'autoplay' &&
+        attribute !== 'controls' &&
+        attribute !== 'loop' &&
+        attribute !== 'muted'
+      ) {
         this.applyVideoAttribute(video, attribute, this.getAttribute(attribute));
       }
     }
@@ -368,8 +389,8 @@ export class ShadowPlayer extends HTMLElement {
       if (this.activeClip !== clip) {
         return;
       }
-      if (!this.activateNextClip() && this.streamEnded) {
-        this.showReplayButton();
+      if (!this.activateNextClip()) {
+        this.handleSequencePlaybackEnd();
       }
       this.renderClipControls(clip);
       this.renderPlayerControls();
@@ -508,7 +529,10 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private sendRequest(websocket: ServerWebSocket, type: 'start' | 'pull'): void {
-    if (this.websocket !== websocket) {
+    if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
+      return;
+    }
+    if (!websocket.isOpen()) {
       return;
     }
     if (this.awaitingResponse) {
@@ -524,11 +548,20 @@ export class ShadowPlayer extends HTMLElement {
     }
     this.awaitingResponse = false;
     this.websocket = null;
-    if (event.code === 4001) {
-      this.onErrorCallback?.({
-        type: 'session-not-found',
-        message: 'Recording session is no longer active',
-      });
+    if (this.terminalOutcome === 'none') {
+      const error: ShadowPlayerError =
+        event.code === 4001
+          ? {
+              type: 'session-not-found',
+              message: 'Recording session is no longer active',
+            }
+          : {
+              type: 'websocket-close',
+              code: event.code,
+              reason: event.reason,
+              wasClean: event.wasClean,
+            };
+      this.reportTerminalError(error);
     }
     this.renderPlayerControls();
   }
@@ -537,7 +570,7 @@ export class ShadowPlayer extends HTMLElement {
     if (this.websocket !== websocket) {
       return;
     }
-    this.onErrorCallback?.({
+    this.reportTerminalError({
       type: 'websocket',
       inner: event as ErrorEvent,
     });
@@ -548,11 +581,60 @@ export class ShadowPlayer extends HTMLElement {
       return;
     }
     const error = value instanceof Error ? value : new Error(String(value));
+    if (
+      !this.reportTerminalError({
+        type: 'player',
+        inner: error,
+      })
+    ) {
+      return;
+    }
     this.awaitingResponse = false;
-    this.onErrorCallback?.({ type: 'player', inner: error });
     websocket.close(1000, 'Player failure');
     this.websocket = null;
     this.renderPlayerControls();
+  }
+
+  private completeStream(): void {
+    if (this.terminalOutcome !== 'none') {
+      return;
+    }
+    this.terminalOutcome = 'end';
+    this.streamEnded = true;
+    this.renderPlayerControls();
+    this.handleSequencePlaybackEnd();
+    this.onEndCallback?.();
+  }
+
+  private reportTerminalError(error: ShadowPlayerError): boolean {
+    if (this.terminalOutcome !== 'none') {
+      return false;
+    }
+    this.terminalOutcome = 'error';
+    this.onErrorCallback?.(error);
+    this.renderPlayerControls();
+    return true;
+  }
+
+  private handleSequencePlaybackEnd(): void {
+    if (!this.isSequencePlaybackComplete()) {
+      return;
+    }
+    if (this.hasAttribute('loop') && this.shouldPlay) {
+      this.replay();
+    } else {
+      this.showReplayButton();
+    }
+  }
+
+  private isSequencePlaybackComplete(): boolean {
+    const activeClip = this.activeClip;
+    return (
+      this.streamEnded &&
+      activeClip !== null &&
+      activeClip.video.ended &&
+      activeClip.metadata.sequence === this.clips.length - 1
+    );
   }
 
   private reportPlayerError(value: unknown): void {
@@ -579,6 +661,8 @@ export class ShadowPlayer extends HTMLElement {
     const websocket = this.websocket;
     this.websocket = null;
     this.awaitingResponse = false;
+    this.terminalOutcome = 'closed';
+    this.streamEnded = false;
     websocket?.close(1000, 'Component cleanup');
     for (const clip of this.clips) {
       clip.dispose();
