@@ -70,6 +70,15 @@ fn find_unused_port() -> u16 {
         .port()
 }
 
+fn find_unused_udp_port() -> u16 {
+    std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0))
+        .or_else(|_| std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
 impl DgwConfig {
     pub fn init(self) -> anyhow::Result<DgwConfigHandle> {
         DgwConfigHandle::init(self)
@@ -115,7 +124,7 @@ impl DgwConfigHandle {
         };
 
         let agent_tunnel_json = if let Some(at_config) = agent_tunnel {
-            let listen_port = at_config.listen_port.unwrap_or_else(find_unused_port);
+            let listen_port = at_config.listen_port.unwrap_or_else(find_unused_udp_port);
             format!(
                 r#",
     "AgentTunnel": {{
