@@ -972,7 +972,7 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
     install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1021,7 +1021,7 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1111,7 +1111,7 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1219,7 +1219,7 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     let kdc = RefusingKdc::start().await?;
     let rdp_kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(rdp_kdc.url()).await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1277,7 +1277,7 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
 #[tokio::test]
 async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     let rdp = FakeClosedTarget::start().await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1309,7 +1309,7 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
 async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     install_crypto_provider();
     let rdp = MockRdp::start_ntlm().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -1514,7 +1514,7 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     };
     install_crypto_provider();
     let rdp = MockRdp::start_ntlm().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
     let endpoint = ironrdp_agent_endpoint();
     let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
 
@@ -1573,7 +1573,7 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
     install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
     let endpoint = ironrdp_agent_endpoint();
     let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
 
