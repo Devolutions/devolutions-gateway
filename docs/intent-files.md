@@ -44,8 +44,7 @@ A successful response returns HTTP 201:
 }
 ```
 
-Changes to the route, authentication requirement, response schema,
-or status-code semantics are changes to intent.
+Changes to the route, authentication requirement, response schema, or status-code semantics are changes to intent.
 
 ## Architectural invariants
 
