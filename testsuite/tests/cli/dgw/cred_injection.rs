@@ -226,12 +226,10 @@ pub(crate) struct GatewayProc {
 }
 
 impl GatewayProc {
-    pub(crate) async fn start(kerberos: bool) -> anyhow::Result<Self> {
+    pub(crate) async fn start() -> anyhow::Result<Self> {
         let config = DgwConfig::builder()
             .disable_token_validation(true)
             .verbosity_profile(VerbosityProfile::DEBUG)
-            .enable_unstable(kerberos)
-            .kerberos_credential_injection(kerberos)
             .build()
             .init()
             .context("init gateway config")?;
@@ -430,7 +428,7 @@ async fn connect_rdp_client(gateway_tcp: u16, association_jwt: &str) -> anyhow::
 #[tokio::test]
 async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -462,7 +460,7 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
 #[tokio::test]
 async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -500,7 +498,7 @@ async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
 #[tokio::test]
 async fn required_missing_fails_closed() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -533,7 +531,7 @@ async fn required_missing_fails_closed() -> anyhow::Result<()> {
 #[tokio::test]
 async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -560,7 +558,7 @@ async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
 #[tokio::test]
 async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -647,7 +645,7 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
 #[tokio::test]
 async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(true).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -673,9 +671,9 @@ async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-async fn kerberos_opt_out_uses_ntlm_for_domain_user() -> anyhow::Result<()> {
+async fn kerberos_injection_does_not_need_debug_flags() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start(false).await?;
+    let mut gateway = GatewayProc::start().await?;
 
     let jti = next_id();
     let jet_aid = next_id();
@@ -692,8 +690,8 @@ async fn kerberos_opt_out_uses_ntlm_for_domain_user() -> anyhow::Result<()> {
     let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     assert!(
-        logs.contains("kerberos=false"),
-        "Kerberos injection opt-out must NTLM even with a domain username; logs:\n{logs}"
+        logs.contains("kerberos=true"),
+        "Kerberos injection must run without debug flags; logs:\n{logs}"
     );
 
     let _ = gateway.process.start_kill();
