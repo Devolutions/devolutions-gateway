@@ -116,6 +116,7 @@ impl CredsspSession {
         let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
         client_credssp_res.context("CredSSP with client")?;
         server_credssp_res.context("CredSSP with server")?;
+        drop(credential_injection);
 
         intercept_connect_confirm(&mut client_framed, &mut server_framed, server_security_protocol).await?;
 
