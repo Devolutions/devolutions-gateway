@@ -268,6 +268,9 @@ importers:
 
   packages/shadow-player:
     devDependencies:
+      jsdom:
+        specifier: ^20.0.3
+        version: 20.0.3
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@22.19.3)(typescript@5.6.3)
@@ -283,6 +286,9 @@ importers:
       vite-plugin-static-copy:
         specifier: ^2.3.0
         version: 2.3.2(vite@5.4.21(@types/node@22.19.3)(less@4.4.0)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.43.1))
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.7(@types/node@20.19.27)(jiti@2.6.1)(jsdom@20.0.3)(less@4.4.0)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.43.1)
 
   packages/web-recorder:
     devDependencies:
