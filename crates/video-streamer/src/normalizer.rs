@@ -6,6 +6,7 @@ use anyhow::Context;
 use bytes::{Bytes, BytesMut};
 use cadeau::xmf::vpx::{VpxCodec, VpxEncoder, VpxEncoderPreset, VpxImage};
 use ebml_iterable::TagDecoder;
+use ebml_iterable::error::TagIteratorError;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::mpsc;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
@@ -311,10 +312,20 @@ impl ClipNormalizer {
             self.clip_sequence
         );
         loop {
-            match self.decoder.decode_eof(&mut self.input)? {
-                Some(positioned) => self.handle_tag(positioned.tag)?,
-                None if self.decoder.is_finished() => break,
-                None => continue,
+            match self.decoder.decode_eof(&mut self.input) {
+                Ok(Some(positioned)) => self.handle_tag(positioned.tag)?,
+                Ok(None) if self.decoder.is_finished() => break,
+                Ok(None) => continue,
+                Err(TagIteratorError::UnexpectedEOF { .. }) => {
+                    debug!(
+                        clip_sequence = self.clip_sequence,
+                        bytes = self.input.len(),
+                        "Discard incomplete trailing EBML element"
+                    );
+                    self.input.clear();
+                    break;
+                }
+                Err(error) => return Err(error.into()),
             }
         }
 
@@ -374,26 +385,17 @@ impl ClipNormalizer {
             .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
         let decoded = input_decoder.decode(&frame.data)?;
         let dimensions = decoded.dimensions;
-        let size_changed = self
-            .output_segment
-            .as_ref()
-            .is_some_and(|current| current.dimensions != dimensions);
-        if size_changed {
+        let new_segment = next_segment_info(
+            self.output_segment.as_ref().map(|segment| segment.dimensions),
+            dimensions,
+            self.next_segment_sequence,
+        );
+        if self.output_segment.is_some() && new_segment.is_some() {
             self.output_segment
                 .take()
                 .context("missing active output segment")?
                 .finish()?;
         }
-
-        let new_segment = if self.output_segment.is_none() {
-            Some(SegmentInfo {
-                sequence: self.next_segment_sequence,
-                width: dimensions.width,
-                height: dimensions.height,
-            })
-        } else {
-            None
-        };
 
         if let Some(info) = new_segment {
             self.output_segment = Some(OutputSegment::new(self.sender.clone(), info, self.config)?);
@@ -408,6 +410,18 @@ impl ClipNormalizer {
             .encode(&decoded.image, frame.timestamp)?;
         Ok(())
     }
+}
+
+fn next_segment_info(
+    current_dimensions: Option<Dimensions>,
+    frame_dimensions: Dimensions,
+    next_sequence: u64,
+) -> Option<SegmentInfo> {
+    (current_dimensions != Some(frame_dimensions)).then_some(SegmentInfo {
+        sequence: next_sequence,
+        width: frame_dimensions.width,
+        height: frame_dimensions.height,
+    })
 }
 
 fn parse_video_track(children: &[MatroskaSpec]) -> anyhow::Result<Option<SourceVideo>> {
@@ -635,5 +649,133 @@ impl Write for EventWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_clip_bytes() -> Vec<u8> {
+        let mut writer = WebmWriter::new(Vec::new());
+        writer
+            .write(&MatroskaSpec::Ebml(Master::Full(vec![
+                MatroskaSpec::EbmlVersion(1),
+                MatroskaSpec::EbmlReadVersion(1),
+                MatroskaSpec::EbmlMaxIdLength(4),
+                MatroskaSpec::EbmlMaxSizeLength(8),
+                MatroskaSpec::DocType("webm".to_owned()),
+                MatroskaSpec::DocTypeVersion(4),
+                MatroskaSpec::DocTypeReadVersion(2),
+            ])))
+            .expect("write EBML header");
+        writer
+            .write_advanced(
+                &MatroskaSpec::Segment(Master::Start),
+                WriteOptions::is_unknown_sized_element(),
+            )
+            .expect("write segment start");
+        writer
+            .write_advanced(
+                &MatroskaSpec::Cluster(Master::Start),
+                WriteOptions::is_unknown_sized_element(),
+            )
+            .expect("write cluster start");
+        writer
+            .write(&MatroskaSpec::Timestamp(0))
+            .expect("write cluster timestamp");
+        writer.into_inner().expect("finish clip bytes")
+    }
+
+    #[test]
+    fn resolution_change_starts_the_next_output_segment() {
+        let first_dimensions = Dimensions {
+            width: 640,
+            height: 480,
+        };
+        let second_dimensions = Dimensions {
+            width: 1280,
+            height: 720,
+        };
+
+        assert_eq!(
+            next_segment_info(None, first_dimensions, 0),
+            Some(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            })
+        );
+        assert_eq!(next_segment_info(Some(first_dimensions), first_dimensions, 1), None);
+        assert_eq!(
+            next_segment_info(Some(first_dimensions), second_dimensions, 1),
+            Some(SegmentInfo {
+                sequence: 1,
+                width: 1280,
+                height: 720,
+            })
+        );
+    }
+
+    #[test]
+    fn truncated_clip_tail_does_not_abort_the_following_clip() {
+        let mut truncated = empty_clip_bytes();
+        truncated.extend_from_slice(&[0xa3, 0x84, 0x81, 0x00]);
+        let complete = empty_clip_bytes();
+        let events = [
+            RecordingEvent::ClipStarted {
+                sequence: 0,
+                start_at: StartAt::Beginning,
+            },
+            RecordingEvent::Bytes(Bytes::from(truncated)),
+            RecordingEvent::CaughtUp,
+            RecordingEvent::ClipEnded,
+            RecordingEvent::ClipStarted {
+                sequence: 1,
+                start_at: StartAt::Beginning,
+            },
+            RecordingEvent::Bytes(Bytes::from(complete)),
+            RecordingEvent::CaughtUp,
+            RecordingEvent::ClipEnded,
+            RecordingEvent::SessionEnded,
+        ];
+        let (input_sender, input_receiver) = mpsc::channel(events.len());
+        for event in events {
+            input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        }
+        drop(input_sender);
+        let (output_sender, mut output_receiver) = mpsc::channel(1);
+
+        normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
+            .expect("normalize reconnecting clips");
+        assert!(output_receiver.blocking_recv().is_none());
+    }
+
+    #[test]
+    fn corruption_before_an_incomplete_tail_still_fails() {
+        let mut corrupted = empty_clip_bytes();
+        corrupted.extend_from_slice(&[0xff, 0x80]);
+        corrupted.extend_from_slice(&[0xa3, 0x84, 0x81, 0x00]);
+        let events = [
+            RecordingEvent::ClipStarted {
+                sequence: 0,
+                start_at: StartAt::Beginning,
+            },
+            RecordingEvent::Bytes(Bytes::from(corrupted)),
+            RecordingEvent::CaughtUp,
+            RecordingEvent::ClipEnded,
+            RecordingEvent::SessionEnded,
+        ];
+        let (input_sender, input_receiver) = mpsc::channel(events.len());
+        for event in events {
+            input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        }
+        drop(input_sender);
+        let (output_sender, _output_receiver) = mpsc::channel(1);
+
+        let error = normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
+            .expect_err("corruption before the incomplete tail must fail");
+
+        assert!(format!("{error:#}").contains("corrupted"), "{error:#}");
     }
 }

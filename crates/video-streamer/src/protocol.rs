@@ -8,6 +8,8 @@ use futures_util::{Sink, SinkExt as _, Stream, StreamExt as _};
 
 use crate::normalizer::{SegmentEvent, SegmentInfo};
 
+const MAX_QUEUED_PULLS: usize = 1;
+
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ServerMessage {
     Chunk(Bytes),
@@ -43,7 +45,7 @@ where
 {
     tokio::pin!(segments);
     let mut expected = ClientMessage::Start;
-    let mut segment_state = SegmentState::AwaitingBegin;
+    let mut segment_state = SegmentState::AwaitingBegin { next_sequence: 0 };
     let mut queued_pulls = VecDeque::new();
 
     loop {
@@ -98,8 +100,12 @@ where
             Ok(None) => return Ok(()),
             Err(error) => {
                 debug!(error = format!("{error:#}"), "Request failed while waiting");
-                let _ =
-                    send_server_message(&mut transport, ServerMessage::Error(UserFriendlyError::UnexpectedError)).await;
+                let pending_requests = 1 + queued_pulls.len();
+                for _ in 0..pending_requests {
+                    let _ =
+                        send_server_message(&mut transport, ServerMessage::Error(UserFriendlyError::UnexpectedError))
+                            .await;
+                }
                 return Err(error);
             }
         };
@@ -107,6 +113,9 @@ where
         let ended = response == ServerMessage::StreamEnded;
         send_server_message(&mut transport, response).await?;
         if ended {
+            while queued_pulls.pop_front().is_some() {
+                send_server_message(&mut transport, ServerMessage::StreamEnded).await?;
+            }
             return Ok(());
         }
 
@@ -173,8 +182,8 @@ fn encode_server_message(message: ServerMessage) -> Bytes {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SegmentState {
-    AwaitingBegin,
-    Streaming,
+    AwaitingBegin { next_sequence: u64 },
+    Streaming { next_sequence: u64 },
 }
 
 async fn wait_for_response<T, S, E>(
@@ -191,14 +200,15 @@ where
     loop {
         tokio::select! {
             biased;
-            response = next_segment_message(segments.as_mut(), state) => {
-                return response;
-            }
             message = transport.next() => match message {
                 None => return Ok(None),
                 Some(Ok(message)) => {
                     let message = decode_client_message(&message).context("decode pipelined client request")?;
                     if message == ClientMessage::Pull {
+                        anyhow::ensure!(
+                            queued_pulls.len() < MAX_QUEUED_PULLS,
+                            "too many pipelined Pull requests"
+                        );
                         debug!(
                             queued_pulls = queued_pulls.len() + 1,
                             "Queued pipelined Pull while waiting for response"
@@ -216,6 +226,9 @@ where
                     return Err(anyhow::Error::new(error).context("read client stream message"));
                 }
             },
+            response = next_segment_message(segments.as_mut(), state) => {
+                return response;
+            }
         }
     }
 }
@@ -230,7 +243,7 @@ where
     loop {
         let Some(event) = segments.as_mut().next().await else {
             anyhow::ensure!(
-                *state == SegmentState::AwaitingBegin,
+                matches!(*state, SegmentState::AwaitingBegin { .. }),
                 "segment stream ended inside a segment"
             );
             return Ok(Some(ServerMessage::StreamEnded));
@@ -238,11 +251,17 @@ where
 
         match event? {
             SegmentEvent::Begin(info) => {
+                let SegmentState::AwaitingBegin { next_sequence } = *state else {
+                    anyhow::bail!("segment began before the previous segment ended");
+                };
                 anyhow::ensure!(
-                    *state == SegmentState::AwaitingBegin,
-                    "segment began before the previous segment ended"
+                    info.sequence == next_sequence,
+                    "segment sequence is not contiguous: expected {next_sequence}, got {}",
+                    info.sequence
                 );
-                *state = SegmentState::Streaming;
+                *state = SegmentState::Streaming {
+                    next_sequence: next_sequence.checked_add(1).context("segment sequence overflow")?,
+                };
                 debug!(
                     sequence = info.sequence,
                     width = info.width,
@@ -253,15 +272,17 @@ where
             }
             SegmentEvent::Data(data) => {
                 anyhow::ensure!(
-                    *state == SegmentState::Streaming,
+                    matches!(*state, SegmentState::Streaming { .. }),
                     "segment data arrived outside a segment"
                 );
                 debug!(bytes = data.len(), "Segment data");
                 return Ok(Some(ServerMessage::Chunk(data)));
             }
             SegmentEvent::End => {
-                anyhow::ensure!(*state == SegmentState::Streaming, "segment ended outside a segment");
-                *state = SegmentState::AwaitingBegin;
+                let SegmentState::Streaming { next_sequence } = *state else {
+                    anyhow::bail!("segment ended outside a segment");
+                };
+                *state = SegmentState::AwaitingBegin { next_sequence };
                 debug!("Segment end");
             }
         }
@@ -271,8 +292,12 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
 
-    use futures_util::{StreamExt as _, stream};
+    use futures_util::{Sink, StreamExt as _, stream};
+    use tokio::sync::mpsc;
 
     use super::*;
 
@@ -280,6 +305,58 @@ mod tests {
         messages: impl IntoIterator<Item = Result<Bytes, std::io::Error>>,
     ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Unpin {
         stream::iter(messages).chain(stream::pending())
+    }
+
+    struct ChannelTransport {
+        incoming: mpsc::UnboundedReceiver<Bytes>,
+        outgoing: mpsc::UnboundedSender<Bytes>,
+    }
+
+    impl Stream for ChannelTransport {
+        type Item = Result<Bytes, std::io::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.incoming.poll_recv(cx).map(|message| message.map(Ok))
+        }
+    }
+
+    impl Sink<Bytes> for ChannelTransport {
+        type Error = std::io::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: Pin<&mut Self>, message: Bytes) -> Result<(), Self::Error> {
+            self.outgoing
+                .send(message)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "test receiver closed"))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn channel_transport() -> (
+        ChannelTransport,
+        mpsc::UnboundedSender<Bytes>,
+        mpsc::UnboundedReceiver<Bytes>,
+    ) {
+        let (client_sender, incoming) = mpsc::unbounded_channel();
+        let (outgoing, client_receiver) = mpsc::unbounded_channel();
+        (ChannelTransport { incoming, outgoing }, client_sender, client_receiver)
+    }
+
+    async fn receive_response(receiver: &mut mpsc::UnboundedReceiver<Bytes>) -> Bytes {
+        tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await
+            .expect("timed out waiting for server response")
+            .expect("server response channel closed")
     }
 
     #[test]
@@ -336,7 +413,7 @@ mod tests {
         ];
         let segments = stream::iter(events);
         tokio::pin!(segments);
-        let mut state = SegmentState::AwaitingBegin;
+        let mut state = SegmentState::AwaitingBegin { next_sequence: 0 };
 
         assert!(matches!(
             next_segment_message(segments.as_mut(), &mut state)
@@ -382,7 +459,7 @@ mod tests {
             }))
         });
         tokio::pin!(segments);
-        let mut state = SegmentState::AwaitingBegin;
+        let mut state = SegmentState::AwaitingBegin { next_sequence: 0 };
         let mut queued_pulls = VecDeque::new();
 
         let response = wait_for_response(&mut transport, segments.as_mut(), &mut state, &mut queued_pulls)
@@ -405,7 +482,7 @@ mod tests {
             Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
         });
         tokio::pin!(segments);
-        let mut state = SegmentState::Streaming;
+        let mut state = SegmentState::Streaming { next_sequence: 1 };
         let mut queued_pulls = VecDeque::new();
 
         let response = wait_for_response(&mut transport, segments.as_mut(), &mut state, &mut queued_pulls)
@@ -425,7 +502,7 @@ mod tests {
             Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
         });
         tokio::pin!(segments);
-        let mut state = SegmentState::Streaming;
+        let mut state = SegmentState::Streaming { next_sequence: 1 };
         let mut queued_pulls = VecDeque::new();
 
         let error = wait_for_response(&mut transport, segments.as_mut(), &mut state, &mut queued_pulls)
@@ -435,6 +512,201 @@ mod tests {
         assert!(
             format!("{error:#}").contains("client sent another request before receiving a response"),
             "{error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn first_segment_sequence_must_be_zero() {
+        let segments = stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 1,
+            width: 640,
+            height: 480,
+        }))]);
+        tokio::pin!(segments);
+        let mut state = SegmentState::AwaitingBegin { next_sequence: 0 };
+
+        let error = next_segment_message(segments.as_mut(), &mut state)
+            .await
+            .expect_err("nonzero first sequence must fail");
+
+        assert!(
+            format!("{error:#}").contains("segment sequence is not contiguous"),
+            "{error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn segment_sequence_gap_is_rejected() {
+        let segments = stream::iter([
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            })),
+            Ok(SegmentEvent::End),
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 2,
+                width: 800,
+                height: 600,
+            })),
+        ]);
+        tokio::pin!(segments);
+        let mut state = SegmentState::AwaitingBegin { next_sequence: 0 };
+
+        assert!(matches!(
+            next_segment_message(segments.as_mut(), &mut state)
+                .await
+                .expect("first segment"),
+            Some(ServerMessage::SegmentStarted(SegmentInfo { sequence: 0, .. }))
+        ));
+        let error = next_segment_message(segments.as_mut(), &mut state)
+            .await
+            .expect_err("segment sequence gap must fail");
+
+        assert!(
+            format!("{error:#}").contains("segment sequence is not contiguous"),
+            "{error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pipelined_pull_queue_is_bounded() {
+        let mut transport = pending_after([
+            Ok::<_, std::io::Error>(Bytes::from_static(b"\x01")),
+            Ok::<_, std::io::Error>(Bytes::from_static(b"\x01")),
+        ]);
+        let segments = stream::pending::<anyhow::Result<SegmentEvent>>();
+        tokio::pin!(segments);
+        let mut state = SegmentState::AwaitingBegin { next_sequence: 0 };
+        let mut queued_pulls = VecDeque::new();
+
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_for_response(&mut transport, segments.as_mut(), &mut state, &mut queued_pulls),
+        )
+        .await
+        .expect("a second queued Pull must be rejected")
+        .expect_err("a second queued Pull must fail");
+
+        assert!(
+            format!("{error:#}").contains("too many pipelined Pull requests"),
+            "{error:#}"
+        );
+        assert_eq!(queued_pulls, VecDeque::from([ClientMessage::Pull]));
+    }
+
+    #[tokio::test]
+    async fn ready_output_does_not_bypass_the_pipelined_pull_limit() {
+        let (transport, client_sender, mut client_receiver) = channel_transport();
+        client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+        client_sender
+            .send(Bytes::from_static(b"\x01"))
+            .expect("send first pipelined Pull");
+        client_sender
+            .send(Bytes::from_static(b"\x01"))
+            .expect("send second pipelined Pull");
+        let segments = stream::iter([
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            })),
+            Ok(SegmentEvent::End),
+        ]);
+        let task = tokio::spawn(stream_segments(transport, segments));
+
+        assert_eq!(receive_response(&mut client_receiver).await[0], 2);
+        assert_eq!(receive_response(&mut client_receiver).await[0], 2);
+        assert!(task.await.expect("stream task panicked").is_err());
+        assert_eq!(client_receiver.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn queued_pull_receives_stream_end() {
+        let (transport, client_sender, mut client_receiver) = channel_transport();
+        client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+        client_sender
+            .send(Bytes::from_static(b"\x01"))
+            .expect("send queued Pull");
+        let task = tokio::spawn(stream_segments(transport, stream::empty()));
+
+        assert_eq!(
+            receive_response(&mut client_receiver).await,
+            Bytes::from_static(b"\x03")
+        );
+        assert_eq!(
+            receive_response(&mut client_receiver).await,
+            Bytes::from_static(b"\x03")
+        );
+        task.await
+            .expect("stream task panicked")
+            .expect("stream session failed");
+        assert_eq!(client_receiver.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn each_request_receives_exactly_one_response() {
+        let (transport, client_sender, mut client_receiver) = channel_transport();
+        let segments = stream::iter([
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            })),
+            Ok(SegmentEvent::Data(Bytes::from_static(b"chunk"))),
+            Ok(SegmentEvent::End),
+        ]);
+        let task = tokio::spawn(stream_segments(transport, segments));
+
+        client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+        assert_eq!(receive_response(&mut client_receiver).await[0], 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), client_receiver.recv())
+                .await
+                .is_err(),
+            "server sent a response without another request"
+        );
+
+        client_sender
+            .send(Bytes::from_static(b"\x01"))
+            .expect("send first Pull");
+        assert_eq!(
+            receive_response(&mut client_receiver).await,
+            Bytes::from_static(b"\x00chunk")
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), client_receiver.recv())
+                .await
+                .is_err(),
+            "server sent a response without another request"
+        );
+
+        client_sender
+            .send(Bytes::from_static(b"\x01"))
+            .expect("send final Pull");
+        assert_eq!(
+            receive_response(&mut client_receiver).await,
+            Bytes::from_static(b"\x03")
+        );
+        task.await
+            .expect("stream task panicked")
+            .expect("stream session failed");
+    }
+
+    #[tokio::test]
+    async fn segment_failure_sends_error_without_stream_end() {
+        let (transport, client_sender, mut client_receiver) = channel_transport();
+        let segments = stream::iter([Err(anyhow::anyhow!("test segment failure"))]);
+        let task = tokio::spawn(stream_segments(transport, segments));
+
+        client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+        let response = receive_response(&mut client_receiver).await;
+        assert_eq!(response[0], 2);
+        assert!(task.await.expect("stream task panicked").is_err());
+        assert_eq!(
+            client_receiver.recv().await,
+            None,
+            "error must not be followed by StreamEnded"
         );
     }
 }

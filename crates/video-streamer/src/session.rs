@@ -36,7 +36,9 @@ impl Default for SessionConfig {
     }
 }
 
-/// Converts a recording session into fixed-size VP8 WebM segments over one pull-driven stream.
+/// Converts a recording session into independent VP8 WebM segments over one pull-driven stream.
+///
+/// Each segment has one resolution, and output sequence numbers remain contiguous across input clips.
 pub async fn stream_session<S, T, E>(source: S, transport: T, config: SessionConfig) -> anyhow::Result<()>
 where
     S: Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static,
