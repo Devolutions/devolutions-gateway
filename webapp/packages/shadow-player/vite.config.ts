@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { UserConfig, defineConfig } from 'vite';
+import { defineConfig, UserConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -51,12 +51,14 @@ const staticCopyPlugin = viteStaticCopy({
 const Plugins = {
   debug: [
     dts({
+      exclude: ['src/**/*.test.ts'],
       insertTypesEntry: true,
     }),
     staticCopyPlugin,
   ],
   release: [
     dts({
+      exclude: ['src/**/*.test.ts'],
       insertTypesEntry: true,
     }),
     staticCopyPlugin,
