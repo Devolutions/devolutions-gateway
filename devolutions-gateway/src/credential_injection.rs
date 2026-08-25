@@ -294,11 +294,7 @@ impl CredentialInjection {
 }
 
 /// Unstable debug opt-in for Kerberos credential injection (both legs).
-pub(crate) fn kerberos_injection_opt_in(enable_unstable: bool, kerberos_credential_injection: bool) -> bool {
-    enable_unstable && kerberos_credential_injection
-}
-
-/// Whether target username + opt-in select Kerberos injection (otherwise NTLM).
+/// Whether the target username should use Kerberos injection (otherwise NTLM).
 pub(crate) fn select_kerberos_for_target(kerberos_enabled: bool, target_username: &str) -> bool {
     if !kerberos_enabled {
         return false;
@@ -924,14 +920,6 @@ mod tests {
             url: Url::parse(url).expect("url"),
             data: Vec::new(),
         }
-    }
-
-    #[test]
-    fn kerberos_injection_opt_in_requires_both_flags() {
-        assert!(!kerberos_injection_opt_in(false, false));
-        assert!(!kerberos_injection_opt_in(false, true));
-        assert!(!kerberos_injection_opt_in(true, false));
-        assert!(kerberos_injection_opt_in(true, true));
     }
 
     #[test]
