@@ -540,7 +540,7 @@
         "kerberos_credential_injection": {
           "type": "boolean",
           "default": false,
-          "description": "Whether to enable proxy-based RDP credential injection against Kerberos-enforced targets."
+          "description": "Ignored. Kerberos credential injection is always available when provisioned."
         },
         "enable_unstable": {
           "type": "boolean",

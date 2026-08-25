@@ -133,24 +133,14 @@ where
 
                 // Checkout before dialing so missing Kerberos material cannot open an upstream socket.
                 let credential_injection = if inject {
-                    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
-                        conf.debug.enable_unstable,
-                        conf.debug.kerberos_credential_injection,
-                    );
                     Some(
-                        CredentialInjection::checkout(
-                            &provisioning,
-                            &synthetic_kdc_registry,
-                            claims.jti,
-                            token,
-                            kerberos_enabled,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "credential-injection material for {} is missing or expired; re-provision to retry",
-                                claims.jti
-                            )
-                        })?,
+                        CredentialInjection::checkout(&provisioning, &synthetic_kdc_registry, claims.jti, token, true)
+                            .with_context(|| {
+                                format!(
+                                    "credential-injection material for {} is missing or expired; re-provision to retry",
+                                    claims.jti
+                                )
+                            })?,
                     )
                 } else {
                     None

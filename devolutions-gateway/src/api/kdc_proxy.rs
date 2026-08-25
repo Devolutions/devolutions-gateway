@@ -2,7 +2,6 @@ use axum::Router;
 use axum::extract::State;
 use axum::routing::post;
 use picky_krb::messages::KdcProxyMessage;
-use uuid::Uuid;
 
 use crate::DgwState;
 use crate::credential_injection::{
@@ -44,8 +43,6 @@ async fn kdc_proxy(
 
     match destination {
         KdcDestination::Inject { jti } => {
-            enforce_credential_injection_enabled(jti, conf.debug.enable_unstable)?;
-
             let kdc = synthetic_kdc_registry
                 .get(jti)
                 .ok_or_else(|| HttpError::bad_request().msg("no live synthetic KDC published for this session"))?;
@@ -132,18 +129,6 @@ async fn forward_to_real_kdc(
     reply.to_vec().map_err(HttpError::internal().err())
 }
 
-fn enforce_credential_injection_enabled(jet_cred_id: Uuid, enable_unstable: bool) -> Result<(), HttpError> {
-    if enable_unstable {
-        return Ok(());
-    }
-
-    warn!(
-        %jet_cred_id,
-        "Credential-injection KDC token rejected because unstable Kerberos injection is disabled"
-    );
-    Err(HttpError::bad_request().msg("credential-injection KDC proxy is not enabled"))
-}
-
 /// Refuses to forward a KDC request whose realm disagrees with the realm the token was issued for.
 ///
 /// `bypass=true` (only when `__debug__.disable_token_validation` is on) downgrades the mismatch
@@ -187,15 +172,5 @@ mod tests {
         // This is the only branch where realm authorization is intentionally weakened, so pin it
         // explicitly to catch an inverted gate.
         assert!(enforce_realm_token_match("ad.example", "evil.example", true).is_ok());
-    }
-
-    #[test]
-    fn credential_injection_gate_allows_jet_cred_id_when_enabled() {
-        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), true).is_ok());
-    }
-
-    #[test]
-    fn credential_injection_gate_rejects_jet_cred_id_when_disabled() {
-        assert!(enforce_credential_injection_enabled(Uuid::new_v4(), false).is_err());
     }
 }
