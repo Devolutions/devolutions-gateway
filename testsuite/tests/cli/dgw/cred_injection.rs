@@ -496,7 +496,7 @@ async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn required_missing_fails_closed() -> anyhow::Result<()> {
+async fn expired_staging_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
@@ -507,22 +507,18 @@ async fn required_missing_fails_closed() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
-    let logs = gateway.logs.wait_contains(MISSING_LOG).await?;
+    let logs = gateway.logs.wait_contains(FORWARD_LOG).await?;
     assert!(
         !logs.contains(INJECT_LOG),
-        "expired mapping must not inject; logs:\n{logs}"
-    );
-    assert!(
-        !logs.contains(FORWARD_LOG),
-        "expired mapping must fail closed, never silent ordinary forward; logs:\n{logs}"
+        "evicted staging credentials must not inject; logs:\n{logs}"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        anyhow::ensure!(target.accepted() == 0, "fail-closed routing must not connect upstream");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert_eq!(target.accepted(), 0, "fail-closed routing must not connect upstream");
+    let cookies = target.wait_cookies(1).await?;
+    assert_eq!(
+        cookies,
+        vec![CLIENT_COOKIE],
+        "ordinary forward must keep the decoded client cookie"
+    );
 
     let _ = gateway.process.start_kill();
     Ok(())
