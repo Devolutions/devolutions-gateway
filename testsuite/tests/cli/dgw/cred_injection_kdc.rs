@@ -23,11 +23,11 @@ use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use picky_krb::data_types::PrincipalName;
 use picky_krb::messages::{AsRep, AsReq, KdcProxyMessage, KrbError, TgsRep, TgsReq};
+use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::{ClientConfig, ServerConfig};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::rustls::pki_types::pem::PemObject as _;
-use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use tokio_rustls::rustls::{ClientConfig, ServerConfig};
 use x509_cert::der::Decode as _;
 
 use super::cred_injection::{
@@ -895,53 +895,53 @@ fn dangerous_tls_connector() -> tokio_rustls::TlsConnector {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
         .with_no_client_auth();
-    config.resumption = tokio_rustls::rustls::client::Resumption::disabled();
+    config.resumption = rustls::client::Resumption::disabled();
     tokio_rustls::TlsConnector::from(Arc::new(config))
 }
 
 fn install_crypto_provider() {
-    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 #[derive(Debug)]
 struct NoCertificateVerification;
 
-impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
+impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     fn verify_server_cert(
         &self,
         _: &CertificateDer<'_>,
         _: &[CertificateDer<'_>],
         _: &ServerName<'_>,
         _: &[u8],
-        _: tokio_rustls::rustls::pki_types::UnixTime,
-    ) -> Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error> {
-        Ok(tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
+        _: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
         &self,
         _: &[u8],
         _: &CertificateDer<'_>,
-        _: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-        Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
         &self,
         _: &[u8],
         _: &CertificateDer<'_>,
-        _: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-        Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
-    fn supported_verify_schemes(&self) -> Vec<tokio_rustls::rustls::SignatureScheme> {
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         vec![
-            tokio_rustls::rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            tokio_rustls::rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            tokio_rustls::rustls::SignatureScheme::RSA_PSS_SHA256,
-            tokio_rustls::rustls::SignatureScheme::ED25519,
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::ED25519,
         ]
     }
 }
