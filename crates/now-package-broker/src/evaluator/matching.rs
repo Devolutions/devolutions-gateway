@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use now_policy::{Architecture, Elevation, ManagerName, Operation, PolicyRule, Scope};
-use now_policy_api::PackageRequest;
+use now_policy_api::{self as api, PackageRequest};
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
@@ -18,16 +18,16 @@ pub(super) fn rule_matches(
 ) -> bool {
     let m = &rule.match_criteria;
 
-    operations_match(request.operation.into(), &m.operations)
-        && managers_match(request.manager.into(), &m.managers)
+    operations_match(policy_operation(request.operation), &m.operations)
+        && managers_match(policy_manager(request.manager), &m.managers)
         && wildcard_any(&request.source.name, &m.sources)
         && wildcard_any(&request.package.id, &m.package_identifiers)
         && m.package_names.is_empty()
         && string_in_set(effective_version, &m.versions)
         && version_range_matches(effective_version, &m.version_range)
-        && scopes_match(request.options.scope.map(Into::into), &m.scopes)
-        && architectures_match(request.package.architecture.map(Into::into), &m.architectures)
-        && elevation_match(request.client.requested_elevation.into(), &m.elevation)
+        && scopes_match(request.options.scope.map(policy_scope), &m.scopes)
+        && architectures_match(request.package.architecture.map(policy_architecture), &m.architectures)
+        && elevation_match(policy_elevation(request.client.requested_elevation), &m.elevation)
         && bool_in_set(request.options.interactive, &m.interactive)
         && bool_in_set(request.options.skip_hash_check, &m.skip_hash_check)
         && bool_in_set(request.options.pre_release, &m.pre_release)
@@ -37,6 +37,59 @@ pub(super) fn rule_matches(
         && bool_in_set(flags.has_kill_before_operation, &m.has_kill_before_operation)
         && bool_in_set(flags.has_uninstall_previous, &m.has_uninstall_previous)
         && constraints_pass(&rule.constraints, request, flags)
+}
+
+fn policy_operation(operation: api::Operation) -> Operation {
+    match operation {
+        api::Operation::Install => Operation::Install,
+        api::Operation::Update => Operation::Update,
+        api::Operation::Uninstall => Operation::Uninstall,
+    }
+}
+
+fn policy_manager(manager: api::ManagerName) -> ManagerName {
+    match manager {
+        api::ManagerName::Winget => ManagerName::Winget,
+        api::ManagerName::PowerShell => ManagerName::PowerShell,
+        api::ManagerName::PowerShell7 => ManagerName::PowerShell7,
+        api::ManagerName::Apt => ManagerName::Apt,
+        api::ManagerName::Bun => ManagerName::Bun,
+        api::ManagerName::Cargo => ManagerName::Cargo,
+        api::ManagerName::Chocolatey => ManagerName::Chocolatey,
+        api::ManagerName::Dnf => ManagerName::Dnf,
+        api::ManagerName::Dotnet => ManagerName::Dotnet,
+        api::ManagerName::Flatpak => ManagerName::Flatpak,
+        api::ManagerName::Homebrew => ManagerName::Homebrew,
+        api::ManagerName::Npm => ManagerName::Npm,
+        api::ManagerName::Pacman => ManagerName::Pacman,
+        api::ManagerName::Pip => ManagerName::Pip,
+        api::ManagerName::Scoop => ManagerName::Scoop,
+        api::ManagerName::Snap => ManagerName::Snap,
+        api::ManagerName::Vcpkg => ManagerName::Vcpkg,
+    }
+}
+
+fn policy_scope(scope: api::Scope) -> Scope {
+    match scope {
+        api::Scope::User => Scope::User,
+        api::Scope::Machine => Scope::Machine,
+    }
+}
+
+fn policy_architecture(architecture: api::Architecture) -> Architecture {
+    match architecture {
+        api::Architecture::X86 => Architecture::X86,
+        api::Architecture::X64 => Architecture::X64,
+        api::Architecture::Arm64 => Architecture::Arm64,
+        api::Architecture::Neutral => Architecture::Neutral,
+    }
+}
+
+fn policy_elevation(elevation: api::Elevation) -> Elevation {
+    match elevation {
+        api::Elevation::Standard => Elevation::Standard,
+        api::Elevation::Elevated => Elevation::Elevated,
+    }
 }
 
 fn operations_match(op: Operation, allowed: &BTreeSet<Operation>) -> bool {

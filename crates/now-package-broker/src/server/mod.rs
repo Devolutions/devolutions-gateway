@@ -115,7 +115,7 @@ impl PackageBrokerServer for BrokerConnection {
         self.state.capabilities(self.client.user_sid()).await
     }
 
-    async fn policy(&self) -> Result<PolicyResponse, ErrorResponse> {
+    async fn active_policy(&self) -> Result<PolicyResponse, ErrorResponse> {
         self.client
             .validate_connection(self.state.skip_signature_validation)
             .map_err(|error| {
@@ -477,7 +477,10 @@ impl BrokerState {
         let effective_decision = if audit_mode {
             Decision::Allow
         } else {
-            decision.decision.into()
+            match decision.decision {
+                now_policy::Decision::Allow => Decision::Allow,
+                now_policy::Decision::Deny => Decision::Deny,
+            }
         };
 
         let reason = if audit_mode && decision.decision != now_policy::Decision::Allow {

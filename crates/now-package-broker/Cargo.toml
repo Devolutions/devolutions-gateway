@@ -31,8 +31,8 @@ hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
 notify = { version = "7", default-features = false }
 now-policy = "0.2"
-now-policy-api = { version = "0.3", features = ["policy-compat"] }
-now-policy-server-template = { version = "0.3", features = ["policy-compat"] }
+now-policy-api = "0.3"
+now-policy-server-template = "0.3"
 parking_lot = "0.12"
 regex = "1"
 semver = "1"

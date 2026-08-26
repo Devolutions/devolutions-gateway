@@ -5,7 +5,7 @@ use now_policy::PolicyDocument;
 use now_policy_api::{
     API_VERSION_STR, ApiVersion, Architecture, ErrorCode, ErrorResponse, ErrorResponseKind, ManagerCapability,
     ManagerName, Operation, OperationDiagnostics, PackageRequest, RequestSummary, ResourceId, ResponsePolicyInfo,
-    RuleId, Scope, ServerContext, Transport,
+    RuleId, Scope, SemanticVersion, ServerContext, Transport,
 };
 
 use crate::operation_tracker::OperationTracker;
@@ -182,9 +182,9 @@ pub(super) fn request_summary(request: &PackageRequest) -> RequestSummary {
 
 pub(super) fn policy_info(policy: &PolicyDocument) -> ResponsePolicyInfo {
     ResponsePolicyInfo {
-        id: policy.metadata.id.clone().into(),
+        id: ResourceId(policy.metadata.id.0.clone()),
         revision: policy.metadata.revision,
-        policy_version: policy.policy_version.clone().into(),
+        policy_version: SemanticVersion(policy.policy_version.0.clone()),
     }
 }
 
