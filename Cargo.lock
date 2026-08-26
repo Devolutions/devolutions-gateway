@@ -929,9 +929,9 @@ dependencies = [
 
 [[package]]
 name = "cadeau"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abc663bd17ad2e21ad335c0d2c3fd51b341113c4165b8b5cc078dd15b97f3f9"
+checksum = "02884456f32df770744a0342e2c71aa06dadf62f383d03f89c08911f0d36dfaf"
 dependencies = [
  "xmf-sys",
 ]
@@ -2189,10 +2189,11 @@ dependencies = [
 
 [[package]]
 name = "ebml-iterable"
-version = "0.6.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5173ac3752f08b526a6991509615e1a345b221ec3c58c7633433e8c9582312"
+checksum = "255f697fda61d9a3ea24ec21aa4a443d2380660e2cb138e7167d18891abb4daa"
 dependencies = [
+ "bytes 1.12.1",
  "ebml-iterable-specification",
  "ebml-iterable-specification-derive",
  "futures",
@@ -7509,19 +7510,34 @@ dependencies = [
 name = "testsuite"
 version = "0.0.0"
 dependencies = [
+ "agent-tunnel",
+ "agent-tunnel-proto",
  "anyhow",
  "assert_cmd",
  "base64 0.23.1",
+ "camino",
+ "devolutions-gateway",
+ "devolutions-gateway-task",
  "dynosaur",
  "escargot",
  "expect-test",
  "fastrand",
+ "futures-util",
+ "ipnetwork",
  "libsql",
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
+ "nonempty",
+ "picky",
  "proxy-socks",
+ "quinn",
+ "rcgen",
+ "reqwest",
  "rstest",
+ "rustls 0.23.43",
+ "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sysevent",
@@ -7534,6 +7550,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "typed-builder",
+ "uuid",
 ]
 
 [[package]]
@@ -8613,6 +8630,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "bytes 1.12.1",
  "cadeau",
  "criterion",
  "ebml-iterable",
@@ -8800,9 +8818,9 @@ dependencies = [
 
 [[package]]
 name = "webm-iterable"
-version = "0.6.4"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd9fbf173b4b38f2f8bbb0082a0d4cb21f263a70811f5fccb1663c421c66d9f9"
+checksum = "a2ebdc6faab4925edc7737bd0a04f9784f8b8e2cbb174aa523e94689575cd152"
 dependencies = [
  "ebml-iterable",
 ]
@@ -9562,9 +9580,9 @@ dependencies = [
 
 [[package]]
 name = "xmf-sys"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe719e326e963b00276c45c7d8a10567330106f48ea56ad25976b4be0e6caebc"
+checksum = "046fee6c2b1b7e4ae631265485f27436ebee39ff5229d532da08065bc8de9821"
 dependencies = [
  "dlib",
 ]

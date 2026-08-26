@@ -239,6 +239,37 @@ jobs:
         shell: pwsh
         run: sccache --show-stats
 
+  agent-tunnel-e2e:
+    name: agent tunnel end-to-end test
+    needs: [preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
+      - name: Configure runner
+        run: docker info
+
+      - name: Test agent tunnel
+        shell: pwsh
+        run: cargo test --locked -p testsuite --test integration_tests cli::agent::tunnel::docker_isolates_real_agent_dns_and_ip_routes -- --ignored --exact --nocapture
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
+
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
     needs: [preflight]
@@ -1267,7 +1298,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:
