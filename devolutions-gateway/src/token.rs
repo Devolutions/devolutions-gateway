@@ -287,7 +287,7 @@ pub enum RecordingFileType {
 
 impl RecordingFileType {
     pub const WEBM_CONTENT_TYPE: &'static str = "video/webm";
-    pub const TRP_CONTENT_TYPE: &'static str = "application/vnd.devolutions.trp";
+    pub const TRP_CONTENT_TYPE: &'static str = "application/octet-stream";
     pub const ASCIICAST_CONTENT_TYPE: &'static str = "application/x-asciicast";
     pub const SLOG_CONTENT_TYPE: &'static str = "application/x-ndjson";
 
@@ -1900,7 +1900,7 @@ mod tests {
     fn recording_file_types_have_concrete_content_types() {
         let expected = [
             (RecordingFileType::WebM, "video/webm"),
-            (RecordingFileType::TRP, "application/vnd.devolutions.trp"),
+            (RecordingFileType::TRP, "application/octet-stream"),
             (RecordingFileType::Asciicast, "application/x-asciicast"),
             (RecordingFileType::SessionRecordingLog, "application/x-ndjson"),
         ];

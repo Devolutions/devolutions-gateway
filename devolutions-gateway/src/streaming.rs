@@ -82,6 +82,8 @@ enum StreamingType {
     WebM,
 }
 
+/// Determines streamability from recording type, which is stricter than pull MIME handling.
+/// A file may be downloadable but still rejected here when there is no streaming backend.
 async fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
     let path_extension = path
         .extension()

@@ -323,10 +323,6 @@ paths:
               schema:
                 type: string
                 format: binary
-            application/vnd.devolutions.trp:
-              schema:
-                type: string
-                format: binary
             application/x-ndjson:
               schema:
                 type: string

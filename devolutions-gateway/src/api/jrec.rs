@@ -570,7 +570,6 @@ pub(crate) async fn pull_recording_session(
             content_type = [
                 "video/webm",
                 "application/x-asciicast",
-                "application/vnd.devolutions.trp",
                 "application/x-ndjson",
                 "application/json",
                 "application/octet-stream",
@@ -622,12 +621,9 @@ where
         .map_err(HttpError::internal().err())?;
 
     let content_type = recording_file_content_type(&path);
-
-    if let Some(content_type) = content_type {
-        response
-            .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    }
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     Ok(response)
 }
@@ -649,10 +645,15 @@ fn is_safe_recording_file_name(file_name: &str) -> bool {
     !file_name.is_empty() && !file_name.contains("..") && !file_name.contains('/') && !file_name.contains('\\')
 }
 
-fn recording_file_content_type(path: &Utf8Path) -> Option<&'static str> {
+fn recording_file_content_type(path: &Utf8Path) -> &'static str {
+    if path.file_name() == Some("recording.json") {
+        return "application/json";
+    }
+
     path.extension()
         .and_then(RecordingFileType::from_extension)
         .map(RecordingFileType::content_type)
+        .unwrap_or("application/octet-stream")
 }
 
 /// Immutable package membership for one download attempt.
@@ -1034,12 +1035,13 @@ mod tests {
     #[test]
     fn detects_recording_file_content_types() {
         let expected_content_types = [
-            ("recording-0.webm", Some("video/webm")),
-            ("recording-0.trp", Some("application/vnd.devolutions.trp")),
-            ("recording-0.cast", Some("application/x-asciicast")),
-            ("recording-0.slog", Some("application/x-ndjson")),
-            ("recording.json", None),
-            ("recording-0.bin", None),
+            ("recording-0.webm", "video/webm"),
+            ("recording-0.trp", "application/octet-stream"),
+            ("recording-0.cast", "application/x-asciicast"),
+            ("recording-0.slog", "application/x-ndjson"),
+            ("recording.json", "application/json"),
+            ("recording-0.bin", "application/octet-stream"),
+            ("recording-0", "application/octet-stream"),
         ];
 
         for (file_name, expected_content_type) in expected_content_types {
