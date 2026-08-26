@@ -31,7 +31,14 @@ typed-builder = "0.21"
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 
 [dev-dependencies]
+agent-tunnel = { path = "../crates/agent-tunnel", features = ["test-utils"] }
+agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
 base64 = "0.23"
+camino = "1"
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+devolutions-gateway = { path = "../devolutions-gateway" }
+futures-util = "0.3"
+ipnetwork = "0.20"
 ironrdp-connector = "0.10"
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
@@ -39,17 +46,26 @@ ironrdp-tokio = "0.10"
 kdc = "0.1"
 picky-asn1-der = "0.5"
 picky-krb = "0.12"
-proxy-socks = { path = "../crates/proxy-socks" }
 libsql = { version = "0.9", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
+nonempty = "0.12"
+picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
+proxy-socks = { path = "../crates/proxy-socks" }
+quinn = "0.11"
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rstest = "0.25"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
 tokio-rustls = { version = "0.26", features = ["ring"] }
+uuid = { version = "1", features = ["v4"] }
 x509-cert = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dev-dependencies]
