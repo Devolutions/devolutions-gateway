@@ -13,6 +13,7 @@ bench = ["perf-diagnostics"]
 
 [dependencies]
 anyhow = "1.0"
+bytes = "1"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio = { version = "1.52", features = [
     "io-util",
@@ -24,11 +25,11 @@ tokio = { version = "1.52", features = [
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
-cadeau = { version = "0.5", features = ["dlopen"] }
+cadeau = { version = "0.5.2", features = ["dlopen"] }
 thiserror = "2"
 num_cpus = "1.17"
-ebml-iterable = "0.6"
-webm-iterable = "0.6"
+ebml-iterable = "0.7"
+webm-iterable = "0.7"
 
 [dev-dependencies]
 criterion = "0.5"
