@@ -4802,7 +4802,6 @@ checksum = "fa0817fd85c0a6b0173e2b837fa2b369be684c93c11fed1b5182284021411839"
 dependencies = [
  "chrono",
  "derive_more",
- "now-policy",
  "schemars",
  "semver",
  "serde",
@@ -4820,7 +4819,6 @@ dependencies = [
  "aide",
  "async-trait",
  "axum 0.8.9",
- "now-policy",
  "now-policy-api",
  "schemars",
  "serde",
