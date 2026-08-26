@@ -10,8 +10,7 @@ Name | Type | Description | Notes
 **Kind** | **PreflightOperationKind** |  | 
 **ProxyCredential** | [**AppCredential**](AppCredential.md) |  | [optional] 
 **TargetCredential** | [**AppCredential**](AppCredential.md) |  | [optional] 
-**TimeToLive** | **int?** | Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds. | [optional] 
+**TimeToLive** | **int?** | Retention duration in seconds for data provisioned by this operation.  For \&quot;provision-credentials\&quot;, this is the maximum staging time before the first credential checkout. After checkout, Gateway retains the credentials for later connections authorized for the same association.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds. | [optional]
 **Token** | **string** | The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds. | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
-

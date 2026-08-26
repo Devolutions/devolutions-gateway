@@ -16,7 +16,8 @@ use tracing::field;
 const PCB_TRANSMIT_DEADLINE: Duration = Duration::from_secs(10);
 
 use crate::config::Conf;
-use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialService};
+use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
+use crate::provisioning::{MappingStatus, ProvisioningStore};
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
@@ -425,23 +426,21 @@ async fn connect_rdp_server(
     })
 }
 
-/// Handle RDP connection with credential injection via CredSSP MITM
+/// Handle RDP connection with credential injection via CredSSP MITM.
 #[expect(clippy::too_many_arguments)]
 async fn handle_with_credential_injection(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
-    token_cache: &TokenCache,
-    jrl: &CurrentJrl,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
-    credential_injection_kdc: CredentialInjectionKdc,
+    claims: AssociationTokenClaims,
+    provisioning: &ProvisioningStore,
+    synthetic_kdc_registry: &SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
-
     let gateway_hostname = conf.hostname.clone();
 
     let x224_req = cleanpath_pdu
@@ -451,7 +450,6 @@ async fn handle_with_credential_injection(
     let received_connection_request: ironrdp_pdu::x224::X224<nego::ConnectionRequest> =
         ironrdp_core::decode(x224_req.as_bytes()).context("decode X224 connection request PDU from client")?;
 
-    // Choose the security protocol to use with the client.
     let received_connection_request_protocol = received_connection_request.0.protocol;
     let client_security_protocol = if received_connection_request_protocol.contains(nego::SecurityProtocol::HYBRID_EX) {
         nego::SecurityProtocol::HYBRID_EX
@@ -468,18 +466,23 @@ async fn handle_with_credential_injection(
         )
     };
 
-    // Authorize and connect to the RDP server.
-    let CleanPathAuth { claims } = authorize_cleanpath(
-        &cleanpath_pdu,
-        client_addr,
-        &conf,
-        token_cache,
-        jrl,
-        active_recordings,
-        &sessions,
+    let token = cleanpath_pdu
+        .proxy_auth
+        .clone()
+        .context("missing token in RDCleanPath PDU")?;
+
+    let kerberos_enabled = crate::credential_injection::kerberos_injection_opt_in(
+        conf.debug.enable_unstable,
+        conf.debug.kerberos_credential_injection,
+    );
+    let credential_injection = CredentialInjection::checkout(
+        provisioning,
+        synthetic_kdc_registry,
+        claims.jti,
+        &token,
+        kerberos_enabled,
     )
-    .await
-    .context("RDCleanPath authorization failed")?;
+    .context("checkout credential-injection material before connecting upstream")?;
 
     let ConnectedRdpServer {
         tls_stream: server_stream,
@@ -491,13 +494,11 @@ async fn handle_with_credential_injection(
         .context("RDCleanPath connection failed")?;
     let x224_rsp = x224_rsp.context("RDCleanPath credential injection requires X.224")?;
 
-    // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
-        gateway_hostname.clone(),
+        gateway_hostname,
         tls_conf.acceptor.clone(),
     ));
 
-    // Extract server security protocol from X224 response (before x224_rsp is moved).
     let x224_confirm: ironrdp_pdu::x224::X224<nego::ConnectionConfirm> =
         ironrdp_core::decode(&x224_rsp).context("decode X224 connection confirm")?;
     let server_security_protocol = match &x224_confirm.0 {
@@ -521,8 +522,7 @@ async fn handle_with_credential_injection(
     let gateway_public_key = crate::tls::extract_public_key(gateway_cert_chain.first().context("no leaf")?)
         .context("extract Gateway public key")?;
 
-    // Send RDCleanPath response to client using Devolutions Gateway certification chain.
-    // (When performing credential injection, the client performs CredSSP against the Devolutions Gateway.)
+    // Client CredSSP runs against the Gateway certificate chain.
     trace!("Sending RDCleanPath response");
     let rd_clean_path_rsp = RDCleanPathPdu::new_response(
         server_addr.to_string(),
@@ -531,73 +531,8 @@ async fn handle_with_credential_injection(
     )
     .context("couldn't build RDCleanPath response")?;
     send_clean_path_response(&mut client_stream, &rd_clean_path_rsp).await?;
-    debug!("RDCleanPath response sent, now performing CredSSP MITM");
+    debug!("RDCleanPath response sent, starting CredSSP MITM");
 
-    // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
-
-    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
-
-    let krb_configs = crate::rdp_proxy::credential_injection_kerberos_configs(
-        &conf,
-        client_addr,
-        &gateway_hostname,
-        &credential_injection_kdc,
-    )?;
-
-    let kdc_connector =
-        crate::kdc_connector::KdcConnector::new(claims.jet_aid, claims.jet_agent_id, agent_tunnel_handle.clone());
-
-    let client_credssp_fut = crate::rdp_proxy::perform_credssp_as_server(
-        &mut client_framed,
-        client_addr.ip(),
-        gateway_public_key,
-        client_security_protocol,
-        credential_injection_kdc.proxy_credential(),
-        krb_configs.server,
-        &credential_injection_kdc,
-        &kdc_connector,
-    );
-
-    let server_credssp_fut = crate::rdp_proxy::perform_credssp_as_client(
-        &mut server_framed,
-        destination.host().to_owned(),
-        server_public_key,
-        server_security_protocol,
-        credential_injection_kdc.target_credential(),
-        krb_configs.client,
-        &kdc_connector,
-    );
-
-    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_credssp_res.context("CredSSP with client")?;
-    server_credssp_res.context("CredSSP with server")?;
-
-    debug!("CredSSP MITM completed successfully");
-
-    // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
-
-    crate::rdp_proxy::intercept_connect_confirm(&mut client_framed, &mut server_framed, server_security_protocol)
-        .await?;
-
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
-
-    // -- At this point, proceed to the usual two-way forwarding -- //
-
-    info!("RDP-TLS forwarding (credential injection)");
-
-    client_stream
-        .write_all(&server_leftover)
-        .await
-        .context("write server leftover to client")?;
-
-    server_stream
-        .write_all(&client_leftover)
-        .await
-        .context("write client leftover to server")?;
-
-    // Build SessionInfo for forwarding
     let info = SessionInfo::builder()
         .id(claims.jet_aid)
         .application_protocol(claims.jet_ap)
@@ -610,22 +545,32 @@ async fn handle_with_credential_injection(
         .build();
 
     let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
+    let kdc_connector =
+        crate::kdc_connector::KdcConnector::new(claims.jet_aid, claims.jet_agent_id, agent_tunnel_handle.clone());
 
-    // Plain forwarding for now
-    Proxy::builder()
+    let session = crate::rdp_proxy::CredsspSession::builder()
         .conf(conf)
         .session_info(info)
-        .address_a(client_addr)
-        .transport_a(client_stream)
-        .address_b(server_addr)
-        .transport_b(server_stream)
+        .client_addr(client_addr)
+        .server_addr(server_addr)
+        .credential_injection(credential_injection)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
+        .server_dns_name(destination.host().to_owned())
         .disconnect_interest(disconnect_interest)
-        .build()
-        .select_dissector_and_forward()
-        .await
-        .context("proxy failed")
+        .kdc_connector(kdc_connector)
+        .build();
+
+    let prepared = crate::rdp_proxy::PreparedCredssp::builder()
+        .client_stream(client_stream)
+        .server_stream(server_stream)
+        .gateway_public_key(gateway_public_key)
+        .server_public_key(server_public_key)
+        .client_security_protocol(client_security_protocol)
+        .server_security_protocol(server_security_protocol)
+        .build();
+
+    session.run(prepared).await
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -639,7 +584,8 @@ pub async fn handle(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
-    credentials: &CredentialService,
+    provisioning: &ProvisioningStore,
+    synthetic_kdc_registry: &SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     // Special handshake of our RDP extension
@@ -650,71 +596,58 @@ pub async fn handle(
         .await
         .context("couldn't read cleanpath PDU")?;
 
-    // Early credential detection: check if we should use RdpProxy instead.
-    let token = cleanpath_pdu
-        .proxy_auth
-        .as_deref()
-        .context("missing token in RDCleanPath PDU")?;
-
-    // If a credential mapping has been pushed, we automatically switch to
-    // proxy-based credential injection mode. Otherwise, we continue the usual
-    // clean path procedure. The credential store is keyed on the association token's JTI.
-    if let Some(jti) = crate::token::extract_jti(token).ok()
-        && let Some(entry) = credentials.get(jti)
-        && entry.mapping.is_some()
+    let auth = match authorize_cleanpath(
+        &cleanpath_pdu,
+        client_addr,
+        &conf,
+        token_cache,
+        jrl,
+        active_recordings,
+        &sessions,
+    )
+    .await
     {
-        // VMConnect needs pre-X.224 CredSSP against the Hyper-V host cert on the client.
-        // Proxy CredSSP MITM is X.224-first and is not supported for this ordering.
-        if is_vmconnect_request(&cleanpath_pdu) {
-            let response = RDCleanPathPdu::new_http_error(400);
+        Ok(auth) => auth,
+        Err(error) => {
+            let response = RDCleanPathPdu::from(&error);
             send_clean_path_response(&mut client_stream, &response).await?;
-            anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
+            return anyhow::Error::new(error)
+                .context("an error occurred when processing cleanpath PDU")
+                .pipe(Err)?;
         }
+    };
 
-        let credential_injection_kdc = credentials.kdc_for(jti)?;
-        anyhow::ensure!(token == credential_injection_kdc.raw_token(), "token mismatch");
-        debug!(
-            jti = %credential_injection_kdc.jti(),
-            "Switching to RdpProxy for credential injection (WebSocket)"
-        );
+    let mapping_status = provisioning.mapping_status(auth.claims.jti);
+    if is_vmconnect_request(&cleanpath_pdu) && mapping_status == MappingStatus::Available {
+        let response = RDCleanPathPdu::new_http_error(400);
+        send_clean_path_response(&mut client_stream, &response).await?;
+        anyhow::bail!("credential injection is not supported for VMConnect RDCleanPath");
+    }
 
-        return handle_with_credential_injection(
-            client_stream,
-            client_addr,
-            conf,
-            token_cache,
-            jrl,
-            sessions,
-            subscriber_tx,
-            active_recordings,
-            cleanpath_pdu,
-            credential_injection_kdc,
-            agent_tunnel_handle.clone(),
-        )
-        .await;
+    match mapping_status {
+        MappingStatus::Available => {
+            debug!(jti = %auth.claims.jti, "Switching to RdpProxy for credential injection (WebSocket)");
+            return handle_with_credential_injection(
+                client_stream,
+                client_addr,
+                conf,
+                sessions,
+                subscriber_tx,
+                cleanpath_pdu,
+                auth.claims,
+                provisioning,
+                synthetic_kdc_registry,
+                agent_tunnel_handle.clone(),
+            )
+            .await;
+        }
+        MappingStatus::Absent => {}
     }
 
     trace!("Processing RDCleanPath");
 
-    let (auth, connected) = match async {
-        let auth = authorize_cleanpath(
-            &cleanpath_pdu,
-            client_addr,
-            &conf,
-            token_cache,
-            jrl,
-            active_recordings,
-            &sessions,
-        )
-        .await?;
-
-        let connected = connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await?;
-
-        Ok::<_, CleanPathError>((auth, connected))
-    }
-    .await
-    {
-        Ok(result) => result,
+    let connected = match connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await {
+        Ok(connected) => connected,
         Err(error) => {
             let response = RDCleanPathPdu::from(&error);
             send_clean_path_response(&mut client_stream, &response).await?;

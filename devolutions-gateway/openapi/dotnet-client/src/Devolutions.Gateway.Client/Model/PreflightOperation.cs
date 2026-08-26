@@ -53,7 +53,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="kind">kind (required).</param>
         /// <param name="proxyCredential">proxyCredential.</param>
         /// <param name="targetCredential">targetCredential.</param>
-        /// <param name="timeToLive">Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds..</param>
+        /// <param name="timeToLive">Retention duration in seconds for data provisioned by this operation.  For \&quot;provision-credentials\&quot;, this is the maximum staging time before the first credential checkout. After checkout, Gateway retains the credentials for later connections authorized for the same association.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds..</param>
         public PreflightOperation(TargetConnectionOptions connectionOptions = default(TargetConnectionOptions), string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
@@ -100,9 +100,9 @@ namespace Devolutions.Gateway.Client.Model
         public AppCredential TargetCredential { get; set; }
 
         /// <summary>
-        /// Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds.
+        /// Retention duration in seconds for data provisioned by this operation.  For \&quot;provision-credentials\&quot;, this is the maximum staging time before the first credential checkout. After checkout, Gateway retains the credentials for later connections authorized for the same association.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds.
         /// </summary>
-        /// <value>Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds.</value>
+        /// <value>Retention duration in seconds for data provisioned by this operation.  For \&quot;provision-credentials\&quot;, this is the maximum staging time before the first credential checkout. After checkout, Gateway retains the credentials for later connections authorized for the same association.  Optional parameter for \&quot;provision-token\&quot;, \&quot;provision-credentials\&quot;, and \&quot;provision-connection-options\&quot; kinds.</value>
         [DataMember(Name = "time_to_live", EmitDefaultValue = true)]
         public int? TimeToLive { get; set; }
 

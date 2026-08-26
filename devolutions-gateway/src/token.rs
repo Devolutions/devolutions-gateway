@@ -1279,6 +1279,24 @@ pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jti").context("extract jti")
 }
 
+/// Extract the JWT `exp` claim without verifying the signature.
+pub fn extract_exp(token: &str) -> anyhow::Result<i64> {
+    let payload = extract_payload(token)?;
+    let exp = payload.get("exp").context("exp is missing from the token")?;
+    exp.as_i64()
+        .or_else(|| exp.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .context("exp is malformed")
+}
+
+/// Latest instant at which Gateway will still accept a token with this `exp`.
+///
+/// Includes the hardcoded JWT clock-skew leeway.
+pub(crate) fn token_acceptance_deadline(exp: i64) -> anyhow::Result<time::OffsetDateTime> {
+    let timestamp = exp.saturating_add(i64::from(LEEWAY_SECS));
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .context("token expiration is outside the supported timestamp range")
+}
+
 pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jet_aid").context("extract jet_aid")
 }
