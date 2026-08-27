@@ -141,7 +141,7 @@ mod as_of_v2026_3_0_0 {
     }
 
     fn dvls_reuse_policy() -> impl Strategy<Value = Option<u32>> {
-        prop_oneof![Just(None), (1u32..=900u32).prop_map(Some),]
+        prop_oneof![Just(None), (0u32..=900u32).prop_map(Some),]
     }
 
     fn dvls_jrec_claims(now: i64) -> impl Strategy<Value = DvlsJrecClaims> {
@@ -214,6 +214,15 @@ mod as_of_v2026_3_0_0 {
         nbf: 1_700_000_000,
         exp: 4_102_444_800,
         jti: uuid!("7de3320f-9760-4f6e-b2f4-b9e3f64f0f43"),
+    })]
+    #[case::push_disallow_reuse(DvlsJrecClaims {
+        jet_aid: uuid!("3e7c1854-f1eb-42d2-b9cb-9303036e50da"),
+        jet_rop: DvlsRecordingOperation::Push,
+        jet_gw_id: uuid!("ccbaad3f-4627-4666-8bb5-cb6a1a7db815"),
+        jet_reuse: Some(0),
+        nbf: 1_700_000_000,
+        exp: 4_102_444_800,
+        jti: uuid!("8a5a88fc-1184-4417-b70d-a9c2f9ec92a9"),
     })]
     fn samples(
         #[case] claims: DvlsJrecClaims,
