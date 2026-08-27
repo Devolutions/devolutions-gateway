@@ -293,7 +293,6 @@ impl CredentialInjection {
     }
 }
 
-/// Unstable debug opt-in for Kerberos credential injection (both legs).
 /// Whether the target username should use Kerberos injection (otherwise NTLM).
 pub(crate) fn select_kerberos_for_target(kerberos_enabled: bool, target_username: &str) -> bool {
     if !kerberos_enabled {

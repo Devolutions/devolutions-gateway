@@ -537,11 +537,6 @@
           "type": "string",
           "description": "Path to lib XMF files."
         },
-        "kerberos_credential_injection": {
-          "type": "boolean",
-          "default": false,
-          "description": "Ignored. Kerberos credential injection is always available when provisioned."
-        },
         "enable_unstable": {
           "type": "boolean",
           "default": false,
