@@ -5,5 +5,4 @@ mod cred_injection_kdc;
 mod heartbeat;
 mod preflight;
 mod tls_anchoring;
-mod tls_fixtures;
 mod traffic_audit;
