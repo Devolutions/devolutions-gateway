@@ -6,5 +6,4 @@ mod heartbeat;
 mod preflight;
 mod subscriber;
 mod tls_anchoring;
-mod tls_fixtures;
 mod traffic_audit;
