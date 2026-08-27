@@ -168,7 +168,7 @@ async fn start_dummy_tls_server() -> anyhow::Result<u16> {
 }
 
 mod tls {
-    pub(super) use super::super::tls_fixtures::{CERT_PEM, KEY_PEM};
+    pub(super) use testsuite::tls_fixtures::{CERT_PEM, KEY_PEM};
 
     /// SHA-256 thumbprint of the certificate.
     pub(super) const CERT_THUMBPRINT: &str = "bce13f257b9d856404c51b46f2420eff6d01b3a4c99fe3d0e11e4517c2291b70";

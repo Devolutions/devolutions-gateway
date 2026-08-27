@@ -1,7 +1,7 @@
 //! Shared localhost TLS material for process-level Gateway tests.
 
 /// Self-signed certificate for localhost (valid for 100 years).
-pub(crate) const CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+pub const CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIIDCzCCAfOgAwIBAgIUPRJa8i280unV3/kW6TE2fSUw8PwwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI1MTEyNTA5NDAzMFoYDzIxMjUx
 MTAxMDk0MDMwWjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB
@@ -22,7 +22,7 @@ x9Ba6YbssOz6epATKhvt80yclO34AzUyimssvViIUpgFEyaPhZZTw46Q/6X3ixK4
 -----END CERTIFICATE-----"#;
 
 /// Private key for the self-signed certificate.
-pub(crate) const KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+pub const KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDHpBlyRgUx/V9c
 QGw/eqDFc6odxB2hvnbudi67LvEjcNIWOU79R1e/NswME4oecqT9W05n4UyxkABf
 m2qjODO0nDf47W0DsgbEA87qE715RWg8AtC529CZAazqTV3gqYyRMsCuVKzPVxgW
