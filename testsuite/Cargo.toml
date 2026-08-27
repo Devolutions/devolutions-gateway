@@ -32,6 +32,7 @@ tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 
 [dev-dependencies]
 agent-tunnel = { path = "../crates/agent-tunnel", features = ["test-utils"] }
+agent-tunnel-libsql = { path = "../crates/agent-tunnel-libsql" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
 base64 = "0.23"
 camino = "1"

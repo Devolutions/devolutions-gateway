@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use agent_tunnel::AgentTunnelHandle;
-use agent_tunnel::cert::extract_agent_id_from_pem;
 use agent_tunnel::registry::AgentRegistry;
 use agent_tunnel_proto::{
     CertRenewalResult, ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, DomainName,
@@ -14,8 +13,8 @@ use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
 use super::common::{
-    accept_session_request, advertise_routes, bind_test_listener, generate_csr_with_cn, start_echo_server,
-    wait_for_route_advertised,
+    accept_session_request, advertise_routes, bind_test_listener, generate_csr_with_cn, generate_csr_with_key,
+    start_echo_server, wait_for_route_advertised,
 };
 
 fn target(host: &str, port: u16) -> TargetAddr {
@@ -313,10 +312,9 @@ async fn gateway_connect_upstream_does_not_bypass_failed_agent_routes() {
 }
 
 #[tokio::test]
-async fn gateway_listener_renews_authenticated_agent_identity() {
+async fn gateway_listener_rejects_certificate_renewal_key_rotation() {
     let listener = bind_test_listener().await;
-    let (agent_id, connection) = listener.connect_agent("renewal-agent").await;
-    let expected_ca = listener.handle.ca_manager().ca_cert_pem().to_owned();
+    let (agent_id, connection) = listener.connect_agent("key-rotation-agent").await;
     let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
 
     ctrl.send(&ControlMessage::route_advertise(1, vec![], vec![]))
@@ -333,25 +331,55 @@ async fn gateway_listener_renews_authenticated_agent_identity() {
         .await
         .expect("renewal response timed out")
         .expect("receive renewal response");
-    let renewed_pem = match response {
+    match response {
+        ControlMessage::CertRenewalResponse {
+            result: CertRenewalResult::Error { reason },
+            ..
+        } => {
+            assert!(
+                reason.contains("key rotation"),
+                "renewal error should explain that key rotation is rejected: {reason}"
+            );
+        }
+        other => panic!("expected renewal key rotation to fail, got {other:?}"),
+    }
+
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_listener_renews_certificate_with_accepted_key() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection, key_pair) = listener.connect_agent_with_key("renewal-agent").await;
+    let expected_ca = listener.handle.ca_manager().ca_cert_pem().to_owned();
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
+
+    ctrl.send(&ControlMessage::route_advertise(1, vec![], vec![]))
+        .await
+        .expect("send route advertisement");
+    wait_for_route_advertised(listener.handle.registry(), agent_id, 1).await;
+
+    let csr_pem = generate_csr_with_key("renewal-agent", &key_pair);
+    ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+        .await
+        .expect("send renewal request");
+
+    let response = tokio::time::timeout(Duration::from_secs(5), ctrl.recv())
+        .await
+        .expect("renewal response timed out")
+        .expect("receive renewal response");
+    match response {
         ControlMessage::CertRenewalResponse {
             result:
                 CertRenewalResult::Success {
-                    client_cert_pem,
+                    client_cert_pem: _,
                     gateway_ca_cert_pem,
                 },
             ..
-        } => {
-            assert_eq!(gateway_ca_cert_pem, expected_ca);
-            client_cert_pem
-        }
+        } => assert_eq!(gateway_ca_cert_pem, expected_ca),
         other => panic!("expected successful renewal, got {other:?}"),
-    };
-
-    assert_eq!(
-        extract_agent_id_from_pem(&renewed_pem).expect("read renewed agent identity"),
-        agent_id
-    );
+    }
 
     connection.close(0u32.into(), b"test done");
     listener.shutdown().await;

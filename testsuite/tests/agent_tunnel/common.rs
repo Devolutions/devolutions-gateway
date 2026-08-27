@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agent_tunnel::AgentTunnelHandle;
+use agent_tunnel::authorization::{EnrollmentAttempt, EnrollmentOutcome};
 use agent_tunnel::cert::CaManager;
 use agent_tunnel::listener::AgentTunnelListener;
 use agent_tunnel::registry::AgentRegistry;
@@ -29,11 +30,15 @@ pub(super) async fn start_echo_server() -> (SocketAddr, JoinHandle<()>) {
 
 pub(super) fn generate_csr_with_cn(cn: &str) -> (rcgen::KeyPair, String) {
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("generate test key pair");
+    let csr_pem = generate_csr_with_key(cn, &key_pair);
+    (key_pair, csr_pem)
+}
+
+pub(super) fn generate_csr_with_key(cn: &str, key_pair: &rcgen::KeyPair) -> String {
     let mut params = rcgen::CertificateParams::default();
     params.distinguished_name.push(rcgen::DnType::CommonName, cn);
-    let csr = params.serialize_request(&key_pair).expect("serialize test csr");
-    let csr_pem = csr.pem().expect("encode test csr");
-    (key_pair, csr_pem)
+    let csr = params.serialize_request(key_pair).expect("serialize test csr");
+    csr.pem().expect("encode test csr")
 }
 
 async fn connect_quinn_client(
@@ -97,6 +102,11 @@ pub(super) struct TestListener {
 
 impl TestListener {
     pub(super) async fn connect_agent(&self, agent_name: &str) -> (Uuid, quinn::Connection) {
+        let (agent_id, connection, _key_pair) = self.connect_agent_with_key(agent_name).await;
+        (agent_id, connection)
+    }
+
+    pub(super) async fn connect_agent_with_key(&self, agent_name: &str) -> (Uuid, quinn::Connection, rcgen::KeyPair) {
         let agent_id = Uuid::new_v4();
         let (key_pair, csr_pem) = generate_csr_with_cn(agent_name);
         let signed = self
@@ -104,6 +114,25 @@ impl TestListener {
             .ca_manager()
             .sign_agent_csr(agent_id, agent_name, &csr_pem, Some("localhost"))
             .expect("sign agent csr");
+        let client_cert_der = rustls_pemfile::certs(&mut std::io::BufReader::new(signed.client_cert_pem.as_bytes()))
+            .next()
+            .expect("find signed Agent certificate")
+            .expect("parse signed Agent certificate");
+        let client_spki_sha256 =
+            agent_tunnel::cert::spki_sha256_digest_from_der(&client_cert_der).expect("hash Agent public key");
+        let enrollment = self
+            .handle
+            .enroll(EnrollmentAttempt {
+                token_id: Uuid::new_v4(),
+                token_expires_at: 1_999_999_999,
+                agent_id,
+                name: agent_name.to_owned(),
+                client_spki_sha256,
+                request_sha256: [0; 32],
+            })
+            .await
+            .expect("accept test Agent");
+        assert!(matches!(enrollment, EnrollmentOutcome::Created(_)));
         let connection = connect_quinn_client(
             &signed.ca_cert_pem,
             &signed.client_cert_pem,
@@ -112,7 +141,7 @@ impl TestListener {
         )
         .await;
 
-        (agent_id, connection)
+        (agent_id, connection, key_pair)
     }
 
     pub(super) async fn shutdown(self) {
@@ -129,10 +158,15 @@ pub(super) async fn bind_test_listener() -> TestListener {
     let temp_dir = tempfile::tempdir().expect("create temporary directory");
     let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("use utf-8 temporary path");
     let ca_manager = CaManager::load_or_generate(&data_dir).expect("generate test ca");
-    let listen_addr: SocketAddr = "127.0.0.1:0".parse().expect("parse listener address");
-    let (listener, handle) = AgentTunnelListener::bind(listen_addr, ca_manager, "localhost")
+    let ca_spki_sha256 = ca_manager.ca_spki_sha256().expect("hash test CA public key");
+    let authorization_store = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(":memory:", ca_spki_sha256)
         .await
-        .expect("bind quic listener");
+        .expect("open test Agent authorization store");
+    let listen_addr: SocketAddr = "127.0.0.1:0".parse().expect("parse listener address");
+    let (listener, handle) =
+        AgentTunnelListener::bind(listen_addr, ca_manager, "localhost", Arc::new(authorization_store))
+            .await
+            .expect("bind quic listener");
     let server_addr = listener.local_addr();
     let (shutdown, shutdown_signal) = ShutdownHandle::new();
     let task = tokio::spawn(async move {

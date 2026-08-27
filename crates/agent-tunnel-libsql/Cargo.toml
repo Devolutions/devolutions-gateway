@@ -1,0 +1,21 @@
+[package]
+name = "agent-tunnel-libsql"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-tunnel.path = "../agent-tunnel"
+anyhow = "1"
+async-trait = "0.1"
+libsql = { version = "0.9", default-features = false, features = ["core", "serde"] }
+tokio = { version = "1.52", features = ["sync"] }
+uuid = "1.23"
+
+[dev-dependencies]
+tempfile = "3.24"
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }

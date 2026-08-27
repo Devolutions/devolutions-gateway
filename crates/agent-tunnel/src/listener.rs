@@ -12,9 +12,10 @@ use std::time::Duration;
 use agent_tunnel_proto::{ConnectRequest, ConnectResponse, ControlMessage, ControlStream, SessionStream};
 use anyhow::Context as _;
 use async_trait::async_trait;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
+use super::authorization::{AcceptedAgent, DynAgentAuthorizationStore, EnrollmentAttempt, EnrollmentOutcome};
 use super::cert::CaManager;
 use super::registry::{AgentPeer, AgentRegistry};
 use super::stream::TunnelStream;
@@ -29,9 +30,16 @@ use super::stream::TunnelStream;
 #[derive(Clone)]
 pub struct AgentTunnelHandle {
     registry: Arc<AgentRegistry>,
-    /// Map of agent_id → live Quinn connection, used for opening new streams.
-    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, RegisteredAgentConnection>>>,
     ca_manager: Arc<CaManager>,
+    authorization_store: DynAgentAuthorizationStore,
+    lifecycle: Arc<Mutex<()>>,
+}
+
+#[derive(Clone)]
+struct RegisteredAgentConnection {
+    instance_id: Uuid,
+    connection: quinn::Connection,
 }
 
 impl AgentTunnelHandle {
@@ -41,6 +49,39 @@ impl AgentTunnelHandle {
 
     pub fn ca_manager(&self) -> &CaManager {
         &self.ca_manager
+    }
+
+    pub async fn enroll(&self, attempt: EnrollmentAttempt) -> anyhow::Result<EnrollmentOutcome> {
+        let _lifecycle_guard = self.lifecycle.lock().await;
+        self.authorization_store.enroll(attempt).await
+    }
+
+    pub async fn accepted_agents(&self) -> anyhow::Result<Vec<AcceptedAgent>> {
+        self.authorization_store.list().await
+    }
+
+    pub async fn accepted_agent(&self, agent_id: Uuid) -> anyhow::Result<Option<AcceptedAgent>> {
+        self.authorization_store.get(agent_id).await
+    }
+
+    pub async fn delete_agent(&self, agent_id: Uuid) -> anyhow::Result<Option<AcceptedAgent>> {
+        let _lifecycle_guard = self.lifecycle.lock().await;
+        let Some(deleted) = self.authorization_store.delete(agent_id).await? else {
+            return Ok(None);
+        };
+
+        let connection = self
+            .agent_connections
+            .write()
+            .await
+            .remove(&agent_id)
+            .map(|registered| registered.connection);
+        self.registry.unregister(&agent_id).await;
+        if let Some(connection) = connection {
+            connection.close(0u32.into(), b"agent-deleted");
+        }
+
+        Ok(Some(deleted))
     }
 
     /// Open a proxy stream through a connected agent.
@@ -56,7 +97,7 @@ impl AgentTunnelHandle {
             .read()
             .await
             .get(&agent_id)
-            .cloned()
+            .map(|registered| registered.connection.clone())
             .ok_or_else(|| anyhow::anyhow!("agent {} not connected", agent_id))?;
 
         let mut session: SessionStream<_, _> = conn
@@ -104,8 +145,10 @@ impl AgentTunnelHandle {
 pub struct AgentTunnelListener {
     endpoint: quinn::Endpoint,
     registry: Arc<AgentRegistry>,
-    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, RegisteredAgentConnection>>>,
     ca_manager: Arc<CaManager>,
+    authorization_store: DynAgentAuthorizationStore,
+    lifecycle: Arc<Mutex<()>>,
 }
 
 impl AgentTunnelListener {
@@ -113,6 +156,7 @@ impl AgentTunnelListener {
         listen_addr: SocketAddr,
         ca_manager: Arc<CaManager>,
         hostname: &str,
+        authorization_store: DynAgentAuthorizationStore,
     ) -> anyhow::Result<(Self, AgentTunnelHandle)> {
         let tls_config = ca_manager
             .build_server_tls_config(hostname)
@@ -147,12 +191,15 @@ impl AgentTunnelListener {
         );
 
         let registry = Arc::new(AgentRegistry::new());
-        let agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>> = Arc::new(RwLock::new(HashMap::new()));
+        let agent_connections = Arc::new(RwLock::new(HashMap::new()));
+        let lifecycle = Arc::new(Mutex::new(()));
 
         let handle = AgentTunnelHandle {
             registry: Arc::clone(&registry),
             agent_connections: Arc::clone(&agent_connections),
             ca_manager: Arc::clone(&ca_manager),
+            authorization_store: Arc::clone(&authorization_store),
+            lifecycle: Arc::clone(&lifecycle),
         };
 
         let listener = Self {
@@ -160,6 +207,8 @@ impl AgentTunnelListener {
             registry,
             agent_connections,
             ca_manager,
+            authorization_store,
+            lifecycle,
         };
 
         Ok((listener, handle))
@@ -201,8 +250,17 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
                     let registry = Arc::clone(&self.registry);
                     let agent_connections = Arc::clone(&self.agent_connections);
                     let ca_manager = Arc::clone(&self.ca_manager);
+                    let authorization_store = Arc::clone(&self.authorization_store);
+                    let lifecycle = Arc::clone(&self.lifecycle);
 
-                    conn_handles.spawn(run_agent_connection(registry, agent_connections, ca_manager, incoming));
+                    conn_handles.spawn(run_agent_connection(
+                        registry,
+                        agent_connections,
+                        ca_manager,
+                        authorization_store,
+                        lifecycle,
+                        incoming,
+                    ));
                 }
 
                 // Reap completed connection tasks to prevent unbounded growth.
@@ -222,8 +280,10 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
 
 async fn run_agent_connection(
     registry: Arc<AgentRegistry>,
-    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, RegisteredAgentConnection>>>,
     ca_manager: Arc<CaManager>,
+    authorization_store: DynAgentAuthorizationStore,
+    lifecycle: Arc<Mutex<()>>,
     incoming: quinn::Incoming,
 ) {
     let peer_addr = incoming.remote_address();
@@ -244,25 +304,55 @@ async fn run_agent_connection(
 
         let agent_id =
             super::cert::extract_agent_id_from_der(peer_cert_der).context("extract agent_id from peer certificate")?;
-
-        let agent_name =
-            super::cert::extract_agent_name_from_der(peer_cert_der).unwrap_or_else(|_| format!("agent-{agent_id}"));
-
+        let client_spki_sha256 = super::cert::spki_sha256_digest_from_der(peer_cert_der)
+            .context("extract SPKI SHA-256 from peer certificate")?;
         let fingerprint = super::cert::cert_fingerprint_from_der(peer_cert_der);
+        let instance_id = Uuid::new_v4();
+        let lifecycle_guard = lifecycle.lock().await;
+        let accepted = authorization_store
+            .authorize(agent_id, client_spki_sha256)
+            .await
+            .context("query Agent authorization")?
+            .context("agent credential is not accepted")?;
+        let agent_name = accepted.name;
 
         info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
 
         let peer = Arc::new(AgentPeer::new(agent_id, agent_name.clone(), fingerprint));
         registry.register(Arc::clone(&peer)).await;
-        agent_connections.write().await.insert(agent_id, conn.clone());
+        let previous = agent_connections.write().await.insert(
+            agent_id,
+            RegisteredAgentConnection {
+                instance_id,
+                connection: conn.clone(),
+            },
+        );
+        if let Some(previous) = previous {
+            previous.connection.close(0u32.into(), b"connection-superseded");
+        }
+        drop(lifecycle_guard);
 
         // Accept the first bidirectional stream as the control stream.
-        let control_result = run_control_loop(&conn, agent_id, &agent_name, &registry, &ca_manager).await;
+        let control_result = run_control_loop(&conn, &peer, client_spki_sha256, &ca_manager).await;
 
         // Agent disconnected — clean up.
         info!(%agent_id, "Agent QUIC connection closed");
-        registry.unregister(&agent_id).await;
-        agent_connections.write().await.remove(&agent_id);
+        let _lifecycle_guard = lifecycle.lock().await;
+        let should_unregister = {
+            let mut connections = agent_connections.write().await;
+            if connections
+                .get(&agent_id)
+                .is_some_and(|registered| registered.instance_id == instance_id)
+            {
+                connections.remove(&agent_id);
+                true
+            } else {
+                false
+            }
+        };
+        if should_unregister {
+            registry.unregister(&agent_id).await;
+        }
 
         control_result
     }
@@ -275,12 +365,12 @@ async fn run_agent_connection(
 
 async fn run_control_loop(
     conn: &quinn::Connection,
-    agent_id: Uuid,
-    agent_name: &str,
-    registry: &AgentRegistry,
+    peer: &AgentPeer,
+    client_spki_sha256: [u8; 32],
     ca_manager: &CaManager,
 ) -> anyhow::Result<()> {
     let mut ctrl: ControlStream<_, _> = conn.accept_bi().await.context("accept control stream")?.into();
+    let agent_id = peer.agent_id;
 
     info!(%agent_id, "Control stream accepted");
 
@@ -300,7 +390,14 @@ async fn run_control_loop(
                     }
                 };
 
-                handle_control_message(registry, ca_manager, agent_id, agent_name, &mut ctrl, msg).await;
+                handle_control_message(
+                    peer,
+                    ca_manager,
+                    client_spki_sha256,
+                    &mut ctrl,
+                    msg,
+                )
+                .await;
             }
 
             // Detect connection close.
@@ -315,13 +412,14 @@ async fn run_control_loop(
 }
 
 async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::AsyncRead + Unpin>(
-    registry: &AgentRegistry,
+    peer: &AgentPeer,
     ca_manager: &CaManager,
-    agent_id: Uuid,
-    agent_name: &str,
+    client_spki_sha256: [u8; 32],
     ctrl: &mut ControlStream<S, R>,
     msg: ControlMessage,
 ) {
+    let agent_id = peer.agent_id;
+    let agent_name = &peer.name;
     let protocol_version = msg.protocol_version();
     if agent_tunnel_proto::validate_protocol_version(protocol_version)
         .inspect_err(|e| warn!(%agent_id, %protocol_version, %e, "Ignoring control message: unsupported version"))
@@ -345,10 +443,8 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
                 "Received route advertisement"
             );
 
-            if let Some(peer) = registry.get(&agent_id).await {
-                peer.update_routes(epoch, subnets, domains);
-                peer.touch();
-            }
+            peer.update_routes(epoch, subnets, domains);
+            peer.touch();
         }
         ControlMessage::Heartbeat {
             timestamp_ms,
@@ -357,9 +453,7 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
         } => {
             debug!(%agent_id, timestamp_ms, active_stream_count, "Received heartbeat");
 
-            if let Some(peer) = registry.get(&agent_id).await {
-                peer.touch();
-            }
+            peer.touch();
 
             let ack = ControlMessage::heartbeat_ack(timestamp_ms);
 
@@ -377,7 +471,17 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
             // trust the CSR's subject. The CA only re-signs the public key the
             // agent put in its CSR; identity stays whatever the existing cert
             // already proved during the handshake.
-            let result = match ca_manager.sign_agent_csr(agent_id, agent_name, &csr_pem, None) {
+            let renewal = ca_manager
+                .sign_agent_csr(agent_id, agent_name, &csr_pem, None)
+                .and_then(|signed| {
+                    let renewed_spki_sha256 = super::cert::spki_sha256_digest_from_pem(&signed.client_cert_pem)?;
+                    anyhow::ensure!(
+                        renewed_spki_sha256 == client_spki_sha256,
+                        "certificate renewal key rotation is not allowed"
+                    );
+                    Ok(signed)
+                });
+            let result = match renewal {
                 Ok(signed) => {
                     info!(%agent_id, %agent_name, "Renewed agent certificate");
                     agent_tunnel_proto::CertRenewalResult::Success {
@@ -450,4 +554,37 @@ fn build_dual_stack_v6_socket(listen_addr: SocketAddr) -> anyhow::Result<UdpSock
     socket.bind(&listen_addr.into()).context("bind v6 UDP socket")?;
 
     Ok(socket.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+    use ipnetwork::Ipv4Network;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn control_message_updates_only_its_connection_peer() {
+        let agent_id = Uuid::new_v4();
+        let old_peer = AgentPeer::new(agent_id, String::from("old"), String::from("old-cert"));
+        let replacement_peer = AgentPeer::new(agent_id, String::from("replacement"), String::from("replacement-cert"));
+        let temp_dir = std::env::temp_dir().join(format!("dgw-peer-isolation-test-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temporary path is UTF-8");
+        let ca_manager = CaManager::load_or_generate(&data_dir).expect("generate test CA");
+        let mut control = ControlStream::new(tokio::io::sink(), tokio::io::empty());
+        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("parse test subnet");
+
+        handle_control_message(
+            &old_peer,
+            &ca_manager,
+            [0; 32],
+            &mut control,
+            ControlMessage::route_advertise(9, vec![subnet], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(old_peer.route_state().epoch, 9);
+        assert_eq!(replacement_peer.route_state().epoch, 0);
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
 }

@@ -1,11 +1,13 @@
 use axum::extract::{Path, State};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use crate::DgwState;
 use crate::extract::{AgentManagementDeleteAccess, AgentManagementReadAccess};
 use crate::http::HttpError;
+use crate::token::EnrollmentTokenClaims;
 
 #[derive(Deserialize)]
 pub struct EnrollRequest {
@@ -31,6 +33,24 @@ pub struct EnrollResponse {
     /// SHA-256 hash of the server certificate's SPKI (hex-encoded).
     /// Used by the agent to pin the server's public key.
     pub server_spki_sha256: String,
+}
+
+#[derive(Serialize)]
+pub struct AgentDomainAdvertisement {
+    pub domain: String,
+    pub auto_detected: bool,
+}
+
+#[derive(Serialize)]
+pub struct AgentInfo {
+    pub agent_id: Uuid,
+    pub name: String,
+    pub cert_fingerprint: Option<String>,
+    pub is_online: bool,
+    pub last_seen_ms: Option<u64>,
+    pub subnets: Option<Vec<String>>,
+    pub domains: Option<Vec<AgentDomainAdvertisement>>,
+    pub route_epoch: Option<u64>,
 }
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -61,11 +81,22 @@ async fn enroll_agent(
         agent_hostname,
     }): Json<EnrollRequest>,
 ) -> Result<Json<EnrollResponse>, HttpError> {
-    let agent_name = token_claims.jet_agent_name;
+    let EnrollmentTokenClaims {
+        exp,
+        jti,
+        jet_agent_name: agent_name,
+        ..
+    } = token_claims;
 
     // Validate agent name: 1-255 printable ASCII characters.
-    if agent_name.is_empty() || 255 < agent_name.len() || agent_name.bytes().any(|b| !(0x20..=0x7E).contains(&b)) {
-        return Err(HttpError::bad_request().msg("agent name must be 1-255 printable ASCII characters"));
+    if agent_name.is_empty()
+        || 255 < agent_name.len()
+        || agent_name.trim() != agent_name
+        || agent_name.bytes().any(|b| !(0x20..=0x7E).contains(&b))
+    {
+        return Err(
+            HttpError::bad_request().msg("agent name must be 1-255 printable ASCII characters without outer spaces")
+        );
     }
 
     let conf = conf_handle.get_conf();
@@ -74,17 +105,42 @@ async fn enroll_agent(
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-    // Reject duplicate agent IDs to prevent identity shadowing.
-    if handle.registry().get(&agent_id).await.is_some() {
-        return Err(
-            crate::http::HttpErrorBuilder::new(axum::http::StatusCode::CONFLICT).msg("agent ID already registered")
-        );
-    }
-
     let signed = handle
         .ca_manager()
         .sign_agent_csr(agent_id, &agent_name, &csr_pem, agent_hostname.as_deref())
         .map_err(HttpError::bad_request().with_msg("invalid CSR").err())?;
+    let client_spki_sha256 = agent_tunnel::cert::spki_sha256_digest_from_pem(&signed.client_cert_pem)
+        .map_err(HttpError::internal().with_msg("compute client SPKI").err())?;
+    let request_sha256 = enrollment_request_sha256(
+        jti,
+        agent_id,
+        &agent_name,
+        client_spki_sha256,
+        agent_hostname.as_deref(),
+    );
+    let outcome = handle
+        .enroll(agent_tunnel::authorization::EnrollmentAttempt {
+            token_id: jti,
+            token_expires_at: exp,
+            agent_id,
+            name: agent_name.clone(),
+            client_spki_sha256,
+            request_sha256,
+        })
+        .await
+        .map_err(HttpError::internal().with_msg("persist Agent enrollment").err())?;
+
+    if let agent_tunnel::authorization::EnrollmentOutcome::Conflict(conflict) = outcome {
+        let message = match conflict {
+            agent_tunnel::authorization::EnrollmentConflict::AgentId => "agent ID already registered",
+            agent_tunnel::authorization::EnrollmentConflict::AgentName => "agent name already registered",
+            agent_tunnel::authorization::EnrollmentConflict::DeletedKey => "agent key was previously deleted",
+            agent_tunnel::authorization::EnrollmentConflict::TokenReplay => {
+                "enrollment token was already used for another request"
+            }
+        };
+        return Err(crate::http::HttpErrorBuilder::new(axum::http::StatusCode::CONFLICT).msg(message));
+    }
 
     let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
 
@@ -108,18 +164,86 @@ async fn enroll_agent(
     }))
 }
 
-/// List connected agents and their status.
+fn enrollment_request_sha256(
+    token_id: Uuid,
+    agent_id: Uuid,
+    agent_name: &str,
+    client_spki_sha256: [u8; 32],
+    agent_hostname: Option<&str>,
+) -> [u8; 32] {
+    fn update_field(hasher: &mut Sha256, value: &[u8]) {
+        let len = u64::try_from(value.len()).expect("enrollment field length fits in u64");
+        hasher.update(len.to_be_bytes());
+        hasher.update(value);
+    }
+
+    let mut hasher = Sha256::new();
+    update_field(&mut hasher, token_id.as_bytes());
+    update_field(&mut hasher, agent_id.as_bytes());
+    update_field(&mut hasher, agent_name.as_bytes());
+    update_field(&mut hasher, &client_spki_sha256);
+    update_field(&mut hasher, agent_hostname.unwrap_or_default().as_bytes());
+    hasher.finalize().into()
+}
+
+fn agent_info(
+    accepted: agent_tunnel::authorization::AcceptedAgent,
+    runtime: Option<agent_tunnel::registry::AgentInfo>,
+) -> AgentInfo {
+    let Some(runtime) = runtime else {
+        return AgentInfo {
+            agent_id: accepted.agent_id,
+            name: accepted.name,
+            cert_fingerprint: None,
+            is_online: false,
+            last_seen_ms: None,
+            subnets: None,
+            domains: None,
+            route_epoch: None,
+        };
+    };
+
+    AgentInfo {
+        agent_id: accepted.agent_id,
+        name: accepted.name,
+        cert_fingerprint: Some(runtime.cert_fingerprint),
+        is_online: runtime.is_online,
+        last_seen_ms: Some(runtime.last_seen_ms),
+        subnets: Some(runtime.subnets),
+        domains: Some(
+            runtime
+                .domains
+                .into_iter()
+                .map(|domain| AgentDomainAdvertisement {
+                    domain: domain.domain.to_string(),
+                    auto_detected: domain.auto_detected,
+                })
+                .collect(),
+        ),
+        route_epoch: Some(runtime.route_epoch),
+    }
+}
+
+/// List accepted agents and their current status.
 async fn list_agents(
     State(DgwState {
         agent_tunnel_handle, ..
     }): State<DgwState>,
     _access: AgentManagementReadAccess,
-) -> Result<Json<Vec<agent_tunnel::registry::AgentInfo>>, HttpError> {
+) -> Result<Json<Vec<AgentInfo>>, HttpError> {
     let handle = agent_tunnel_handle
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
 
-    let agents = handle.registry().agent_infos().await;
+    let accepted_agents = handle
+        .accepted_agents()
+        .await
+        .map_err(HttpError::internal().with_msg("query accepted Agents").err())?;
+    let mut agents = Vec::with_capacity(accepted_agents.len());
+    for accepted in accepted_agents {
+        let runtime = handle.registry().agent_info(&accepted.agent_id).await;
+        agents.push(agent_info(accepted, runtime));
+    }
 
     Ok(Json(agents))
 }
@@ -131,21 +255,22 @@ async fn get_agent(
         agent_tunnel_handle, ..
     }): State<DgwState>,
     Path(agent_id): Path<Uuid>,
-) -> Result<Json<agent_tunnel::registry::AgentInfo>, HttpError> {
+) -> Result<Json<AgentInfo>, HttpError> {
     let handle = agent_tunnel_handle
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
 
-    let info = handle
-        .registry()
-        .agent_info(&agent_id)
+    let accepted = handle
+        .accepted_agent(agent_id)
         .await
+        .map_err(HttpError::internal().with_msg("query accepted Agent").err())?
         .ok_or_else(|| HttpError::not_found().msg("agent not found"))?;
+    let runtime = handle.registry().agent_info(&agent_id).await;
 
-    Ok(Json(info))
+    Ok(Json(agent_info(accepted, runtime)))
 }
 
-/// Delete (unregister) an agent by ID.
+/// Delete an accepted agent by ID.
 async fn delete_agent(
     _access: AgentManagementDeleteAccess,
     State(DgwState {
@@ -158,9 +283,9 @@ async fn delete_agent(
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
 
     handle
-        .registry()
-        .unregister(&agent_id)
+        .delete_agent(agent_id)
         .await
+        .map_err(HttpError::internal().with_msg("delete accepted Agent").err())?
         .ok_or_else(|| HttpError::not_found().msg("agent not found"))?;
 
     info!(%agent_id, "Agent deleted via API");
