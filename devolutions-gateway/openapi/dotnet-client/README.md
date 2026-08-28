@@ -185,6 +185,7 @@ Class | Method | HTTP request | Description
  - [Model.AddressFamily](docs/AddressFamily.md)
  - [Model.AgentDomainAdvertisement](docs/AgentDomainAdvertisement.md)
  - [Model.AgentInfo](docs/AgentInfo.md)
+ - [Model.AgentStatus](docs/AgentStatus.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)

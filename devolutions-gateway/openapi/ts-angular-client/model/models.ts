@@ -4,6 +4,7 @@ export * from './ackResponse';
 export * from './addressFamily';
 export * from './agentDomainAdvertisement';
 export * from './agentInfo';
+export * from './agentStatus';
 export * from './appCredential';
 export * from './appCredentialKind';
 export * from './appTokenContentType';

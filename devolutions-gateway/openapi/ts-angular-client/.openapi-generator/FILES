@@ -25,6 +25,7 @@ model/ackResponse.ts
 model/addressFamily.ts
 model/agentDomainAdvertisement.ts
 model/agentInfo.ts
+model/agentStatus.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts

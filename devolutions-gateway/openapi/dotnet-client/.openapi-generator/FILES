@@ -8,6 +8,7 @@ docs/AddressFamily.md
 docs/AgentApi.md
 docs/AgentDomainAdvertisement.md
 docs/AgentInfo.md
+docs/AgentStatus.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -115,6 +116,7 @@ src/Devolutions.Gateway.Client/Model/AckResponse.cs
 src/Devolutions.Gateway.Client/Model/AddressFamily.cs
 src/Devolutions.Gateway.Client/Model/AgentDomainAdvertisement.cs
 src/Devolutions.Gateway.Client/Model/AgentInfo.cs
+src/Devolutions.Gateway.Client/Model/AgentStatus.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs

@@ -1343,45 +1343,50 @@ components:
       properties:
         auto_detected:
           type: boolean
+          description: Whether the Agent discovered the domain automatically.
         domain:
           type: string
+          description: Domain route advertised by the Agent.
     AgentInfo:
       type: object
       required:
       - agent_id
       - name
-      - is_online
+      - status
       properties:
         agent_id:
           type: string
           format: uuid
-        cert_fingerprint:
-          type: string
-          nullable: true
+          description: Stable Agent identity.
         domains:
           type: array
           items:
             $ref: '#/components/schemas/AgentDomainAdvertisement'
+          description: Domain routes currently advertised by the Agent.
           nullable: true
-        is_online:
-          type: boolean
         last_seen_ms:
           type: integer
           format: int64
+          description: Last heartbeat timestamp in milliseconds since the Unix epoch.
           nullable: true
           minimum: 0
         name:
           type: string
-        route_epoch:
-          type: integer
-          format: int64
-          nullable: true
-          minimum: 0
+          description: Unique management name assigned during enrollment.
+        status:
+          $ref: '#/components/schemas/AgentStatus'
         subnets:
           type: array
           items:
             type: string
+          description: Subnet routes currently advertised by the Agent.
           nullable: true
+    AgentStatus:
+      type: string
+      enum:
+      - offline
+      - online
+      - unresponsive
     AppCredential:
       type: object
       required:

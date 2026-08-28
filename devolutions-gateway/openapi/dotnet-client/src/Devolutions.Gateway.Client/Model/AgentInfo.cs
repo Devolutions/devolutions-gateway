@@ -33,6 +33,12 @@ namespace Devolutions.Gateway.Client.Model
     [DataContract(Name = "AgentInfo")]
     public partial class AgentInfo : IValidatableObject
     {
+
+        /// <summary>
+        /// Gets or Sets Status
+        /// </summary>
+        [DataMember(Name = "status", IsRequired = true, EmitDefaultValue = true)]
+        public AgentStatus Status { get; set; }
         /// <summary>
         /// Initializes a new instance of the <see cref="AgentInfo" /> class.
         /// </summary>
@@ -41,76 +47,59 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AgentInfo" /> class.
         /// </summary>
-        /// <param name="agentId">agentId (required).</param>
-        /// <param name="certFingerprint">certFingerprint.</param>
-        /// <param name="domains">domains.</param>
-        /// <param name="isOnline">isOnline (required).</param>
-        /// <param name="lastSeenMs">lastSeenMs.</param>
-        /// <param name="name">name (required).</param>
-        /// <param name="routeEpoch">routeEpoch.</param>
-        /// <param name="subnets">subnets.</param>
-        public AgentInfo(Guid agentId = default(Guid), string certFingerprint = default(string), List<AgentDomainAdvertisement> domains = default(List<AgentDomainAdvertisement>), bool isOnline = default(bool), long? lastSeenMs = default(long?), string name = default(string), long? routeEpoch = default(long?), List<string> subnets = default(List<string>))
+        /// <param name="agentId">Stable Agent identity. (required).</param>
+        /// <param name="domains">Domain routes currently advertised by the Agent..</param>
+        /// <param name="lastSeenMs">Last heartbeat timestamp in milliseconds since the Unix epoch..</param>
+        /// <param name="name">Unique management name assigned during enrollment. (required).</param>
+        /// <param name="status">status (required).</param>
+        /// <param name="subnets">Subnet routes currently advertised by the Agent..</param>
+        public AgentInfo(Guid agentId = default(Guid), List<AgentDomainAdvertisement> domains = default(List<AgentDomainAdvertisement>), long? lastSeenMs = default(long?), string name = default(string), AgentStatus status = default(AgentStatus), List<string> subnets = default(List<string>))
         {
             this.AgentId = agentId;
-            this.IsOnline = isOnline;
             // to ensure "name" is required (not null)
             if (name == null)
             {
                 throw new ArgumentNullException("name is a required property for AgentInfo and cannot be null");
             }
             this.Name = name;
-            this.CertFingerprint = certFingerprint;
+            this.Status = status;
             this.Domains = domains;
             this.LastSeenMs = lastSeenMs;
-            this.RouteEpoch = routeEpoch;
             this.Subnets = subnets;
         }
 
         /// <summary>
-        /// Gets or Sets AgentId
+        /// Stable Agent identity.
         /// </summary>
+        /// <value>Stable Agent identity.</value>
         [DataMember(Name = "agent_id", IsRequired = true, EmitDefaultValue = true)]
         public Guid AgentId { get; set; }
 
         /// <summary>
-        /// Gets or Sets CertFingerprint
+        /// Domain routes currently advertised by the Agent.
         /// </summary>
-        [DataMember(Name = "cert_fingerprint", EmitDefaultValue = true)]
-        public string CertFingerprint { get; set; }
-
-        /// <summary>
-        /// Gets or Sets Domains
-        /// </summary>
+        /// <value>Domain routes currently advertised by the Agent.</value>
         [DataMember(Name = "domains", EmitDefaultValue = true)]
         public List<AgentDomainAdvertisement> Domains { get; set; }
 
         /// <summary>
-        /// Gets or Sets IsOnline
+        /// Last heartbeat timestamp in milliseconds since the Unix epoch.
         /// </summary>
-        [DataMember(Name = "is_online", IsRequired = true, EmitDefaultValue = true)]
-        public bool IsOnline { get; set; }
-
-        /// <summary>
-        /// Gets or Sets LastSeenMs
-        /// </summary>
+        /// <value>Last heartbeat timestamp in milliseconds since the Unix epoch.</value>
         [DataMember(Name = "last_seen_ms", EmitDefaultValue = true)]
         public long? LastSeenMs { get; set; }
 
         /// <summary>
-        /// Gets or Sets Name
+        /// Unique management name assigned during enrollment.
         /// </summary>
+        /// <value>Unique management name assigned during enrollment.</value>
         [DataMember(Name = "name", IsRequired = true, EmitDefaultValue = true)]
         public string Name { get; set; }
 
         /// <summary>
-        /// Gets or Sets RouteEpoch
+        /// Subnet routes currently advertised by the Agent.
         /// </summary>
-        [DataMember(Name = "route_epoch", EmitDefaultValue = true)]
-        public long? RouteEpoch { get; set; }
-
-        /// <summary>
-        /// Gets or Sets Subnets
-        /// </summary>
+        /// <value>Subnet routes currently advertised by the Agent.</value>
         [DataMember(Name = "subnets", EmitDefaultValue = true)]
         public List<string> Subnets { get; set; }
 
@@ -123,12 +112,10 @@ namespace Devolutions.Gateway.Client.Model
             StringBuilder sb = new StringBuilder();
             sb.Append("class AgentInfo {\n");
             sb.Append("  AgentId: ").Append(AgentId).Append("\n");
-            sb.Append("  CertFingerprint: ").Append(CertFingerprint).Append("\n");
             sb.Append("  Domains: ").Append(Domains).Append("\n");
-            sb.Append("  IsOnline: ").Append(IsOnline).Append("\n");
             sb.Append("  LastSeenMs: ").Append(LastSeenMs).Append("\n");
             sb.Append("  Name: ").Append(Name).Append("\n");
-            sb.Append("  RouteEpoch: ").Append(RouteEpoch).Append("\n");
+            sb.Append("  Status: ").Append(Status).Append("\n");
             sb.Append("  Subnets: ").Append(Subnets).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
@@ -154,12 +141,6 @@ namespace Devolutions.Gateway.Client.Model
             if (this.LastSeenMs < (long?)0)
             {
                 yield return new ValidationResult("Invalid value for LastSeenMs, must be a value greater than or equal to 0.", new [] { "LastSeenMs" });
-            }
-
-            // RouteEpoch (long?) minimum
-            if (this.RouteEpoch < (long?)0)
-            {
-                yield return new ValidationResult("Invalid value for RouteEpoch, must be a value greater than or equal to 0.", new [] { "RouteEpoch" });
             }
 
             yield break;

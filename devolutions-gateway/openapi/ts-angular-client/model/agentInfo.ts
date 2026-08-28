@@ -8,16 +8,33 @@
  * Do not edit the class manually.
  */
 import { AgentDomainAdvertisement } from './agentDomainAdvertisement';
+import { AgentStatus } from './agentStatus';
 
 
 export interface AgentInfo { 
+    /**
+     * Stable Agent identity.
+     */
     agent_id: string;
-    cert_fingerprint?: string | null;
+    /**
+     * Domain routes currently advertised by the Agent.
+     */
     domains?: Array<AgentDomainAdvertisement> | null;
-    is_online: boolean;
+    /**
+     * Last heartbeat timestamp in milliseconds since the Unix epoch.
+     */
     last_seen_ms?: number | null;
+    /**
+     * Unique management name assigned during enrollment.
+     */
     name: string;
-    route_epoch?: number | null;
+    status: AgentStatus;
+    /**
+     * Subnet routes currently advertised by the Agent.
+     */
     subnets?: Array<string> | null;
 }
+export namespace AgentInfo {
+}
+
 

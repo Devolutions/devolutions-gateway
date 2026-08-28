@@ -106,6 +106,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tunnel::EnrollRequest,
         crate::api::tunnel::EnrollResponse,
         crate::api::tunnel::AgentDomainAdvertisement,
+        crate::api::tunnel::AgentStatus,
         crate::api::tunnel::AgentInfo,
     )),
     modifiers(&SecurityAddon),

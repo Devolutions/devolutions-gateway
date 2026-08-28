@@ -3453,14 +3453,14 @@ endif::internal-generation[]
 | X
 | 
 |   Boolean  
-| 
+| Whether the Agent discovered the domain automatically.
 |     
 
 | domain
 | X
 | 
 |   String  
-| 
+| Domain route advertised by the Agent.
 |     
 
 |===
@@ -3482,60 +3482,66 @@ endif::internal-generation[]
 | X
 | 
 |   UUID  
-| 
+| Stable Agent identity.
 | uuid    
-
-| cert_fingerprint
-| 
-| X
-|   String  
-| 
-|     
 
 | domains
 | 
 | X
 |   List   of <<AgentDomainAdvertisement>>
-| 
-|     
-
-| is_online
-| X
-| 
-|   Boolean  
-| 
+| Domain routes currently advertised by the Agent.
 |     
 
 | last_seen_ms
 | 
 | X
 |   Long  
-| 
+| Last heartbeat timestamp in milliseconds since the Unix epoch.
 | int64    
 
 | name
 | X
 | 
 |   String  
-| 
+| Unique management name assigned during enrollment.
 |     
 
-| route_epoch
-| 
+| status
 | X
-|   Long  
 | 
-| int64    
+|  <<AgentStatus>>  
+| 
+|    offline, online, unresponsive,  
 
 | subnets
 | 
 | X
 |   List   of <<string>>
-| 
+| Subnet routes currently advertised by the Agent.
 |     
 
 |===
 
+
+
+[#AgentStatus]
+=== _AgentStatus_ 
+
+
+
+
+
+
+[.fields-AgentStatus]
+[cols="1"]
+|===
+| Enum Values
+
+| offline
+| online
+| unresponsive
+
+|===
 
 
 [#AppCredential]

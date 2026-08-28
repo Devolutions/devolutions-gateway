@@ -47,6 +47,7 @@ pub struct AgentDomainAdvertisement {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
     /// No tunnel connection exists for the Agent.

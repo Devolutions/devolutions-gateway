@@ -41,8 +41,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AgentDomainAdvertisement" /> class.
         /// </summary>
-        /// <param name="autoDetected">autoDetected (required).</param>
-        /// <param name="domain">domain (required).</param>
+        /// <param name="autoDetected">Whether the Agent discovered the domain automatically. (required).</param>
+        /// <param name="domain">Domain route advertised by the Agent. (required).</param>
         public AgentDomainAdvertisement(bool autoDetected = default(bool), string domain = default(string))
         {
             this.AutoDetected = autoDetected;
@@ -55,14 +55,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets AutoDetected
+        /// Whether the Agent discovered the domain automatically.
         /// </summary>
+        /// <value>Whether the Agent discovered the domain automatically.</value>
         [DataMember(Name = "auto_detected", IsRequired = true, EmitDefaultValue = true)]
         public bool AutoDetected { get; set; }
 
         /// <summary>
-        /// Gets or Sets Domain
+        /// Domain route advertised by the Agent.
         /// </summary>
+        /// <value>Domain route advertised by the Agent.</value>
         [DataMember(Name = "domain", IsRequired = true, EmitDefaultValue = true)]
         public string Domain { get; set; }
 

@@ -9,14 +9,11 @@
  */
 
 
-export interface AgentDomainAdvertisement { 
-    /**
-     * Whether the Agent discovered the domain automatically.
-     */
-    auto_detected: boolean;
-    /**
-     * Domain route advertised by the Agent.
-     */
-    domain: string;
-}
+export type AgentStatus = 'offline' | 'online' | 'unresponsive';
+
+export const AgentStatus = {
+    Offline: 'offline' as AgentStatus,
+    Online: 'online' as AgentStatus,
+    Unresponsive: 'unresponsive' as AgentStatus
+};
 
