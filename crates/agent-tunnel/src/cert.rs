@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_agent_shared::write_restricted_file;
 use picky::pem::{PemError, parse_pem, read_pem};
 use picky::x509::Cert;
 use picky_asn1_x509::{ExtensionView, GeneralName};
@@ -165,18 +166,8 @@ impl CaManager {
             // Persist to disk.
             std::fs::create_dir_all(data_dir).with_context(|| format!("create data directory {data_dir}"))?;
             std::fs::write(&cert_path, &ca_cert_pem).with_context(|| format!("write CA cert to {cert_path}"))?;
-            std::fs::write(&key_path, ca_key_pair.serialize_pem())
+            write_restricted_file(&key_path, &ca_key_pair.serialize_pem())
                 .with_context(|| format!("write CA key to {key_path}"))?;
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                    .with_context(|| format!("set permissions on {key_path}"))?;
-            }
-
-            // TODO: On Windows, set explicit DACL on the CA key file.
-            // Currently relying on ProgramData directory ACL (SYSTEM + Admins only).
 
             info!(%cert_path, "Agent tunnel CA certificate generated and saved");
 
@@ -292,15 +283,8 @@ impl CaManager {
             .context("sign server certificate with CA")?;
 
         std::fs::write(&cert_path, server_cert.pem()).with_context(|| format!("write server cert to {cert_path}"))?;
-        std::fs::write(&key_path, server_key_pair.serialize_pem())
+        write_restricted_file(&key_path, &server_key_pair.serialize_pem())
             .with_context(|| format!("write server key to {key_path}"))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                .with_context(|| format!("set permissions on {key_path}"))?;
-        }
 
         info!(%cert_path, %hostname, "Server certificate generated and saved");
 

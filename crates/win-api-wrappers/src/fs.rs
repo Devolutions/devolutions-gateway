@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::fs::File;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 
@@ -18,6 +19,31 @@ pub fn create_directory(path: &Path, security_attributes: Option<&SecurityAttrib
     unsafe { FileSystem::CreateDirectoryW(path.as_pcwstr(), security_attributes.map(|x| x.as_ptr())) }?;
 
     Ok(())
+}
+
+pub fn create_file(path: &Path, security_attributes: Option<&SecurityAttributes>) -> anyhow::Result<File> {
+    use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
+
+    let path = U16CString::from_os_str(path.as_os_str()).context("invalid path")?;
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let handle = unsafe {
+        FileSystem::CreateFileW(
+            path.as_pcwstr(),
+            FileSystem::FILE_GENERIC_READ.0 | FileSystem::FILE_GENERIC_WRITE.0,
+            FileSystem::FILE_SHARE_NONE,
+            security_attributes.map(|x| x.as_ptr()),
+            FileSystem::CREATE_NEW,
+            FileSystem::FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+    }
+    .context("failed to create file")?;
+
+    // SAFETY: `CreateFileW` succeeded and returned a valid file handle that we now own.
+    let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+
+    Ok(File::from(handle))
 }
 
 pub fn get_system32_path() -> anyhow::Result<String> {

@@ -6,6 +6,7 @@
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_agent_shared::write_restricted_file;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -235,8 +236,7 @@ fn persist_enrollment_response(
     // at config save, a non-zero exit would leave partial, orphaned state behind. On any failure we
     // roll that partial state back below so the machine is left exactly as it was before enroll.
     let persist = || -> Result<()> {
-        // Write the locally-generated private key first (before cert/CA from the network).
-        std::fs::write(&client_key_path, key_pem)
+        write_restricted_file(&client_key_path, key_pem)
             .with_context(|| format!("failed to write client private key: {client_key_path}"))?;
 
         std::fs::write(&client_cert_path, &client_cert_pem)
@@ -245,12 +245,11 @@ fn persist_enrollment_response(
         std::fs::write(&gateway_ca_path, &gateway_ca_cert_pem)
             .with_context(|| format!("failed to write gateway CA certificate: {gateway_ca_path}"))?;
 
-        // Restrict permissions on cert/key files (owner-only on Unix).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
             let restricted = std::fs::Permissions::from_mode(0o600);
-            for path in [&client_cert_path, &client_key_path, &gateway_ca_path] {
+            for path in [&client_cert_path, &gateway_ca_path] {
                 std::fs::set_permissions(path, restricted.clone())
                     .with_context(|| format!("failed to set permissions on {path}"))?;
             }

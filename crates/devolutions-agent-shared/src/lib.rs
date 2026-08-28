@@ -2,6 +2,7 @@
 pub mod windows;
 
 mod date_version;
+mod restricted_file;
 pub mod temp_file;
 mod update_manifest;
 mod update_status;
@@ -11,6 +12,7 @@ use std::env;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
 pub use date_version::{DateVersion, DateVersionError};
+pub use restricted_file::write_restricted_file;
 pub use update_manifest::{
     InstalledProductUpdateInfo, ProductUpdateInfo, ProductUpdateInfoV1, UPDATE_MANIFEST_V2_MINOR_VERSION,
     UpdateManifest, UpdateManifestV1, UpdateManifestV2, UpdateProductKey, UpdateSchedule, VersionMajorV2,

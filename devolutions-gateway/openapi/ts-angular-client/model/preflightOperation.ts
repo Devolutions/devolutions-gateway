@@ -26,7 +26,7 @@ export interface PreflightOperation {
     proxy_credential?: AppCredential | null;
     target_credential?: AppCredential | null;
     /**
-     * Minimum persistence duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\" kinds.
+     * Retention duration in seconds for data provisioned by this operation.  For \"provision-credentials\", this is the maximum staging time before the first credential checkout. After checkout, Gateway retains the credentials for later connections authorized for the same association.  Optional parameter for \"provision-token\", \"provision-credentials\", and \"provision-connection-options\" kinds.
      */
     time_to_live?: number | null;
     /**
