@@ -381,7 +381,10 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
             return Ok(EnrollmentOutcome::Conflict(EnrollmentConflict::DeletedKey));
         }
 
-        let tx = conn.transaction().await.context("begin Agent enrollment transaction")?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin Agent enrollment transaction")?;
 
         tx.execute(
             "INSERT INTO enrollment_attempts (jti, agent_id, request_sha256, expires_at)
@@ -470,7 +473,10 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
 
     async fn delete(&self, agent_id: Uuid) -> anyhow::Result<Option<AcceptedAgent>> {
         let conn = self.conn.lock().await;
-        let tx = conn.transaction().await.context("begin Agent deletion transaction")?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin Agent deletion transaction")?;
         let row = tx
             .query(
                 "SELECT agent_id, name, client_spki_sha256, enrollment_jti

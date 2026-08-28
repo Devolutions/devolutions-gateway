@@ -309,11 +309,19 @@ async fn run_agent_connection(
         let fingerprint = super::cert::cert_fingerprint_from_der(peer_cert_der);
         let instance_id = Uuid::new_v4();
         let lifecycle_guard = lifecycle.lock().await;
-        let accepted = authorization_store
-            .authorize(agent_id, client_spki_sha256)
-            .await
-            .context("query Agent authorization")?
-            .context("agent credential is not accepted")?;
+        let accepted = match authorization_store.authorize(agent_id, client_spki_sha256).await {
+            Ok(Some(accepted)) => accepted,
+            Ok(None) => {
+                warn!(%agent_id, %peer_addr, "Rejecting Agent connection: credential is not accepted");
+                conn.close(0u32.into(), b"agent-not-accepted");
+                return Ok(());
+            }
+            Err(error) => {
+                error!(%agent_id, %peer_addr, %error, "Failed to query Agent authorization");
+                conn.close(0u32.into(), b"authorization-unavailable");
+                return Ok(());
+            }
+        };
         let agent_name = accepted.name;
 
         info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
