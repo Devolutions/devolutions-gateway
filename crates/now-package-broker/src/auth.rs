@@ -54,7 +54,7 @@ impl PipeClient {
         })
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(test)]
     pub(crate) fn from_current_process() -> anyhow::Result<Self> {
         Self::from_process_id(std::process::id())
     }

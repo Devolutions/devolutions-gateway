@@ -13,9 +13,6 @@ default = []
 # Must never be enabled for shipped builds: without it, broker client signature validation is
 # unconditionally enforced regardless of the configuration file contents.
 dev-skip-broker-signature = []
-# Exposes test infrastructure for out-of-crate integration tests under testsuite/.
-# Production builds must never enable this.
-test-utils = ["dev-skip-broker-signature"]
 
 [lints]
 workspace = true

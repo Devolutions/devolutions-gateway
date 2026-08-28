@@ -27,8 +27,6 @@ use crate::operation_tracker::OperationTracker;
 mod connection;
 mod execution;
 mod responses;
-#[cfg(feature = "test-utils")]
-pub mod test_utils;
 
 pub use connection::serve_connection;
 use responses::{
