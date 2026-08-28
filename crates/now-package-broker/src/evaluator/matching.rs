@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use now_policy::{Architecture, Elevation, ManagerName, Operation, PolicyRule, Scope};
-use now_policy_api::{self as api, PackageRequest};
+use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
@@ -39,7 +39,9 @@ pub(super) fn rule_matches(
         && constraints_pass(&rule.constraints, request, flags)
 }
 
-fn policy_operation(operation: api::Operation) -> Operation {
+fn policy_operation(operation: now_policy_api::Operation) -> Operation {
+    use now_policy_api as api;
+
     match operation {
         api::Operation::Install => Operation::Install,
         api::Operation::Update => Operation::Update,
@@ -47,7 +49,9 @@ fn policy_operation(operation: api::Operation) -> Operation {
     }
 }
 
-fn policy_manager(manager: api::ManagerName) -> ManagerName {
+fn policy_manager(manager: now_policy_api::ManagerName) -> ManagerName {
+    use now_policy_api as api;
+
     match manager {
         api::ManagerName::Winget => ManagerName::Winget,
         api::ManagerName::PowerShell => ManagerName::PowerShell,
@@ -69,14 +73,18 @@ fn policy_manager(manager: api::ManagerName) -> ManagerName {
     }
 }
 
-fn policy_scope(scope: api::Scope) -> Scope {
+fn policy_scope(scope: now_policy_api::Scope) -> Scope {
+    use now_policy_api as api;
+
     match scope {
         api::Scope::User => Scope::User,
         api::Scope::Machine => Scope::Machine,
     }
 }
 
-fn policy_architecture(architecture: api::Architecture) -> Architecture {
+fn policy_architecture(architecture: now_policy_api::Architecture) -> Architecture {
+    use now_policy_api as api;
+
     match architecture {
         api::Architecture::X86 => Architecture::X86,
         api::Architecture::X64 => Architecture::X64,
@@ -85,7 +93,9 @@ fn policy_architecture(architecture: api::Architecture) -> Architecture {
     }
 }
 
-fn policy_elevation(elevation: api::Elevation) -> Elevation {
+fn policy_elevation(elevation: now_policy_api::Elevation) -> Elevation {
+    use now_policy_api as api;
+
     match elevation {
         api::Elevation::Standard => Elevation::Standard,
         api::Elevation::Elevated => Elevation::Elevated,
