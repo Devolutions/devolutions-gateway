@@ -43,7 +43,7 @@ pub struct AgentDomainAdvertisement {
     pub auto_detected: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
     /// No tunnel connection exists for the Agent.
@@ -311,4 +311,39 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn accepted_agent(agent_id: Uuid) -> agent_tunnel::authorization::AcceptedAgent {
+        agent_tunnel::authorization::AcceptedAgent {
+            agent_id,
+            name: String::from("montreal-office"),
+            client_spki_sha256: [0x11; 32],
+        }
+    }
+
+    #[test]
+    fn connected_agent_without_recent_heartbeat_is_unresponsive() {
+        let agent_id = Uuid::new_v4();
+        let runtime = agent_tunnel::registry::AgentInfo {
+            agent_id,
+            name: String::from("montreal-office"),
+            cert_fingerprint: String::from("fingerprint"),
+            is_online: false,
+            last_seen_ms: 1234,
+            subnets: Vec::new(),
+            domains: Vec::new(),
+            route_epoch: 1,
+        };
+
+        let info = agent_info(accepted_agent(agent_id), Some(runtime));
+
+        assert_eq!(info.status, AgentStatus::Unresponsive);
+        assert_eq!(info.last_seen_ms, Some(1234));
+        assert_eq!(info.subnets, Some(Vec::new()));
+        assert!(info.domains.is_some_and(|domains| domains.is_empty()));
+    }
 }
