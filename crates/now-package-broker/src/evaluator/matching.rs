@@ -18,16 +18,16 @@ pub(super) fn rule_matches(
 ) -> bool {
     let m = &rule.match_criteria;
 
-    operations_match(policy_operation(request.operation), &m.operations)
-        && managers_match(policy_manager(request.manager), &m.managers)
+    operations_match(request.operation, &m.operations)
+        && managers_match(request.manager, &m.managers)
         && wildcard_any(&request.source.name, &m.sources)
         && wildcard_any(&request.package.id, &m.package_identifiers)
         && m.package_names.is_empty()
         && string_in_set(effective_version, &m.versions)
         && version_range_matches(effective_version, &m.version_range)
-        && scopes_match(request.options.scope.map(policy_scope), &m.scopes)
-        && architectures_match(request.package.architecture.map(policy_architecture), &m.architectures)
-        && elevation_match(policy_elevation(request.client.requested_elevation), &m.elevation)
+        && scopes_match(request.options.scope, &m.scopes)
+        && architectures_match(request.package.architecture, &m.architectures)
+        && elevation_match(request.client.requested_elevation, &m.elevation)
         && bool_in_set(request.options.interactive, &m.interactive)
         && bool_in_set(request.options.skip_hash_check, &m.skip_hash_check)
         && bool_in_set(request.options.pre_release, &m.pre_release)
@@ -102,30 +102,32 @@ fn policy_elevation(elevation: now_policy_api::Elevation) -> Elevation {
     }
 }
 
-fn operations_match(op: Operation, allowed: &BTreeSet<Operation>) -> bool {
-    allowed.is_empty() || allowed.contains(&op)
+fn operations_match(operation: now_policy_api::Operation, allowed: &BTreeSet<Operation>) -> bool {
+    allowed.is_empty() || allowed.contains(&policy_operation(operation))
 }
 
-fn managers_match(name: ManagerName, allowed: &BTreeSet<ManagerName>) -> bool {
-    allowed.is_empty() || allowed.contains(&name)
+fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<ManagerName>) -> bool {
+    allowed.is_empty() || allowed.contains(&policy_manager(manager))
 }
 
-fn scopes_match(scope: Option<Scope>, allowed: &BTreeSet<Scope>) -> bool {
+fn scopes_match(scope: Option<now_policy_api::Scope>, allowed: &BTreeSet<Scope>) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    scope.is_some_and(|s| allowed.contains(&s))
+    scope.map(policy_scope).is_some_and(|scope| allowed.contains(&scope))
 }
 
-fn architectures_match(arch: Option<Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
+fn architectures_match(architecture: Option<now_policy_api::Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    arch.is_some_and(|a| allowed.contains(&a))
+    architecture
+        .map(policy_architecture)
+        .is_some_and(|architecture| allowed.contains(&architecture))
 }
 
-fn elevation_match(elev: Elevation, allowed: &BTreeSet<Elevation>) -> bool {
-    allowed.is_empty() || allowed.contains(&elev)
+fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elevation>) -> bool {
+    allowed.is_empty() || allowed.contains(&policy_elevation(elevation))
 }
 
 fn bool_in_set(value: bool, set: &BTreeSet<bool>) -> bool {
