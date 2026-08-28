@@ -1305,7 +1305,13 @@ jobs:
         shell: pwsh
         run: |
           cargo build --locked -p devolutions-agent --features dev-skip-broker-signature
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
           cargo build --locked -p agent-policy-tester
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Run Agent policy tester as LocalSystem
         shell: pwsh
