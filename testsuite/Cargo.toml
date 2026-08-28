@@ -48,7 +48,13 @@ tokio-rustls = { version = "0.26", features = ["ring"] }
 sysevent-syslog.path = "../crates/sysevent-syslog"
 
 [target.'cfg(windows)'.dev-dependencies]
+axum = { version = "0.8", default-features = false }
+chrono = "0.4"
+now-package-broker = { path = "../crates/now-package-broker", features = ["test-utils"] }
+now-policy = "0.2"
+now-policy-api = "0.3"
 sysevent-winevent.path = "../crates/sysevent-winevent"
+tower-service = "0.3"
 
 [lints]
 workspace = true

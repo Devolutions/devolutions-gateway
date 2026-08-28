@@ -27,6 +27,8 @@ use crate::operation_tracker::OperationTracker;
 mod connection;
 mod execution;
 mod responses;
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
 
 pub use connection::serve_connection;
 use responses::{
@@ -654,63 +656,11 @@ mod tests {
         serde_json::from_slice(&body).expect("response is valid JSON")
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
-    #[tokio::test]
-    async fn policy_route_serializes_active_policy_with_empty_rules() {
-        let expected = permissive_policy();
-        let response = route_request(shared_state(Some(expected.clone())), Method::GET, "/v1/policy").await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
-
-        let response: PolicyResponse =
-            serde_json::from_value(response_json(response).await).expect("deserialize policy response");
-        assert_eq!(response.response_kind, PolicyResponseKind);
-        assert_eq!(&*response.response_version, api::API_VERSION_STR);
-        assert_eq!(response.server.transport, Transport::HttpNamedPipe);
-        assert_eq!(
-            serde_json::to_value(response.policy).unwrap(),
-            serde_json::to_value(expected).unwrap()
-        );
-    }
-
-    #[cfg(feature = "dev-skip-broker-signature")]
-    #[tokio::test]
-    async fn policy_route_serializes_full_policy_matches_and_constraints() {
-        let expected =
-            now_policy::schema::parse_policy_json(include_str!("../assets/samples/corporate-allowlist.policy.json"))
-                .expect("sample policy is valid");
-        let response = route_request(shared_state(Some(expected.clone())), Method::GET, "/v1/policy").await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let response: PolicyResponse =
-            serde_json::from_value(response_json(response).await).expect("deserialize policy response");
-        assert_eq!(
-            serde_json::to_value(response.policy).unwrap(),
-            serde_json::to_value(expected).unwrap()
-        );
-    }
-
-    #[cfg(feature = "dev-skip-broker-signature")]
-    #[tokio::test]
-    async fn policy_route_returns_structured_service_unavailable_without_active_policy() {
-        let response = route_request(shared_state(None), Method::GET, "/v1/policy").await;
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let body = response_json(response).await;
-        let error: ErrorResponse = serde_json::from_value(body.clone()).expect("deserialize error response");
-        assert_eq!(error.code, ErrorCode::BrokerPaused);
-        assert_eq!(error.message, "active policy is unavailable");
-        assert!(error.details.is_empty());
-        assert!(body.get("Policy").is_none());
-    }
-
-    #[cfg(not(feature = "dev-skip-broker-signature"))]
     #[tokio::test]
     async fn policy_route_rejects_unsigned_client() {
-        let response = route_request(shared_state(Some(permissive_policy())), Method::GET, "/v1/policy").await;
+        let mut state = state();
+        state.skip_signature_validation = false;
+        let response = route_request(Arc::new(state), Method::GET, "/v1/policy").await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
@@ -719,46 +669,6 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Unauthorized);
         assert_eq!(error.message, "pipe client authentication failed");
         assert!(body.get("Policy").is_none());
-    }
-
-    #[cfg(feature = "dev-skip-broker-signature")]
-    #[tokio::test]
-    async fn policy_route_preserves_existing_routes_and_method_restrictions() {
-        let state = shared_state(Some(permissive_policy()));
-
-        for uri in ["/v1/health", "/v1/capabilities"] {
-            let response = route_request(Arc::clone(&state), Method::GET, uri).await;
-            assert_eq!(response.status(), StatusCode::OK, "unexpected status for {uri}");
-        }
-
-        let response = route_request(Arc::clone(&state), Method::HEAD, "/v1/policy").await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            to_bytes(response.into_body(), usize::MAX)
-                .await
-                .expect("read HEAD response")
-                .is_empty()
-        );
-
-        for method in [
-            Method::POST,
-            Method::PUT,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-            Method::TRACE,
-            Method::CONNECT,
-        ] {
-            let response = route_request(Arc::clone(&state), method.clone(), "/v1/policy").await;
-            assert_eq!(
-                response.status(),
-                StatusCode::METHOD_NOT_ALLOWED,
-                "unexpected status for {method}"
-            );
-        }
-
-        let response = route_request(state, Method::GET, "/v1/not-a-route").await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

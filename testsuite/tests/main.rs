@@ -5,4 +5,6 @@
 mod cli;
 mod mcp_proxy;
 mod network_scanner;
+#[cfg(windows)]
+mod now_package_broker;
 mod sysevent;
