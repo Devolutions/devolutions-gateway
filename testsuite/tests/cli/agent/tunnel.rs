@@ -473,8 +473,7 @@ async fn wait_for_registered_agent(
                             })
                         });
 
-                if agent.get("is_online").and_then(serde_json::Value::as_bool) == Some(true)
-                    && agent.get("route_epoch").and_then(serde_json::Value::as_u64) == Some(1)
+                if agent.get("status").and_then(serde_json::Value::as_str) == Some("online")
                     && subnets == expected_subnets
                     && domains == expected_domains
                     && domains_are_explicit
@@ -680,14 +679,14 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         Some("smoke-agent")
     );
     assert_eq!(
-        offline.get("is_online").and_then(serde_json::Value::as_bool),
-        Some(false)
+        offline.get("status").and_then(serde_json::Value::as_str),
+        Some("offline")
     );
-    assert!(offline.get("cert_fingerprint").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("last_seen_ms").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("subnets").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("domains").is_some_and(serde_json::Value::is_null));
-    assert!(offline.get("route_epoch").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("cert_fingerprint").is_none());
+    assert!(offline.get("route_epoch").is_none());
     let mut agent = agent_tokio_cmd()
         .env("DAGENT_CONFIG_PATH", agent_config.path())
         .arg("run")
