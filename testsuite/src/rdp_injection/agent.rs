@@ -1,5 +1,5 @@
-//! Drives the public `ironrdp-agent` CLI as a real RDCleanPath client. Tests skip when the
-//! binary is not installed (`cargo install ironrdp-agent --version 0.1.0`).
+//! Drives the public `ironrdp-agent` CLI as a real RDCleanPath client. The binary is required
+//! (`cargo install ironrdp-agent --version 0.1.0`); set `IRONRDP_AGENT_SKIP=1` to skip instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -48,11 +48,16 @@ fn ironrdp_agent_bin() -> Option<PathBuf> {
 }
 
 pub fn require_ironrdp_agent() -> anyhow::Result<Option<PathBuf>> {
-    let Some(bin) = ironrdp_agent_bin() else {
-        eprintln!(
-            "skipping RDCleanPath ironrdp-agent test: cargo install ironrdp-agent --version {IRONRDP_AGENT_VERSION}"
-        );
+    if std::env::var_os("IRONRDP_AGENT_SKIP").is_some_and(|value| !value.is_empty()) {
+        eprintln!("skipping RDCleanPath ironrdp-agent test: IRONRDP_AGENT_SKIP is set");
         return Ok(None);
+    }
+    let Some(bin) = ironrdp_agent_bin() else {
+        anyhow::bail!(
+            "ironrdp-agent {IRONRDP_AGENT_VERSION} is required for RDCleanPath coverage: \
+             `cargo install ironrdp-agent --version {IRONRDP_AGENT_VERSION}`, \
+             or set IRONRDP_AGENT_SKIP=1 to skip"
+        );
     };
     let output = std::process::Command::new(&bin)
         .arg("--version")
