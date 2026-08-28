@@ -5,7 +5,6 @@
 //! mstshash cookie arriving at the fake target, and from the Kerberos exchanges recorded by
 //! the mock KDC.
 
-pub mod agent;
 pub mod credssp;
 pub mod gateway;
 pub mod mock_kdc;
