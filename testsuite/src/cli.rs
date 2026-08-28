@@ -66,17 +66,15 @@ pub fn dgw_tokio_cmd() -> tokio::process::Command {
 }
 
 static AGENT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
-    let mut build = escargot::CargoBuild::new()
+    escargot::CargoBuild::new()
         .manifest_path("../devolutions-agent/Cargo.toml")
         .bin("devolutions-agent")
         .current_release()
-        .current_target();
-
-    if cfg!(windows) {
-        build = build.features("dev-skip-broker-signature");
-    }
-
-    build.run().expect("build Devolutions Agent").path().to_path_buf()
+        .current_target()
+        .run()
+        .expect("build Devolutions Agent")
+        .path()
+        .to_path_buf()
 });
 
 pub fn agent_assert_cmd() -> assert_cmd::Command {

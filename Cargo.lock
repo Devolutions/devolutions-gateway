@@ -86,6 +86,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-policy-tester"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "fastrand",
+ "serde_json",
+ "tempfile",
+ "tokio 1.52.3",
+]
+
+[[package]]
 name = "agent-tunnel"
 version = "0.0.0"
 dependencies = [
