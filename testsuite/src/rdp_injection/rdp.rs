@@ -13,11 +13,11 @@ use tokio::net::{TcpListener, TcpStream};
 
 use super::CLIENT_COOKIE;
 
-pub fn encode_pcb(token: &str) -> anyhow::Result<Vec<u8>> {
+pub fn encode_pcb(association_token: &str) -> anyhow::Result<Vec<u8>> {
     let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
         version: ironrdp_pdu::pcb::PcbVersion::V2,
         id: 0,
-        v2_payload: Some(token.to_owned()),
+        v2_payload: Some(association_token.to_owned()),
     };
     ironrdp_core::encode_vec(&pcb).context("encode preconnection blob")
 }
@@ -54,12 +54,12 @@ pub(crate) fn record_cookie(cr: &X224<ConnectionRequest>, cookies: &Mutex<Vec<St
     }
 }
 
-pub async fn connect_rdp_client(gateway_tcp: u16, association_jwt: &str) -> anyhow::Result<TcpStream> {
+pub async fn connect_rdp_client(gateway_tcp: u16, association_token: &str) -> anyhow::Result<TcpStream> {
     let mut stream = TcpStream::connect(("127.0.0.1", gateway_tcp))
         .await
         .context("connect to gateway TCP")?;
     stream
-        .write_all(&encode_pcb(association_jwt)?)
+        .write_all(&encode_pcb(association_token)?)
         .await
         .context("write preconnection blob")?;
     stream

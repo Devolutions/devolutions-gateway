@@ -7,14 +7,17 @@ use tokio::net::TcpStream;
 use super::tokens::{next_id, preflight_scope_token};
 use super::{PROXY_PASSWORD, PROXY_USER, TARGET_PASSWORD};
 
-pub async fn post_preflight(http_port: u16, operations: serde_json::Value) -> anyhow::Result<serde_json::Value> {
-    let bearer = preflight_scope_token()?;
-    let body = serde_json::to_string(&operations).context("serialize preflight body")?;
+pub async fn post_preflight(
+    http_port: u16,
+    provisioning_operations: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let preflight_token = preflight_scope_token()?;
+    let body = serde_json::to_string(&provisioning_operations).context("serialize preflight body")?;
     let request = format!(
         "POST /jet/preflight HTTP/1.1\r\n\
          Host: 127.0.0.1:{http_port}\r\n\
          Content-Type: application/json\r\n\
-         Authorization: Bearer {bearer}\r\n\
+         Authorization: Bearer {preflight_token}\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\
          \r\n\
@@ -83,14 +86,14 @@ pub async fn post_preflight(http_port: u16, operations: serde_json::Value) -> an
 
 pub async fn provision_credentials(
     http_port: u16,
-    token: &str,
+    association_token: &str,
     target_username: &str,
     time_to_live: u32,
     krb_kdc: Option<&str>,
 ) -> anyhow::Result<()> {
     provision_mapping(
         http_port,
-        token,
+        association_token,
         PROXY_USER,
         target_username,
         TARGET_PASSWORD,
@@ -102,17 +105,17 @@ pub async fn provision_credentials(
 
 pub async fn provision_mapping(
     http_port: u16,
-    token: &str,
+    association_token: &str,
     proxy_username: &str,
     target_username: &str,
     target_password: &str,
     time_to_live: u32,
     krb_kdc: Option<&str>,
 ) -> anyhow::Result<()> {
-    let mut operations = vec![serde_json::json!({
+    let mut provisioning_operations = vec![serde_json::json!({
         "id": next_id(),
         "kind": "provision-credentials",
-        "token": token,
+        "token": association_token,
         "proxy_credential": {
             "kind": "username-password",
             "username": proxy_username,
@@ -127,15 +130,15 @@ pub async fn provision_mapping(
     })];
 
     if let Some(krb_kdc) = krb_kdc {
-        operations.push(serde_json::json!({
+        provisioning_operations.push(serde_json::json!({
             "id": next_id(),
             "kind": "provision-connection-options",
-            "token": token,
+            "token": association_token,
             "connection_options": { "krb_kdc": krb_kdc },
             "time_to_live": time_to_live
         }));
     }
 
-    post_preflight(http_port, serde_json::Value::Array(operations)).await?;
+    post_preflight(http_port, serde_json::Value::Array(provisioning_operations)).await?;
     Ok(())
 }

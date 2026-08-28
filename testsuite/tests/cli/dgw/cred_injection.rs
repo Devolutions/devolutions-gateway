@@ -20,12 +20,19 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        TARGET_USER,
+        300,
+        None,
+    )
+    .await?;
 
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     assert!(
         logs.contains("kerberos=false"),
@@ -48,21 +55,28 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn reconnect_same_jwt_still_injects() -> anyhow::Result<()> {
+async fn reconnect_same_association_token_still_injects() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        TARGET_USER,
+        300,
+        None,
+    )
+    .await?;
 
-    let first = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let first = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     gateway.logs.wait_count(INJECT_LOG, 1).await?;
     target.wait_cookies(1).await?;
     drop(first);
 
-    let _second = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _second = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_count(INJECT_LOG, 2).await?;
     assert_eq!(
         logs.matches(INJECT_LOG).count(),
@@ -90,13 +104,20 @@ async fn expired_staging_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 1, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        TARGET_USER,
+        1,
+        None,
+    )
+    .await?;
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(FORWARD_LOG).await?;
     assert!(
         !logs.contains(INJECT_LOG),
@@ -119,11 +140,11 @@ async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
 
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(FORWARD_LOG).await?;
     assert!(
         !logs.contains(INJECT_LOG),
@@ -146,12 +167,12 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some("tcp://127.0.0.1:88"),
@@ -159,7 +180,7 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
     .await?;
 
     // Keep overlapping reconnect sockets so the same-generation KDC lease stays live.
-    let _first = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _first = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_count(INJECT_LOG, 1).await?;
     assert!(
         logs.contains("kerberos=true"),
@@ -167,7 +188,7 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
     );
     gateway.logs.wait_count(PUBLISHED_KDC_LOG, 1).await?;
 
-    let _second = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _second = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_count(INJECT_LOG, 2).await?;
     assert_eq!(
         logs.matches("kerberos=true").count(),
@@ -183,14 +204,14 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
 
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some("tcp://127.0.0.1:88"),
     )
     .await?;
 
-    let _third = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _third = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_count(INJECT_LOG, 3).await?;
     assert_eq!(
         logs.matches("kerberos=true").count(),
@@ -233,19 +254,19 @@ async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> 
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         TARGET_USER,
         300,
         Some("tcp://127.0.0.1:88"),
     )
     .await?;
 
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     assert!(
         logs.contains("kerberos=false"),
@@ -261,19 +282,19 @@ async fn kerberos_injection_does_not_need_debug_flags() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token(&jti, &jet_aid, target.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some("tcp://127.0.0.1:88"),
     )
     .await?;
 
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &token).await?;
+    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     assert!(
         logs.contains("kerberos=true"),
