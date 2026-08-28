@@ -37,20 +37,37 @@ pub struct EnrollResponse {
 
 #[derive(Serialize)]
 pub struct AgentDomainAdvertisement {
+    /// Domain route advertised by the Agent.
     pub domain: String,
+    /// Whether the Agent discovered the domain automatically.
     pub auto_detected: bool,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    /// No tunnel connection exists for the Agent.
+    Offline,
+    /// The Agent has a tunnel connection and a recent heartbeat.
+    Online,
+    /// The Agent has a tunnel connection, but its heartbeat has expired.
+    Unresponsive,
 }
 
 #[derive(Serialize)]
 pub struct AgentInfo {
+    /// Stable Agent identity.
     pub agent_id: Uuid,
+    /// Unique management name assigned during enrollment.
     pub name: String,
-    pub cert_fingerprint: Option<String>,
-    pub is_online: bool,
+    /// Current tunnel connection status.
+    pub status: AgentStatus,
+    /// Last heartbeat timestamp in milliseconds since the Unix epoch.
     pub last_seen_ms: Option<u64>,
+    /// Subnet routes currently advertised by the Agent.
     pub subnets: Option<Vec<String>>,
+    /// Domain routes currently advertised by the Agent.
     pub domains: Option<Vec<AgentDomainAdvertisement>>,
-    pub route_epoch: Option<u64>,
 }
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -194,20 +211,21 @@ fn agent_info(
         return AgentInfo {
             agent_id: accepted.agent_id,
             name: accepted.name,
-            cert_fingerprint: None,
-            is_online: false,
+            status: AgentStatus::Offline,
             last_seen_ms: None,
             subnets: None,
             domains: None,
-            route_epoch: None,
         };
     };
 
     AgentInfo {
         agent_id: accepted.agent_id,
         name: accepted.name,
-        cert_fingerprint: Some(runtime.cert_fingerprint),
-        is_online: runtime.is_online,
+        status: if runtime.is_online {
+            AgentStatus::Online
+        } else {
+            AgentStatus::Unresponsive
+        },
         last_seen_ms: Some(runtime.last_seen_ms),
         subnets: Some(runtime.subnets),
         domains: Some(
@@ -220,7 +238,6 @@ fn agent_info(
                 })
                 .collect(),
         ),
-        route_epoch: Some(runtime.route_epoch),
     }
 }
 
