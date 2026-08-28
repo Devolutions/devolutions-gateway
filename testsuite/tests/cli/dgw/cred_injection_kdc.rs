@@ -359,14 +359,7 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     let association_jti = next_id();
     let association_id = next_id();
     let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        TARGET_USER,
-        300,
-        None,
-    )
-    .await?;
+    provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
     let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     complete_raw_ntlm_credssp(tls)
@@ -409,14 +402,7 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     let association_jti = next_id();
     let association_id = next_id();
     let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        TARGET_USER,
-        300,
-        None,
-    )
-    .await?;
+    provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
     let mut connect = connect_ironrdp_rdcleanpath(
         &bin,

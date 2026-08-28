@@ -23,14 +23,7 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     let association_jti = next_id();
     let association_id = next_id();
     let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        TARGET_USER,
-        300,
-        None,
-    )
-    .await?;
+    provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
     let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
@@ -62,14 +55,7 @@ async fn reconnect_same_association_token_still_injects() -> anyhow::Result<()> 
     let association_jti = next_id();
     let association_id = next_id();
     let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        TARGET_USER,
-        300,
-        None,
-    )
-    .await?;
+    provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
     let first = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
     gateway.logs.wait_count(INJECT_LOG, 1).await?;
@@ -107,14 +93,7 @@ async fn expired_staging_uses_ordinary_forward() -> anyhow::Result<()> {
     let association_jti = next_id();
     let association_id = next_id();
     let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        TARGET_USER,
-        1,
-        None,
-    )
-    .await?;
+    provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 1, None).await?;
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
