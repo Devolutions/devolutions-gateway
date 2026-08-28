@@ -317,7 +317,7 @@ async fn run_agent_connection(
                 return Ok(());
             }
             Err(error) => {
-                error!(%agent_id, %peer_addr, %error, "Failed to query Agent authorization");
+                error!(%agent_id, %peer_addr, error = format!("{error:#}"), "Failed to query Agent authorization");
                 conn.close(0u32.into(), b"authorization-unavailable");
                 return Ok(());
             }
