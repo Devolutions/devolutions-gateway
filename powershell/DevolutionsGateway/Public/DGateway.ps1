@@ -283,7 +283,7 @@ function New-DGatewayWebAppConfig() {
 
 class DGatewayAgentTunnelConfig {
     [ValidateRange(1, 65535)]
-    [System.UInt16] $ListenPort
+    [System.UInt16] $ListenPort = 4433
 
     DGatewayAgentTunnelConfig() { }
 
