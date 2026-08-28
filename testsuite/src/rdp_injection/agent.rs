@@ -108,7 +108,7 @@ pub async fn connect_ironrdp_rdcleanpath(
     bin: &Path,
     endpoint: &str,
     server: &str,
-    token: &str,
+    association_token: &str,
     http_port: u16,
 ) -> anyhow::Result<tokio::process::Child> {
     let url = format!("ws://127.0.0.1:{http_port}/jet/rdp");
@@ -126,7 +126,7 @@ pub async fn connect_ironrdp_rdcleanpath(
             "--prop",
             &format!("ironrdp_rdcleanpathurl:s:{url}"),
             "--prop",
-            &format!("ironrdp_rdcleanpathtoken:s:{token}"),
+            &format!("ironrdp_rdcleanpathtoken:s:{association_token}"),
         ])
         .kill_on_drop(true)
         .stdout(Stdio::piped())
