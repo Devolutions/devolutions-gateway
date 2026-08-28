@@ -31,26 +31,51 @@ pub fn preflight_scope_token() -> anyhow::Result<String> {
     )
 }
 
-pub fn association_token(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -> anyhow::Result<String> {
-    association_claims(jti, jet_aid, format!("127.0.0.1:{dest_port}"), jet_reuse)
+pub fn association_token(
+    association_jti: &str,
+    association_id: &str,
+    dest_port: u16,
+    jet_reuse: u32,
+) -> anyhow::Result<String> {
+    association_claims(
+        association_jti,
+        association_id,
+        format!("127.0.0.1:{dest_port}"),
+        jet_reuse,
+    )
 }
 
-pub fn association_token_for_host(jti: &str, jet_aid: &str, dest_port: u16, jet_reuse: u32) -> anyhow::Result<String> {
-    association_claims(jti, jet_aid, format!("{SERVICE_HOST}:{dest_port}"), jet_reuse)
+pub fn association_token_for_host(
+    association_jti: &str,
+    association_id: &str,
+    dest_port: u16,
+    jet_reuse: u32,
+) -> anyhow::Result<String> {
+    association_claims(
+        association_jti,
+        association_id,
+        format!("{SERVICE_HOST}:{dest_port}"),
+        jet_reuse,
+    )
 }
 
-fn association_claims(jti: &str, jet_aid: &str, dst_hst: String, jet_reuse: u32) -> anyhow::Result<String> {
+fn association_claims(
+    association_jti: &str,
+    association_id: &str,
+    dst_hst: String,
+    jet_reuse: u32,
+) -> anyhow::Result<String> {
     unsigned_jws(
         serde_json::json!({"alg":"RS256","typ":"JWT","cty":"ASSOCIATION"}),
         serde_json::json!({
             "dst_hst": dst_hst,
             "exp": 9_999_999_999i64,
-            "jet_aid": jet_aid,
+            "jet_aid": association_id,
             "jet_ap": "rdp",
             "jet_cm": "fwd",
             "jet_rec": "none",
             "jet_reuse": jet_reuse,
-            "jti": jti,
+            "jti": association_jti,
             "nbf": 0,
         }),
     )
@@ -68,6 +93,6 @@ pub fn kdc_inject_token(association_jti: &str) -> anyhow::Result<String> {
 }
 
 pub fn kdc_proxy_url(http_port: u16, association_jti: &str) -> anyhow::Result<String> {
-    let token = kdc_inject_token(association_jti)?;
-    Ok(format!("http://127.0.0.1:{http_port}/jet/KdcProxy/{token}"))
+    let kdc_token = kdc_inject_token(association_jti)?;
+    Ok(format!("http://127.0.0.1:{http_port}/jet/KdcProxy/{kdc_token}"))
 }

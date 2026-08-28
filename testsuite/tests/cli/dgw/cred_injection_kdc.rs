@@ -40,19 +40,19 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some(&kdc.url()),
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     complete_ntlm_credssp(tls)
         .await
         .context("Gateway-facing NTLM CredSSP")?;
@@ -89,12 +89,12 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_mapping(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         PROXY_KERBEROS_USER,
         KERBEROS_TARGET_USER,
         TARGET_PASSWORD,
@@ -103,10 +103,10 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     )
     .await?;
 
-    let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &jti)?;
+    let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &association_jti)?;
     let proxy_replies = Mutex::new(Vec::new());
     let proxy_requests = Mutex::new(Vec::new());
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     complete_client_credssp(
         tls,
         PROXY_KERBEROS_USER,
@@ -179,12 +179,12 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_mapping(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         PROXY_USER,
         KERBEROS_TARGET_USER,
         "wrong-target-password",
@@ -193,7 +193,7 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     let _ = complete_ntlm_credssp(tls).await;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     anyhow::ensure!(
@@ -256,19 +256,19 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     let rdp = MockRdp::start_kerberos(rdp_kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some(&kdc.url()),
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     let _ = complete_ntlm_credssp(tls).await;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     anyhow::ensure!(
@@ -314,15 +314,25 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     let rdp = FakeClosedTarget::start().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, KERBEROS_TARGET_USER, 300, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        KERBEROS_TARGET_USER,
+        300,
+        None,
+    )
+    .await?;
 
     let mut stream = TcpStream::connect(("127.0.0.1", gateway.config.tcp_port()))
         .await
         .context("connect gateway TCP")?;
-    stream.write_all(&encode_pcb(&token)?).await.context("write PCB")?;
+    stream
+        .write_all(&encode_pcb(&association_token)?)
+        .await
+        .context("write PCB")?;
     stream.write_all(&encode_hybrid_cr()?).await.context("write CR")?;
     stream.flush().await.context("flush CR")?;
     let logs = gateway.logs.wait_contains(MISSING_LOG).await?;
@@ -346,12 +356,19 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     let rdp = MockRdp::start_ntlm().await?;
     let mut gateway = GatewayProc::start().await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        TARGET_USER,
+        300,
+        None,
+    )
+    .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &token).await?;
+    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
     complete_raw_ntlm_credssp(tls)
         .await
         .with_context(|| format!("client-leg NTLM CredSSP; logs:\n{}", gateway.logs.snapshot()))?;
@@ -389,16 +406,23 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     let endpoint = ironrdp_agent_endpoint();
     let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
-    provision_credentials(gateway.config.http_port(), &token, TARGET_USER, 300, None).await?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
+    provision_credentials(
+        gateway.config.http_port(),
+        &association_token,
+        TARGET_USER,
+        300,
+        None,
+    )
+    .await?;
 
     let mut connect = connect_ironrdp_rdcleanpath(
         &bin,
         &endpoint,
         &format!("{SERVICE_HOST}:{}", rdp.port),
-        &token,
+        &association_token,
         gateway.config.http_port(),
     )
     .await?;
@@ -448,12 +472,12 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
     let endpoint = ironrdp_agent_endpoint();
     let mut daemon = start_ironrdp_daemon(&bin, &endpoint).await?;
 
-    let jti = next_id();
-    let jet_aid = next_id();
-    let token = association_token_for_host(&jti, &jet_aid, rdp.port, 60)?;
+    let association_jti = next_id();
+    let association_id = next_id();
+    let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_credentials(
         gateway.config.http_port(),
-        &token,
+        &association_token,
         KERBEROS_TARGET_USER,
         300,
         Some(&kdc.url()),
@@ -464,7 +488,7 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
         &bin,
         &endpoint,
         &format!("{SERVICE_HOST}:{}", rdp.port),
-        &token,
+        &association_token,
         gateway.config.http_port(),
     )
     .await?;

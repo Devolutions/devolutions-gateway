@@ -24,11 +24,11 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub async fn connect_ntlm_client(
     gateway_tcp: u16,
-    association_jwt: &str,
+    association_token: &str,
 ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
     tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        connect_ntlm_client_inner(gateway_tcp, association_jwt),
+        connect_ntlm_client_inner(gateway_tcp, association_token),
     )
     .await
     .context("timed out connecting NTLM client to Gateway")?
@@ -36,13 +36,13 @@ pub async fn connect_ntlm_client(
 
 async fn connect_ntlm_client_inner(
     gateway_tcp: u16,
-    association_jwt: &str,
+    association_token: &str,
 ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
     let mut stream = TcpStream::connect(("127.0.0.1", gateway_tcp))
         .await
         .context("connect gateway TCP")?;
     stream
-        .write_all(&encode_pcb(association_jwt)?)
+        .write_all(&encode_pcb(association_token)?)
         .await
         .context("write PCB")?;
     stream.write_all(&encode_hybrid_cr()?).await.context("write X.224 CR")?;
