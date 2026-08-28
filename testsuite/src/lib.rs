@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod dgw_config;
+pub mod ironrdp_agent;
 pub mod mcp_client;
 pub mod mcp_server;
 pub mod rdp_injection;

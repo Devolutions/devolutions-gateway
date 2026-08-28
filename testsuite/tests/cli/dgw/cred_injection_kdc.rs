@@ -11,8 +11,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use testsuite::rdp_injection::agent::{
-    agent_query_logs, connect_ironrdp_rdcleanpath, ironrdp_agent_endpoint, require_ironrdp_agent, start_ironrdp_daemon,
+use testsuite::ironrdp_agent::{
+    agent_query_logs, connect_rdcleanpath, ironrdp_agent_endpoint, require_ironrdp_agent, start_ironrdp_daemon,
 };
 use testsuite::rdp_injection::credssp::{
     complete_client_credssp, complete_ntlm_credssp, complete_raw_ntlm_credssp, connect_ntlm_client,
@@ -27,7 +27,7 @@ use testsuite::rdp_injection::rdp::{FakeClosedTarget, encode_hybrid_cr, encode_p
 use testsuite::rdp_injection::tls::install_crypto_provider;
 use testsuite::rdp_injection::tokens::{association_token_for_host, kdc_proxy_url, next_id};
 use testsuite::rdp_injection::{
-    FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, MISSING_LOG, PROXY_KERBEROS_USER, PROXY_USER,
+    FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, MISSING_LOG, PROXY_KERBEROS_USER, PROXY_PASSWORD, PROXY_USER,
     RDCLEANPATH_FORWARD_LOG, RDCLEANPATH_INJECT_LOG, REALM, SERVICE_HOST, TARGET_PASSWORD, TARGET_USER,
 };
 use tokio::io::AsyncWriteExt as _;
@@ -404,10 +404,12 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
-    let mut connect = connect_ironrdp_rdcleanpath(
+    let mut connect = connect_rdcleanpath(
         &bin,
         &endpoint,
         &format!("{SERVICE_HOST}:{}", rdp.port),
+        PROXY_USER,
+        PROXY_PASSWORD,
         &association_token,
         gateway.config.http_port(),
     )
@@ -470,10 +472,12 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
     )
     .await?;
 
-    let mut connect = connect_ironrdp_rdcleanpath(
+    let mut connect = connect_rdcleanpath(
         &bin,
         &endpoint,
         &format!("{SERVICE_HOST}:{}", rdp.port),
+        PROXY_USER,
+        PROXY_PASSWORD,
         &association_token,
         gateway.config.http_port(),
     )

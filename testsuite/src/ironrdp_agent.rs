@@ -1,14 +1,13 @@
-//! Drives the public `ironrdp-agent` CLI as a real RDCleanPath client. The binary is required
-//! (`cargo install ironrdp-agent --version 0.1.0`); set `IRONRDP_AGENT_SKIP=1` to skip instead.
+//! Drives the public `ironrdp-agent` CLI as a real RDP client for process-level Gateway tests.
+//! The binary is required (`cargo install ironrdp-agent --version 0.1.0`); set
+//! `IRONRDP_AGENT_SKIP=1` to skip agent-based tests instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-
-use super::tokens::next_id;
-use super::{PROXY_PASSWORD, PROXY_USER};
 
 pub const IRONRDP_AGENT_VERSION: &str = "0.1.0";
 
@@ -49,12 +48,12 @@ fn ironrdp_agent_bin() -> Option<PathBuf> {
 
 pub fn require_ironrdp_agent() -> anyhow::Result<Option<PathBuf>> {
     if std::env::var_os("IRONRDP_AGENT_SKIP").is_some_and(|value| !value.is_empty()) {
-        eprintln!("skipping RDCleanPath ironrdp-agent test: IRONRDP_AGENT_SKIP is set");
+        eprintln!("skipping ironrdp-agent test: IRONRDP_AGENT_SKIP is set");
         return Ok(None);
     }
     let Some(bin) = ironrdp_agent_bin() else {
         anyhow::bail!(
-            "ironrdp-agent {IRONRDP_AGENT_VERSION} is required for RDCleanPath coverage: \
+            "ironrdp-agent {IRONRDP_AGENT_VERSION} is required: \
              `cargo install ironrdp-agent --version {IRONRDP_AGENT_VERSION}`, \
              or set IRONRDP_AGENT_SKIP=1 to skip"
         );
@@ -73,7 +72,12 @@ pub fn require_ironrdp_agent() -> anyhow::Result<Option<PathBuf>> {
 }
 
 pub fn ironrdp_agent_endpoint() -> String {
-    let name = format!("ironrdp-e2e-{}", next_id().replace('-', ""));
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let name = format!(
+        "ironrdp-e2e-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     if cfg!(windows) {
         format!(r"\\.\pipe\{name}")
     } else {
@@ -109,10 +113,12 @@ pub async fn start_ironrdp_daemon(bin: &Path, endpoint: &str) -> anyhow::Result<
     }
 }
 
-pub async fn connect_ironrdp_rdcleanpath(
+pub async fn connect_rdcleanpath(
     bin: &Path,
     endpoint: &str,
     server: &str,
+    username: &str,
+    password: &str,
     association_token: &str,
     http_port: u16,
 ) -> anyhow::Result<tokio::process::Child> {
@@ -125,9 +131,9 @@ pub async fn connect_ironrdp_rdcleanpath(
             "--server",
             server,
             "--username",
-            PROXY_USER,
+            username,
             "--password",
-            PROXY_PASSWORD,
+            password,
             "--prop",
             &format!("ironrdp_rdcleanpathurl:s:{url}"),
             "--prop",
