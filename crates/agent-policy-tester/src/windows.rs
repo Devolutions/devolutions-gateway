@@ -7,6 +7,9 @@ use now_policy_server_template::{MAX_POLICY_MANAGEMENT_BODY_BYTES, MAX_REQUEST_B
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::windows::named_pipe::ClientOptions;
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::process::Process;
+use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
 
@@ -278,6 +281,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         .context("usage: agent-policy-tester <path-to-devolutions-agent> [unelevated|elevated]")?;
     let mode_arg = args.next();
     let mode = Mode::parse(mode_arg.as_deref().and_then(|arg| arg.to_str()))?;
+    verify_process_token(mode)?;
 
     ensure!(
         agent_path.is_file(),
@@ -314,6 +318,30 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             uppercase_json_extension_is_active_and_writable(&agent_path).await?;
         }
     }
+
+    Ok(())
+}
+
+fn verify_process_token(mode: Mode) -> anyhow::Result<()> {
+    if mode != Mode::Unelevated {
+        return Ok(());
+    }
+
+    let token = Process::current_process()
+        .token(TOKEN_QUERY | TOKEN_DUPLICATE)
+        .context("open tester process token")?;
+    ensure!(
+        !token.is_elevated().context("query tester token elevation")?,
+        "unelevated test mode requires a non-elevated process token"
+    );
+    let administrators =
+        Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("construct built-in Administrators SID")?;
+    ensure!(
+        !token
+            .is_member(&administrators)
+            .context("query tester Administrators membership")?,
+        "unelevated test mode requires Administrators membership to be disabled"
+    );
 
     Ok(())
 }

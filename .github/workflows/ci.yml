@@ -699,7 +699,11 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         run: |
           Enter-VsDevShell
-          $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
+          $mc = Get-Command -Name mc.exe -CommandType Application -All | Select-Object -First 1
+          if ($null -eq $mc -or -not (Test-Path -LiteralPath $mc.Source -PathType Leaf)) {
+            throw "mc.exe was not found in the Visual Studio developer environment"
+          }
+          $path = Split-Path -Parent $mc.Source
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
@@ -974,7 +978,11 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         run: |
           Enter-VsDevShell
-          $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
+          $mc = Get-Command -Name mc.exe -CommandType Application -All | Select-Object -First 1
+          if ($null -eq $mc -or -not (Test-Path -LiteralPath $mc.Source -PathType Leaf)) {
+            throw "mc.exe was not found in the Visual Studio developer environment"
+          }
+          $path = Split-Path -Parent $mc.Source
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
@@ -1326,15 +1334,16 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      # Runs as the ordinary, unelevated CI runner account (never SYSTEM/elevated): the
-      # complementary half of the split test suite (item 23). Running the whole tester
-      # only under `psexec -s` (as the step below still does, for the privileged half)
-      # made the unelevated `PUT` denial assertion contradictory, since that process
-      # actually *is* elevated/SYSTEM.
       - name: Run Agent policy tester (unelevated)
         shell: pwsh
         run: |
-          cargo run --locked -p agent-policy-tester -- (Resolve-Path "./target/debug/devolutions-agent.exe") unelevated
+          $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-unelevated.ps1"
+          psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath
+          $exitCode = $LASTEXITCODE
+          Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester-unelevated.out
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
 
       - name: Run Agent policy tester as LocalSystem (elevated)
         shell: pwsh

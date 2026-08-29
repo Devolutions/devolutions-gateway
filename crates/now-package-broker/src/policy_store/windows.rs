@@ -21,6 +21,7 @@
 //! SYSTEM/Administrators-trusted writer (including an external editor) acting on the same
 //! file at the same time; Windows offers no primitive that closes that specific gap.
 
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
@@ -262,7 +263,7 @@ fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(PathBuf, [u8;
         "an existing policy directory does not meet the required security bar; \
          it was not created by this call and will not be silently repaired",
     )?;
-    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(dir, "policy directory")?;
+    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(&final_path, "policy directory")?;
 
     Ok((final_path, ancestor_security_digest))
 }
@@ -276,7 +277,7 @@ fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(PathBuf, [u8;
 fn verify_custom_directory_secure(dir: &Path) -> anyhow::Result<(PathBuf, [u8; 32])> {
     let (handle, final_path) = open_and_verify_directory_identity(dir)?;
     policy_security::verify_policy_directory_security(&handle)?;
-    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(dir, "policy directory")?;
+    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(&final_path, "policy directory")?;
     Ok((final_path, ancestor_security_digest))
 }
 
@@ -563,6 +564,25 @@ struct InvalidContext {
     security_digest: Option<[u8; 32]>,
 }
 
+fn resolved_policy_path_matches(resolved: &Path, canonical_parent: &Path, configured_leaf: &OsStr) -> bool {
+    let Some(resolved_parent) = resolved.parent() else {
+        return false;
+    };
+    let Some(resolved_leaf) = resolved.file_name() else {
+        return false;
+    };
+
+    policy_security::paths_match_case_insensitive(resolved_parent, canonical_parent)
+        && paths_component_matches_case_insensitive(resolved_leaf, configured_leaf)
+}
+
+fn paths_component_matches_case_insensitive(a: &OsStr, b: &OsStr) -> bool {
+    match (a.to_str(), b.to_str()) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => a == b,
+    }
+}
+
 /// Observe the exact current disk state of the configured policy file.
 ///
 /// Resolves (and, for the default path, idempotently creates) the canonical directory
@@ -669,7 +689,7 @@ pub(super) fn observe(
             };
         }
     };
-    let canonical_path = canonical_dir.join(leaf_name);
+    let initial_canonical_path = canonical_dir.join(leaf_name);
 
     // Held open for the entire observation (see the doc comment above); dropped when this
     // function returns.
@@ -678,7 +698,7 @@ pub(super) fn observe(
         Err(error) => {
             tracing::warn!(path = %canonical_dir.display(), %error, "Failed to open the configured policy directory");
             return invalid_observation(
-                &canonical_path,
+                &initial_canonical_path,
                 validation::DiskFailureReason::Unreadable,
                 InvalidContext::default(),
                 PolicyWriteCapability::ReadOnly,
@@ -686,6 +706,23 @@ pub(super) fn observe(
             );
         }
     };
+    let canonical_dir = match policy_security::final_path_from_handle(&dir_handle) {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(
+                path = %canonical_dir.display(), %error,
+                "Failed to resolve the configured policy directory's final path"
+            );
+            return invalid_observation(
+                &initial_canonical_path,
+                validation::DiskFailureReason::Unreadable,
+                InvalidContext::default(),
+                PolicyWriteCapability::ReadOnly,
+                Some(PolicyReadOnlyReason::UnsafePath),
+            );
+        }
+    };
+    let canonical_path = canonical_dir.join(leaf_name);
     let parent = match policy_security::file_identity(&dir_handle) {
         Ok(identity) => identity,
         Err(error) => {
@@ -793,20 +830,47 @@ pub(super) fn observe(
         );
     }
 
-    // Reject a hard-link alias (item 22): the handle's own resolved final path must
-    // match the canonical directory and expected leaf name, so a name that happens to
-    // appear inside the verified directory but is actually a link to a different,
-    // untrusted object elsewhere is never trusted. The comparison is case-insensitive
-    // (same as the parent-directory comparison above it): Windows filesystems are
-    // case-insensitive but case-preserving, so the on-disk leaf may legitimately differ in
-    // case from the operator's configured path without being a different object at all.
+    // A policy leaf with multiple names is ambiguous regardless of which name
+    // GetFinalPathNameByHandleW happens to report. Reject it using file metadata rather
+    // than inferring link identity from that reported path.
+    let link_count = match policy_security::file_link_count(&file) {
+        Ok(link_count) => link_count,
+        Err(error) => {
+            tracing::warn!(path = %canonical_path.display(), %error, "Failed to query the configured policy file link count");
+            return invalid_observation(
+                &canonical_path,
+                validation::DiskFailureReason::Unreadable,
+                invalid_ctx,
+                PolicyWriteCapability::ReadOnly,
+                Some(PolicyReadOnlyReason::UnsafePath),
+            );
+        }
+    };
+    if link_count != 1 {
+        tracing::warn!(
+            path = %canonical_path.display(),
+            link_count,
+            "Configured policy file has multiple hard links"
+        );
+        return invalid_observation(
+            &canonical_path,
+            validation::DiskFailureReason::InsecureStorage,
+            invalid_ctx,
+            PolicyWriteCapability::ReadOnly,
+            Some(PolicyReadOnlyReason::UnsafePath),
+        );
+    }
+
+    // Resolve both the parent and leaf from their held handles. This tolerates a lexical
+    // 8.3 alias in the configured parent while still requiring the resolved leaf to be
+    // exactly the configured name modulo Windows casing.
     match policy_security::final_path_from_handle(&file) {
         Ok(resolved) => {
-            let resolved_matches = policy_security::paths_match_case_insensitive(&resolved, &canonical_path);
+            let resolved_matches = resolved_policy_path_matches(&resolved, &canonical_dir, leaf_name);
             if !resolved_matches {
                 tracing::warn!(
                     path = %canonical_path.display(), resolved = %resolved.display(),
-                    "Configured policy file resolved to an unexpected location; refusing to trust a hard-link alias"
+                    "Configured policy file resolved to an unexpected location"
                 );
                 return invalid_observation(
                     &canonical_path,
@@ -817,6 +881,7 @@ pub(super) fn observe(
                 );
             }
         }
+
         Err(error) => {
             tracing::warn!(
                 path = %canonical_path.display(), %error,
@@ -1580,91 +1645,38 @@ mod tests {
     // volume, so this exercises the real alias-rejection path directly.
 
     #[test]
-    fn hard_link_alias_is_rejected_by_final_path_comparison() {
+    fn policy_leaf_with_multiple_hard_links_is_rejected() {
         let dir = temp_dir();
         let real_file = dir.path().join("real-policy.json");
         std::fs::write(&real_file, b"{}").unwrap();
         let alias = dir.path().join("alias-policy.json");
         std::fs::hard_link(&real_file, &alias).expect("create hard link");
 
-        // Opening the alias name resolves, via its own handle, to a final path this
-        // process (deliberately) treats as *not* matching the alias name itself: the
-        // canonical directory/leaf-name comparison in `observe` must reject it. This
-        // proves the comparison primitive itself: `GetFinalPathNameByHandleW` reports
-        // one specific link for a multiply-linked file, and it need not be the name used
-        // to open it.
         let handle = OpenOptions::new()
             .read(true)
             .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
             .open(&alias)
             .unwrap();
-        let resolved = policy_security::final_path_from_handle(&handle).unwrap();
-
-        // Whichever of the two equally-valid names Windows reports, it must match
-        // *exactly one* of them, proving the comparison is meaningful (able to both
-        // accept a genuine match and reject a genuine mismatch) rather than vacuous.
-        let matches_real = policy_security::paths_match_case_insensitive(&resolved, &real_file);
-        let matches_alias = policy_security::paths_match_case_insensitive(&resolved, &alias);
-        assert!(
-            matches_real || matches_alias,
-            "resolved path {} matched neither hard-linked name",
-            resolved.display()
-        );
+        assert_eq!(policy_security::file_link_count(&handle).unwrap(), 2);
     }
 
-    /// A leaf whose on-disk casing merely differs from the configured path must be
-    /// accepted as the same file, not rejected as though it were a hard-link alias to a
-    /// different object (item 22): Windows filesystems are case-insensitive but
-    /// case-preserving, so `GetFinalPathNameByHandleW` reports whatever casing was used
-    /// when the file was actually created on disk, which need not match the casing an
-    /// operator later configures. This exercises the exact comparison `observe` performs
-    /// (`paths_match_case_insensitive` over the full resolved path vs. the canonical
-    /// directory joined with the configured leaf name), directly proving the fix for a
-    /// prior exact (case-sensitive) `OsStr` leaf-name comparison that would have
-    /// wrongly rejected this legitimate case.
     #[test]
-    fn leaf_casing_difference_from_configured_name_is_accepted_by_final_path_comparison() {
-        let dir = temp_dir();
-        // Create the file on disk with one casing...
-        let on_disk_path = dir.path().join("Policy-Casing.json");
-        std::fs::write(&on_disk_path, b"{}").unwrap();
+    fn resolved_parent_alias_and_leaf_casing_are_compared_independently() {
+        let configured = Path::new(r"C:\RUNNER~1\AppData\Local\Temp\policy.json");
+        let resolved_parent = Path::new(r"C:\actions\runneradmin\AppData\Local\Temp");
+        let resolved_file = resolved_parent.join("Policy.JSON");
 
-        // ...but open it (as `observe` does) through a *different* casing of the same
-        // leaf name, as would happen if the operator configures the path with different
-        // casing than the file was originally created with.
-        let configured_path = dir.path().join("policy-casing.json");
-        let handle = OpenOptions::new()
-            .read(true)
-            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-            .open(&configured_path)
-            .unwrap();
-        let resolved = policy_security::final_path_from_handle(&handle).unwrap();
-
-        // The comparison `observe` performs against the canonical directory joined with
-        // the *configured* leaf name must accept this: it is the same file, differing
-        // only in casing, never a different, untrusted object.
-        assert!(
-            policy_security::paths_match_case_insensitive(&resolved, &configured_path),
-            "resolved path {} must match the differently-cased configured path {} \
-             case-insensitively; a mere casing difference must never be treated as a \
-             hard-link alias",
-            resolved.display(),
-            configured_path.display()
-        );
-
-        // The genuine alias-rejection case (a real hard link to a differently *named*
-        // file, not merely differently-cased) must still be rejected by the same
-        // comparison, proving it is meaningful rather than vacuously permissive.
-        let unrelated_path = dir.path().join("unrelated-name.json");
-        std::fs::hard_link(&on_disk_path, &unrelated_path).expect("create hard link");
-        assert!(
-            !policy_security::paths_match_case_insensitive(&resolved, &unrelated_path),
-            "resolved path {} must not match an unrelated hard-linked name {}",
-            resolved.display(),
-            unrelated_path.display()
-        );
+        assert!(resolved_policy_path_matches(
+            &resolved_file,
+            resolved_parent,
+            configured.file_name().unwrap()
+        ));
+        assert!(!resolved_policy_path_matches(
+            &resolved_parent.join("other.json"),
+            resolved_parent,
+            configured.file_name().unwrap()
+        ));
     }
 
     // ─── DiskFingerprint::Invalid enrichment (item 15) ────────────────────────

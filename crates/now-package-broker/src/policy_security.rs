@@ -376,6 +376,28 @@ pub(crate) fn file_identity(file: &File) -> anyhow::Result<FileIdentity> {
     })
 }
 
+/// Query how many directory entries link to the open file.
+pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
+    use windows::Win32::Storage::FileSystem::{FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_STANDARD_INFO::default();
+    let info_size = u32::try_from(size_of::<FILE_STANDARD_INFO>()).expect("FILE_STANDARD_INFO size fits in u32");
+
+    // SAFETY: `file` is an open file handle, and the output pointer points to a properly
+    // sized FILE_STANDARD_INFO valid for the duration of the call.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileStandardInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    }
+    .context("GetFileInformationByHandleEx(FileStandardInfo) failed")?;
+
+    Ok(info.NumberOfLinks)
+}
+
 /// A package-manager executable that was verified for elevated execution.
 ///
 /// The held file handle was opened without write or delete sharing, so the verified file

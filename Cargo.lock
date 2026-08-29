@@ -95,6 +95,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio 1.52.3",
+ "win-api-wrappers",
+ "windows 0.61.3",
 ]
 
 [[package]]
