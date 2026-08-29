@@ -330,17 +330,22 @@ fn verify_process_token(mode: Mode) -> anyhow::Result<()> {
     let token = Process::current_process()
         .token(TOKEN_QUERY | TOKEN_DUPLICATE)
         .context("open tester process token")?;
-    ensure!(
-        !token.is_elevated().context("query tester token elevation")?,
-        "unelevated test mode requires a non-elevated process token"
-    );
+    let is_elevated = token.is_elevated().context("query tester token elevation")?;
     let administrators =
         Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("construct built-in Administrators SID")?;
+    let is_administrator = token
+        .is_member(&administrators)
+        .context("query tester Administrators membership")?;
+    // PsExec -l disables the Administrators group and lowers integrity, but Windows may
+    // retain TokenElevation from the source token. Match the server's real authorization
+    // rule instead of treating that informational flag alone as write authority.
     ensure!(
-        !token
-            .is_member(&administrators)
-            .context("query tester Administrators membership")?,
+        !is_administrator,
         "unelevated test mode requires Administrators membership to be disabled"
+    );
+    ensure!(
+        !(is_elevated && is_administrator),
+        "unelevated test mode must not satisfy the policy-write authorization gate"
     );
 
     Ok(())
