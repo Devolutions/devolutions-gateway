@@ -1,7 +1,9 @@
 //! Admin-only-writable file security validation.
 //!
-//! Shared by two trust boundaries in the package broker:
+//! Shared by three trust boundaries in the package broker:
 //! - The policy file, which is the entire authorization control for the broker.
+//! - The dedicated directory hosting the default policy file, which the broker itself
+//!   creates and secures.
 //! - Package-manager executables resolved for elevated/machine-scope execution
 //!   (e.g. `winget.exe`, `choco.exe`).
 //!
@@ -15,8 +17,11 @@
 //! a trusted principal and that its DACL does not grant write access to any other
 //! principal. Callers fail closed when this check fails.
 //!
-//! For the policy file, the trusted principals are SYSTEM, `LOCAL SERVICE`, and the
-//! built-in Administrators group. For executables, `LOCAL SERVICE` is not trusted, but
+//! For the policy file and its hosting directory, the trusted principals are SYSTEM and
+//! the built-in Administrators group only. `LOCAL SERVICE` is deliberately *not* trusted:
+//! it is a low-privilege shared service identity, and the managed policy store must not
+//! accept it as a legitimate writer even though other, unrelated Agent subtrees grant it
+//! write access. For executables, `LOCAL SERVICE` is likewise not trusted, but
 //! `NT SERVICE\TrustedInstaller` is, since Windows-protected binaries (`System32`,
 //! `Program Files`, `WindowsApps`) are owned by and writable by that service.
 //!
@@ -26,28 +31,36 @@
 //! object cannot be written, deleted, or renamed until it has been executed. Execution is
 //! bound to the final path resolved from the verified handle (defeating reparse-point
 //! retargeting of the originally supplied name), and every ancestor directory of that
-//! path is checked so untrusted principals cannot swap path components either.
+//! path is checked so untrusted principals cannot swap path components either. The policy
+//! directory's own ancestor chain is checked more strictly still (see
+//! [`verify_policy_ancestor_chain`]): every level must also reject reparse points outright
+//! and resolve to the exact expected location, tolerating create rights at every level
+//! since a sibling entry cannot redirect or replace the already-identity-checked directory
+//! itself.
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::os::windows::ffi::OsStringExt as _;
-use std::os::windows::fs::OpenOptionsExt as _;
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
+use sha2::{Digest as _, Sha256};
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::security::acl::{Acl, InheritableAcl, InheritableAclKind};
+use win_api_wrappers::security::attributes::{SecurityAttributes, SecurityAttributesInit};
 use windows::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, INHERIT_ONLY_ACE, IsWellKnownSid,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalServiceSid,
-    WinLocalSystemSid,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
-    DELETE, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC,
-    WRITE_OWNER,
+    DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
+    GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -95,7 +108,10 @@ const TRUSTED_INSTALLER_SID: &str = "S-1-5-80-956008885-3418522649-1831038044-18
 /// Principals trusted to hold write access over a verified file.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TrustedWriters {
-    /// SYSTEM, `LOCAL SERVICE`, and the built-in Administrators group (policy file).
+    /// SYSTEM and the built-in Administrators group only (policy file and its hosting
+    /// directory). `LOCAL SERVICE` is deliberately not trusted: it is a low-privilege
+    /// shared service identity, and the managed policy store must not treat it as a
+    /// legitimate writer even though other, unrelated Agent subtrees grant it write access.
     AdminOnly,
     /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`
     /// (Windows-protected executables). `LOCAL SERVICE` is deliberately not trusted here:
@@ -147,8 +163,7 @@ impl Drop for OwnedSecurityDescriptor {
     }
 }
 
-/// Verify that the policy file may only be written by SYSTEM, `LOCAL SERVICE`, or
-/// built-in Administrators.
+/// Verify that the policy file may only be written by SYSTEM or built-in Administrators.
 ///
 /// The check is performed on the already-opened file handle so the verified security
 /// descriptor belongs to the very same file that is subsequently read (no TOCTOU window
@@ -164,6 +179,201 @@ impl Drop for OwnedSecurityDescriptor {
 /// - Unsupported (object) access-allowed ACE types are rejected.
 pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
     verify_handle_security(file, "policy file", TrustedWriters::AdminOnly, WRITE_ACCESS_MASK)
+}
+
+/// Verify that a directory intended to exclusively host the managed policy file denies
+/// untrusted principals every right that would let them interfere with it: creating,
+/// renaming, or deleting entries (including the atomic-replace temporary file), or
+/// rewriting the directory's own security descriptor.
+///
+/// Unlike [`verify_ancestor_directories`], which only cares about redirecting an
+/// *existing* path component and therefore tolerates create rights on higher ancestors,
+/// this directory is exclusively owned by the broker: create rights would let an
+/// untrusted principal plant or race the atomic-replace temporary file, so they are
+/// rejected here too. The same [`TrustedWriters::AdminOnly`] principals as the policy
+/// file itself apply (`LOCAL SERVICE` is not trusted).
+pub(crate) fn verify_policy_directory_security(dir: &File) -> anyhow::Result<()> {
+    verify_handle_security(
+        dir,
+        "policy directory",
+        TrustedWriters::AdminOnly,
+        PARENT_DIRECTORY_TAMPER_MASK,
+    )
+}
+
+/// Compute a digest that changes whenever `file`'s owner or DACL changes, even between
+/// two configurations that would each independently pass [`verify_policy_file_security`]
+/// (e.g. a rewritten-but-still-admin-only ACL, or SYSTEM vs. Administrators ownership).
+/// Used only to fold "security-relevant state" into the policy store's opaque token so an
+/// ACL change rotates it; never to authorize anything by itself.
+///
+/// Callers must only invoke this after [`verify_policy_file_security`] has already
+/// succeeded on the same handle: every ACE this reads is then guaranteed to be one of the
+/// simple, fixed-layout allow/deny/audit/alarm types (object ACE types would already have
+/// been rejected), so no further type dispatch is needed here.
+pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
+    let handle = HANDLE(file.as_raw_handle());
+
+    let mut owner = PSID::default();
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut descriptor = OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
+
+    // SAFETY: `handle` is a valid open file handle, all out pointers point to live stack
+    // variables, and the requested security information matches the provided out parameters.
+    let ret = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            Some(&mut dacl),
+            None,
+            Some(&mut descriptor.0),
+        )
+    };
+    if ret != ERROR_SUCCESS {
+        bail!("failed to read security information for digest: error {}", ret.0);
+    }
+
+    let mut hasher = Sha256::new();
+
+    let owner_string = if owner.0.is_null() {
+        "<none>".to_owned()
+    } else {
+        // SAFETY: `owner` points into `descriptor`, which outlives this call.
+        unsafe { sid_to_string(owner) }
+    };
+    hasher.update(owner_string.as_bytes());
+    hasher.update(b"\0");
+
+    if dacl.is_null() {
+        hasher.update(b"NULL_DACL");
+    } else {
+        // SAFETY: On success, `dacl` points into `descriptor`, which outlives this call.
+        let ace_count = u32::from(unsafe { (*dacl).AceCount });
+        hasher.update(ace_count.to_le_bytes());
+
+        for idx in 0..ace_count {
+            let mut ace_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+            // SAFETY: `dacl` is a valid ACL pointer and `idx` is within `AceCount`.
+            unsafe { GetAce(dacl, idx, &mut ace_ptr) }.context("failed to read DACL entry for security digest")?;
+
+            // SAFETY: GetAce succeeded, so `ace_ptr` points to an ACE starting with an
+            // ACE_HEADER, and (per this function's precondition) a simple, fixed-layout
+            // (header, mask, inline SID) ACE type.
+            let header = unsafe { &*ace_ptr.cast::<ACE_HEADER>() };
+            // SAFETY: Same as above: `ace_ptr` points to a simple, fixed-layout ACE.
+            let ace = unsafe { &*ace_ptr.cast::<ACCESS_ALLOWED_ACE>() };
+            hasher.update([header.AceType, header.AceFlags]);
+            hasher.update(ace.Mask.to_le_bytes());
+
+            let trustee = PSID(std::ptr::from_ref(&ace.SidStart).cast_mut().cast());
+            // SAFETY: `SidStart` is the first DWORD of the trustee SID stored inline in the ACE.
+            let trustee_string = unsafe { sid_to_string(trustee) };
+            hasher.update(trustee_string.as_bytes());
+            hasher.update(b"\0");
+        }
+    }
+
+    Ok(hasher.finalize().into())
+}
+
+/// Build the admin-only ACL (SYSTEM and built-in Administrators only, full control)
+/// shared by every place the broker establishes the policy store's on-disk security.
+///
+/// `inheritance` controls whether the resulting ACEs propagate to children (appropriate
+/// for a directory) or apply only to the object itself (appropriate for a leaf file).
+fn admin_only_acl(inheritance: windows::Win32::Security::ACE_FLAGS) -> anyhow::Result<Acl> {
+    use win_api_wrappers::security::acl::{ExplicitAccess, Trustee};
+    use windows::Win32::Security::Authorization::GRANT_ACCESS;
+
+    let system = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("resolve Administrators SID")?;
+
+    Acl::new()
+        .context("initialize ACL")?
+        .set_entries(&[
+            ExplicitAccess {
+                access_permissions: GENERIC_ALL.0,
+                access_mode: GRANT_ACCESS,
+                inheritance,
+                trustee: Trustee::Sid(system),
+            },
+            ExplicitAccess {
+                access_permissions: GENERIC_ALL.0,
+                access_mode: GRANT_ACCESS,
+                inheritance,
+                trustee: Trustee::Sid(admins),
+            },
+        ])
+        .context("build admin-only ACL")
+}
+
+/// Build `SECURITY_ATTRIBUTES` granting only SYSTEM and built-in Administrators access
+/// (owner: SYSTEM; `Protected` DACL, so inheritance changes to ancestors cannot loosen it
+/// later), for use with `CreateDirectoryW`/`CreateFileW` so the object's security is
+/// correct from the instant it becomes visible on disk -- no create-then-ACL window an
+/// untrusted principal could win.
+///
+/// Set `inherit_to_children` for a directory whose files/subdirectories should default to
+/// the same restrictive ACL; leave it unset for a leaf file, which has no children.
+pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyhow::Result<SecurityAttributes> {
+    use windows::Win32::Security::{CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE};
+
+    let inheritance = if inherit_to_children {
+        CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE
+    } else {
+        NO_INHERITANCE
+    };
+
+    let owner = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    let acl = admin_only_acl(inheritance)?;
+
+    Ok(SecurityAttributesInit {
+        owner: Some(owner),
+        dacl: Some(InheritableAcl {
+            kind: InheritableAclKind::Protected,
+            acl,
+        }),
+        ..Default::default()
+    }
+    .init())
+}
+
+/// Volume serial number and 128-bit file id uniquely identifying an open filesystem
+/// object: stable across renames of the same object, but distinct across a delete and
+/// recreate at the same path (even with byte-identical content), which is exactly the
+/// distinction the policy store's opaque tokens depend on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
+    pub(crate) volume_serial: u64,
+    pub(crate) file_id: [u8; 16],
+}
+
+/// Query the [`FileIdentity`] of the open object behind `file`.
+pub(crate) fn file_identity(file: &File) -> anyhow::Result<FileIdentity> {
+    use windows::Win32::Storage::FileSystem::{FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_ID_INFO::default();
+    let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
+
+    // SAFETY: `file` is an open file handle, and the output pointer points to a properly
+    // sized FILE_ID_INFO valid for the duration of the call.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileIdInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    }
+    .context("GetFileInformationByHandleEx(FileIdInfo) failed")?;
+
+    Ok(FileIdentity {
+        volume_serial: info.VolumeSerialNumber,
+        file_id: info.FileId.Identifier,
+    })
 }
 
 /// A package-manager executable that was verified for elevated execution.
@@ -254,7 +464,7 @@ pub(crate) fn verify_elevated_executable_security(
         WRITE_ACCESS_MASK,
     )?;
 
-    verify_ancestor_directories(&final_path, &subject)?;
+    verify_elevated_executable_ancestor_directories(&final_path, &subject)?;
 
     Ok(Some(VerifiedExecutable {
         _file: file,
@@ -439,9 +649,113 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// file when the image is finally loaded. Create rights higher up are harmless (and are
 /// granted to unprivileged users on stock drive roots), since they cannot redirect an
 /// existing path component.
-fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
+pub(crate) fn verify_elevated_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
+    verify_ancestor_directories(path, subject, PARENT_DIRECTORY_TAMPER_MASK)
+}
+
+/// Verify that every ancestor of `dir` (starting at its parent; `dir` itself must already
+/// be separately verified by the caller, e.g. with [`verify_policy_directory_security`])
+/// is a genuine directory resolving to the expected location and denies untrusted
+/// principals the rights needed to delete, rename, or replace `dir` out from under an
+/// already-verified identity check -- a "path-swap" further up the tree.
+///
+/// Unlike [`verify_elevated_executable_ancestor_directories`] (and the shared
+/// [`verify_ancestor_directories`] helper it relies on, which this deliberately never
+/// calls or alters), every level here is opened with `FILE_FLAG_OPEN_REPARSE_POINT` and
+/// rejected outright if it turns out to be a reparse point (junction/symlink) rather than
+/// transparently traversed, and its handle-resolved final path is compared against the
+/// exact literal component being verified: a directory silently retargeted partway up the
+/// policy directory's own ancestor chain must never be trusted just because reparse
+/// traversal would have "worked". Create rights are still tolerated at *every* level,
+/// including the immediate parent: other, unrelated features may legitimately create
+/// sibling entries in a shared ancestor (the installer grants `LOCAL SERVICE` write
+/// access to the shared `%ProgramData%\Devolutions\Agent` directory for unrelated Agent
+/// subtrees), and that alone cannot redirect or replace `dir`, which is what this check
+/// actually defends against. Only delete/rename/take-ownership rights
+/// ([`DIRECTORY_TAMPER_MASK`]) are rejected.
+///
+/// Returns a digest summarizing every verified level's resolved path and security state
+/// (owner/DACL), so a caller folding this into a fingerprint (see
+/// `policy_store::windows::DiskFingerprint`) can detect a change anywhere in the ancestor
+/// chain -- not just the immediate parent -- without re-deriving the individual checks.
+pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    let mut current = dir.parent();
+
+    while let Some(ancestor) = current {
+        let dir_subject = format!("{subject} ancestor directory '{}'", ancestor.display());
+
+        let handle = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(ancestor)
+            .with_context(|| format!("failed to open {dir_subject}"))?;
+
+        let attributes = handle
+            .metadata()
+            .with_context(|| format!("failed to query metadata for {dir_subject}"))?
+            .file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            bail!("{dir_subject} is a reparse point (junction/symlink); ancestor directories must be real directories");
+        }
+        if attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            bail!("{dir_subject} is not a directory");
+        }
+
+        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
+        if !paths_match_case_insensitive(&resolved, ancestor) {
+            bail!(
+                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
+                resolved.display()
+            );
+        }
+
+        verify_handle_security(
+            &handle,
+            &dir_subject,
+            TrustedWriters::AdminOrTrustedInstaller,
+            DIRECTORY_TAMPER_MASK,
+        )?;
+
+        let level_security_digest =
+            security_state_digest(&handle).with_context(|| format!("failed to digest {dir_subject} security"))?;
+        hasher.update(resolved.as_os_str().to_string_lossy().to_lowercase().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(level_security_digest);
+
+        current = ancestor.parent();
+    }
+
+    Ok(hasher.finalize().into())
+}
+
+/// Case-insensitive path comparison for verifying a handle's resolved final path against
+/// an expected literal component. Falls back to an exact `OsStr` comparison on the rare
+/// input that is not valid Unicode, which only ever makes the comparison *stricter*
+/// (fail-closed), never more permissive.
+pub(crate) fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
+    match (a.to_str(), b.to_str()) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => a.as_os_str() == b.as_os_str(),
+    }
+}
+
+/// Verify that every ancestor of `dir` (starting at its parent; `dir` itself must already
+/// be separately verified by the caller, e.g. with [`verify_policy_directory_security`])
+/// denies untrusted principals the rights needed to delete, rename, or replace `dir` out
+/// from under an already-verified identity check -- a "path-swap" further up the tree.
+///
+/// Unlike [`verify_elevated_executable_ancestor_directories`], create rights are tolerated
+/// at *every* level, including the immediate parent: other, unrelated features may
+/// legitimately create sibling entries in a shared ancestor (the installer grants
+/// `LOCAL SERVICE` write access to the shared `%ProgramData%\Devolutions\Agent` directory
+/// for unrelated Agent subtrees), and that alone cannot redirect or replace `dir`, which is
+/// what this check actually defends against. Only delete/rename/take-ownership rights
+/// ([`DIRECTORY_TAMPER_MASK`]) are rejected.
+fn verify_ancestor_directories(path: &Path, subject: &str, first_level_mask: u32) -> anyhow::Result<()> {
     let mut current = path.parent();
-    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
+    let mut tamper_mask = first_level_mask;
 
     while let Some(dir) = current {
         let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
@@ -468,7 +782,7 @@ fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()>
 }
 
 /// Resolve the normalized final path of an open file from its handle.
-fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
+pub(crate) fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
     let handle = HANDLE(file.as_raw_handle());
     let mut buffer = vec![0u16; 512];
 
@@ -628,7 +942,7 @@ unsafe fn verify_owner_and_dacl(
                     // SAFETY: `trustee` points to a valid SID inside the ACE.
                     let trustee_string = unsafe { sid_to_string(trustee) };
                     bail!(
-                        "{subject} DACL grants write access to {trustee_string}; only trusted principals may be able to write it"
+                        "{subject} DACL grants write access to {trustee_string}; only trusted principals may write it"
                     );
                 }
             }
@@ -648,15 +962,6 @@ unsafe fn verify_owner_and_dacl(
 unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
     // SAFETY: Per function contract, `sid` points to a valid SID.
     if unsafe { IsWellKnownSid(sid, WinLocalSystemSid) }.as_bool() {
-        return true;
-    }
-
-    // The Devolutions Agent installer creates `C:\ProgramData\Devolutions\Agent` with
-    // write access for `LOCAL SERVICE`, so it must be trusted for the policy file.
-    // It is a low-privilege shared service identity, however, so it is not trusted for
-    // elevated executables, where accepting it would open a privilege-escalation path.
-    // SAFETY: Per function contract, `sid` points to a valid SID.
-    if trusted_writers == TrustedWriters::AdminOnly && unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool() {
         return true;
     }
 
@@ -716,6 +1021,40 @@ mod tests {
     };
 
     use super::*;
+
+    /// Proves the property [`admin_only_security_attributes`] is relied on for (item 8):
+    /// the DACL it builds is `Protected` (`SE_DACL_PROTECTED`), so `CreateFileW`/
+    /// `CreateDirectoryW` never merges it with whatever the hosting directory would
+    /// otherwise have inherited. An insecure inherited/default DACL on the parent
+    /// therefore cannot expose the object even if inheritance were somehow
+    /// misconfigured: the new object's DACL is authoritative from the instant of
+    /// creation, not a merge. This only inspects the in-memory descriptor this process
+    /// just built, so it needs no elevation and touches no real file.
+    #[test]
+    fn admin_only_security_attributes_use_a_protected_non_inheriting_dacl() {
+        let attributes = admin_only_security_attributes(false).expect("build admin-only security attributes");
+
+        // SAFETY: `attributes.as_ptr()` is a valid, live `SECURITY_ATTRIBUTES` this
+        // process just constructed.
+        let raw = unsafe { &*attributes.as_ptr() };
+        // SAFETY: `lpSecurityDescriptor` points to a live `SECURITY_DESCRIPTOR` built the
+        // same way, valid for the duration of this read.
+        let descriptor = unsafe {
+            &*raw
+                .lpSecurityDescriptor
+                .cast::<windows::Win32::Security::SECURITY_DESCRIPTOR>()
+        };
+        let control = descriptor.Control;
+
+        assert!(
+            control.contains(windows::Win32::Security::SE_DACL_PROTECTED),
+            "expected SE_DACL_PROTECTED to be set so the DACL never merges with inherited ACEs"
+        );
+        assert!(
+            control.contains(windows::Win32::Security::SE_DACL_PRESENT),
+            "expected a DACL to actually be present (a NULL DACL would grant everyone full control)"
+        );
+    }
 
     /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
     struct SddlDescriptor {
@@ -813,11 +1152,16 @@ mod tests {
     }
 
     #[test]
-    fn local_service_write_ace_is_accepted_for_policy_file() {
-        // The installer creates the Agent ProgramData directory with write access for
-        // LOCAL SERVICE, so the policy-file check must accept it.
+    fn local_service_write_ace_is_rejected_for_policy_file() {
+        // The managed policy store lives in its own dedicated, broker-secured directory,
+        // and LOCAL SERVICE is a low-privilege shared service identity that must not be
+        // trusted to write the policy that authorizes elevated installs.
         let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
-        sd.verify().expect("LOCAL SERVICE write access must be accepted");
+        let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -836,6 +1180,34 @@ mod tests {
     fn network_service_write_ace_is_rejected() {
         let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;NS)");
         let error = sd.verify().unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn shared_ancestor_create_only_grant_passes_the_relaxed_ancestor_mask() {
+        // Mirrors the installer-configured shared `%ProgramData%\Devolutions\Agent`
+        // parent: SYSTEM/Administrators full control, plus LOCAL SERVICE granted only
+        // add-file/add-subdirectory rights (0x6: FILE_WRITE_DATA | FILE_APPEND_DATA) for
+        // unrelated Agent features. No delete-child, delete, write-DAC, or take-ownership
+        // rights are granted, so this must pass the ancestor chain's relaxed
+        // `DIRECTORY_TAMPER_MASK` (see `verify_policy_ancestor_chain`): a sibling
+        // create right cannot redirect or replace the dedicated policy directory.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;LS)");
+        sd.verify_with_mask(DIRECTORY_TAMPER_MASK)
+            .expect("create-only rights on a shared ancestor must not fail the relaxed ancestor check");
+    }
+
+    #[test]
+    fn shared_ancestor_delete_child_grant_fails_the_relaxed_ancestor_mask() {
+        // If the shared parent ever granted delete-child (path-swap) rights to a
+        // non-trusted principal, the dedicated policy directory could be renamed or
+        // replaced out from under an already-passed identity check. This must never be
+        // silently accepted, even by the deliberately relaxed ancestor mask.
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x40;;;LS)");
+        let error = sd.verify_with_mask(DIRECTORY_TAMPER_MASK).unwrap_err();
         assert!(
             error.to_string().contains("grants write access"),
             "unexpected error: {error}"

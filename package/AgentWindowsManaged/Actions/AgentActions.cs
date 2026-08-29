@@ -122,6 +122,21 @@ internal static class AgentActions
         Sequence.InstallExecuteSequence);
 
     /// <summary>
+    /// Create the dedicated package-broker policy directory %ProgramData%\Devolutions\PackageBroker
+    /// if it does not exist. Always created (not gated on a feature), mirroring
+    /// <see cref="createProgramDataDirectory"/>: the runtime itself also creates and
+    /// secures this directory on demand (see now-package-broker::policy_store::windows),
+    /// so this is a best-effort head start rather than the only place it can happen.
+    /// </summary>
+    private static readonly ElevatedManagedAction createProgramDataPackageBrokerDirectory = new(
+        new Id($"CA.{nameof(createProgramDataPackageBrokerDirectory)}"),
+        CustomActions.CreateProgramDataPackageBrokerDirectory,
+        Return.check,
+        When.After, Step.CreateFolders,
+        Condition.Always,
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
     /// Set or reset the ACL on %ProgramData%\Devolutions\Agent
     /// </summary>
     private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
@@ -144,6 +159,27 @@ internal static class AgentActions
         CustomActions.SetProgramDataPedmDirectoryPermissions,
         Return.ignore,
         When.After, new Step(createProgramDataPedmDirectories.Id),
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Set or reset the ACL on %ProgramData%\Devolutions\PackageBroker to
+    /// SYSTEM/Administrators-only. Deliberately its own dedicated action rather than
+    /// reusing <see cref="setProgramDataDirectoryPermissions"/>: that one's
+    /// <see cref="Includes.PROGRAM_DATA_SDDL"/> additionally grants LOCAL SERVICE and
+    /// Users access for unrelated Agent features, which the policy directory's own
+    /// strict ancestor-security check must never see (see
+    /// <see cref="Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL"/>).
+    /// </summary>
+    private static readonly ElevatedManagedAction setProgramDataPackageBrokerDirectoryPermissions = new(
+        new Id($"CA.{nameof(setProgramDataPackageBrokerDirectoryPermissions)}"),
+        CustomActions.SetProgramDataPackageBrokerDirectoryPermissions,
+        Return.ignore,
+        When.After, new Step(createProgramDataPackageBrokerDirectory.Id),
         Condition.Always,
         Sequence.InstallExecuteSequence)
     {
@@ -499,6 +535,8 @@ internal static class AgentActions
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
+        createProgramDataPackageBrokerDirectory,
+        setProgramDataPackageBrokerDirectoryPermissions,
         initAgentConfigIfNeeded,
         registerExplorerCommand,
         registerExplorerCommandRollback,

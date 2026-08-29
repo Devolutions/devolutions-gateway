@@ -33,6 +33,12 @@ lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
+# Freeze on the exact commit implementing the Phase 2 package-policy management contract
+# (Devolutions/now-libraries#99) ahead of publication. Pin with `rev` (not `branch`) so the
+# dependency never silently moves as the upstream branch is amended.
+now-policy = { git = "https://github.com/Devolutions/now-libraries.git", rev = "ec592a91f95a66c8a79b7d612ed73d931ef74aeb" }
+now-policy-api = { git = "https://github.com/Devolutions/now-libraries.git", rev = "ec592a91f95a66c8a79b7d612ed73d931ef74aeb" }
+now-policy-server-template = { git = "https://github.com/Devolutions/now-libraries.git", rev = "ec592a91f95a66c8a79b7d612ed73d931ef74aeb" }
 
 [workspace.lints.rust]
 # Declare the custom cfgs.

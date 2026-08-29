@@ -6,7 +6,7 @@ $agentPath = Join-Path $workspacePath "target/debug/devolutions-agent.exe"
 $outputPath = Join-Path $PSScriptRoot "agent-policy-tester.out"
 
 try {
-    & $testerPath $agentPath 2>&1 | Out-File $outputPath
+    & $testerPath $agentPath elevated 2>&1 | Out-File $outputPath
     $exitCode = $LASTEXITCODE
 } catch {
     $_ | Out-File $outputPath -Append

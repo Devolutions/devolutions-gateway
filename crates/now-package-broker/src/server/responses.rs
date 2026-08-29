@@ -1,20 +1,57 @@
 //! NOW API response mapping helpers.
 
+// `ErrorResponse` (from the shared `now-policy-api` contract) carries the atomic
+// management snapshot and validation result needed by `StalePolicyStoreToken` and
+// policy-management errors, which makes it large; every helper here that can fail
+// returns it directly rather than boxing, to match the trait's fixed method signatures.
+#![expect(
+    clippy::result_large_err,
+    reason = "ErrorResponse's size is dictated by the shared now-policy-api contract, not under this crate's control"
+)]
+
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
     API_VERSION_STR, ApiVersion, Architecture, ErrorCode, ErrorResponse, ErrorResponseKind, ManagerCapability,
-    ManagerName, Operation, OperationDiagnostics, PackageRequest, RequestSummary, ResourceId, ResponsePolicyInfo,
-    RuleId, Scope, SemanticVersion, ServerContext, Transport,
+    ManagerName, Operation, OperationDiagnostics, PackageRequest, PolicyReadOnlyReason, RequestSummary, ResourceId,
+    ResponsePolicyInfo, RuleId, Scope, SemanticVersion, ServerContext, Transport,
 };
 
 use crate::operation_tracker::OperationTracker;
 
-pub(super) fn api_version() -> ApiVersion {
+pub(crate) fn api_version() -> ApiVersion {
     API_VERSION_STR.into()
 }
 
-pub(super) fn server_context() -> ServerContext {
+/// Map a [`PolicyReadOnlyReason`] (the store's own advisory reason a configured policy
+/// path cannot currently be written) to the closest explicit final [`ErrorCode`] for a
+/// blocked `PUT /v1/policy` (item 31).
+///
+/// `UnsafePath`, `UnsupportedFileSystem`, and `UnsupportedFormat` all have dedicated codes
+/// exported by the final pinned `now-policy-api` revision (`UnsafePolicyPath` maps to HTTP
+/// 409, `UnsupportedPolicyFilesystem` and `UnsupportedPolicyFormat` both to 422; see
+/// `now_policy_server_template::error_status`). `ManagementDisabled`, `PathNotConfigured`,
+/// and `InsufficientPermissions` describe a server-side environment/configuration
+/// condition -- never the caller's own identity or permissions -- so they must never be
+/// mapped to an authentication/authorization code (`Unauthorized`/`Forbidden`/
+/// `AdministratorRequired`), which would falsely imply the problem is something the
+/// caller could fix by presenting different credentials. `UnsafePolicyPath` is the
+/// closest existing code that does not make that false claim.
+pub(crate) fn policy_read_only_error_code(reason: Option<PolicyReadOnlyReason>) -> ErrorCode {
+    match reason {
+        Some(PolicyReadOnlyReason::UnsupportedFileSystem) => ErrorCode::UnsupportedPolicyFilesystem,
+        Some(PolicyReadOnlyReason::UnsupportedFormat) => ErrorCode::UnsupportedPolicyFormat,
+        Some(
+            PolicyReadOnlyReason::UnsafePath
+            | PolicyReadOnlyReason::InsufficientPermissions
+            | PolicyReadOnlyReason::ManagementDisabled
+            | PolicyReadOnlyReason::PathNotConfigured,
+        )
+        | None => ErrorCode::UnsafePolicyPath,
+    }
+}
+
+pub(crate) fn server_context() -> ServerContext {
     ServerContext {
         server_version: env!("CARGO_PKG_VERSION").to_owned(),
         transport: Transport::HttpNamedPipe,
@@ -255,7 +292,7 @@ pub(super) fn policy_validity_failure(policy: &PolicyDocument, now: DateTime<Utc
     None
 }
 
-pub(super) fn error_response(code: ErrorCode, message: impl Into<String>) -> ErrorResponse {
+pub(crate) fn error_response(code: ErrorCode, message: impl Into<String>) -> ErrorResponse {
     ErrorResponse {
         response_kind: ErrorResponseKind,
         response_version: api_version(),
@@ -265,5 +302,137 @@ pub(super) fn error_response(code: ErrorCode, message: impl Into<String>) -> Err
         details: Vec::new(),
         validation: None,
         management: None,
+    }
+}
+
+/// Build an error response carrying the authoritative validation result, used for
+/// `InvalidPolicy`, `ValidationFailed` (a stale or mismatched validation receipt), and
+/// `WarningConfirmationRequired`, so the caller can inspect the exact findings without
+/// resubmitting to `POST /v1/policy/validate`.
+pub(crate) fn validation_error_response(
+    code: ErrorCode,
+    message: impl Into<String>,
+    validation: now_policy_api::PolicyValidationResult,
+) -> ErrorResponse {
+    ErrorResponse {
+        response_kind: ErrorResponseKind,
+        response_version: api_version(),
+        server: server_context(),
+        code,
+        message: message.into(),
+        details: Vec::new(),
+        validation: Some(validation),
+        management: None,
+    }
+}
+
+/// Build a `StalePolicyStoreToken` error response, which must carry the atomic current
+/// management snapshot so the caller can retry with `ConfirmOverwrite` against the exact
+/// newly observed token.
+pub(crate) fn stale_token_response(
+    message: impl Into<String>,
+    management: now_policy_api::PolicyManagementSnapshot,
+) -> ErrorResponse {
+    ErrorResponse {
+        response_kind: ErrorResponseKind,
+        response_version: api_version(),
+        server: server_context(),
+        code: ErrorCode::StalePolicyStoreToken,
+        message: message.into(),
+        details: Vec::new(),
+        validation: None,
+        management: Some(management),
+    }
+}
+
+/// Build an error response for an arbitrary `code` that also carries a management
+/// snapshot (item 27).
+///
+/// Used for `PolicyActivationFailed`: a post-publication verification failure means the
+/// atomic rename already made new content live, so this crate synchronously reobserves
+/// and publishes the actual resulting disk state under the write lock before building
+/// this response. The shared `ErrorResponse.management` field is generic -- not
+/// restricted to `StalePolicyStoreToken` -- so attaching the freshly recomputed snapshot
+/// here lets the caller see the true current state immediately, without depending on a
+/// follow-up `GET` to observe what this same request already learned.
+pub(crate) fn error_response_with_management(
+    code: ErrorCode,
+    message: impl Into<String>,
+    management: now_policy_api::PolicyManagementSnapshot,
+) -> ErrorResponse {
+    ErrorResponse {
+        response_kind: ErrorResponseKind,
+        response_version: api_version(),
+        server: server_context(),
+        code,
+        message: message.into(),
+        details: Vec::new(),
+        validation: None,
+        management: Some(management),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── policy_read_only_error_code (item 31) ─────────────────────────────────
+
+    #[test]
+    fn unsafe_path_maps_to_unsafe_policy_path() {
+        assert_eq!(
+            policy_read_only_error_code(Some(PolicyReadOnlyReason::UnsafePath)),
+            ErrorCode::UnsafePolicyPath
+        );
+    }
+
+    #[test]
+    fn unsupported_file_system_maps_to_unsupported_policy_filesystem() {
+        assert_eq!(
+            policy_read_only_error_code(Some(PolicyReadOnlyReason::UnsupportedFileSystem)),
+            ErrorCode::UnsupportedPolicyFilesystem
+        );
+    }
+
+    #[test]
+    fn insufficient_permissions_maps_to_unsafe_policy_path_not_an_auth_code() {
+        // Never `Forbidden`/`Unauthorized`/`AdministratorRequired`: this describes a
+        // server-side environment condition, not the caller's own identity/permissions.
+        let code = policy_read_only_error_code(Some(PolicyReadOnlyReason::InsufficientPermissions));
+        assert_eq!(code, ErrorCode::UnsafePolicyPath);
+        assert_ne!(code, ErrorCode::Forbidden);
+        assert_ne!(code, ErrorCode::Unauthorized);
+        assert_ne!(code, ErrorCode::AdministratorRequired);
+    }
+
+    #[test]
+    fn management_disabled_maps_to_unsafe_policy_path_not_an_auth_code() {
+        let code = policy_read_only_error_code(Some(PolicyReadOnlyReason::ManagementDisabled));
+        assert_eq!(code, ErrorCode::UnsafePolicyPath);
+        assert_ne!(code, ErrorCode::Forbidden);
+        assert_ne!(code, ErrorCode::Unauthorized);
+        assert_ne!(code, ErrorCode::AdministratorRequired);
+    }
+
+    #[test]
+    fn path_not_configured_maps_to_unsafe_policy_path_not_an_auth_code() {
+        let code = policy_read_only_error_code(Some(PolicyReadOnlyReason::PathNotConfigured));
+        assert_eq!(code, ErrorCode::UnsafePolicyPath);
+        assert_ne!(code, ErrorCode::Forbidden);
+        assert_ne!(code, ErrorCode::Unauthorized);
+        assert_ne!(code, ErrorCode::AdministratorRequired);
+    }
+
+    #[test]
+    fn absent_reason_maps_to_unsafe_policy_path() {
+        assert_eq!(policy_read_only_error_code(None), ErrorCode::UnsafePolicyPath);
+    }
+
+    #[test]
+    fn unsupported_format_maps_to_unsupported_policy_format() {
+        assert_eq!(
+            policy_read_only_error_code(Some(PolicyReadOnlyReason::UnsupportedFormat)),
+            ErrorCode::UnsupportedPolicyFormat
+        );
     }
 }

@@ -397,6 +397,36 @@ impl Token {
         Ok(is_elevated)
     }
 
+    /// Determines whether `sid` is an enabled group in this token, using the same
+    /// semantics as the Windows `IsUserAnAdmin`/UAC checks (deny-only and
+    /// not-enabled group memberships do not count).
+    ///
+    /// `CheckTokenMembership` requires an impersonation-level token, so this duplicates
+    /// the token (query-only access, `SecurityIdentification` level, which is sufficient
+    /// for a membership check and does not grant the duplicate any impersonation rights).
+    pub fn is_member(&self, sid: &Sid) -> anyhow::Result<bool> {
+        use windows::Win32::Security::CheckTokenMembership;
+
+        let impersonation_token = self
+            .duplicate(TOKEN_QUERY, None, SecurityIdentification, Security::TokenImpersonation)
+            .context("duplicate token to impersonation level for membership check")?;
+
+        let mut is_member = windows::core::BOOL(0);
+
+        // SAFETY: `impersonation_token` is a valid, open impersonation-level token handle
+        // with TOKEN_QUERY access; `sid` is a valid SID; `is_member` is a live out-pointer.
+        unsafe {
+            CheckTokenMembership(
+                Some(impersonation_token.handle.raw()),
+                sid.as_psid_const(),
+                &mut is_member,
+            )
+        }
+        .context("CheckTokenMembership failed")?;
+
+        Ok(is_member.as_bool())
+    }
+
     pub fn linked_token(&self) -> anyhow::Result<Self> {
         // SAFETY: The TokenLinkedToken info class is associated to a HANDLE.
         let handle = unsafe {

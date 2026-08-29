@@ -11,7 +11,7 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 
@@ -21,6 +21,15 @@ pub(crate) struct PipeClient {
     executable_path: PathBuf,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
+    /// Whether the pipe client process token is elevated, captured at connect.
+    ///
+    /// Request fields are never trusted for this: policy management writes require the
+    /// actual token state observed on the named-pipe process, not a claim in the request
+    /// body.
+    is_elevated: bool,
+    /// Whether the pipe client process token has the built-in Administrators group
+    /// enabled, captured at connect (see [`win_api_wrappers::token::Token::is_member`]).
+    is_administrator: bool,
 }
 
 impl PipeClient {
@@ -40,17 +49,30 @@ impl PipeClient {
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
-        let user_sid = process
-            .token(TOKEN_QUERY)
-            .with_context(|| format!("failed to open pipe client process {process_id} token"))?
+        // TOKEN_DUPLICATE is required so `Token::is_member` can duplicate this handle to
+        // an impersonation-level token for `CheckTokenMembership`.
+        let token = process
+            .token(TOKEN_QUERY | TOKEN_DUPLICATE)
+            .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
+        let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
             .sid;
+        let is_elevated = token
+            .is_elevated()
+            .with_context(|| format!("failed to query pipe client process {process_id} token elevation"))?;
+        let administrators_sid =
+            Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("resolve Administrators SID")?;
+        let is_administrator = token
+            .is_member(&administrators_sid)
+            .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
 
         Ok(Self {
             process_id,
             executable_path,
             user_sid,
+            is_elevated,
+            is_administrator,
         })
     }
 
@@ -59,9 +81,53 @@ impl PipeClient {
         Self::from_process_id(std::process::id())
     }
 
+    /// Build a synthetic pipe client claiming an elevated, Administrators-member token
+    /// for `user_sid`/`executable_path`, regardless of the real privilege of the process
+    /// actually running the test. Used only by tests elsewhere in the crate (e.g.
+    /// `server::mod::tests`) that need to exercise post-elevation-gate logic
+    /// deterministically -- independent of whether the host actually running the test
+    /// suite happens to be elevated (item 23's core concern, applied to unit tests too).
+    /// Gated the same way as its only callers: only meaningful with the signature bypass
+    /// active (see `server::tests::elevation_gating`'s own module doc comment).
+    #[cfg(all(test, feature = "dev-skip-broker-signature"))]
+    pub(crate) fn test_elevated_administrator(user_sid: Sid, executable_path: PathBuf) -> Self {
+        Self {
+            process_id: 0,
+            executable_path,
+            user_sid,
+            is_elevated: true,
+            is_administrator: true,
+        }
+    }
+
+    /// Same as [`PipeClient::test_elevated_administrator`], but for a token that is
+    /// authenticated yet neither elevated nor an Administrators member: the ordinary,
+    /// unprivileged case `AdministratorRequired` must still reject.
+    #[cfg(all(test, feature = "dev-skip-broker-signature"))]
+    pub(crate) fn test_unelevated(user_sid: Sid, executable_path: PathBuf) -> Self {
+        Self {
+            process_id: 0,
+            executable_path,
+            user_sid,
+            is_elevated: false,
+            is_administrator: false,
+        }
+    }
+
     /// Security identifier of the authenticated pipe client user, captured at connect.
     pub(crate) fn user_sid(&self) -> &Sid {
         &self.user_sid
+    }
+
+    /// File path of the authenticated pipe client executable, captured at connect.
+    pub(crate) fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    /// Whether the pipe client presented an elevated, Administrators-member token at
+    /// connect. Policy management writes require both; inspection/validation does not.
+    pub(crate) fn is_elevated_administrator(&self) -> bool {
+        self.is_elevated && self.is_administrator
     }
 
     pub(crate) fn validate_request(
@@ -251,13 +317,10 @@ fn same_file(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::Security::{WinLocalSystemSid, WinWorldSid};
+    use windows::Win32::Security::WinWorldSid;
 
     use super::*;
-
-    fn system_sid() -> Sid {
-        Sid::from_well_known(WinLocalSystemSid, None).expect("well-known SYSTEM SID")
-    }
+    use crate::test_support::system_sid;
 
     /// Host-localized (domain, name) for the LocalSystem account.
     fn system_account_names() -> (String, String) {
@@ -280,6 +343,8 @@ mod tests {
             process_id: 0,
             executable_path: PathBuf::new(),
             user_sid: system_sid(),
+            is_elevated: true,
+            is_administrator: true,
         }
     }
 
@@ -371,6 +436,8 @@ mod tests {
                 process_id: std::process::id(),
                 executable_path: std::env::current_exe().expect("current test executable path"),
                 user_sid: client_user_sid(),
+                is_elevated: true,
+                is_administrator: true,
             };
 
             assert!(client.validate_connection(true).is_err());

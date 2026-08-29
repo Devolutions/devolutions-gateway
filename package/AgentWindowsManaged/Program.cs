@@ -348,6 +348,16 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.PSU_FEATURE,
+            },
+            // Registers "Devolutions Agent" as a Windows Event Log source, so the package
+            // broker's policy-management audit trail (attempts/denials/conflicts/writes)
+            // reported through sysevent-winevent is attributed to a named source instead
+            // of an unregistered one. Mirrors the equivalent Gateway installer entry.
+            new (RegistryHive.LocalMachine, $"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\{Includes.PRODUCT_NAME}", "EventMessageFile", $"[{AgentProperties.InstallDir}]{Includes.EXECUTABLE_NAME}")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
             }
         };
 

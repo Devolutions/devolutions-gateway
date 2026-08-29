@@ -6,6 +6,8 @@
 //! The broker is only functional on Windows; on other platforms this crate is empty.
 
 #[cfg(windows)]
+mod audit;
+#[cfg(windows)]
 mod auth;
 #[cfg(windows)]
 pub mod command_builder;
@@ -20,11 +22,9 @@ pub mod operation_tracker;
 #[cfg(windows)]
 pub mod pipe;
 #[cfg(windows)]
-pub mod policy_loader;
-#[cfg(windows)]
 mod policy_security;
 #[cfg(windows)]
-pub mod policy_watcher;
+pub mod policy_store;
 #[cfg(windows)]
 pub mod server;
 #[cfg(windows)]
@@ -32,3 +32,5 @@ pub mod task;
 
 #[cfg(all(test, windows))]
 mod scenario_tests;
+#[cfg(all(test, windows))]
+mod test_support;

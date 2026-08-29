@@ -11,7 +11,7 @@ use now_policy_api::PackageRequest;
 mod constraints;
 mod matching;
 mod version;
-mod wildcard;
+pub(crate) mod wildcard;
 
 #[cfg(test)]
 mod tests;

@@ -42,6 +42,15 @@ namespace DevolutionsAgent.Actions
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "Devolutions", "Agent");
 
+        /// <summary>
+        /// Dedicated root hosting the package-broker managed policy file: a top-level
+        /// sibling of <see cref="ProgramDataDirectory"/>, not a subdirectory of it (see
+        /// <see cref="Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL"/> for why).
+        /// </summary>
+        private static string ProgramDataPackageBrokerDirectory => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Devolutions", "PackageBroker");
+
         [CustomAction]
         public static ActionResult CheckInstalledNetFx45Version(Session session)
         {
@@ -179,6 +188,30 @@ namespace DevolutionsAgent.Actions
             catch (Exception e)
             {
                 session.Log($"failed to evaluate or create path {rootPath}: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Create the dedicated %ProgramData%\Devolutions\PackageBroker directory (if it
+        /// does not already exist) hosting the package-broker managed policy file. Its
+        /// ACL is applied separately by <see cref="SetProgramDataPackageBrokerDirectoryPermissions"/>.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult CreateProgramDataPackageBrokerDirectory(Session session)
+        {
+            string path = ProgramDataPackageBrokerDirectory;
+
+            try
+            {
+                DirectoryInfo di = Directory.CreateDirectory(path);
+                session.Log($"created directory at {di.FullName} or already exists");
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to evaluate or create path {path}: {e}");
                 return ActionResult.Failure;
             }
 
@@ -1708,6 +1741,26 @@ namespace DevolutionsAgent.Actions
             try
             {
                 SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        /// <summary>
+        /// Set or reset the ACL on %ProgramData%\Devolutions\PackageBroker to
+        /// SYSTEM/Administrators-only (no LOCAL SERVICE, no Users), matching what the
+        /// package broker's own strict ancestor-security check requires at runtime.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult SetProgramDataPackageBrokerDirectoryPermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, ProgramDataPackageBrokerDirectory, Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
