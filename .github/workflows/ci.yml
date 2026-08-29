@@ -1338,9 +1338,13 @@ jobs:
         shell: pwsh
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-unelevated.ps1"
-          $output = psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath 2>&1
+          $tempPath = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
+          $outputPath = Join-Path $tempPath "agent-policy-tester-unelevated.out"
+          New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
+          Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+          psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath -TempPath $tempPath -OutputPath $outputPath
           $exitCode = $LASTEXITCODE
-          $output | Write-Output
+          Get-Content -LiteralPath $outputPath
           if ($exitCode -ne 0) {
             exit $exitCode
           }
