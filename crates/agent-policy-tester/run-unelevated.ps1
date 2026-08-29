@@ -3,14 +3,11 @@ $ErrorActionPreference = "Stop"
 $workspacePath = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $testerPath = Join-Path $workspacePath "target/debug/agent-policy-tester.exe"
 $agentPath = Join-Path $workspacePath "target/debug/devolutions-agent.exe"
-$outputPath = Join-Path $PSScriptRoot "agent-policy-tester-unelevated.out"
+$lowIntegrityTemp = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
 
-try {
-    & $testerPath $agentPath unelevated 2>&1 | Out-File $outputPath
-    $exitCode = $LASTEXITCODE
-} catch {
-    $_ | Out-File $outputPath -Append
-    exit 1
-}
+New-Item -ItemType Directory -Path $lowIntegrityTemp -Force | Out-Null
+$env:TEMP = $lowIntegrityTemp
+$env:TMP = $lowIntegrityTemp
 
-exit $exitCode
+& $testerPath $agentPath unelevated
+exit $LASTEXITCODE

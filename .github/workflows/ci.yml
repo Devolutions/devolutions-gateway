@@ -1338,9 +1338,9 @@ jobs:
         shell: pwsh
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-unelevated.ps1"
-          psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath
+          $output = psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath 2>&1
           $exitCode = $LASTEXITCODE
-          Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester-unelevated.out
+          $output | Write-Output
           if ($exitCode -ne 0) {
             exit $exitCode
           }
