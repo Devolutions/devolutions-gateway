@@ -68,6 +68,7 @@ export interface ArdFormDataInput {
   resolutionQuality: ResolutionQuality;
   ardQualityMode: ArdQualityMode;
   autoClipboard?: boolean;
+  ardOnlyInputEncryption: boolean;
 }
 
 export interface TelnetFormDataInput {

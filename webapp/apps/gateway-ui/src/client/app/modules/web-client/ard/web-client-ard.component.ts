@@ -11,7 +11,13 @@ import { MessageService } from 'primeng/api';
 import { EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
-import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
+import {
+  ardQualityMode,
+  Backend,
+  resolutionQuality,
+  wheelSpeedFactor,
+  ardOnlyInputEncryption,
+} from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WheelSpeedControl } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
@@ -113,7 +119,15 @@ export class WebClientArdComponent
   }
 
   private fetchParameters(formData: ArdFormDataInput): Observable<IronARDConnectionParameters> {
-    const { hostname, username, password, resolutionQuality, ardQualityMode, wheelSpeedFactor = 1 } = formData;
+    const {
+      hostname,
+      username,
+      password,
+      resolutionQuality,
+      ardQualityMode,
+      wheelSpeedFactor = 1,
+      ardOnlyInputEncryption,
+    } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
     const sessionId: string = uuidv4();
@@ -132,6 +146,7 @@ export class WebClientArdComponent
       ardQualityMode,
       wheelSpeedFactor,
       sessionId,
+      ardOnlyInputEncryption,
     };
     return of(connectionParameters);
   }
@@ -157,6 +172,7 @@ export class WebClientArdComponent
       configBuilder.withExtension(ardQualityMode(connectionParameters.ardQualityMode));
     }
 
+    configBuilder.withExtension(ardOnlyInputEncryption(connectionParameters.ardOnlyInputEncryption));
     configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
