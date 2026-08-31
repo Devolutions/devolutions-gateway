@@ -139,10 +139,12 @@ Describe 'Devolutions Gateway config' {
 			It 'Sets agent tunnel configuration' {
 				$AgentTunnel = New-DGatewayAgentTunnelConfig -ListenPort 8443
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $false
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 8443
 
-				$AgentTunnel = New-DGatewayAgentTunnelConfig -ListenPort 9443
+				$AgentTunnel = New-DGatewayAgentTunnelConfig -Enabled -ListenPort 9443
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $true
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 9443
 
 				{ New-DGatewayAgentTunnelConfig -ListenPort 0 } | Should -Throw

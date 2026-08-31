@@ -76,10 +76,11 @@ fn up_enrollment_string_stdin_empty_is_error() {
 async fn up_enrollment_against_real_gateway() {
     use anyhow::Context as _;
     use testsuite::cli::{agent_assert_cmd, dgw_tokio_cmd, wait_for_tcp_port};
-    use testsuite::dgw_config::DgwConfig;
+    use testsuite::dgw_config::{AgentTunnelConfig, DgwConfig};
 
     let config_handle = DgwConfig::builder()
         .disable_token_validation(true)
+        .agent_tunnel(AgentTunnelConfig::builder().build())
         .build()
         .init()
         .expect("init gateway config");

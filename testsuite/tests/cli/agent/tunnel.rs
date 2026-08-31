@@ -18,7 +18,7 @@ use picky::jose::jwt::CheckedJwtSig;
 use picky::key::PrivateKey;
 use serde::Serialize;
 use testsuite::cli::{agent_assert_cmd, agent_tokio_cmd, dgw_tokio_cmd, wait_for_tcp_port};
-use testsuite::dgw_config::DgwConfig;
+use testsuite::dgw_config::{AgentTunnelConfig, DgwConfig};
 use tokio::net::TcpListener;
 use tokio::process::Child;
 use tokio_tungstenite::tungstenite::Message;
@@ -639,6 +639,7 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
     let config = DgwConfig::builder()
         .hostname("localhost".to_owned())
         .provisioner_public_key_data(public_key_data)
+        .agent_tunnel(AgentTunnelConfig::builder().build())
         .build()
         .init()
         .expect("initialize gateway config");
@@ -772,6 +773,7 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         .hostname(DOCKER_GATEWAY_HOST.to_owned())
         .listener_host("0.0.0.0")
         .provisioner_public_key_data(public_key_data)
+        .agent_tunnel(AgentTunnelConfig::builder().build())
         .build()
         .init()
         .expect("initialize gateway config");
