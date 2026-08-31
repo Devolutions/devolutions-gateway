@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use agent_tunnel::AgentTunnelHandle;
 use agent_tunnel::authorization::{EnrollmentAttempt, EnrollmentOutcome};
-use agent_tunnel::cert::CaManager;
+use agent_tunnel::cert::{CaManager, SignedAgentCert};
 use agent_tunnel::listener::AgentTunnelListener;
 use agent_tunnel::registry::AgentRegistry;
 use agent_tunnel_proto::{ControlMessage, ControlStream, DomainAdvertisement, SessionStream};
@@ -142,6 +142,18 @@ impl TestListener {
         .await;
 
         (agent_id, connection, key_pair)
+    }
+
+    /// Connect with a CA-signed certificate without going through enrollment,
+    /// so tests can drive the listener admission gate directly.
+    pub(super) async fn connect_signed(&self, signed: &SignedAgentCert, key_pair: &rcgen::KeyPair) -> quinn::Connection {
+        connect_quinn_client(
+            &signed.ca_cert_pem,
+            &signed.client_cert_pem,
+            &key_pair.serialize_pem(),
+            self.server_addr,
+        )
+        .await
     }
 
     pub(super) async fn shutdown(self) {
