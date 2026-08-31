@@ -202,7 +202,7 @@ catch (ApiException e)
 | **200** | Agent enrolled |  -  |
 | **400** | Invalid agent name, request body, or certificate signing request |  -  |
 | **401** | Invalid or missing enrollment token |  -  |
-| **409** | Agent ID already registered |  -  |
+| **409** | Agent ID or name already registered, agent key previously deleted, or enrollment token already used |  -  |
 | **500** | Unexpected server error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

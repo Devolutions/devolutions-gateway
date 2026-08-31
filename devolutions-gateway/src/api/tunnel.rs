@@ -100,7 +100,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         (status = 200, description = "Agent enrolled", body = EnrollResponse),
         (status = 400, description = "Invalid agent name, request body, or certificate signing request"),
         (status = 401, description = "Invalid or missing enrollment token"),
-        (status = 409, description = "Agent ID already registered"),
+        (status = 409, description = "Agent ID or name already registered, agent key previously deleted, or enrollment token already used"),
         (status = 500, description = "Unexpected server error"),
     ),
     security(("enrollment_token" = [])),
