@@ -118,6 +118,16 @@ async fn enroll_agent(
         client_spki_sha256,
         agent_hostname.as_deref(),
     );
+
+    let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
+
+    // Computed before enrollment so the durable authorization write is the last
+    // fallible step; failing after it would leave a ghost enrollment behind.
+    let server_spki_sha256 = handle
+        .ca_manager()
+        .server_spki_sha256(&conf.hostname)
+        .map_err(HttpError::internal().with_msg("compute server SPKI").err())?;
+
     let outcome = handle
         .enroll(agent_tunnel::authorization::EnrollmentAttempt {
             token_id: jti,
@@ -141,13 +151,6 @@ async fn enroll_agent(
         };
         return Err(crate::http::HttpErrorBuilder::new(axum::http::StatusCode::CONFLICT).msg(message));
     }
-
-    let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
-
-    let server_spki_sha256 = handle
-        .ca_manager()
-        .server_spki_sha256(&conf.hostname)
-        .map_err(HttpError::internal().with_msg("compute server SPKI").err())?;
 
     info!(
         %agent_id,
