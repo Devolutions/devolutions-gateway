@@ -146,7 +146,11 @@ impl TestListener {
 
     /// Connect with a CA-signed certificate without going through enrollment,
     /// so tests can drive the listener admission gate directly.
-    pub(super) async fn connect_signed(&self, signed: &SignedAgentCert, key_pair: &rcgen::KeyPair) -> quinn::Connection {
+    pub(super) async fn connect_signed(
+        &self,
+        signed: &SignedAgentCert,
+        key_pair: &rcgen::KeyPair,
+    ) -> quinn::Connection {
         connect_quinn_client(
             &signed.ca_cert_pem,
             &signed.client_cert_pem,
