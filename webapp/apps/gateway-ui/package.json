@@ -29,7 +29,7 @@
     "@devolutions/icons": "^5.0.10",
     "@devolutions/iron-remote-desktop": "^0.11.0",
     "@devolutions/iron-remote-desktop-rdp": "^0.7.0",
-    "@devolutions/iron-remote-desktop-vnc": "../IronVNC/web-client/iron-remote-desktop-vnc/dist",
+    "@devolutions/iron-remote-desktop-vnc": "^0.7.0",
     "@devolutions/ldap-wasm-js": "^0.3.4",
     "@devolutions/terminal-shared": "^1.4.1",
     "@devolutions/web-active-directory-gui": "0.0.13",
