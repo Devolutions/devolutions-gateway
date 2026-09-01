@@ -1,6 +1,4 @@
 # Recording streaming intent
-This document captures the intended behaviour and architectural invariants for recording-file streaming in `streaming.rs`.
-
 ## Scope
 
 These rules apply to the `/shadow` WebSocket streaming path implemented by `streaming.rs`.
