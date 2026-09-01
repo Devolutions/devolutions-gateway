@@ -248,6 +248,8 @@ impl CaManager {
             .signed_by(&csr_params.public_key, &ca_cert, &self.ca_key_pair)
             .context("sign agent certificate with CA")?;
 
+        info!(%agent_id, %agent_name, "Signed agent CSR and issued client certificate");
+
         Ok(SignedAgentCert {
             client_cert_pem: agent_cert.pem(),
             ca_cert_pem: self.ca_cert_pem.clone(),
