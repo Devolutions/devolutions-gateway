@@ -6,7 +6,7 @@ Push-Location -Path $PSScriptRoot
 
 try
 {
-	pnpm install
+	pnpm install --frozen-lockfile --filter "@devolutions/shadow-player..."
 
 	pnpm --filter @devolutions/shadow-player... build
 

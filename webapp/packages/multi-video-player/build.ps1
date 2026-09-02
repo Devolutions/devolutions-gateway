@@ -6,7 +6,7 @@ Push-Location -Path $PSScriptRoot
 
 try
 {
-	pnpm install
+	pnpm install --frozen-lockfile --filter "@devolutions/multi-video-player..."
 
 	pnpm --filter @devolutions/multi-video-player... build
 
