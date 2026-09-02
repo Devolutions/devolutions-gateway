@@ -170,6 +170,17 @@ public partial class SummaryDialog : GatewayDialog
 
         new PropertyGroup()
         {
+            Name = Strings.Group_AgentTunnel,
+            If = p => p.EnableAgentTunnel,
+            Properties = new IProperty[]
+            {
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.enableAgentTunnel),
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.agentTunnelPort)
+            }
+        },
+
+        new PropertyGroup()
+        {
             Name = Strings.Group_EncryptionKeys,
             If = Always,
             Properties = new IProperty[]

@@ -84,6 +84,7 @@
                 <String Id="YouMustProvideAValidHostname">Vous devez fournir un nom d'hôte valide</String>
                 <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">Vous devez sélectionner un certificat dans le magasin de certificats du système</String>
                     <!-- propertyGroups -->
+                <String Id="Group_AgentTunnel">Agent Tunnel</String>
                 <String Id="Group_Certificate">Certificat</String>
                 <String Id="Group_EncryptionKeys">Clés de chiffrement</String>
                 <String Id="Group_ExternalAccess">Accès externe</String>
@@ -94,6 +95,7 @@
                 <String Id="Group_WebApp">Application Web</String>
                     <!-- properties -->
                 <String Id="Property_AccessUri">URI d'accès</String>
+                <String Id="Property_AgentTunnelPort">Port UDP</String>
                 <String Id="Property_AuthenticationMode">Mode authentification</String>
                 <String Id="Property_CertificateFile">Fichier de certificat</String>
                 <String Id="Property_CertificateLocation">Emplacement du certificat</String>
@@ -104,6 +106,7 @@
                 <String Id="Property_CertificateStore">Magasin de certificats</String>
                 <String Id="Property_DevolutionsServerUrl">URL du Devolutions Server</String>
                 <String Id="Property_Directory">Répertoire</String>
+                <String Id="Property_EnableAgentTunnel">Activé</String>
                 <String Id="Property_HttpListener">Écouteur HTTP</String>
                 <String Id="Property_NewCertificate">Un nouveau certificat autosigné sera généré</String>
                 <String Id="Property_NewKeyPair">Une nouvelle paire de clés sera générée</String>
@@ -170,12 +173,14 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
                     <!-- dialogs.customize -->
+                <String Id="AgentTunnelUdpPort">Port UDP</String>
                 <String Id="ConfigurationOptions">Options de configuration</String>
                 <String Id="ConfigureTheGatewayInstallation">Configurer l'installation de Gateway</String>
                 <String Id="CustomInstallDlgDescription">Veuillez choisir comment configurer [ProductName].</String>
                 <String Id="CustomInstallDlgInfoLabel">L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant.</String>
                 <String Id="CustomInstallDlgTitle">Configuration</String>
                 <String Id="EnableAccessOverTheInternetUsingNgrok">Autoriser l'accès Web via ngrok.</String>
+                <String Id="EnableAgentTunnel">Activer Agent Tunnel</String>
                 <String Id="EnableTheGatewayWebInterface">Activer l'interface Web de Gateway</String>
                 <String Id="GenerateASelfSignedHttpsCertificate">Générer un certificat HTTPS autosigné</String>
                 <String Id="GenerateEncryptionKeys">Générer des clés de chiffrement</String>

@@ -25,6 +25,8 @@ public partial class CustomizeDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session);
         this.cmbConfigure.SelectedIndex = properties.ConfigureGateway ? 0 : 1;
+        this.chkEnableAgentTunnel.Checked = properties.EnableAgentTunnel;
+        this.txtAgentTunnelPort.Text = properties.AgentTunnelPort.ToString();
         this.chkConfigureNgrok.Checked = properties.ConfigureNgrok;
         this.chkWebApp.Checked = properties.ConfigureWebApp;
         this.chkGenerateCertificate.Checked = properties.GenerateCertificate;
@@ -33,12 +35,28 @@ public partial class CustomizeDialog : GatewayDialog
         this.SetControlStates();
     }
 
+    public override bool DoValidate()
+    {
+        if (this.ConfigureNow && this.chkEnableAgentTunnel.Checked &&
+            (string.IsNullOrWhiteSpace(this.txtAgentTunnelPort.Text) || !Validation.IsValidPort(this.txtAgentTunnelPort.Text, out _)))
+        {
+            ShowValidationError(I18n(Strings.YouMustEnterAValidPort));
+            return false;
+        }
+
+        return true;
+    }
+
     public override bool ToProperties()
     {
         new GatewayProperties(this.Runtime.Session)
         {
             ConfigureGateway = this.ConfigureNow,
             ConfigureNgrok = this.ConfigureNow && this.chkConfigureNgrok.Checked,
+            EnableAgentTunnel = this.ConfigureNow && this.chkEnableAgentTunnel.Checked,
+            AgentTunnelPort = Validation.IsValidPort(this.txtAgentTunnelPort.Text, out uint agentTunnelPort)
+                ? agentTunnelPort
+                : GatewayProperties.agentTunnelPort.Default,
             ConfigureWebApp = this.ConfigureNow && this.chkWebApp.Checked,
             GenerateCertificate = this.ConfigureNow && this.chkGenerateCertificate.Checked && !this.chkConfigureNgrok.Checked,
             GenerateKeyPair = this.ConfigureNow && this.chkGenerateKeyPair.Checked,
@@ -73,6 +91,8 @@ public partial class CustomizeDialog : GatewayDialog
     private void SetControlStates()
     {
         this.chkConfigureNgrok.Enabled = this.ConfigureNow;
+        this.chkEnableAgentTunnel.Enabled = this.ConfigureNow;
+        this.txtAgentTunnelPort.Enabled = this.chkEnableAgentTunnel.Checked && this.chkEnableAgentTunnel.Enabled;
         this.chkWebApp.Enabled = this.ConfigureNow;
 
         this.chkGenerateCertificate.Enabled = this.chkWebApp.Checked && this.chkWebApp.Enabled && !this.chkConfigureNgrok.Checked;
@@ -115,6 +135,11 @@ public partial class CustomizeDialog : GatewayDialog
         {
             this.chkGenerateCertificate.Checked = false;
         }
+    }
+
+    private void chkEnableAgentTunnel_CheckedChanged(object sender, EventArgs e)
+    {
+        this.SetControlStates();
     }
 
     private void cmbConfigure_SelectedIndexChanged(object sender, EventArgs e)

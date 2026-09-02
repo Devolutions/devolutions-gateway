@@ -518,6 +518,63 @@ namespace DevolutionsGateway.Properties
         }
 
  
+        internal static readonly WixProperty<Boolean> enableAgentTunnel = new()
+        {
+            Id = "P.ENABLEAGENTTUNNEL",
+            Default = false,
+            Name = "EnableAgentTunnel",
+            Secure = true,
+            Hidden = false,
+            Public = true,
+            Encode = false,
+        };
+
+        /// <summary>`true` to enable Agent Tunnel</summary>
+        public Boolean EnableAgentTunnel
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(enableAgentTunnel.Id);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
+            }
+            set
+            {
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(enableAgentTunnel, value);
+                }
+            }
+        }
+
+
+        internal static readonly WixProperty<UInt32> agentTunnelPort = new()
+        {
+            Id = "P.AGENTTUNNELPORT",
+            Default = 4433,
+            Name = "AgentTunnelPort",
+            Secure = true,
+            Hidden = false,
+            Public = true,
+            Encode = false,
+        };
+
+        public UInt32 AgentTunnelPort
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(agentTunnelPort.Id);
+                return WixProperties.GetPropertyValue<UInt32>(stringValue);
+            }
+            set
+            {
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(agentTunnelPort, value);
+                }
+            }
+        }
+
+
         internal static readonly WixProperty<Boolean> hasPowerShell = new()
         {
             Id = "P.HasPowerShell",
@@ -1522,6 +1579,12 @@ namespace DevolutionsGateway.Properties
             configureGateway,
  
  
+            enableAgentTunnel,
+
+
+            agentTunnelPort,
+
+
             hasPowerShell,
  
  

@@ -197,6 +197,10 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string Group_Ngrok = "Group_Ngrok";		
 		/// <summary>
+		/// Agent Tunnel
+		/// </summary>
+		public const string Group_AgentTunnel = "Group_AgentTunnel";
+		/// <summary>
 		/// External Access
 		/// </summary>
 		public const string Group_ExternalAccess = "Group_ExternalAccess";		
@@ -417,6 +421,14 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string Property_NgrokRemoteAddress = "Property_NgrokRemoteAddress";		
 		/// <summary>
+		/// Enabled
+		/// </summary>
+		public const string Property_EnableAgentTunnel = "Property_EnableAgentTunnel";
+		/// <summary>
+		/// UDP Port
+		/// </summary>
+		public const string Property_AgentTunnelPort = "Property_AgentTunnelPort";
+		/// <summary>
 		/// Directory
 		/// </summary>
 		public const string Property_Directory = "Property_Directory";		
@@ -576,6 +588,14 @@ namespace DevolutionsGateway.Resources
 		/// Enable access over the internet using ngrok
 		/// </summary>
 		public const string EnableAccessOverTheInternetUsingNgrok = "EnableAccessOverTheInternetUsingNgrok";		
+		/// <summary>
+		/// Enable Agent Tunnel
+		/// </summary>
+		public const string EnableAgentTunnel = "EnableAgentTunnel";
+		/// <summary>
+		/// UDP port
+		/// </summary>
+		public const string AgentTunnelUdpPort = "AgentTunnelUdpPort";
 		/// <summary>
 		/// Enable the Gateway web interface
 		/// </summary>
