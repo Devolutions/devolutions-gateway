@@ -6,7 +6,12 @@ Push-Location -Path $PSScriptRoot
 
 try
 {
-	pnpm install
+	pnpm install --frozen-lockfile --filter "@devolutions/session-recording-log..."
+
+	if ($LASTEXITCODE -ne 0)
+	{
+		throw "pnpm install failed with exit code $LASTEXITCODE"
+	}
 
 	pnpm --filter @devolutions/session-recording-log... build
 
