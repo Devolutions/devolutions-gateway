@@ -6,7 +6,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **AgentId** | **Guid** | Stable Agent identity. | 
 **Domains** | [**List&lt;AgentDomainAdvertisement&gt;**](AgentDomainAdvertisement.md) | Domain routes currently advertised by the Agent. | [optional] 
-**LastSeenMs** | **long?** | Last heartbeat timestamp in milliseconds since the Unix epoch. | [optional] 
+**LastSeen** | **DateTime?** | Time of the Agent&#39;s last heartbeat. | [optional] 
 **Name** | **string** | Unique management name assigned during enrollment. | 
 **Status** | **AgentStatus** |  | 
 **Subnets** | **List&lt;string&gt;** | Subnet routes currently advertised by the Agent. | [optional] 

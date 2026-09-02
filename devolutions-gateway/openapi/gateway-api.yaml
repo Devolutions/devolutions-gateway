@@ -1364,12 +1364,11 @@ components:
             $ref: '#/components/schemas/AgentDomainAdvertisement'
           description: Domain routes currently advertised by the Agent.
           nullable: true
-        last_seen_ms:
-          type: integer
-          format: int64
-          description: Last heartbeat timestamp in milliseconds since the Unix epoch.
+        last_seen:
+          type: string
+          format: date-time
+          description: Time of the Agent's last heartbeat.
           nullable: true
-          minimum: 0
         name:
           type: string
           description: Unique management name assigned during enrollment.

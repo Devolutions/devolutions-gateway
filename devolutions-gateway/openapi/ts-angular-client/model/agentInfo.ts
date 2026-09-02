@@ -21,9 +21,9 @@ export interface AgentInfo {
      */
     domains?: Array<AgentDomainAdvertisement> | null;
     /**
-     * Last heartbeat timestamp in milliseconds since the Unix epoch.
+     * Time of the Agent\'s last heartbeat.
      */
-    last_seen_ms?: number | null;
+    last_seen?: string | null;
     /**
      * Unique management name assigned during enrollment.
      */
