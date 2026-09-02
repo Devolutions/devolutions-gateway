@@ -130,53 +130,70 @@ pub struct SignedAgentCert {
 }
 
 impl CaManager {
+    /// Loads an existing CA from disk.
+    pub fn load(data_dir: &Utf8Path) -> anyhow::Result<Arc<Self>> {
+        let cert_path = data_dir.join(CA_CERT_FILENAME);
+        let key_path = data_dir.join(CA_KEY_FILENAME);
+        if !cert_path.exists() || !key_path.exists() {
+            bail!("Agent tunnel CA certificate and key must both exist");
+        }
+
+        info!(%cert_path, "Loading existing agent tunnel CA");
+
+        let ca_cert_pem =
+            std::fs::read_to_string(&cert_path).with_context(|| format!("read CA cert from {cert_path}"))?;
+        let ca_key_pem = std::fs::read_to_string(&key_path).with_context(|| format!("read CA key from {key_path}"))?;
+        let ca_key_pair = KeyPair::from_pem(&ca_key_pem).context("parse CA key pair from PEM")?;
+        let key_cert = make_ca_params()
+            .self_signed(&ca_key_pair)
+            .context("reconstruct CA certificate from key")?;
+        let certificate_spki = spki_sha256_digest_from_pem(&ca_cert_pem).context("read CA certificate public key")?;
+        let key_spki = spki_sha256_digest_from_der(key_cert.der()).context("read CA key public key")?;
+        if certificate_spki != key_spki {
+            bail!("Agent tunnel CA certificate and key do not match");
+        }
+
+        Ok(Arc::new(Self {
+            ca_cert_pem,
+            ca_key_pair,
+            data_dir: data_dir.to_owned(),
+        }))
+    }
+
     /// Load an existing CA from disk, or generate a new one.
     pub fn load_or_generate(data_dir: &Utf8Path) -> anyhow::Result<Arc<Self>> {
         let cert_path = data_dir.join(CA_CERT_FILENAME);
         let key_path = data_dir.join(CA_KEY_FILENAME);
 
-        if cert_path.exists() && key_path.exists() {
-            // --- Load existing CA ---
-
-            info!(%cert_path, "Loading existing agent tunnel CA");
-
-            let ca_cert_pem =
-                std::fs::read_to_string(&cert_path).with_context(|| format!("read CA cert from {cert_path}"))?;
-            let ca_key_pem =
-                std::fs::read_to_string(&key_path).with_context(|| format!("read CA key from {key_path}"))?;
-            let ca_key_pair = KeyPair::from_pem(&ca_key_pem).context("parse CA key pair from PEM")?;
-
-            Ok(Arc::new(Self {
-                ca_cert_pem,
-                ca_key_pair,
-                data_dir: data_dir.to_owned(),
-            }))
-        } else {
-            // --- Generate new CA ---
-
-            info!("Generating new agent tunnel CA certificate");
-
-            let ca_key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key pair")?;
-            let ca_params = make_ca_params();
-            let ca_cert = ca_params
-                .self_signed(&ca_key_pair)
-                .context("self-sign CA certificate")?;
-            let ca_cert_pem = ca_cert.pem();
-
-            // Persist to disk.
-            std::fs::create_dir_all(data_dir).with_context(|| format!("create data directory {data_dir}"))?;
-            std::fs::write(&cert_path, &ca_cert_pem).with_context(|| format!("write CA cert to {cert_path}"))?;
-            write_restricted_file(&key_path, &ca_key_pair.serialize_pem())
-                .with_context(|| format!("write CA key to {key_path}"))?;
-
-            info!(%cert_path, "Agent tunnel CA certificate generated and saved");
-
-            Ok(Arc::new(Self {
-                ca_cert_pem,
-                ca_key_pair,
-                data_dir: data_dir.to_owned(),
-            }))
+        match (cert_path.exists(), key_path.exists()) {
+            (true, true) => return Self::load(data_dir),
+            (true, false) | (false, true) => {
+                bail!("Agent tunnel CA certificate and key must both exist");
+            }
+            (false, false) => {}
         }
+
+        info!("Generating new agent tunnel CA certificate");
+
+        let ca_key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key pair")?;
+        let ca_params = make_ca_params();
+        let ca_cert = ca_params
+            .self_signed(&ca_key_pair)
+            .context("self-sign CA certificate")?;
+        let ca_cert_pem = ca_cert.pem();
+
+        std::fs::create_dir_all(data_dir).with_context(|| format!("create data directory {data_dir}"))?;
+        std::fs::write(&cert_path, &ca_cert_pem).with_context(|| format!("write CA cert to {cert_path}"))?;
+        write_restricted_file(&key_path, &ca_key_pair.serialize_pem())
+            .with_context(|| format!("write CA key to {key_path}"))?;
+
+        info!(%cert_path, "Agent tunnel CA certificate generated and saved");
+
+        Ok(Arc::new(Self {
+            ca_cert_pem,
+            ca_key_pair,
+            data_dir: data_dir.to_owned(),
+        }))
     }
 
     /// Reconstruct a `Certificate` object from the stored key pair.
@@ -296,6 +313,12 @@ impl CaManager {
         &self.ca_cert_pem
     }
 
+    /// Computes the SHA-256 hash of the CA certificate's Subject Public Key Info.
+    pub fn ca_spki_sha256(&self) -> anyhow::Result<[u8; 32]> {
+        let der = cert_pem_to_der(&self.ca_cert_pem).context("parse CA certificate PEM")?;
+        spki_sha256_digest_from_der(&der)
+    }
+
     /// Get the CA certificate file path on disk.
     pub fn ca_cert_path(&self) -> Utf8PathBuf {
         self.data_dir.join(CA_CERT_FILENAME)
@@ -370,10 +393,21 @@ impl CaManager {
 
 /// SHA-256 hash of a DER certificate's Subject Public Key Info (hex string).
 pub fn spki_sha256_from_der(der_bytes: &[u8]) -> anyhow::Result<String> {
+    Ok(hex::encode(spki_sha256_digest_from_der(der_bytes)?))
+}
+
+/// SHA-256 digest of a PEM certificate's Subject Public Key Info.
+pub fn spki_sha256_digest_from_pem(pem_str: &str) -> anyhow::Result<[u8; 32]> {
+    let der = cert_pem_to_der(pem_str).context("parse certificate PEM for SPKI")?;
+    spki_sha256_digest_from_der(&der)
+}
+
+/// SHA-256 digest of a DER certificate's Subject Public Key Info.
+pub fn spki_sha256_digest_from_der(der_bytes: &[u8]) -> anyhow::Result<[u8; 32]> {
     let cert = Cert::from_der(der_bytes).context("parse certificate for SPKI")?;
     let spki_der = cert.public_key().to_der().context("encode SPKI for hashing")?;
     let digest = Sha256::digest(&spki_der);
-    Ok(hex::encode(digest))
+    Ok(digest.into())
 }
 
 /// Compute SHA-256 fingerprint of a PEM-encoded certificate (hex string).
@@ -568,6 +602,30 @@ mod tests {
             extract_agent_id_from_pem(&signed.client_cert_pem).expect("should extract agent ID from signed cert");
         assert_eq!(extracted_id, agent_id);
 
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn incomplete_ca_is_rejected_without_overwriting_the_surviving_key() {
+        let temp_dir = std::env::temp_dir().join(format!("dgw-incomplete-ca-test-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temp path should be UTF-8");
+        let ca = CaManager::load_or_generate(&data_dir).expect("generate CA");
+        drop(ca);
+        let cert_path = data_dir.join(CA_CERT_FILENAME);
+        let key_path = data_dir.join(CA_KEY_FILENAME);
+        let original_key = std::fs::read_to_string(&key_path).expect("read generated CA key");
+        std::fs::remove_file(&cert_path).expect("remove CA certificate");
+
+        let error = CaManager::load_or_generate(&data_dir)
+            .err()
+            .expect("incomplete CA must be rejected");
+
+        assert!(error.to_string().contains("must both exist"));
+        assert!(!cert_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&key_path).expect("read surviving CA key"),
+            original_key
+        );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 

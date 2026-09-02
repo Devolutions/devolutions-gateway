@@ -114,6 +114,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-tunnel-libsql"
+version = "0.0.0"
+dependencies = [
+ "agent-tunnel",
+ "anyhow",
+ "async-trait",
+ "libsql",
+ "tempfile",
+ "tokio 1.52.3",
+ "uuid",
+]
+
+[[package]]
 name = "agent-tunnel-proto"
 version = "0.0.0"
 dependencies = [
@@ -1773,6 +1786,7 @@ name = "devolutions-gateway"
 version = "2026.2.4"
 dependencies = [
  "agent-tunnel",
+ "agent-tunnel-libsql",
  "anyhow",
  "argon2",
  "async-trait",
@@ -7511,6 +7525,7 @@ name = "testsuite"
 version = "0.0.0"
 dependencies = [
  "agent-tunnel",
+ "agent-tunnel-libsql",
  "agent-tunnel-proto",
  "anyhow",
  "assert_cmd",

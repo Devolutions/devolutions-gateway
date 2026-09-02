@@ -563,6 +563,67 @@ async fn assert_explicit_ip_is_refused(http_port: u16, key: &PrivateKey, agent_i
     );
 }
 
+async fn delete_agent(http_port: u16, key: &PrivateKey, agent_id: Uuid) {
+    let claims = ScopeTokenClaims {
+        scope: AccessScope::AgentDelete,
+        exp: unix_timestamp() + 60,
+        jti: Uuid::new_v4(),
+    };
+    let response = reqwest::Client::new()
+        .delete(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents/{agent_id}"))
+        .bearer_auth(sign(key, "SCOPE", &claims))
+        .send()
+        .await
+        .expect("delete Agent");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+async fn list_agents(http_port: u16, key: &PrivateKey) -> Vec<serde_json::Value> {
+    let claims = ScopeTokenClaims {
+        scope: AccessScope::AgentRead,
+        exp: unix_timestamp() + 60,
+        jti: Uuid::new_v4(),
+    };
+    reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents"))
+        .bearer_auth(sign(key, "SCOPE", &claims))
+        .send()
+        .await
+        .expect("list Agents")
+        .error_for_status()
+        .expect("Agent listing succeeds")
+        .json()
+        .await
+        .expect("decode Agent listing")
+}
+
+async fn assert_agent_stays_rejected(
+    http_port: u16,
+    key: &PrivateKey,
+    target: TargetAddr,
+    agent_id: Uuid,
+    duration: Duration,
+) {
+    let deadline = Instant::now() + duration;
+    loop {
+        assert!(
+            round_trip(
+                http_port,
+                key,
+                target.clone(),
+                Some(agent_id),
+                b"deleted Agent must stay rejected"
+            )
+            .await
+            .is_err()
+        );
+        if Instant::now() >= deadline {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test]
 async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
     let provisioner_key = PrivateKey::generate_rsa(2048).expect("generate provisioner key");
@@ -609,6 +670,24 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         .assert()
         .success();
     let agent_id = enrolled_agent_id(agent_config.path());
+    let agents = list_agents(config.http_port(), &provisioner_key).await;
+    let offline = agents
+        .iter()
+        .find(|agent| agent.get("agent_id").and_then(serde_json::Value::as_str) == Some(&agent_id.to_string()))
+        .expect("enrolled Agent is listed before connecting");
+    assert_eq!(
+        offline.get("name").and_then(serde_json::Value::as_str),
+        Some("smoke-agent")
+    );
+    assert_eq!(
+        offline.get("is_online").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert!(offline.get("cert_fingerprint").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("last_seen_ms").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("subnets").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("domains").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("route_epoch").is_some_and(serde_json::Value::is_null));
     let mut agent = agent_tokio_cmd()
         .env("DAGENT_CONFIG_PATH", agent_config.path())
         .arg("run")
@@ -634,10 +713,39 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
     wait_for_tcp_port(config.http_port())
         .await
         .expect("restarted gateway http port ready");
-    wait_for_round_trip(config.http_port(), &provisioner_key, echo_target, b"after restart")
-        .await
-        .expect("forward after restart");
+    wait_for_round_trip(
+        config.http_port(),
+        &provisioner_key,
+        echo_target.clone(),
+        b"after restart",
+    )
+    .await
+    .expect("forward after restart");
     assert_explicit_ip_is_refused(config.http_port(), &provisioner_key, agent_id).await;
+    delete_agent(config.http_port(), &provisioner_key, agent_id).await;
+    assert_agent_stays_rejected(
+        config.http_port(),
+        &provisioner_key,
+        echo_target.clone(),
+        agent_id,
+        Duration::from_secs(2),
+    )
+    .await;
+
+    gateway.kill().await.expect("stop gateway after Agent deletion");
+    gateway.wait().await.expect("wait for gateway shutdown");
+    gateway = start_gateway(config.config_dir());
+    wait_for_tcp_port(config.http_port())
+        .await
+        .expect("gateway http port ready after Agent deletion");
+    assert_agent_stays_rejected(
+        config.http_port(),
+        &provisioner_key,
+        echo_target,
+        agent_id,
+        Duration::from_secs(2),
+    )
+    .await;
 
     agent.kill().await.expect("stop agent");
     gateway.kill().await.expect("stop gateway");

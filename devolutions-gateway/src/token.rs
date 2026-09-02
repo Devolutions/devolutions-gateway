@@ -1174,26 +1174,26 @@ fn validate_token_impl(
             }
         }
 
-        // SCOPE, NETSCAN, JMUX, and ENROLLMENT tokens can never be reused.
+        // SCOPE, NETSCAN, and JMUX tokens can never be reused.
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Enrollment(EnrollmentTokenClaims { jti: id, exp, .. }) => {
-            match token_cache.lock().entry(id) {
-                Entry::Occupied(_) => {
-                    return Err(TokenError::UnexpectedReplay {
-                        reason: "never allowed for this use case",
-                    });
-                }
-                Entry::Vacant(bucket) => {
-                    bucket.insert(TokenSource {
-                        ip: source_ip,
-                        expiration_timestamp: exp,
-                        last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    });
-                }
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+            Entry::Occupied(_) => {
+                return Err(TokenError::UnexpectedReplay {
+                    reason: "never allowed for this use case",
+                });
             }
-        }
+            Entry::Vacant(bucket) => {
+                bucket.insert(TokenSource {
+                    ip: source_ip,
+                    expiration_timestamp: exp,
+                    last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
+                });
+            }
+        },
+
+        // Enrollment retry and replay state is persisted by the Agent authorization store.
+        AccessTokenClaims::Enrollment(_) => {}
 
         // JREC push tokens may be re-used as long as recording is considered as ongoing
         AccessTokenClaims::Jrec(JrecTokenClaims {

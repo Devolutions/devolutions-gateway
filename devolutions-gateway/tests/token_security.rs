@@ -368,6 +368,8 @@ fn token_cache(
 
         let can_reuse = matches!(claims, TokenClaims::Kdc(_))
             || matches!(claims, TokenClaims::Bridge(_))
+            // The Agent authorization store validates enrollment retries against durable request material.
+            || matches!(claims, TokenClaims::Enrollment(_))
             || same_ip
                 && matches!(
                     claims,
