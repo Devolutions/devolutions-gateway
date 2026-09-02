@@ -8,6 +8,11 @@ try
 {
 	pnpm install --frozen-lockfile --filter "@devolutions/web-recorder..."
 
+	if ($LASTEXITCODE -ne 0)
+	{
+		throw "pnpm install failed with exit code $LASTEXITCODE"
+	}
+
 	pnpm --filter @devolutions/web-recorder... build
 
 	Set-Location -Path ./dist/
