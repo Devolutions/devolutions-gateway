@@ -681,7 +681,7 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         offline.get("status").and_then(serde_json::Value::as_str),
         Some("offline")
     );
-    assert!(offline.get("last_seen_ms").is_some_and(serde_json::Value::is_null));
+    assert!(offline.get("last_seen").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("subnets").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("domains").is_some_and(serde_json::Value::is_null));
     assert!(offline.get("cert_fingerprint").is_none());

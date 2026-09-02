@@ -49,11 +49,11 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="agentId">Stable Agent identity. (required).</param>
         /// <param name="domains">Domain routes currently advertised by the Agent..</param>
-        /// <param name="lastSeenMs">Last heartbeat timestamp in milliseconds since the Unix epoch..</param>
+        /// <param name="lastSeen">Time of the Agent&#39;s last heartbeat..</param>
         /// <param name="name">Unique management name assigned during enrollment. (required).</param>
         /// <param name="status">status (required).</param>
         /// <param name="subnets">Subnet routes currently advertised by the Agent..</param>
-        public AgentInfo(Guid agentId = default(Guid), List<AgentDomainAdvertisement> domains = default(List<AgentDomainAdvertisement>), long? lastSeenMs = default(long?), string name = default(string), AgentStatus status = default(AgentStatus), List<string> subnets = default(List<string>))
+        public AgentInfo(Guid agentId = default(Guid), List<AgentDomainAdvertisement> domains = default(List<AgentDomainAdvertisement>), DateTime? lastSeen = default(DateTime?), string name = default(string), AgentStatus status = default(AgentStatus), List<string> subnets = default(List<string>))
         {
             this.AgentId = agentId;
             // to ensure "name" is required (not null)
@@ -64,7 +64,7 @@ namespace Devolutions.Gateway.Client.Model
             this.Name = name;
             this.Status = status;
             this.Domains = domains;
-            this.LastSeenMs = lastSeenMs;
+            this.LastSeen = lastSeen;
             this.Subnets = subnets;
         }
 
@@ -83,11 +83,11 @@ namespace Devolutions.Gateway.Client.Model
         public List<AgentDomainAdvertisement> Domains { get; set; }
 
         /// <summary>
-        /// Last heartbeat timestamp in milliseconds since the Unix epoch.
+        /// Time of the Agent&#39;s last heartbeat.
         /// </summary>
-        /// <value>Last heartbeat timestamp in milliseconds since the Unix epoch.</value>
-        [DataMember(Name = "last_seen_ms", EmitDefaultValue = true)]
-        public long? LastSeenMs { get; set; }
+        /// <value>Time of the Agent&#39;s last heartbeat.</value>
+        [DataMember(Name = "last_seen", EmitDefaultValue = true)]
+        public DateTime? LastSeen { get; set; }
 
         /// <summary>
         /// Unique management name assigned during enrollment.
@@ -113,7 +113,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("class AgentInfo {\n");
             sb.Append("  AgentId: ").Append(AgentId).Append("\n");
             sb.Append("  Domains: ").Append(Domains).Append("\n");
-            sb.Append("  LastSeenMs: ").Append(LastSeenMs).Append("\n");
+            sb.Append("  LastSeen: ").Append(LastSeen).Append("\n");
             sb.Append("  Name: ").Append(Name).Append("\n");
             sb.Append("  Status: ").Append(Status).Append("\n");
             sb.Append("  Subnets: ").Append(Subnets).Append("\n");
@@ -137,12 +137,6 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
-            // LastSeenMs (long?) minimum
-            if (this.LastSeenMs < (long?)0)
-            {
-                yield return new ValidationResult("Invalid value for LastSeenMs, must be a value greater than or equal to 0.", new [] { "LastSeenMs" });
-            }
-
             yield break;
         }
     }

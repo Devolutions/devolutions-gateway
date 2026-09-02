@@ -3492,12 +3492,12 @@ endif::internal-generation[]
 | Domain routes currently advertised by the Agent.
 |     
 
-| last_seen_ms
+| last_seen
 | 
 | X
-|   Long  
-| Last heartbeat timestamp in milliseconds since the Unix epoch.
-| int64    
+|   Date  
+| Time of the Agent's last heartbeat.
+| date-time    
 
 | name
 | X

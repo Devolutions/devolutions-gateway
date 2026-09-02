@@ -2,6 +2,7 @@ use axum::extract::{Path, State};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DgwState;
@@ -67,8 +68,9 @@ pub struct AgentInfo {
     pub name: String,
     /// Current tunnel connection status.
     pub status: AgentStatus,
-    /// Last heartbeat timestamp in milliseconds since the Unix epoch.
-    pub last_seen_ms: Option<u64>,
+    /// Time of the Agent's last heartbeat.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub last_seen: Option<OffsetDateTime>,
     /// Subnet routes currently advertised by the Agent.
     pub subnets: Option<Vec<String>>,
     /// Domain routes currently advertised by the Agent.
@@ -226,6 +228,14 @@ fn enrollment_request_sha256(
     hasher.finalize().into()
 }
 
+/// Converts a heartbeat timestamp expressed in milliseconds since the Unix epoch into an
+/// [`OffsetDateTime`], returning `None` if the value cannot be represented (e.g. it overflows
+/// the range supported by [`OffsetDateTime`]) rather than panicking.
+fn last_seen_ms_to_datetime(last_seen_ms: u64) -> Option<OffsetDateTime> {
+    let nanos = i128::from(last_seen_ms).checked_mul(1_000_000)?;
+    OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()
+}
+
 fn agent_info(
     accepted: agent_tunnel::authorization::AcceptedAgent,
     runtime: Option<agent_tunnel::registry::AgentInfo>,
@@ -235,7 +245,7 @@ fn agent_info(
             agent_id: accepted.agent_id,
             name: accepted.name,
             status: AgentStatus::Offline,
-            last_seen_ms: None,
+            last_seen: None,
             subnets: None,
             domains: None,
         };
@@ -249,7 +259,7 @@ fn agent_info(
         } else {
             AgentStatus::Unresponsive
         },
-        last_seen_ms: Some(runtime.last_seen_ms),
+        last_seen: last_seen_ms_to_datetime(runtime.last_seen_ms),
         subnets: Some(runtime.subnets),
         domains: Some(
             runtime
@@ -409,8 +419,31 @@ mod tests {
         let info = agent_info(accepted_agent(agent_id), Some(runtime));
 
         assert_eq!(info.status, AgentStatus::Unresponsive);
-        assert_eq!(info.last_seen_ms, Some(1234));
+        assert_eq!(
+            info.last_seen,
+            Some(OffsetDateTime::from_unix_timestamp_nanos(1234 * 1_000_000).expect("valid timestamp"))
+        );
         assert_eq!(info.subnets, Some(Vec::new()));
         assert!(info.domains.is_some_and(|domains| domains.is_empty()));
+    }
+
+    #[test]
+    fn agent_never_seen_has_no_last_seen() {
+        let agent_id = Uuid::new_v4();
+
+        let info = agent_info(accepted_agent(agent_id), None);
+
+        assert_eq!(info.status, AgentStatus::Offline);
+        assert_eq!(info.last_seen, None);
+    }
+
+    #[test]
+    fn last_seen_ms_to_datetime_converts_zero_to_unix_epoch() {
+        assert_eq!(last_seen_ms_to_datetime(0), Some(OffsetDateTime::UNIX_EPOCH));
+    }
+
+    #[test]
+    fn last_seen_ms_to_datetime_does_not_panic_on_out_of_range_value() {
+        assert_eq!(last_seen_ms_to_datetime(u64::MAX), None);
     }
 }
