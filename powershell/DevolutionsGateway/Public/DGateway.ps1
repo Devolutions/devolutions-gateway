@@ -281,6 +281,32 @@ function New-DGatewayWebAppConfig() {
     $webapp
 }
 
+class DGatewayAgentTunnelConfig {
+    [bool] $Enabled = $false
+
+    [ValidateRange(1, 65535)]
+    [System.UInt16] $ListenPort = 4433
+
+    DGatewayAgentTunnelConfig() { }
+
+    DGatewayAgentTunnelConfig([bool] $Enabled, [System.UInt16] $ListenPort) {
+        $this.Enabled = $Enabled
+        $this.ListenPort = $ListenPort
+    }
+}
+
+function New-DGatewayAgentTunnelConfig() {
+    [CmdletBinding()]
+    [OutputType('DGatewayAgentTunnelConfig')]
+    param(
+        [switch] $Enabled,
+        [ValidateRange(1, 65535)]
+        [System.UInt16] $ListenPort = 4433
+    )
+
+    [DGatewayAgentTunnelConfig]::new($Enabled.IsPresent, $ListenPort)
+}
+
 enum VerbosityProfile {
     Default
     Debug
@@ -316,6 +342,8 @@ class DGatewayConfig {
     [DGatewayNgrokConfig] $Ngrok
     
     [DGatewayWebAppConfig] $WebApp
+
+    [DGatewayAgentTunnelConfig] $AgentTunnel
 
     [string] $LogDirective
     [string] $VerbosityProfile
@@ -396,6 +424,8 @@ function Set-DGatewayConfig {
         [DGatewayNgrokConfig] $Ngrok,
 
         [DGatewayWebAppConfig] $WebApp,
+
+        [DGatewayAgentTunnelConfig] $AgentTunnel,
 
         [VerbosityProfile] $VerbosityProfile
     )

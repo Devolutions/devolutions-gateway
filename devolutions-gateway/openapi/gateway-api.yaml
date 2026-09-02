@@ -958,6 +958,125 @@ paths:
       security:
       - scope_token:
         - gateway.traffic.claim
+  /jet/tunnel/agents:
+    get:
+      tags:
+      - Agent
+      summary: List accepted agents and their current status.
+      operationId: ListAgents
+      responses:
+        '200':
+          description: Accepted agents and their current status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentInfo'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.agent.read
+  /jet/tunnel/agents/{agent_id}:
+    get:
+      tags:
+      - Agent
+      summary: Get a single agent by ID.
+      operationId: GetAgent
+      parameters:
+      - name: agent_id
+        in: path
+        description: Agent ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Agent status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentInfo'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Agent not found
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.agent.read
+    delete:
+      tags:
+      - Agent
+      summary: Delete an accepted agent by ID.
+      operationId: DeleteAgent
+      parameters:
+      - name: agent_id
+        in: path
+        description: Agent ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Agent deleted
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Agent not found
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.agent.delete
+  /jet/tunnel/enroll:
+    post:
+      tags:
+      - Agent
+      summary: Enroll a new agent.
+      description: |-
+        Requires a Bearer token: an `ENROLLMENT` JWT signed by the configured provisioner key
+        (e.g. DVLS, Hub, PAM service, or any other compatible provisioner).
+
+        The agent generates its own key pair and sends a CSR. The gateway signs it
+        and returns the certificate. The private key never leaves the agent.
+      operationId: EnrollAgent
+      requestBody:
+        description: Agent identity and certificate signing request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollRequest'
+        required: true
+      responses:
+        '200':
+          description: Agent enrolled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollResponse'
+        '400':
+          description: Invalid agent name, request body, or certificate signing request
+        '401':
+          description: Invalid or missing enrollment token
+        '409':
+          description: Agent ID or name already registered, agent key previously deleted, or enrollment token already used
+        '500':
+          description: Unexpected server error
+      security:
+      - enrollment_token: []
   /jet/update:
     get:
       tags:
@@ -1216,6 +1335,58 @@ components:
       enum:
       - IPv4
       - IPv6
+    AgentDomainAdvertisement:
+      type: object
+      required:
+      - domain
+      - auto_detected
+      properties:
+        auto_detected:
+          type: boolean
+          description: Whether the Agent discovered the domain automatically.
+        domain:
+          type: string
+          description: Domain route advertised by the Agent.
+    AgentInfo:
+      type: object
+      required:
+      - agent_id
+      - name
+      - status
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          description: Stable Agent identity.
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentDomainAdvertisement'
+          description: Domain routes currently advertised by the Agent.
+          nullable: true
+        last_seen_ms:
+          type: integer
+          format: int64
+          description: Last heartbeat timestamp in milliseconds since the Unix epoch.
+          nullable: true
+          minimum: 0
+        name:
+          type: string
+          description: Unique management name assigned during enrollment.
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        subnets:
+          type: array
+          items:
+            type: string
+          description: Subnet routes currently advertised by the Agent.
+          nullable: true
+    AgentStatus:
+      type: string
+      enum:
+      - offline
+      - online
+      - unresponsive
     AppCredential:
       type: object
       required:
@@ -1357,6 +1528,50 @@ components:
           type: integer
           description: Number of recordings not found
           minimum: 0
+    EnrollRequest:
+      type: object
+      required:
+      - agent_id
+      - csr_pem
+      properties:
+        agent_hostname:
+          type: string
+          description: Optional hostname of the agent machine (added as DNS SAN in the issued certificate).
+          nullable: true
+        agent_id:
+          type: string
+          format: uuid
+          description: Agent-generated UUID (the agent owns its identity).
+        csr_pem:
+          type: string
+          description: PEM-encoded Certificate Signing Request from the agent.
+    EnrollResponse:
+      type: object
+      required:
+      - agent_id
+      - client_cert_pem
+      - gateway_ca_cert_pem
+      - quic_endpoint
+      - server_spki_sha256
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          description: Assigned agent ID.
+        client_cert_pem:
+          type: string
+          description: PEM-encoded client certificate (signed by the gateway CA).
+        gateway_ca_cert_pem:
+          type: string
+          description: PEM-encoded gateway CA certificate (for server verification).
+        quic_endpoint:
+          type: string
+          description: QUIC endpoint to connect to (`host:port`).
+        server_spki_sha256:
+          type: string
+          description: |-
+            SHA-256 hash of the server certificate's SPKI (hex-encoded).
+            Used by the agent to pin the server's public key.
     EventOutcomeResponse:
       type: string
       enum:
@@ -2255,6 +2470,11 @@ components:
       type: object
       description: Response returned by the update endpoint.
   securitySchemes:
+    enrollment_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Single-use token authorizing Agent Tunnel enrollment
     jrec_token:
       type: http
       scheme: bearer

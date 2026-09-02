@@ -10,6 +10,7 @@ use crate::http::HttpError;
 use crate::token::EnrollmentTokenClaims;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity).
     pub agent_id: Uuid,
@@ -21,6 +22,7 @@ pub struct EnrollRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollResponse {
     /// Assigned agent ID.
     pub agent_id: Uuid,
@@ -36,21 +38,41 @@ pub struct EnrollResponse {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentDomainAdvertisement {
+    /// Domain route advertised by the Agent.
     pub domain: String,
+    /// Whether the Agent discovered the domain automatically.
     pub auto_detected: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    /// No tunnel connection exists for the Agent.
+    Offline,
+    /// The Agent has a tunnel connection and a recent heartbeat.
+    Online,
+    /// The Agent has a tunnel connection, but its heartbeat has expired.
+    Unresponsive,
+}
+
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentInfo {
+    /// Stable Agent identity.
     pub agent_id: Uuid,
+    /// Unique management name assigned during enrollment.
     pub name: String,
-    pub cert_fingerprint: Option<String>,
-    pub is_online: bool,
+    /// Current tunnel connection status.
+    pub status: AgentStatus,
+    /// Last heartbeat timestamp in milliseconds since the Unix epoch.
     pub last_seen_ms: Option<u64>,
+    /// Subnet routes currently advertised by the Agent.
     pub subnets: Option<Vec<String>>,
+    /// Domain routes currently advertised by the Agent.
     pub domains: Option<Vec<AgentDomainAdvertisement>>,
-    pub route_epoch: Option<u64>,
 }
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -68,7 +90,22 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
-async fn enroll_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    operation_id = "EnrollAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/enroll",
+    request_body(content = EnrollRequest, description = "Agent identity and certificate signing request", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Agent enrolled", body = EnrollResponse),
+        (status = 400, description = "Invalid agent name, request body, or certificate signing request"),
+        (status = 401, description = "Invalid or missing enrollment token"),
+        (status = 409, description = "Agent ID or name already registered, agent key previously deleted, or enrollment token already used"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("enrollment_token" = [])),
+))]
+pub(crate) async fn enroll_agent(
     crate::extract::EnrollmentToken(token_claims): crate::extract::EnrollmentToken,
     State(DgwState {
         conf_handle,
@@ -197,20 +234,21 @@ fn agent_info(
         return AgentInfo {
             agent_id: accepted.agent_id,
             name: accepted.name,
-            cert_fingerprint: None,
-            is_online: false,
+            status: AgentStatus::Offline,
             last_seen_ms: None,
             subnets: None,
             domains: None,
-            route_epoch: None,
         };
     };
 
     AgentInfo {
         agent_id: accepted.agent_id,
         name: accepted.name,
-        cert_fingerprint: Some(runtime.cert_fingerprint),
-        is_online: runtime.is_online,
+        status: if runtime.is_online {
+            AgentStatus::Online
+        } else {
+            AgentStatus::Unresponsive
+        },
         last_seen_ms: Some(runtime.last_seen_ms),
         subnets: Some(runtime.subnets),
         domains: Some(
@@ -223,12 +261,24 @@ fn agent_info(
                 })
                 .collect(),
         ),
-        route_epoch: Some(runtime.route_epoch),
     }
 }
 
 /// List accepted agents and their current status.
-async fn list_agents(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "ListAgents",
+    tag = "Agent",
+    path = "/jet/tunnel/agents",
+    responses(
+        (status = 200, description = "Accepted agents and their current status", body = [AgentInfo]),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.read"])),
+))]
+pub(crate) async fn list_agents(
     State(DgwState {
         agent_tunnel_handle, ..
     }): State<DgwState>,
@@ -252,7 +302,24 @@ async fn list_agents(
 }
 
 /// Get a single agent by ID.
-async fn get_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "GetAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/agents/{agent_id}",
+    params(
+        ("agent_id" = Uuid, Path, description = "Agent ID")
+    ),
+    responses(
+        (status = 200, description = "Agent status", body = AgentInfo),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Agent not found"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.read"])),
+))]
+pub(crate) async fn get_agent(
     _access: AgentManagementReadAccess,
     State(DgwState {
         agent_tunnel_handle, ..
@@ -274,7 +341,24 @@ async fn get_agent(
 }
 
 /// Delete an accepted agent by ID.
-async fn delete_agent(
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    operation_id = "DeleteAgent",
+    tag = "Agent",
+    path = "/jet/tunnel/agents/{agent_id}",
+    params(
+        ("agent_id" = Uuid, Path, description = "Agent ID")
+    ),
+    responses(
+        (status = 204, description = "Agent deleted"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Agent not found"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("scope_token" = ["gateway.agent.delete"])),
+))]
+pub(crate) async fn delete_agent(
     _access: AgentManagementDeleteAccess,
     State(DgwState {
         agent_tunnel_handle, ..
@@ -294,4 +378,39 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn accepted_agent(agent_id: Uuid) -> agent_tunnel::authorization::AcceptedAgent {
+        agent_tunnel::authorization::AcceptedAgent {
+            agent_id,
+            name: String::from("montreal-office"),
+            client_spki_sha256: [0x11; 32],
+        }
+    }
+
+    #[test]
+    fn connected_agent_without_recent_heartbeat_is_unresponsive() {
+        let agent_id = Uuid::new_v4();
+        let runtime = agent_tunnel::registry::AgentInfo {
+            agent_id,
+            name: String::from("montreal-office"),
+            cert_fingerprint: String::from("fingerprint"),
+            is_online: false,
+            last_seen_ms: 1234,
+            subnets: Vec::new(),
+            domains: Vec::new(),
+            route_epoch: 1,
+        };
+
+        let info = agent_info(accepted_agent(agent_id), Some(runtime));
+
+        assert_eq!(info.status, AgentStatus::Unresponsive);
+        assert_eq!(info.last_seen_ms, Some(1234));
+        assert_eq!(info.subnets, Some(Vec::new()));
+        assert!(info.domains.is_some_and(|domains| domains.is_empty()));
+    }
 }

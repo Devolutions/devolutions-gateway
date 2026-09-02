@@ -1252,7 +1252,7 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
 
-        /// (Unstable) Agent tunnel configuration (QUIC-based agent tunnel)
+        /// QUIC-based agent tunnel configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub agent_tunnel: Option<AgentTunnelConf>,
 
@@ -1351,7 +1351,7 @@ pub mod dto {
         }
     }
 
-    /// (Unstable) QUIC-based agent tunnel configuration
+    /// QUIC-based agent tunnel configuration
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct AgentTunnelConf {
@@ -1360,12 +1360,12 @@ pub mod dto {
         pub enabled: bool,
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
-        pub listen_port: u16,
+        pub listen_port: std::num::NonZeroU16,
     }
 
     impl AgentTunnelConf {
-        fn default_listen_port() -> u16 {
-            4433
+        fn default_listen_port() -> std::num::NonZeroU16 {
+            std::num::NonZeroU16::new(4433).expect("default port is non-zero")
         }
     }
 

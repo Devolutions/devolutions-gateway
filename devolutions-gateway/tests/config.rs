@@ -467,3 +467,23 @@ fn sample_parsing(#[case] sample: Sample) {
 
     assert_eq!(from_json, from_struct);
 }
+
+#[rstest]
+#[case(r#"{"Listeners":[]}"#, false, 4433)]
+#[case(r#"{"Listeners":[],"AgentTunnel":{}}"#, false, 4433)]
+#[case(r#"{"Listeners":[],"AgentTunnel":{"Enabled":true}}"#, true, 4433)]
+#[case(r#"{"Listeners":[],"AgentTunnel":{"Enabled":true,"ListenPort":8443}}"#, true, 8443)]
+fn agent_tunnel_conf(#[case] json: &str, #[case] expected_enabled: bool, #[case] expected_listen_port: u16) {
+    let conf_file = serde_json::from_str::<ConfFile>(json).unwrap();
+    let agent_tunnel = conf_file.agent_tunnel.unwrap_or_default();
+
+    assert_eq!(agent_tunnel.enabled, expected_enabled);
+    assert_eq!(agent_tunnel.listen_port.get(), expected_listen_port);
+}
+
+#[test]
+fn agent_tunnel_zero_port_is_rejected() {
+    let result = serde_json::from_str::<ConfFile>(r#"{"Listeners":[],"AgentTunnel":{"ListenPort":0}}"#);
+
+    assert!(result.is_err());
+}

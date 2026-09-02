@@ -275,7 +275,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
-    // Initialize agent tunnel if configured.
+    // Initialize the agent tunnel when enabled.
     let agent_tunnel_handle = if conf.agent_tunnel.enabled {
         let data_dir = config::get_data_dir();
         let hostname = &conf.hostname;
@@ -302,9 +302,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         // resolution returns an IPv6 address for the configured gateway endpoint).
         // The listener crate explicitly clears `IPV6_V6ONLY` for portability across
         // OSes, and falls back to IPv4 if the host has IPv6 disabled.
-        let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
+        let listen_addr =
+            std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port.get()));
 
-        let (listener, handle) = agent_tunnel::AgentTunnelListener::bind(
+        let (agent_tunnel_listener, agent_tunnel_handle) = agent_tunnel::AgentTunnelListener::bind(
             listen_addr,
             Arc::clone(&ca_manager),
             hostname,
@@ -313,14 +314,14 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .await
         .context("failed to bind agent tunnel listener")?;
 
-        tasks.register(listener);
+        tasks.register(agent_tunnel_listener);
 
         info!(
-            port = conf.agent_tunnel.listen_port,
+            port = conf.agent_tunnel.listen_port.get(),
             "Agent tunnel QUIC listener started",
         );
 
-        Some(Arc::new(handle))
+        Some(Arc::new(agent_tunnel_handle))
     } else {
         None
     };

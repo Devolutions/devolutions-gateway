@@ -114,17 +114,17 @@ namespace Example
             // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new ConfigApi(httpClient, config, httpClientHandler);
-            var configPatch = new ConfigPatch(); // ConfigPatch | JSON-encoded configuration patch
+            var apiInstance = new AgentApi(httpClient, config, httpClientHandler);
+            var agentId = "agentId_example";  // Guid | Agent ID
 
             try
             {
-                // Modifies configuration
-                apiInstance.PatchConfig(configPatch);
+                // Delete an accepted agent by ID.
+                apiInstance.DeleteAgent(agentId);
             }
             catch (ApiException e)
             {
-                Debug.Print("Exception when calling ConfigApi.PatchConfig: " + e.Message );
+                Debug.Print("Exception when calling AgentApi.DeleteAgent: " + e.Message );
                 Debug.Print("Status Code: "+ e.ErrorCode);
                 Debug.Print(e.StackTrace);
             }
@@ -141,6 +141,10 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*AgentApi* | [**DeleteAgent**](docs/AgentApi.md#deleteagent) | **DELETE** /jet/tunnel/agents/{agent_id} | Delete an accepted agent by ID.
+*AgentApi* | [**EnrollAgent**](docs/AgentApi.md#enrollagent) | **POST** /jet/tunnel/enroll | Enroll a new agent.
+*AgentApi* | [**GetAgent**](docs/AgentApi.md#getagent) | **GET** /jet/tunnel/agents/{agent_id} | Get a single agent by ID.
+*AgentApi* | [**ListAgents**](docs/AgentApi.md#listagents) | **GET** /jet/tunnel/agents | List accepted agents and their current status.
 *ConfigApi* | [**PatchConfig**](docs/ConfigApi.md#patchconfig) | **PATCH** /jet/config | Modifies configuration
 *DiagnosticsApi* | [**GetClockDiagnostic**](docs/DiagnosticsApi.md#getclockdiagnostic) | **GET** /jet/diagnostics/clock | Retrieves server's clock in order to diagnose clock drifting.
 *DiagnosticsApi* | [**GetConfigurationDiagnostic**](docs/DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves a subset of the configuration, for diagnosis purposes.
@@ -179,6 +183,9 @@ Class | Method | HTTP request | Description
  - [Model.AckRequest](docs/AckRequest.md)
  - [Model.AckResponse](docs/AckResponse.md)
  - [Model.AddressFamily](docs/AddressFamily.md)
+ - [Model.AgentDomainAdvertisement](docs/AgentDomainAdvertisement.md)
+ - [Model.AgentInfo](docs/AgentInfo.md)
+ - [Model.AgentStatus](docs/AgentStatus.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)
@@ -190,6 +197,8 @@ Class | Method | HTTP request | Description
  - [Model.ConnectionMode](docs/ConnectionMode.md)
  - [Model.DataEncoding](docs/DataEncoding.md)
  - [Model.DeleteManyResult](docs/DeleteManyResult.md)
+ - [Model.EnrollRequest](docs/EnrollRequest.md)
+ - [Model.EnrollResponse](docs/EnrollResponse.md)
  - [Model.EventOutcomeResponse](docs/EventOutcomeResponse.md)
  - [Model.GetUpdateProductsResponse](docs/GetUpdateProductsResponse.md)
  - [Model.GetUpdateScheduleResponse](docs/GetUpdateScheduleResponse.md)
@@ -239,6 +248,11 @@ Class | Method | HTTP request | Description
 
 
 Authentication schemes defined for the API:
+<a id="enrollment_token"></a>
+### enrollment_token
+
+- **Type**: Bearer Authentication
+
 <a id="jrec_token"></a>
 ### jrec_token
 

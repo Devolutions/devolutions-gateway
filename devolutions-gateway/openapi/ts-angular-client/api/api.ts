@@ -1,3 +1,5 @@
+export * from './agent.service';
+import { AgentService } from './agent.service';
 export * from './config.service';
 import { ConfigService } from './config.service';
 export * from './diagnostics.service';
@@ -24,4 +26,4 @@ export * from './update.service';
 import { UpdateService } from './update.service';
 export * from './webApp.service';
 import { WebAppService } from './webApp.service';
-export const APIS = [ConfigService, DiagnosticsService, HealthService, HeartbeatService, JrecService, JrlService, NetService, NetworkMonitoringService, PreflightService, SessionsService, TrafficService, UpdateService, WebAppService];
+export const APIS = [AgentService, ConfigService, DiagnosticsService, HealthService, HeartbeatService, JrecService, JrlService, NetService, NetworkMonitoringService, PreflightService, SessionsService, TrafficService, UpdateService, WebAppService];
