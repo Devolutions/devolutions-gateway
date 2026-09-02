@@ -327,13 +327,27 @@ internal static class GatewayActions
         },
         new[] { GatewayProperties.configureNgrok.Equal(true) });
 
+    private static readonly ElevatedManagedAction configureAgentTunnel = BuildConfigureAction(
+        $"CA.{nameof(configureAgentTunnel)}",
+        CustomActions.ConfigureAgentTunnel,
+        When.After, new Step(configureNgrokListeners.Id),
+        new IWixProperty[]
+        {
+            GatewayProperties.agentTunnelPort,
+        },
+        new[]
+        {
+            GatewayProperties.firstInstall.Equal(true),
+            GatewayProperties.enableAgentTunnel.Equal(true)
+        });
+
     /// <summary>
     /// Configure the certificate using PowerShell
     /// </summary>
     private static readonly ElevatedManagedAction configureCertificate = BuildConfigureAction(
         $"CA.{nameof(configureCertificate)}",
         CustomActions.ConfigureCertificate,
-        When.After, new Step(configureNgrokListeners.Id),
+        When.After, new Step(configureAgentTunnel.Id),
         new IWixProperty[]
         {
             GatewayProperties.certificateMode,
@@ -534,9 +548,10 @@ internal static class GatewayActions
         configureInit,
         configureAccessUri,
         configureListeners,
+        configureNgrokListeners,
+        configureAgentTunnel,
         configureCertificate,
         setCertificatePrivateKeyPermissions,
-        configureNgrokListeners,
         configurePublicKey,
         configureWebApp,
         configureWebAppUser,

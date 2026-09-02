@@ -199,6 +199,10 @@
           "text": "ngrok"
         },
         {
+          "id": "Group_AgentTunnel",
+          "text": "Agent Tunnel"
+        },
+        {
           "id": "Group_ExternalAccess",
           "text": "Externer Zugriff"
         },
@@ -423,6 +427,14 @@
           "text": "TCP-Adresse"
         },
         {
+          "id": "Property_EnableAgentTunnel",
+          "text": "Aktiviert"
+        },
+        {
+          "id": "Property_AgentTunnelPort",
+          "text": "UDP-Port"
+        },
+        {
           "id": "Property_Directory",
           "text": "Verzeichnis"
         },
@@ -601,6 +613,14 @@
           {
             "id": "EnableAccessOverTheInternetUsingNgrok",
             "text": "Internetzugriff über ngrok aktivieren"
+          },
+          {
+            "id": "EnableAgentTunnel",
+            "text": "Agent Tunnel aktivieren"
+          },
+          {
+            "id": "AgentTunnelUdpPort",
+            "text": "UDP-Port"
           },
           {
             "id": "EnableTheGatewayWebInterface",
