@@ -1829,7 +1829,16 @@ namespace DevolutionsAgent.Actions
                         return ActionResult.Success;
                     }
 
-                    VerifyPackageBrokerSecurity(new FileInfo(legacyJson).GetAccessControl());
+                    if (!TryVerifyLegacyPolicySourceSecurity(
+                        new FileInfo(legacyJson).GetAccessControl(),
+                        out string legacySecurityDiagnostic))
+                    {
+                        session.Log(
+                            $"skipping automatic package broker policy migration from {legacyJson}: " +
+                            $"{legacySecurityDiagnostic}. The source was left untouched and no destination was created. " +
+                            "Restrict the source owner and write access to SYSTEM/Administrators, then validate and migrate it manually.");
+                        return ActionResult.Success;
+                    }
                     string sourceFileIdentity = FileIdentity(legacyPath.Leaf);
                     string sourceContentDigest = FileContentDigest(legacyPath.Leaf);
                     using (FileStream source = OpenPinnedFileStream(legacyPath.Leaf))
@@ -1990,7 +1999,14 @@ namespace DevolutionsAgent.Actions
                         expectedSourceDigest);
                 if (removeLegacy)
                 {
-                    VerifyPackageBrokerSecurity(new FileInfo(legacyJson).GetAccessControl());
+                    if (!TryVerifyLegacyPolicySourceSecurity(
+                        new FileInfo(legacyJson).GetAccessControl(),
+                        out string legacySecurityDiagnostic))
+                    {
+                        session.Log(
+                            $"preserving the legacy package broker policy during commit: {legacySecurityDiagnostic}");
+                        removeLegacy = false;
+                    }
                 }
 
                 using (PinnedPath markerPath = PinPathWithoutReparse(
@@ -2163,6 +2179,67 @@ namespace DevolutionsAgent.Actions
                 !rules.Any(rule => IsExpectedFullControl(rule, administrators)))
             {
                 throw new InvalidOperationException("package broker path DACL is not SYSTEM/Administrators-only");
+            }
+        }
+
+        private static bool TryVerifyLegacyPolicySourceSecurity(
+            FileSystemSecurity security,
+            out string diagnostic)
+        {
+            try
+            {
+                VerifyLegacyPolicySourceSecurity(security);
+                diagnostic = null;
+                return true;
+            }
+            catch (InvalidOperationException error)
+            {
+                diagnostic = error.Message;
+                return false;
+            }
+        }
+
+        private static void VerifyLegacyPolicySourceSecurity(FileSystemSecurity security)
+        {
+            SecurityIdentifier system = new(WellKnownSidType.LocalSystemSid, null);
+            SecurityIdentifier administrators = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+            SecurityIdentifier trustedInstaller =
+                (SecurityIdentifier)new NTAccount(@"NT SERVICE\TrustedInstaller").Translate(typeof(SecurityIdentifier));
+            SecurityIdentifier owner = (SecurityIdentifier)security.GetOwner(typeof(SecurityIdentifier));
+            if (!owner.Equals(system) && !owner.Equals(administrators) && !owner.Equals(trustedInstaller))
+            {
+                throw new InvalidOperationException($"legacy policy has untrusted owner {owner.Value}");
+            }
+
+            const FileSystemRights unsafeRights =
+                FileSystemRights.WriteData |
+                FileSystemRights.AppendData |
+                FileSystemRights.WriteAttributes |
+                FileSystemRights.WriteExtendedAttributes |
+                FileSystemRights.Delete |
+                FileSystemRights.DeleteSubdirectoriesAndFiles |
+                FileSystemRights.ChangePermissions |
+                FileSystemRights.TakeOwnership;
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                includeExplicit: true,
+                includeInherited: true,
+                targetType: typeof(SecurityIdentifier)))
+            {
+                if (rule.AccessControlType != AccessControlType.Allow ||
+                    (rule.PropagationFlags & PropagationFlags.InheritOnly) != 0 ||
+                    (rule.FileSystemRights & unsafeRights) == 0)
+                {
+                    continue;
+                }
+
+                SecurityIdentifier identity = (SecurityIdentifier)rule.IdentityReference;
+                if (!identity.Equals(system) &&
+                    !identity.Equals(administrators) &&
+                    !identity.Equals(trustedInstaller))
+                {
+                    throw new InvalidOperationException(
+                        $"legacy policy grants unsafe write or tamper rights to {identity.Value}");
+                }
             }
         }
 
