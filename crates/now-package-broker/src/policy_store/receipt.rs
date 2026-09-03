@@ -104,7 +104,7 @@ mod tests {
 
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
-            "$schema": now_policy::POLICY_SCHEMA_URI,
+            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
             "PolicyVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": id, "Publisher": "Test" },

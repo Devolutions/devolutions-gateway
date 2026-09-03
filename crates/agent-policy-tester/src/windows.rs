@@ -12,6 +12,7 @@ use win_api_wrappers::process::Process;
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
+const POLICY_DRAFT_SCHEMA_URI: &str = "https://devolutions.net/schemas/now-policy-draft.schema.1.0.json";
 
 /// The Agent's test data/config directory (also hosting `PolicyPath`), materialized
 /// differently depending on [`Mode`] (item 23).
@@ -447,6 +448,7 @@ fn empty_policy() -> Value {
 /// omits the server-assigned `Revision` and `PublishedAt` metadata fields.
 fn draft_from(policy: &Value) -> Value {
     let mut draft = policy.clone();
+    draft["$schema"] = json!(POLICY_DRAFT_SCHEMA_URI);
     if let Some(metadata) = draft.get_mut("Metadata").and_then(Value::as_object_mut) {
         metadata.remove("Revision");
         metadata.remove("PublishedAt");

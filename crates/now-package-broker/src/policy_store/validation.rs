@@ -68,7 +68,7 @@ pub fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult {
         raw,
         "$schema",
         "/$schema",
-        now_policy::POLICY_SCHEMA_URI,
+        now_policy::POLICY_DRAFT_SCHEMA_URI,
         PolicyFindingCode::UnsupportedSchema,
         &mut findings,
     );
@@ -937,7 +937,7 @@ mod tests {
 
     fn minimal_draft() -> serde_json::Value {
         json!({
-            "$schema": now_policy::POLICY_SCHEMA_URI,
+            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
             "PolicyVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "test-policy", "Publisher": "Test" },
@@ -966,9 +966,9 @@ mod tests {
     }
 
     #[test]
-    fn wrong_schema_constant_is_reported_precisely() {
+    fn committed_schema_uri_is_rejected_for_a_draft() {
         let mut draft = minimal_draft();
-        draft["$schema"] = json!("https://example.com/wrong.json");
+        draft["$schema"] = json!(now_policy::POLICY_SCHEMA_URI);
         let result = validate_draft(&draft);
         assert!(!result.is_valid);
         assert!(

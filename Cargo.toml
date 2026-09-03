@@ -36,9 +36,9 @@ tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "4209
 # Freeze on the exact commit implementing the Phase 2 package-policy management contract
 # (Devolutions/now-libraries#99) ahead of publication. Pin with `rev` (not `branch`) so the
 # dependency never silently moves as the upstream branch is amended.
-now-policy = { git = "https://github.com/Devolutions/now-libraries.git", rev = "d76745a4528077e5c147417f9a660d9551dca14f" }
-now-policy-api = { git = "https://github.com/Devolutions/now-libraries.git", rev = "d76745a4528077e5c147417f9a660d9551dca14f" }
-now-policy-server-template = { git = "https://github.com/Devolutions/now-libraries.git", rev = "d76745a4528077e5c147417f9a660d9551dca14f" }
+now-policy = { git = "https://github.com/Devolutions/now-libraries.git", rev = "b4234983f3efdcf8a64aa4dbdb26497294877d79" }
+now-policy-api = { git = "https://github.com/Devolutions/now-libraries.git", rev = "b4234983f3efdcf8a64aa4dbdb26497294877d79" }
+now-policy-server-template = { git = "https://github.com/Devolutions/now-libraries.git", rev = "b4234983f3efdcf8a64aa4dbdb26497294877d79" }
 
 [workspace.lints.rust]
 # Declare the custom cfgs.

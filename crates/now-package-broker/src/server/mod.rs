@@ -849,7 +849,7 @@ mod tests {
 
         fn draft_json(id: &str) -> serde_json::Value {
             serde_json::json!({
-                "$schema": now_policy::POLICY_SCHEMA_URI,
+                "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
                 "PolicyVersion": "1.0.0",
                 "PolicyType": "PackageBrokerPolicy",
                 "Metadata": { "Id": id, "Publisher": "Test" },
