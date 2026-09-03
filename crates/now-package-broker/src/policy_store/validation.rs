@@ -1770,10 +1770,10 @@ mod tests {
 
     #[test]
     fn committed_policy_with_zero_revision_is_invalid() {
-        // `PolicyDraftDocument::into_policy_document` itself rejects revision 0 when this
-        // store commits a document, so an on-disk file claiming revision 0 could only be
-        // tampering or corruption -- it must never be reactivated as-is.
-        let policy = minimal_committed_policy("test-policy", 0);
+        // The shared model rejects revision 0 during parsing and serialization.
+        // Mutate an otherwise-valid model to exercise this defensive validation independently.
+        let mut policy = minimal_committed_policy("test-policy", 1);
+        policy.metadata.revision = 0;
         let result = validate_committed_policy(&policy);
         assert!(!result.is_valid);
     }
