@@ -663,10 +663,7 @@ fn resolved_policy_path_matches(resolved: &Path, canonical_parent: &Path, config
 }
 
 fn paths_component_matches_case_insensitive(a: &OsStr, b: &OsStr) -> bool {
-    match (a.to_str(), b.to_str()) {
-        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
-        _ => a == b,
-    }
+    policy_security::os_strings_match_case_insensitive(a, b)
 }
 
 /// Observe the exact current disk state of the configured policy file.
@@ -1882,6 +1879,29 @@ mod tests {
         ));
         assert!(!resolved_policy_path_matches(
             &resolved_parent.join("other.json"),
+            resolved_parent,
+            configured.file_name().unwrap()
+        ));
+    }
+
+    #[test]
+    fn resolved_policy_path_accepts_windows_unicode_case_mapping() {
+        let configured = Path::new(r"C:\DÉVOLUTIONS\PackageBroker\policé.json");
+        let resolved_parent = Path::new(r"c:\dévolutions\packagebroker");
+        let resolved_file = resolved_parent.join("POLICÉ.JSON");
+
+        assert!(resolved_policy_path_matches(
+            &resolved_file,
+            resolved_parent,
+            configured.file_name().unwrap()
+        ));
+        assert!(!resolved_policy_path_matches(
+            &resolved_file,
+            Path::new(r"c:\dévolutions\other"),
+            configured.file_name().unwrap()
+        ));
+        assert!(!resolved_policy_path_matches(
+            &resolved_parent.join("different.json"),
             resolved_parent,
             configured.file_name().unwrap()
         ));

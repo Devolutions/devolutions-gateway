@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{Context as _, bail};
-use devolutions_agent_shared::windows::code_signing::validate_devolutions_authenticode_signature;
+use devolutions_agent_shared::windows::code_signing::validate_devolutions_authenticode_signature_for_file;
 use now_policy_api::{CancelRequest, ClientContext, PackageRequest, StatusRequest};
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
@@ -17,7 +17,7 @@ use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::token::Token;
-use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::{FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE};
 use windows::Win32::System::Threading::{PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -272,7 +272,11 @@ impl PipeClient {
             return Ok(());
         }
 
-        let thumbprint = validate_devolutions_authenticode_signature(&self.executable_path)?;
+        let executable_file = self
+            .executable_file
+            .as_deref()
+            .context("pipe client executable handle is not retained")?;
+        let thumbprint = validate_devolutions_authenticode_signature_for_file(&self.executable_path, executable_file)?;
 
         debug!(
             process_id = self.process_id,
@@ -447,7 +451,7 @@ fn ensure_same_process_instance(
 
 fn open_executable_file(path: &Path) -> anyhow::Result<File> {
     OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES.0)
+        .access_mode(GENERIC_READ.0 | FILE_READ_ATTRIBUTES.0)
         .share_mode(FILE_SHARE_READ.0)
         .open(path)
         .context("failed to open executable without write or delete sharing")
@@ -624,11 +628,6 @@ mod tests {
             .expect_err("an inherited pipe cannot outlive the authenticated process");
     }
 
-    #[cfg(not(feature = "dev-skip-broker-signature"))]
-    fn client_user_sid() -> Sid {
-        system_client().user_sid
-    }
-
     #[test]
     fn resolve_account_sid_resolves_qualified_name() {
         let (domain, name) = system_account_names();
@@ -694,6 +693,82 @@ mod tests {
         assert!(!same_file(&exe_id, &temp_id));
     }
 
+    #[test]
+    fn retained_executable_handle_rejects_junction_retarget_to_signed_file() {
+        use win_api_wrappers::security::crypt::{
+            AuthenticodeSignatureStatus, authenticode_status, authenticode_status_for_file,
+        };
+
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let signed_source = PathBuf::from(windows_dir).join(r"System32\cmd.exe");
+        let root = tempfile::tempdir().expect("create retarget test directory");
+        let unsigned_dir = root.path().join("unsigned");
+        let signed_dir = root.path().join("signed");
+        std::fs::create_dir(&unsigned_dir).expect("create unsigned directory");
+        std::fs::create_dir(&signed_dir).expect("create signed directory");
+        let unsigned_file = unsigned_dir.join("client.exe");
+        let signed_file = signed_dir.join("client.exe");
+        std::fs::copy(std::env::current_exe().expect("current executable"), &unsigned_file)
+            .expect("copy unsigned test executable");
+        std::fs::copy(signed_source, &signed_file).expect("copy signed system executable");
+
+        let Ok(signed_status) = authenticode_status(&signed_file) else {
+            return;
+        };
+        if !matches!(signed_status.status, AuthenticodeSignatureStatus::Valid) {
+            return;
+        }
+        if authenticode_status(&unsigned_file)
+            .is_ok_and(|status| matches!(status.status, AuthenticodeSignatureStatus::Valid))
+        {
+            return;
+        }
+
+        let junction = root.path().join("client-dir");
+        create_directory_junction(&junction, &unsigned_dir);
+        let aliased_file = junction.join("client.exe");
+        let retained_unsigned = open_executable_file(&aliased_file).expect("retain unsigned executable");
+
+        std::fs::remove_dir(&junction).expect("remove original junction");
+        create_directory_junction(&junction, &signed_dir);
+        assert!(
+            authenticode_status(&aliased_file)
+                .is_ok_and(|status| matches!(status.status, AuthenticodeSignatureStatus::Valid)),
+            "retargeted path should resolve to the signed control file"
+        );
+
+        let retained_status = authenticode_status_for_file(&aliased_file, &retained_unsigned);
+        assert!(
+            match retained_status {
+                Ok(status) => !matches!(status.status, AuthenticodeSignatureStatus::Valid),
+                Err(_) => true,
+            },
+            "signature verification must reject the retained unsigned object despite the retargeted signed path"
+        );
+
+        drop(retained_unsigned);
+        std::fs::remove_dir(&junction).expect("remove retargeted junction");
+    }
+
+    fn create_directory_junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("spawn mklink");
+        assert!(
+            status.success(),
+            "failed to create junction {} -> {}",
+            link.display(),
+            target.display()
+        );
+    }
+
     #[cfg(not(feature = "dev-skip-broker-signature"))]
     mod shipping_build {
         use super::*;
@@ -708,16 +783,7 @@ mod tests {
         fn validate_signature_is_attempted_even_when_skip_is_requested() {
             // The test binary is not Devolutions-signed, so validation must be attempted and fail
             // even though the configuration requests skipping it.
-            let client = PipeClient {
-                process_id: std::process::id(),
-                process_creation_time: SystemTime::UNIX_EPOCH,
-                process: None,
-                executable_path: std::env::current_exe().expect("current test executable path"),
-                executable_file: None,
-                user_sid: client_user_sid(),
-                is_elevated: true,
-                is_administrator: true,
-            };
+            let client = PipeClient::from_current_process().expect("capture current process with executable handle");
 
             assert!(client.validate_connection(true).is_err());
         }

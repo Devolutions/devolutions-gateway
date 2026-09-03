@@ -9,6 +9,7 @@ internal static class WinAPI
 {
     internal static uint CREATE_ALWAYS = 2;
     internal const int ERROR_ALREADY_EXISTS = 183;
+    internal const int ERROR_INSUFFICIENT_BUFFER = 122;
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
@@ -257,6 +258,15 @@ internal static class WinAPI
         uint dwFlagsAndAttributes,
         IntPtr hTemplateFile
     );
+
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetKernelObjectSecurity(
+        SafeFileHandle handle,
+        uint requestedInformation,
+        [Out] byte[] securityDescriptor,
+        uint length,
+        out uint lengthNeeded);
 
     [DllImport("kernel32", EntryPoint = "CreateDirectoryW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

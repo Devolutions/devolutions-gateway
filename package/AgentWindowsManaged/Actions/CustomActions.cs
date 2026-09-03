@@ -1925,14 +1925,15 @@ namespace DevolutionsAgent.Actions
                     marker,
                     leafIsDirectory: false,
                     allowMissingLeaf: true,
-                    leafAccess: WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
                 {
                     if (markerPath.Leaf == null)
                     {
                         return ActionResult.Success;
                     }
-                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
-                    (_, _, migratedFileIdentity, migratedContentDigest) = ReadPackageBrokerMigrationMarker(marker);
+                    VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
+                    (_, _, migratedFileIdentity, migratedContentDigest) =
+                        ReadPackageBrokerMigrationMarker(markerPath.Leaf);
 
                     using PinnedPath destinationPath = PinPathWithoutReparse(
                         destination,
@@ -1948,9 +1949,10 @@ namespace DevolutionsAgent.Actions
                         VerifyPackageBrokerSecurity(new FileInfo(destination).GetAccessControl());
                         DeleteFileByHandle(destinationPath.Leaf);
                     }
-                }
 
-                File.Delete(marker);
+                    // Delete the verified marker before releasing its pin so a path replacement cannot be targeted.
+                    DeleteFileByHandle(markerPath.Leaf);
+                }
             }
             catch (Exception e)
             {
@@ -1980,9 +1982,9 @@ namespace DevolutionsAgent.Actions
                     {
                         return ActionResult.Success;
                     }
-                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
                     (expectedSourceIdentity, expectedSourceDigest, _, _) =
-                        ReadPackageBrokerMigrationMarker(marker);
+                        ReadPackageBrokerMigrationMarker(markerPath.Leaf);
                     markerIdentity = FileIdentity(markerPath.Leaf);
                 }
 
@@ -2015,7 +2017,7 @@ namespace DevolutionsAgent.Actions
                     allowMissingLeaf: false,
                     leafAccess: WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
                 {
-                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
                     if (!string.Equals(FileIdentity(markerPath.Leaf), markerIdentity, StringComparison.Ordinal))
                     {
                         throw new InvalidOperationException("package broker migration marker changed during commit");
@@ -2575,9 +2577,30 @@ namespace DevolutionsAgent.Actions
             string SourceDigest,
             string DestinationIdentity,
             string DestinationDigest)
-            ReadPackageBrokerMigrationMarker(string marker)
+            ReadPackageBrokerMigrationMarker(SafeFileHandle marker)
         {
-            JObject markerDocument = JObject.Parse(File.ReadAllText(marker, Encoding.UTF8));
+            string markerJson;
+            using (SafeFileHandle borrowedHandle = new(marker.DangerousGetHandle(), ownsHandle: false))
+            using (FileStream stream = new(borrowedHandle, FileAccess.Read))
+            {
+                try
+                {
+                    stream.Position = 0;
+                    using StreamReader reader = new(
+                        stream,
+                        Encoding.UTF8,
+                        detectEncodingFromByteOrderMarks: true,
+                        bufferSize: 1024,
+                        leaveOpen: true);
+                    markerJson = reader.ReadToEnd();
+                }
+                finally
+                {
+                    stream.Position = 0;
+                }
+            }
+
+            JObject markerDocument = JObject.Parse(markerJson);
             string sourceIdentity = markerDocument.Value<string>("SourceIdentity");
             string sourceDigest = markerDocument.Value<string>("SourceDigest");
             string destinationIdentity = markerDocument.Value<string>("DestinationIdentity");
@@ -2590,6 +2613,40 @@ namespace DevolutionsAgent.Actions
                 throw new InvalidOperationException("package broker migration marker is incomplete");
             }
             return (sourceIdentity, sourceDigest, destinationIdentity, destinationDigest);
+        }
+
+        private static FileSecurity FileSecurityFromHandle(SafeFileHandle handle)
+        {
+            uint securityInformation =
+                WinAPI.OWNER_SECURITY_INFORMATION |
+                WinAPI.GROUP_SECURITY_INFORMATION |
+                WinAPI.DACL_SECURITY_INFORMATION;
+            WinAPI.GetKernelObjectSecurity(
+                handle,
+                securityInformation,
+                null,
+                0,
+                out uint requiredSize);
+            int error = Marshal.GetLastWin32Error();
+            if (requiredSize == 0 || error != WinAPI.ERROR_INSUFFICIENT_BUFFER)
+            {
+                throw new Win32Exception(error, "failed to query pinned file security descriptor size");
+            }
+
+            byte[] securityDescriptor = new byte[requiredSize];
+            if (!WinAPI.GetKernelObjectSecurity(
+                handle,
+                securityInformation,
+                securityDescriptor,
+                (uint)securityDescriptor.Length,
+                out requiredSize))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "failed to query pinned file security descriptor");
+            }
+
+            FileSecurity security = new();
+            security.SetSecurityDescriptorBinaryForm(securityDescriptor);
+            return security;
         }
 
         private static void DeleteFileByHandle(SafeFileHandle handle)

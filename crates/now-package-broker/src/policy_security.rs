@@ -38,9 +38,9 @@
 //! since a sibling entry cannot redirect or replace the already-identity-checked directory
 //! itself.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
-use std::os::windows::ffi::OsStringExt as _;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
@@ -63,6 +63,19 @@ use windows::Win32::Storage::FileSystem::{
     GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
+
+const CSTR_EQUAL: i32 = 2;
+
+#[link(name = "Kernel32")]
+unsafe extern "system" {
+    fn CompareStringOrdinal(
+        string1: *const u16,
+        string1_length: i32,
+        string2: *const u16,
+        string2_length: i32,
+        ignore_case: i32,
+    ) -> i32;
+}
 
 /// Access rights that allow modifying the file content or its security descriptor.
 const WRITE_ACCESS_MASK: u32 = FILE_WRITE_DATA.0 /* modify content */
@@ -746,15 +759,24 @@ pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow:
     Ok(hasher.finalize().into())
 }
 
-/// Case-insensitive path comparison for verifying a handle's resolved final path against
-/// an expected literal component. Falls back to an exact `OsStr` comparison on the rare
-/// input that is not valid Unicode, which only ever makes the comparison *stricter*
-/// (fail-closed), never more permissive.
+/// Compare Windows paths or components using ordinal case-insensitive UTF-16 semantics.
 pub(crate) fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
-    match (a.to_str(), b.to_str()) {
-        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
-        _ => a.as_os_str() == b.as_os_str(),
-    }
+    os_strings_match_case_insensitive(a.as_os_str(), b.as_os_str())
+}
+
+pub(crate) fn os_strings_match_case_insensitive(a: &OsStr, b: &OsStr) -> bool {
+    let a: Vec<u16> = a.encode_wide().collect();
+    let b: Vec<u16> = b.encode_wide().collect();
+    let Ok(a_len) = i32::try_from(a.len()) else {
+        return false;
+    };
+    let Ok(b_len) = i32::try_from(b.len()) else {
+        return false;
+    };
+
+    // SAFETY: Both pointers reference UTF-16 buffers of the explicit lengths supplied
+    // for the duration of the call. `CompareStringOrdinal` does not retain them.
+    unsafe { CompareStringOrdinal(a.as_ptr(), a_len, b.as_ptr(), b_len, 1) == CSTR_EQUAL }
 }
 
 /// Verify that every ancestor of `dir` (starting at its parent; `dir` itself must already
