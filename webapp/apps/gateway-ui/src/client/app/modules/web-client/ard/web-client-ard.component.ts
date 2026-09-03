@@ -12,11 +12,11 @@ import { EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
+  ardOnlyInputEncryption,
   ardQualityMode,
   Backend,
   resolutionQuality,
   wheelSpeedFactor,
-  ardOnlyInputEncryption,
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';

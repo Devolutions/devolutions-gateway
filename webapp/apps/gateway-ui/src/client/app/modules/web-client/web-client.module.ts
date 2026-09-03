@@ -34,8 +34,8 @@ import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
 import { WebClientActiveDirectoryComponent } from './active-directory/web-client-active-directory.component';
-import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 import { ArdOnlyInputEncryptionComponent } from './form/form-controls/ard-only-input-encryption/ard-only-input-encryption.component';
+import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 import { AutoClipboardControlComponent } from './form/form-controls/auto-clipboard-control/auto-clipboard-control.component';
 import { ColorFormatControlComponent } from './form/form-controls/color-format-control/color-format-control.component';
 // TODO: uncomment when adding support for iDRAC and VMWare
