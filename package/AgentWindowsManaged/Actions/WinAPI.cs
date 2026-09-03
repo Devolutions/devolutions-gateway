@@ -63,7 +63,7 @@ internal static class WinAPI
     [StructLayout(LayoutKind.Sequential)]
     internal struct FileDispositionInfo
     {
-        [MarshalAs(UnmanagedType.Bool)]
+        [MarshalAs(UnmanagedType.U1)]
         internal bool DeleteFile;
     }
 
