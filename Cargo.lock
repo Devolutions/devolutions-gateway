@@ -167,7 +167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2477554ebf38aea815a9c4729100cfc32f766876c45b9c9c38ef221b9d1a703"
 dependencies = [
  "axum 0.8.9",
- "axum-extra",
+ "axum-extra 0.10.3",
  "bytes 1.12.1",
  "cfg-if",
  "http 1.4.2",
@@ -619,7 +619,30 @@ dependencies = [
  "axum 0.8.9",
  "axum-core 0.5.6",
  "bytes 1.12.1",
+ "futures-util",
+ "http 1.4.2",
+ "http-body 1.1.0",
+ "http-body-util",
+ "mime",
+ "pin-project-lite 0.2.17",
+ "rustversion",
+ "serde_core",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-extra"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be44683b41ccb9ab2d23a5230015c9c3c55be97a25e4428366de8873103f7970"
+dependencies = [
+ "axum 0.8.9",
+ "axum-core 0.5.6",
+ "bytes 1.12.1",
  "form_urlencoded",
+ "futures-core",
  "futures-util",
  "headers",
  "http 1.4.2",
@@ -627,7 +650,6 @@ dependencies = [
  "http-body-util",
  "mime",
  "pin-project-lite 0.2.17",
- "rustversion",
  "serde_core",
  "serde_html_form",
  "serde_path_to_error",
@@ -1791,7 +1813,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "axum 0.8.9",
- "axum-extra",
+ "axum-extra 0.12.6",
  "backoff",
  "base64 0.23.1",
  "bitflags 2.13.1",
