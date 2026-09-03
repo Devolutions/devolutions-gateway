@@ -1,0 +1,15 @@
+<div [formGroup]="parentForm">
+  <div class="gateway-form-input">
+    <p-checkbox
+      formControlName="ardOnlyInputEncryption"
+      inputId="ardOnlyInputEncryption"
+      [binary]="true"
+    ></p-checkbox>
+    <label
+      for="ardOnlyInputEncryption"
+      pTooltip="By default, we enable full ARD session encryption. This option forces only input encryption which improves performance."
+    >
+      ARD only Input Encryption
+    </label>
+  </div>
+</div>
