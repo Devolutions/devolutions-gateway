@@ -31,7 +31,7 @@ use crate::evaluator::wildcard::pattern_compiles;
 /// validation receipt. Bump this whenever validation semantics change, so a receipt
 /// computed by an older/newer broker can never be mistaken for a match against the
 /// current logic.
-pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/1";
+pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/2";
 
 /// Maximum number of rules accepted in a single policy, mirroring the shared contract's
 /// documented schema bound (`schemars(length(max = 1024))` on `PolicyDraftDocument::rules`),
@@ -388,6 +388,7 @@ fn semantic_checks(draft: &PolicyDraftDocument, findings: &mut Vec<PolicyFinding
         check_version_range(idx, rule, findings);
         check_wildcard_patterns(idx, rule, findings);
         check_match_collection_bounds(idx, rule, findings);
+        check_supported_match_criteria(idx, rule, findings);
         check_rule_bounds(idx, rule, findings);
         check_contradictory_constraints(idx, rule, findings);
     }
@@ -511,6 +512,19 @@ fn check_match_collection_bounds(idx: usize, rule: &PolicyRule, findings: &mut V
     );
     check_max_len(m.package_names.len(), 1024, &format!("{base}/PackageNames"), findings);
     check_max_len(m.versions.len(), 256, &format!("{base}/Versions"), findings);
+}
+
+fn check_supported_match_criteria(idx: usize, rule: &PolicyRule, findings: &mut Vec<PolicyFinding>) {
+    if !rule.match_criteria.package_names.is_empty() {
+        push_rule_finding(
+            findings,
+            rule,
+            PolicyFindingSeverity::Error,
+            PolicyFindingCode::InvalidFieldValue,
+            format!("/Rules/{idx}/Match/PackageNames"),
+            "PackageNames is not supported because package requests do not provide a package display name; leave this collection empty",
+        );
+    }
 }
 
 /// `Reason` and the `Constraints` allow/deny collections, none of which are covered by
@@ -638,7 +652,6 @@ fn check_wildcard_patterns(idx: usize, rule: &PolicyRule, findings: &mut Vec<Pol
     let m = &rule.match_criteria;
     check_patterns(idx, rule, "Match/Sources", &m.sources, findings);
     check_patterns(idx, rule, "Match/PackageIdentifiers", &m.package_identifiers, findings);
-    check_patterns(idx, rule, "Match/PackageNames", &m.package_names, findings);
 
     if let Some(constraints) = &rule.constraints {
         check_patterns(
@@ -696,7 +709,7 @@ fn check_contradictory_constraints(idx: usize, rule: &PolicyRule, findings: &mut
     let m = &rule.match_criteria;
 
     let mut check = |bool_match: &BTreeSet<bool>, allow_flag: bool, option_name: &str| {
-        if !allow_flag && bool_match.contains(&true) {
+        if !allow_flag && bool_match.len() == 1 && bool_match.contains(&true) {
             push_rule_finding(
                 findings,
                 rule,
@@ -1386,6 +1399,40 @@ mod tests {
     }
 
     #[test]
+    fn non_empty_package_names_are_rejected_until_requests_expose_a_display_name() {
+        let mut draft = minimal_draft();
+        draft["Rules"] = json!([rule(
+            "r1",
+            json!({ "Match": { "PackageNames": ["Visual Studio Code"] } })
+        )]);
+
+        let result = validate_draft(&draft);
+
+        assert!(!result.is_valid);
+        assert!(result.findings.iter().any(|finding| {
+            finding.code == PolicyFindingCode::InvalidFieldValue
+                && finding.path == "/Rules/0/Match/PackageNames"
+                && finding.rule_id == Some(now_policy_api::ResourceId::from("r1"))
+                && finding.message
+                    == "PackageNames is not supported because package requests do not provide a package display name; \
+                        leave this collection empty"
+        }));
+    }
+
+    #[test]
+    fn empty_package_names_remain_valid() {
+        let mut draft = minimal_draft();
+        draft["Rules"] = json!([rule(
+            "r1",
+            json!({ "Match": { "Managers": ["Winget"], "PackageNames": [] } })
+        )]);
+
+        let result = validate_draft(&draft);
+
+        assert!(result.is_valid, "{:?}", result.findings);
+    }
+
+    #[test]
     fn disk_failure_finding_never_interpolates_content() {
         // Never takes any variable/attacker-controlled input at all: its whole point is
         // that no code path can accidentally make it echo raw OS/serde error text or file
@@ -1403,7 +1450,7 @@ mod tests {
     }
 
     #[test]
-    fn contradictory_constraints_are_rejected() {
+    fn singleton_true_denied_constraint_is_contradictory() {
         let mut draft = minimal_draft();
         draft["Rules"] = json!([rule(
             "r1",
@@ -1419,6 +1466,74 @@ mod tests {
                 .findings
                 .iter()
                 .any(|f| f.code == PolicyFindingCode::ContradictoryConstraints)
+        );
+    }
+
+    #[test]
+    fn singleton_false_denied_constraint_remains_reachable() {
+        let mut draft = minimal_draft();
+        draft["Rules"] = json!([rule(
+            "r1",
+            json!({
+                "Match": { "Interactive": [false] },
+                "Constraints": { "AllowInteractive": false }
+            })
+        )]);
+
+        let result = validate_draft(&draft);
+
+        assert!(result.is_valid, "{:?}", result.findings);
+        assert!(
+            result
+                .findings
+                .iter()
+                .all(|finding| finding.code != PolicyFindingCode::ContradictoryConstraints)
+        );
+    }
+
+    #[test]
+    fn mixed_boolean_set_is_not_itself_a_contradiction() {
+        let mut draft = minimal_draft();
+        draft["Rules"] = json!([rule(
+            "r1",
+            json!({
+                "Match": { "Interactive": [false] },
+                "Constraints": { "AllowInteractive": false }
+            })
+        )]);
+        let mut parsed: PolicyDraftDocument = serde_json::from_value(draft).expect("valid singleton boolean set");
+        let rule = &mut parsed.rules[0];
+        rule.match_criteria.interactive.insert(true);
+        let mut findings = Vec::new();
+
+        check_contradictory_constraints(0, rule, &mut findings);
+
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.code != PolicyFindingCode::ContradictoryConstraints)
+        );
+    }
+
+    #[test]
+    fn mixed_boolean_set_is_rejected_structurally() {
+        let mut draft = minimal_draft();
+        draft["Rules"] = json!([rule(
+            "r1",
+            json!({
+                "Match": { "Interactive": [false, true] },
+                "Constraints": { "AllowInteractive": false }
+            })
+        )]);
+
+        let result = validate_draft(&draft);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .findings
+                .iter()
+                .all(|finding| finding.code != PolicyFindingCode::ContradictoryConstraints)
         );
     }
 
