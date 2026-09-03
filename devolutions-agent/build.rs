@@ -111,7 +111,7 @@ END"#,
     ///
     /// Mirrors `devolutions-gateway/build.rs`'s `embed_devolutions_gateway_mc`.
     ///
-    /// Prerequisite (release builds only; debug builds never need this): `mc.exe` from
+    /// Prerequisite (release and production builds only; debug builds never need this): `mc.exe` from
     /// the Windows SDK must be resolvable, either already on `PATH` (e.g. by building
     /// from a "Developer Command Prompt/PowerShell for VS"), or via the
     /// `WindowsSdkVerBinPath`/`WindowsSdkDir` environment variable. See [`find_mc`] and
@@ -121,25 +121,25 @@ END"#,
         use std::path::PathBuf;
         use std::process::Command;
 
-        // --- gate: only release builds -------------------------------------
+        // --- gate: only release-like builds --------------------------------
         let profile = env::var("PROFILE").unwrap_or_default();
-        if profile != "release" {
+        if !matches!(profile.as_str(), "release" | "production") {
             return;
         }
 
-        // --- gate: missing mc.exe is a hard failure for release builds -----
+        // --- gate: missing mc.exe is a hard failure for release-like builds
         //
-        // A release build silently missing the Windows Event Log message-table resource
+        // A release-like build silently missing the Windows Event Log message-table resource
         // would ship without formatted audit messages (the package-broker policy audit
         // trail; see `crates/sysevent-codes`) and without anyone noticing until an
         // operator inspects Event Viewer. Debug builds stay free of this requirement
         // (gated above) so an ordinary `cargo build`/`cargo check` never needs the
-        // Windows SDK, but a release build must fail loudly and actionably instead of
+        // Windows SDK, but a release-like build must fail loudly and actionably instead of
         // silently producing an incomplete binary.
         let mc_exe_path = find_mc().unwrap_or_else(|| {
             panic!(
                 "mc.exe not found, but it is required to embed the Windows Event Log message catalog \
-                 in a release build of Devolutions Agent (see `embed_devolutions_agent_mc` in this build \
+                 in a release or production build of Devolutions Agent (see `embed_devolutions_agent_mc` in this build \
                  script). Build from a \"Developer Command Prompt/PowerShell for VS\" (or otherwise put the \
                  Windows SDK `bin\\<version>\\x64` directory on PATH), or set the `WindowsSdkVerBinPath` or \
                  `WindowsSdkDir` environment variable to the Windows SDK installation. This is not required \

@@ -94,9 +94,9 @@ END"#,
         use std::path::PathBuf;
         use std::process::Command;
 
-        // --- gate: only release builds -------------------------------------
+        // --- gate: only release-like builds --------------------------------
         let profile = env::var("PROFILE").unwrap_or_default();
-        if profile != "release" {
+        if !matches!(profile.as_str(), "release" | "production") {
             return;
         }
 
