@@ -8,21 +8,6 @@ json_escape() {
 }
 
 if [ -n "${PSU_SERVER_URL:-}" ] && [ -n "${PSU_APP_TOKEN:-}" ]; then
-    IFS=',' read -r -a hubs <<< "${PSU_HUBS:-}"
-    hubs_json=""
-    for hub in "${hubs[@]}"; do
-        hub="${hub#${hub%%[![:space:]]*}}"
-        hub="${hub%${hub##*[![:space:]]}}"
-        if [ -z "${hub}" ]; then
-            continue
-        fi
-
-        if [ -n "${hubs_json}" ]; then
-            hubs_json="${hubs_json}, "
-        fi
-        hubs_json="${hubs_json}\"$(json_escape "${hub}")\""
-    done
-
     psu_agent_config=$(cat <<EOF
   "PsuAgent": {
     "Enabled": true,
@@ -30,7 +15,6 @@ if [ -n "${PSU_SERVER_URL:-}" ] && [ -n "${PSU_APP_TOKEN:-}" ]; then
     "AgentId": "$(json_escape "${PSU_AGENT_ID:-devo-agent-linux}")",
     "DisplayName": "$(json_escape "${PSU_DISPLAY_NAME:-Devolutions Agent Linux}")",
     "AppToken": "$(json_escape "${PSU_APP_TOKEN}")",
-    "Hubs": [ ${hubs_json} ],
     "PowerShell": {
       "ExecutablePath": "$(json_escape "${PSU_POWERSHELL_EXECUTABLE:-${POWERSHELL_EXECUTABLE:-pwsh}}")"
     }
