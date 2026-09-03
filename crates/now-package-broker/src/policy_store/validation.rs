@@ -136,7 +136,7 @@ pub(crate) fn validate_committed_policy(policy: &now_policy::PolicyDocument) -> 
         )]);
     }
 
-    let draft = PolicyDraftDocument::from(policy);
+    let draft = policy.to_draft();
     let raw = serde_json::to_value(&draft).expect("BUG: a committed PolicyDocument's derived draft always serializes");
     validate_draft(&raw)
 }
