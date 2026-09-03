@@ -284,6 +284,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn catalog_hash_uses_retained_handle_and_resets_position() {
         let executable = std::env::current_exe().expect("current executable");
         let mut file = File::open(executable).expect("open current executable");
@@ -299,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn catalog_wintrust_info_carries_live_sha256_context_and_member_handle() {
         let executable = std::env::current_exe().expect("current executable");
         let file = File::open(&executable).expect("open current executable");
@@ -319,6 +321,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn embedded_wintrust_info_carries_retained_file_handle() {
         let executable = std::env::current_exe().expect("current executable");
         let file = File::open(&executable).expect("open current executable");
