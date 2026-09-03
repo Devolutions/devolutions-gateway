@@ -386,7 +386,8 @@ pub fn recording_storage_low(remaining_bytes: u64, threshold_bytes: u64) -> Entr
 // external edits detected by the store's file watcher). Never carries full policy
 // content: only actor identity, intent, path, old/new policy id/revision, and outcome.
 
-/// A write was attempted by an authenticated, elevated Administrator.
+/// A write was attempted by the OS-identified connected pipe client before final
+/// signature and privilege authorization.
 pub const POLICY_WRITE_ATTEMPTED: u32 = 8000;
 /// A write was rejected before reaching the store (signature, elevation, or
 /// Administrators-membership check failed).

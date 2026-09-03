@@ -128,6 +128,36 @@ struct BrokerConnection {
     client: PipeClient,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum PolicyWriteAuthorizationAudit {
+    Attempted,
+    Denied(&'static str),
+}
+
+impl BrokerConnection {
+    fn authorize_policy_write(
+        &self,
+        mut audit: impl FnMut(PolicyWriteAuthorizationAudit),
+    ) -> Result<(), ErrorResponse> {
+        audit(PolicyWriteAuthorizationAudit::Attempted);
+
+        if let Err(error) = self.client.validate_connection(self.state.skip_signature_validation) {
+            let reason = "pipe client authentication failed";
+            audit(PolicyWriteAuthorizationAudit::Denied(reason));
+            return Err(auth_error("policy replacement", error));
+        }
+
+        if !self.client.is_elevated_administrator() {
+            let reason = "pipe client token is not an elevated Administrator";
+            audit(PolicyWriteAuthorizationAudit::Denied(reason));
+            warn!(user_sid = %self.client.user_sid(), "Rejected package broker policy replacement request: {reason}");
+            return Err(error_response(ErrorCode::AdministratorRequired, reason));
+        }
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl PackageBrokerServer for BrokerConnection {
     async fn health(&self) -> HealthResponse {
@@ -187,48 +217,24 @@ impl PackageBrokerServer for BrokerConnection {
         let configured_path = PathBuf::from(self.state.policy_store.management_snapshot().configured_path);
 
         // One attempted sysevent+trace for the whole write lifecycle, recorded here at
-        // the server boundary (where the OS-verified pipe client SID/executable, request
+        // the server boundary (where the OS-identified pipe client SID/executable, request
         // intent, and configured path are all in hand) rather than duplicated again once
         // the request reaches `PolicyStore::replace`.
-        crate::audit::write_attempted(
-            self.client.user_sid(),
-            self.client.executable_path(),
-            &intent,
-            &configured_path,
-        );
-
-        if let Err(error) = self.client.validate_connection(self.state.skip_signature_validation) {
-            // Sanitized reason to the tamper-evident sysevent trail; the detailed
-            // Authenticode failure is only ever traced (inside `auth_error`), never
-            // logged as a security-audit event.
-            let reason = "pipe client authentication failed";
-            crate::audit::write_denied(
+        self.authorize_policy_write(|audit| match audit {
+            PolicyWriteAuthorizationAudit::Attempted => crate::audit::write_attempted(
+                self.client.user_sid(),
+                self.client.executable_path(),
+                &intent,
+                &configured_path,
+            ),
+            PolicyWriteAuthorizationAudit::Denied(reason) => crate::audit::write_denied(
                 self.client.user_sid(),
                 self.client.executable_path(),
                 &intent,
                 &configured_path,
                 reason,
-            );
-            return Err(auth_error("policy replacement", error));
-        }
-
-        // Authenticode validation only proves *which* signed client is calling; policy
-        // writes additionally require the actual named-pipe process token to be both
-        // elevated and an enabled member of the built-in Administrators group. This is
-        // captured from the OS token at connect time and is never derived from request
-        // fields, so a client cannot self-declare its way into write access.
-        if !self.client.is_elevated_administrator() {
-            let reason = "pipe client token is not an elevated Administrator";
-            crate::audit::write_denied(
-                self.client.user_sid(),
-                self.client.executable_path(),
-                &intent,
-                &configured_path,
-                reason,
-            );
-            warn!(user_sid = %self.client.user_sid(), "Rejected package broker policy replacement request: {reason}");
-            return Err(error_response(ErrorCode::AdministratorRequired, reason));
-        }
+            ),
+        })?;
 
         let actor = PolicyWriteActor {
             sid: self.client.user_sid(),
@@ -862,6 +868,51 @@ mod tests {
             let mut broker_state = state();
             broker_state.skip_signature_validation = true;
             Arc::new(broker_state)
+        }
+
+        fn authorization_audit(
+            client: PipeClient,
+            skip_signature_validation: bool,
+        ) -> (ErrorResponse, Vec<PolicyWriteAuthorizationAudit>) {
+            let mut broker_state = state();
+            broker_state.skip_signature_validation = skip_signature_validation;
+            let connection = BrokerConnection {
+                state: Arc::new(broker_state),
+                client,
+            };
+            let mut audit = Vec::new();
+
+            let error = connection
+                .authorize_policy_write(|event| audit.push(event))
+                .expect_err("client should be denied");
+
+            (error, audit)
+        }
+
+        #[test]
+        fn denied_policy_writes_audit_attempt_before_authorization_denial() {
+            let unauthenticated =
+                PipeClient::test_unelevated(system_sid(), PathBuf::from("unsigned-policy-client.exe"));
+            let (error, audit) = authorization_audit(unauthenticated, false);
+            assert_eq!(error.code, ErrorCode::Unauthorized);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client authentication failed")
+                ]
+            );
+
+            let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+            let (error, audit) = authorization_audit(unelevated, true);
+            assert_eq!(error.code, ErrorCode::AdministratorRequired);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client token is not an elevated Administrator")
+                ]
+            );
         }
 
         #[tokio::test]
