@@ -2221,7 +2221,9 @@ namespace DevolutionsAgent.Actions
                 FileSystemRights.Delete |
                 FileSystemRights.DeleteSubdirectoriesAndFiles |
                 FileSystemRights.ChangePermissions |
-                FileSystemRights.TakeOwnership;
+                FileSystemRights.TakeOwnership |
+                (FileSystemRights)0x40000000 | // GENERIC_WRITE
+                (FileSystemRights)0x10000000;  // GENERIC_ALL
             foreach (FileSystemAccessRule rule in security.GetAccessRules(
                 includeExplicit: true,
                 includeInherited: true,
@@ -2379,7 +2381,8 @@ namespace DevolutionsAgent.Actions
                 FileSystemRights.Delete |
                 FileSystemRights.DeleteSubdirectoriesAndFiles |
                 FileSystemRights.ChangePermissions |
-                FileSystemRights.TakeOwnership;
+                FileSystemRights.TakeOwnership |
+                (FileSystemRights)0x10000000; // GENERIC_ALL
             foreach (FileSystemAccessRule rule in security.GetAccessRules(
                 includeExplicit: true,
                 includeInherited: true,

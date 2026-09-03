@@ -27,9 +27,9 @@ use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
     GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
-    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE,
-    QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
-    WaitForSingleObject,
+    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_FORMAT, PROCESS_NAME_NATIVE,
+    PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW,
+    STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -70,6 +70,14 @@ impl Process {
     }
 
     pub fn exe_path(&self) -> Result<PathBuf> {
+        self.exe_path_with_format(PROCESS_NAME_WIN32)
+    }
+
+    pub fn exe_path_native(&self) -> Result<PathBuf> {
+        self.exe_path_with_format(PROCESS_NAME_NATIVE)
+    }
+
+    fn exe_path_with_format(&self, format: PROCESS_NAME_FORMAT) -> Result<PathBuf> {
         let mut path = Vec::with_capacity(MAX_PATH as usize);
 
         let mut status;
@@ -81,7 +89,7 @@ impl Process {
             status = unsafe {
                 QueryFullProcessImageNameW(
                     self.handle.raw(),
-                    PROCESS_NAME_WIN32,
+                    format,
                     windows::core::PWSTR(path.as_mut_ptr()),
                     &mut length,
                 )

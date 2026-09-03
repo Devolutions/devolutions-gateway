@@ -1,5 +1,6 @@
 //! Package broker pipe client authentication.
 
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
@@ -126,12 +127,24 @@ impl PipeClient {
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
-        let executable_file = Arc::new(open_executable_file(&executable_path).with_context(|| {
+        let native_executable_path = process
+            .exe_path_native()
+            .with_context(|| format!("failed to query pipe client process {process_id} native executable path"))?;
+        let executable_file = Arc::new(open_native_executable_file(&native_executable_path).with_context(|| {
             format!(
                 "failed to retain pipe client executable '{}'",
                 executable_path.display()
             )
         })?);
+        let confirmed_native_executable_path = process
+            .exe_path_native()
+            .with_context(|| format!("failed to confirm pipe client process {process_id} native executable path"))?;
+        if !crate::policy_security::paths_match_case_insensitive(
+            &native_executable_path,
+            &confirmed_native_executable_path,
+        ) {
+            bail!("pipe client executable changed while its identity was captured");
+        }
         let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
@@ -457,6 +470,12 @@ fn open_executable_file(path: &Path) -> anyhow::Result<File> {
         .context("failed to open executable without write or delete sharing")
 }
 
+fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
+    let mut global_root_path = OsString::from(r"\\?\GLOBALROOT");
+    global_root_path.push(native_path.as_os_str());
+    open_executable_file(Path::new(&global_root_path))
+}
+
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
 fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
@@ -729,7 +748,7 @@ mod tests {
         let junction = root.path().join("client-dir");
         create_directory_junction(&junction, &unsigned_dir);
         let aliased_file = junction.join("client.exe");
-        let retained_unsigned = open_executable_file(&aliased_file).expect("retain unsigned executable");
+        let retained_unsigned = open_executable_file(&unsigned_file).expect("retain unsigned executable");
 
         std::fs::remove_dir(&junction).expect("remove original junction");
         create_directory_junction(&junction, &signed_dir);
@@ -750,6 +769,52 @@ mod tests {
 
         drop(retained_unsigned);
         std::fs::remove_dir(&junction).expect("remove retargeted junction");
+    }
+
+    #[test]
+    fn process_capture_uses_the_mapped_image_instead_of_a_retargeted_launch_path() {
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let root = tempfile::tempdir().expect("create process image test directory");
+        let original_dir = PathBuf::from(&windows_dir).join("System32");
+        let replacement_dir = root.path().join("replacement");
+        std::fs::create_dir(&replacement_dir).expect("create replacement directory");
+        let original_file = original_dir.join("cmd.exe");
+        let replacement_file = replacement_dir.join("cmd.exe");
+        std::fs::copy(
+            PathBuf::from(&windows_dir).join(r"System32\where.exe"),
+            &replacement_file,
+        )
+        .expect("copy replacement executable");
+
+        let junction = root.path().join("client-dir");
+        create_directory_junction(&junction, &original_dir);
+        let aliased_file = junction.join("cmd.exe");
+        let mut child = std::process::Command::new(&aliased_file)
+            .args(["/D", "/C", "ping -n 30 127.0.0.1 > nul"])
+            .spawn()
+            .expect("start executable through junction");
+
+        std::fs::remove_dir(&junction).expect("remove original junction");
+        create_directory_junction(&junction, &replacement_dir);
+        let client = PipeClient::from_process_id(child.id()).expect("capture process image identity");
+        let retained_id = file_id_from_handle(client.executable_file.as_deref().expect("retained executable"))
+            .expect("query retained executable identity");
+
+        assert!(same_file(
+            &retained_id,
+            &file_id(&original_file).expect("query original executable identity")
+        ));
+        assert!(!same_file(
+            &retained_id,
+            &file_id(&replacement_file).expect("query replacement executable identity")
+        ));
+
+        child.kill().expect("terminate child");
+        child.wait().expect("wait for child");
+        drop(client);
+        std::fs::remove_dir(&junction).expect("remove replacement junction");
     }
 
     fn create_directory_junction(link: &Path, target: &Path) {
