@@ -70,22 +70,28 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
             result = server.connect() => {
                 match result {
                     Ok(()) => {
-                        // Capture the caller before handing the connected instance to a
-                        // spawned task. The opened process handle then prevents its process
-                        // object from disappearing while identity is collected.
-                        let client = match PipeClient::from_connected_pipe(&server) {
-                            Ok(client) => client,
-                            Err(error) => {
-                                warn!(%error, "Rejected named pipe client");
-                                continue;
-                            }
-                        };
                         let state = Arc::clone(&state);
                         tokio::spawn(async move {
-                            // The permit is held for the lifetime of the connection task.
-                            let _permit = permit;
-
                             let serve = async move {
+                                // Capture may open a network-backed executable path. Keep
+                                // that blocking work off the accept loop and retain the
+                                // connection slot until it completes, even after a timeout.
+                                let capture = tokio::task::spawn_blocking(move || {
+                                    let client = PipeClient::from_connected_pipe(&server);
+                                    (server, permit, client)
+                                });
+                                let (server, _permit, client) = match capture.await {
+                                    Ok((server, permit, Ok(client))) => (server, permit, client),
+                                    Ok((_server, _permit, Err(error))) => {
+                                        warn!(%error, "Rejected named pipe client");
+                                        return;
+                                    }
+                                    Err(error) => {
+                                        error!(%error, "Named pipe client identity capture task failed");
+                                        return;
+                                    }
+                                };
+
                                 info!("Client connected to named pipe");
                                 let router = build_router_for_client(state, client);
                                 serve_connection(server, router).await;
