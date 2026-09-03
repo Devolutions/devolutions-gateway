@@ -563,7 +563,18 @@ pub(crate) async fn pull_recording_session(
         ("filename" = String, Path, description = "Name of recording file to retrieve"),
     ),
     responses(
-        (status = 200, description = "Recording file", body = Vec<u8>),
+        (
+            status = 200,
+            description = "Recording file",
+            body = Vec<u8>,
+            content_type = [
+                "video/webm",
+                "application/x-asciicast",
+                "application/x-ndjson",
+                "application/json",
+                "application/octet-stream",
+            ],
+        ),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -609,16 +620,10 @@ where
         .await
         .map_err(HttpError::internal().err())?;
 
-    let content_type = path
-        .extension()
-        .and_then(RecordingFileType::from_extension)
-        .and_then(RecordingFileType::content_type);
-
-    if let Some(content_type) = content_type {
-        response
-            .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    }
+    let content_type = recording_file_content_type(&path);
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     Ok(response)
 }
@@ -638,6 +643,17 @@ struct RecordingZipManifestFile {
 
 fn is_safe_recording_file_name(file_name: &str) -> bool {
     !file_name.is_empty() && !file_name.contains("..") && !file_name.contains('/') && !file_name.contains('\\')
+}
+
+fn recording_file_content_type(path: &Utf8Path) -> &'static str {
+    if path.file_name() == Some("recording.json") {
+        return "application/json";
+    }
+
+    path.extension()
+        .and_then(RecordingFileType::from_extension)
+        .map(RecordingFileType::content_type)
+        .unwrap_or("application/octet-stream")
 }
 
 /// Immutable package membership for one download attempt.
@@ -1014,6 +1030,27 @@ mod tests {
         assert!(!is_safe_recording_file_name("../secret.webm"));
         assert!(!is_safe_recording_file_name("a/b.webm"));
         assert!(!is_safe_recording_file_name("a\\b.webm"));
+    }
+
+    #[test]
+    fn detects_recording_file_content_types() {
+        let expected_content_types = [
+            ("recording-0.webm", "video/webm"),
+            ("recording-0.trp", "application/octet-stream"),
+            ("recording-0.cast", "application/x-asciicast"),
+            ("recording-0.slog", "application/x-ndjson"),
+            ("recording.json", "application/json"),
+            ("recording-0.bin", "application/octet-stream"),
+            ("recording-0", "application/octet-stream"),
+        ];
+
+        for (file_name, expected_content_type) in expected_content_types {
+            assert_eq!(
+                recording_file_content_type(Utf8Path::new(file_name)),
+                expected_content_type,
+                "unexpected content type for {file_name}"
+            );
+        }
     }
 
     #[tokio::test]

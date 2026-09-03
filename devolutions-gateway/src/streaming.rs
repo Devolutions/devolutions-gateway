@@ -32,10 +32,11 @@ pub(crate) async fn stream_file(
 
     let path = Arc::new(path.to_owned());
     let upgrade_result = match streaming_type {
-        StreamingType::Terminal => {
+        StreamingType::Terminal(input_type) => {
             let shutdown_notify = Arc::clone(&shutdown_notify);
             ws.on_upgrade(move |socket| async move {
-                if let Err(e) = setup_terminal_streaming(&path, socket, shutdown_notify, when_new_chunk_appended).await
+                if let Err(e) =
+                    setup_terminal_streaming(&path, input_type, socket, shutdown_notify, when_new_chunk_appended).await
                 {
                     error!(error = ?e, "Terminal streaming failed");
                 }
@@ -77,34 +78,35 @@ impl terminal_streamer::TerminalStreamSocket for TerminalStreamSocketImpl {
 }
 
 enum StreamingType {
-    Terminal,
+    Terminal(terminal_streamer::InputStreamType),
     WebM,
 }
 
+/// Determines streamability from recording type, which is stricter than pull MIME handling.
+/// A file may be downloadable but still rejected here when there is no streaming backend.
 async fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
     let path_extension = path
         .extension()
         .context("no extension found in the recording file path")?;
 
     info!(?path, extension = ?path_extension, "Streaming file");
-    if !(path_extension == RecordingFileType::WebM.extension()
-        || path_extension == RecordingFileType::Asciicast.extension()
-        || path_extension == RecordingFileType::TRP.extension())
-    {
-        anyhow::bail!("invalid file type");
-    }
+    let file_type =
+        RecordingFileType::from_extension(path_extension).ok_or_else(|| anyhow::anyhow!("invalid file type"))?;
+    streaming_type_for_file_type(file_type)
+}
 
-    if path_extension == RecordingFileType::Asciicast.extension()
-        || path_extension == RecordingFileType::TRP.extension()
-    {
-        Ok(StreamingType::Terminal)
-    } else {
-        Ok(StreamingType::WebM)
+fn streaming_type_for_file_type(file_type: RecordingFileType) -> anyhow::Result<StreamingType> {
+    match file_type {
+        RecordingFileType::Asciicast => Ok(StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)),
+        RecordingFileType::TRP => Ok(StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)),
+        RecordingFileType::WebM => Ok(StreamingType::WebM),
+        RecordingFileType::SessionRecordingLog => anyhow::bail!("invalid file type"),
     }
 }
 
 async fn setup_terminal_streaming(
     path: &camino::Utf8Path,
+    input_type: terminal_streamer::InputStreamType,
     socket: WebSocket,
     shutdown_notify: Arc<Notify>,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()> + Send + 'static,
@@ -126,15 +128,6 @@ async fn setup_terminal_streaming(
         .open(path)
         .await
         .with_context(|| format!("failed to open file: {path:?}"))?;
-
-    let path_extension = path
-        .extension()
-        .context("no extension found in the recording file path")?;
-    let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
-        terminal_streamer::InputStreamType::Asciinema
-    } else {
-        terminal_streamer::InputStreamType::Trp
-    };
 
     terminal_stream(
         TerminalStreamSocketImpl(socket),
@@ -190,5 +183,73 @@ async fn setup_webm_streaming(
             close_handle.normal_close().await;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn validates_streaming_behavior_from_file_extension() {
+        let webm_type = validate_streaming_file(camino::Utf8Path::new("recording-0.webm"))
+            .await
+            .expect("webm should be accepted");
+        assert!(matches!(webm_type, StreamingType::WebM));
+
+        let cast_type = validate_streaming_file(camino::Utf8Path::new("recording-0.cast"))
+            .await
+            .expect("cast should be accepted");
+        assert!(matches!(
+            cast_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)
+        ));
+
+        let trp_type = validate_streaming_file(camino::Utf8Path::new("recording-0.trp"))
+            .await
+            .expect("trp should be accepted");
+        assert!(matches!(
+            trp_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)
+        ));
+
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0.slog"))
+                .await
+                .is_err(),
+            "slog should be rejected for streaming"
+        );
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0.bin"))
+                .await
+                .is_err(),
+            "unknown extension should be rejected"
+        );
+        assert!(
+            validate_streaming_file(camino::Utf8Path::new("recording-0"))
+                .await
+                .is_err(),
+            "missing extension should be rejected"
+        );
+    }
+
+    #[test]
+    fn maps_recording_file_type_to_streaming_type() {
+        let asciicast_type =
+            streaming_type_for_file_type(RecordingFileType::Asciicast).expect("asciicast should stream in terminal");
+        assert!(matches!(
+            asciicast_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)
+        ));
+
+        let trp_type = streaming_type_for_file_type(RecordingFileType::TRP).expect("trp should stream in terminal");
+        assert!(matches!(
+            trp_type,
+            StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)
+        ));
+
+        let webm_type = streaming_type_for_file_type(RecordingFileType::WebM).expect("webm should stream as video");
+        assert!(matches!(webm_type, StreamingType::WebM));
+        assert!(streaming_type_for_file_type(RecordingFileType::SessionRecordingLog).is_err());
     }
 }
