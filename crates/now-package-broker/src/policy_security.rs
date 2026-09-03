@@ -201,16 +201,12 @@ pub(crate) fn verify_policy_directory_security(dir: &File) -> anyhow::Result<()>
     )
 }
 
-/// Compute a digest that changes whenever `file`'s owner or DACL changes, even between
-/// two configurations that would each independently pass [`verify_policy_file_security`]
-/// (e.g. a rewritten-but-still-admin-only ACL, or SYSTEM vs. Administrators ownership).
+/// Compute a digest over a file or directory's owner and complete DACL entries.
 /// Used only to fold "security-relevant state" into the policy store's opaque token so an
 /// ACL change rotates it; never to authorize anything by itself.
 ///
-/// Callers must only invoke this after [`verify_policy_file_security`] has already
-/// succeeded on the same handle: every ACE this reads is then guaranteed to be one of the
-/// simple, fixed-layout allow/deny/audit/alarm types (object ACE types would already have
-/// been rejected), so no further type dispatch is needed here.
+/// Callers must only invoke this after security verification succeeds on the same policy file or directory handle.
+/// The complete bytes of each accepted ACE are included, including callback conditions.
 pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
     let handle = HANDLE(file.as_raw_handle());
 
@@ -260,23 +256,21 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
             unsafe { GetAce(dacl, idx, &mut ace_ptr) }.context("failed to read DACL entry for security digest")?;
 
             // SAFETY: GetAce succeeded, so `ace_ptr` points to an ACE starting with an
-            // ACE_HEADER, and (per this function's precondition) a simple, fixed-layout
-            // (header, mask, inline SID) ACE type.
+            // ACE_HEADER whose AceSize describes the complete entry.
             let header = unsafe { &*ace_ptr.cast::<ACE_HEADER>() };
-            // SAFETY: Same as above: `ace_ptr` points to a simple, fixed-layout ACE.
-            let ace = unsafe { &*ace_ptr.cast::<ACCESS_ALLOWED_ACE>() };
-            hasher.update([header.AceType, header.AceFlags]);
-            hasher.update(ace.Mask.to_le_bytes());
-
-            let trustee = PSID(std::ptr::from_ref(&ace.SidStart).cast_mut().cast());
-            // SAFETY: `SidStart` is the first DWORD of the trustee SID stored inline in the ACE.
-            let trustee_string = unsafe { sid_to_string(trustee) };
-            hasher.update(trustee_string.as_bytes());
-            hasher.update(b"\0");
+            let ace_size = usize::from(header.AceSize);
+            // SAFETY: AceSize is validated by the ACL and bounds this ACE within the DACL.
+            let ace_bytes = unsafe { std::slice::from_raw_parts(ace_ptr.cast::<u8>(), ace_size) };
+            update_ace_digest(&mut hasher, ace_bytes);
         }
     }
 
     Ok(hasher.finalize().into())
+}
+
+fn update_ace_digest(hasher: &mut Sha256, ace_bytes: &[u8]) {
+    hasher.update(ace_bytes.len().to_le_bytes());
+    hasher.update(ace_bytes);
 }
 
 /// Build the admin-only ACL (SYSTEM and built-in Administrators only, full control)
@@ -1043,6 +1037,16 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn ace_digest_includes_callback_application_data() {
+        let mut left = Sha256::new();
+        let mut right = Sha256::new();
+        update_ace_digest(&mut left, &[1, 2, 3, 4]);
+        update_ace_digest(&mut right, &[1, 2, 3, 5]);
+
+        assert_ne!(left.finalize(), right.finalize());
+    }
 
     /// Proves the property [`admin_only_security_attributes`] is relied on for (item 8):
     /// the DACL it builds is `Protected` (`SE_DACL_PROTECTED`), so `CreateFileW`/

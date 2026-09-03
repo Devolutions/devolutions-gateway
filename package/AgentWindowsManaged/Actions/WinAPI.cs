@@ -8,24 +8,64 @@ namespace DevolutionsAgent.Actions;
 internal static class WinAPI
 {
     internal static uint CREATE_ALWAYS = 2;
+    internal const int ERROR_ALREADY_EXISTS = 183;
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
     internal const uint DACL_SECURITY_INFORMATION = 0x00000004;
+    internal const uint DELETE = 0x00010000;
+    internal const uint GROUP_SECURITY_INFORMATION = 0x00000002;
+    internal const uint OWNER_SECURITY_INFORMATION = 0x00000001;
+    internal const uint PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000;
 
     internal const int EM_SETCUEBANNER = 0x1501;
 
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    internal const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+    internal const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+    internal const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+    internal const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    internal const uint FILE_READ_ATTRIBUTES = 0x00000080;
 
     internal static uint FILE_SHARE_READ = 0x00000001;
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
+    internal const uint GENERIC_READ = 0x80000000;
     internal static uint GENERIC_WRITE = 0x40000000;
+    internal const uint OPEN_EXISTING = 3;
+    internal const uint READ_CONTROL = 0x00020000;
 
     internal static uint MOVEFILE_REPLACE_EXISTING = 0x1;
 
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ByHandleFileInformation
+    {
+        internal uint FileAttributes;
+        internal System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        internal System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        internal System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        internal uint VolumeSerialNumber;
+        internal uint FileSizeHigh;
+        internal uint FileSizeLow;
+        internal uint NumberOfLinks;
+        internal uint FileIndexHigh;
+        internal uint FileIndexLow;
+    }
+
+    internal enum FileInfoByHandleClass
+    {
+        FileDispositionInfo = 4,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FileDispositionInfo
+    {
+        [MarshalAs(UnmanagedType.Bool)]
+        internal bool DeleteFile;
+    }
 
     internal const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
 
@@ -218,6 +258,12 @@ internal static class WinAPI
         IntPtr hTemplateFile
     );
 
+    [DllImport("kernel32", EntryPoint = "CreateDirectoryW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CreateDirectory(
+        [MarshalAs(UnmanagedType.LPWStr)] string lpPathName,
+        ref SECURITY_ATTRIBUTES lpSecurityAttributes);
+
     [DllImport("kernel32", EntryPoint = "CreateProcessW", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern bool CreateProcess(
         [MarshalAs(UnmanagedType.LPWStr)] string lpApplicationName,
@@ -240,6 +286,20 @@ internal static class WinAPI
     [DllImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetFileInformationByHandle(
+        SafeFileHandle hFile,
+        out ByHandleFileInformation lpFileInformation);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetFileInformationByHandle(
+        SafeFileHandle hFile,
+        FileInfoByHandleClass fileInformationClass,
+        ref FileDispositionInfo fileInformation,
+        uint bufferSize);
 
     [DllImport("Kernel32", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Auto, SetLastError = true)]
     internal static extern uint GetFinalPathNameByHandle(

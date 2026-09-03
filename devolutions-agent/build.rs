@@ -199,16 +199,54 @@ END"#,
 
     fn find_mc() -> Option<std::path::PathBuf> {
         if let Ok(sdk_bin) = env::var("WindowsSdkVerBinPath") {
-            let p = std::path::Path::new(&sdk_bin).join("mc.exe");
-            if p.exists() {
-                return Some(p);
+            let sdk_bin = std::path::Path::new(&sdk_bin);
+            for candidate in [sdk_bin.join("mc.exe"), sdk_bin.join("x64").join("mc.exe")] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
             }
         }
 
+        if let Some(candidate) = env::var_os("PATH").and_then(|path| {
+            env::split_paths(&path)
+                .map(|dir| dir.join("mc.exe"))
+                .find(|path| path.is_file())
+        }) {
+            return Some(candidate);
+        }
+
         if let Ok(sdk_dir) = env::var("WindowsSdkDir") {
-            // e.g. C:\Program Files (x86)\Windows Kits\10\
-            let candidate = std::path::Path::new(&sdk_dir).join("bin").join("x64").join("mc.exe");
-            if candidate.exists() {
+            let bin_dir = std::path::Path::new(&sdk_dir).join("bin");
+            let candidate = bin_dir.join("x64").join("mc.exe");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+
+            let mut versioned: Vec<_> = fs::read_dir(bin_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect();
+            versioned.sort_by_key(|path| {
+                std::cmp::Reverse(
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .and_then(|name| {
+                            name.split('.')
+                                .map(str::parse::<u32>)
+                                .collect::<Result<Vec<_>, _>>()
+                                .ok()
+                        })
+                        .unwrap_or_default(),
+                )
+            });
+            if let Some(candidate) = versioned
+                .into_iter()
+                .map(|dir| dir.join("x64").join("mc.exe"))
+                .find(|path| path.is_file())
+            {
                 return Some(candidate);
             }
         }

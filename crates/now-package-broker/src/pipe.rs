@@ -70,21 +70,22 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
             result = server.connect() => {
                 match result {
                     Ok(()) => {
+                        // Capture the caller before handing the connected instance to a
+                        // spawned task. The opened process handle then prevents its process
+                        // object from disappearing while identity is collected.
+                        let client = match PipeClient::from_connected_pipe(&server) {
+                            Ok(client) => client,
+                            Err(error) => {
+                                warn!(%error, "Rejected named pipe client");
+                                continue;
+                            }
+                        };
                         let state = Arc::clone(&state);
                         tokio::spawn(async move {
                             // The permit is held for the lifetime of the connection task.
                             let _permit = permit;
 
                             let serve = async move {
-                                // Capture the client identity off the accept loop so a slow
-                                // lookup cannot stall accepting other connections.
-                                let client = match PipeClient::from_connected_pipe(&server) {
-                                    Ok(client) => client,
-                                    Err(error) => {
-                                        warn!(%error, "Rejected named pipe client");
-                                        return;
-                                    }
-                                };
                                 info!("Client connected to named pipe");
                                 let router = build_router_for_client(state, client);
                                 serve_connection(server, router).await;

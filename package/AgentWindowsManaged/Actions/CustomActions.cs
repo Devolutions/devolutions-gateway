@@ -3,6 +3,7 @@ using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
@@ -13,8 +14,10 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,6 +53,17 @@ namespace DevolutionsAgent.Actions
         private static string ProgramDataPackageBrokerDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "Devolutions", "PackageBroker");
+
+        private static uint PackageBrokerSecurityInformation =>
+            WinAPI.OWNER_SECURITY_INFORMATION |
+            WinAPI.GROUP_SECURITY_INFORMATION |
+            WinAPI.DACL_SECURITY_INFORMATION |
+            WinAPI.PROTECTED_DACL_SECURITY_INFORMATION;
+
+        private static string PackageBrokerMigrationMarker(Session session) =>
+            Path.Combine(
+                ProgramDataPackageBrokerDirectory,
+                $".legacy-policy-migration-{session.Get(AgentProperties.installId)}.marker");
 
         [CustomAction]
         public static ActionResult CheckInstalledNetFx45Version(Session session)
@@ -163,8 +177,8 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                DirectoryInfo di = Directory.CreateDirectory(path);
-                session.Log($"created directory at {di.FullName} or already exists");
+                CreateProgramDataSubdirectoryTree(path, Includes.PROGRAM_DATA_SDDL);
+                session.Log($"securely created directory at {path} or verified it already exists");
             }
             catch (Exception e)
             {
@@ -206,8 +220,8 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                DirectoryInfo di = Directory.CreateDirectory(path);
-                session.Log($"created directory at {di.FullName} or already exists");
+                CreateProgramDataSubdirectoryTree(path, Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL);
+                session.Log($"securely created directory at {path} or verified it already exists");
             }
             catch (Exception e)
             {
@@ -1760,12 +1774,260 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataPackageBrokerDirectory, Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL);
+                using PinnedPath pinned = PinPathWithoutReparse(
+                    ProgramDataPackageBrokerDirectory,
+                    leafIsDirectory: true,
+                    allowMissingLeaf: false,
+                    leafAccess: WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+                SetFileSecurity(
+                    session,
+                    ProgramDataPackageBrokerDirectory,
+                    Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL,
+                    PackageBrokerSecurityInformation);
+                VerifyPackageBrokerSecurity(new DirectoryInfo(ProgramDataPackageBrokerDirectory).GetAccessControl());
                 return ActionResult.Success;
             }
             catch (Exception e)
             {
                 session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult MigrateLegacyPackageBrokerPolicy(Session session)
+        {
+            string destination = Path.Combine(ProgramDataPackageBrokerDirectory, "package-broker-policy.json");
+            string legacyJson = Path.Combine(ProgramDataDirectory, "package-broker-policy.json");
+            string temporary = Path.Combine(
+                ProgramDataPackageBrokerDirectory,
+                $".package-broker-policy.migration-{Guid.NewGuid():N}.tmp");
+            string marker = PackageBrokerMigrationMarker(session);
+            try
+            {
+                using PinnedPath destinationPath = PinPathWithoutReparse(
+                    destination,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.FILE_READ_ATTRIBUTES);
+                if (destinationPath.Leaf != null)
+                {
+                    VerifyPackageBrokerSecurity(new FileInfo(destination).GetAccessControl());
+                    session.Log($"package broker policy already exists at {destination}; legacy migration skipped");
+                    return ActionResult.Success;
+                }
+
+                using (PinnedPath legacyPath = PinPathWithoutReparse(
+                    legacyJson,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.READ_CONTROL))
+                {
+                    if (legacyPath.Leaf == null)
+                    {
+                        LogLegacyYamlMigrationRequired(session, destination);
+                        return ActionResult.Success;
+                    }
+
+                    VerifyPackageBrokerSecurity(new FileInfo(legacyJson).GetAccessControl());
+                    string sourceFileIdentity = FileIdentity(legacyPath.Leaf);
+                    string sourceContentDigest = FileContentDigest(legacyPath.Leaf);
+                    using (FileStream source = OpenPinnedFileStream(legacyPath.Leaf))
+                    using (FileStream target = new(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                    {
+                        source.CopyTo(target);
+                        target.Flush(true);
+                    }
+
+                    SetFileSecurity(
+                        session,
+                        temporary,
+                        Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL,
+                        PackageBrokerSecurityInformation);
+                    VerifyPackageBrokerSecurity(new FileInfo(temporary).GetAccessControl());
+                    string migratedFileIdentity;
+                    string migratedContentDigest;
+                    using (PinnedPath temporaryPath = PinPathWithoutReparse(
+                        temporary,
+                        leafIsDirectory: false,
+                        allowMissingLeaf: false,
+                        leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                    {
+                        migratedFileIdentity = FileIdentity(temporaryPath.Leaf);
+                        migratedContentDigest = FileContentDigest(temporaryPath.Leaf);
+                    }
+                    using (FileStream markerFile = new(marker, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                    {
+                        JObject markerDocument = new()
+                        {
+                            ["SourceIdentity"] = sourceFileIdentity,
+                            ["SourceDigest"] = sourceContentDigest,
+                            ["DestinationIdentity"] = migratedFileIdentity,
+                            ["DestinationDigest"] = migratedContentDigest,
+                        };
+                        byte[] markerContent = Encoding.UTF8.GetBytes(
+                            markerDocument.ToString(Formatting.None, Array.Empty<JsonConverter>()));
+                        markerFile.Write(markerContent, 0, markerContent.Length);
+                        markerFile.Flush(true);
+                    }
+                    SetFileSecurity(
+                        session,
+                        marker,
+                        Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL,
+                        PackageBrokerSecurityInformation);
+                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    File.Move(temporary, destination);
+                }
+
+                session.Log($"migrated legacy package broker policy from {legacyJson} to {destination}");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to migrate legacy package broker policy: {e}");
+                return ActionResult.Failure;
+            }
+            finally
+            {
+                if (File.Exists(temporary))
+                {
+                    try
+                    {
+                        File.Delete(temporary);
+                    }
+                    catch (Exception e)
+                    {
+                        session.Log($"failed to remove package broker policy migration temporary file {temporary}: {e}");
+                    }
+                }
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult RollbackLegacyPackageBrokerPolicyMigration(Session session)
+        {
+            string marker = PackageBrokerMigrationMarker(session);
+            string destination = Path.Combine(ProgramDataPackageBrokerDirectory, "package-broker-policy.json");
+            try
+            {
+                string migratedFileIdentity;
+                string migratedContentDigest;
+                using (PinnedPath markerPath = PinPathWithoutReparse(
+                    marker,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                {
+                    if (markerPath.Leaf == null)
+                    {
+                        return ActionResult.Success;
+                    }
+                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    (_, _, migratedFileIdentity, migratedContentDigest) = ReadPackageBrokerMigrationMarker(marker);
+
+                    using PinnedPath destinationPath = PinPathWithoutReparse(
+                        destination,
+                        leafIsDirectory: false,
+                        allowMissingLeaf: true,
+                        leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+                    if (destinationPath.Leaf != null &&
+                        FileIdentityAndDigestMatch(
+                            destinationPath.Leaf,
+                            migratedFileIdentity,
+                            migratedContentDigest))
+                    {
+                        VerifyPackageBrokerSecurity(new FileInfo(destination).GetAccessControl());
+                        DeleteFileByHandle(destinationPath.Leaf);
+                    }
+                }
+
+                File.Delete(marker);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to roll back legacy package broker policy migration: {e}");
+            }
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult CommitLegacyPackageBrokerPolicyMigration(Session session)
+        {
+            string marker = PackageBrokerMigrationMarker(session);
+            string legacyJson = Path.Combine(ProgramDataDirectory, "package-broker-policy.json");
+            try
+            {
+                string expectedSourceIdentity;
+                string expectedSourceDigest;
+                string markerIdentity;
+                using (PinnedPath markerPath = PinPathWithoutReparse(
+                    marker,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                {
+                    if (markerPath.Leaf == null)
+                    {
+                        return ActionResult.Success;
+                    }
+                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    (expectedSourceIdentity, expectedSourceDigest, _, _) =
+                        ReadPackageBrokerMigrationMarker(marker);
+                    markerIdentity = FileIdentity(markerPath.Leaf);
+                }
+
+                using PinnedPath legacyPath = PinPathWithoutReparse(
+                    legacyJson,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+                bool removeLegacy =
+                    legacyPath.Leaf != null &&
+                    FileIdentityAndDigestMatch(
+                        legacyPath.Leaf,
+                        expectedSourceIdentity,
+                        expectedSourceDigest);
+                if (removeLegacy)
+                {
+                    VerifyPackageBrokerSecurity(new FileInfo(legacyJson).GetAccessControl());
+                }
+
+                using (PinnedPath markerPath = PinPathWithoutReparse(
+                    marker,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: false,
+                    leafAccess: WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                {
+                    VerifyPackageBrokerSecurity(new FileInfo(marker).GetAccessControl());
+                    if (!string.Equals(FileIdentity(markerPath.Leaf), markerIdentity, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("package broker migration marker changed during commit");
+                    }
+                    DeleteFileByHandle(markerPath.Leaf);
+                }
+
+                if (!removeLegacy)
+                {
+                    session.Log("legacy package broker policy changed after migration; preserving the current source");
+                    return ActionResult.Success;
+                }
+
+                try
+                {
+                    DeleteFileByHandle(legacyPath.Leaf);
+                }
+                catch (Exception e)
+                {
+                    // The rollback marker is already gone, so rollback can no longer remove
+                    // the migrated destination. Preserve both copies and do not fail commit.
+                    session.Log($"failed to remove the migrated legacy package broker policy; preserving both copies: {e}");
+                }
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to commit legacy package broker policy migration: {e}");
                 return ActionResult.Failure;
             }
         }
@@ -1838,7 +2100,11 @@ namespace DevolutionsAgent.Actions
             }
         }
 
-        public static void SetFileSecurity(Session session, string path, string sddl)
+        public static void SetFileSecurity(
+            Session session,
+            string path,
+            string sddl,
+            uint securityInformation = WinAPI.DACL_SECURITY_INFORMATION)
         {
             const uint sdRevision = 1;
             IntPtr pSd = new IntPtr();
@@ -1853,17 +2119,432 @@ namespace DevolutionsAgent.Actions
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 }
 
-                if (!WinAPI.SetFileSecurityW(path, WinAPI.DACL_SECURITY_INFORMATION, pSd))
+                if (!WinAPI.SetFileSecurityW(path, securityInformation, pSd))
                 {
                     session.Log($"SetFileSecurityW failed (error: {Marshal.GetLastWin32Error()})");
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 }
             }
+
             finally
             {
                 if (pSd != IntPtr.Zero)
                 {
                     WinAPI.LocalFree(pSd);
+                }
+            }
+        }
+
+        private static void VerifyPackageBrokerSecurity(FileSystemSecurity security)
+        {
+            SecurityIdentifier system = new(WellKnownSidType.LocalSystemSid, null);
+            SecurityIdentifier administrators = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+            SecurityIdentifier owner = (SecurityIdentifier)security.GetOwner(typeof(SecurityIdentifier));
+            if (!owner.Equals(system) && !owner.Equals(administrators))
+            {
+                throw new InvalidOperationException($"package broker path has untrusted owner {owner.Value}");
+            }
+            if (!security.AreAccessRulesProtected)
+            {
+                throw new InvalidOperationException("package broker path DACL inheritance is not protected");
+            }
+
+            FileSystemAccessRule[] rules = security
+                .GetAccessRules(true, true, typeof(SecurityIdentifier))
+                .Cast<FileSystemAccessRule>()
+                .ToArray();
+            bool IsExpectedFullControl(FileSystemAccessRule rule, SecurityIdentifier sid) =>
+                rule.IdentityReference.Equals(sid) &&
+                rule.AccessControlType == AccessControlType.Allow &&
+                (rule.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl;
+
+            if (rules.Length != 2 ||
+                !rules.Any(rule => IsExpectedFullControl(rule, system)) ||
+                !rules.Any(rule => IsExpectedFullControl(rule, administrators)))
+            {
+                throw new InvalidOperationException("package broker path DACL is not SYSTEM/Administrators-only");
+            }
+        }
+
+        private static void CreateProgramDataSubdirectoryTree(string path, string leafSddl)
+        {
+            string programData = Path.GetFullPath(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+            string fullPath = Path.GetFullPath(path);
+            string prefix = programData.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"{fullPath} is outside the ProgramData directory");
+            }
+
+            string relative = fullPath.Substring(prefix.Length);
+            string[] components = relative.Split(
+                new[] { Path.DirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+            List<SafeFileHandle> handles = new();
+            try
+            {
+                SafeFileHandle programDataHandle = OpenPathWithoutReparse(
+                    programData,
+                    isDirectory: true,
+                    WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL,
+                    WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE,
+                    allowMissing: false);
+                handles.Add(programDataHandle);
+                VerifyTrustedDirectorySecurity(new DirectoryInfo(programData).GetAccessControl());
+
+                string current = programData;
+                for (int index = 0; index < components.Length; index++)
+                {
+                    current = Path.Combine(current, components[index]);
+                    string sddl = index == components.Length - 1
+                        ? leafSddl
+                        : Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL;
+                    SafeFileHandle handle = OpenPathWithoutReparse(
+                        current,
+                        isDirectory: true,
+                        WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL,
+                        WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE,
+                        allowMissing: true);
+                    bool created = handle == null;
+                    if (created)
+                    {
+                        CreateDirectoryWithSecurity(current, sddl);
+                        handle = OpenPathWithoutReparse(
+                            current,
+                            isDirectory: true,
+                            WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL,
+                            WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE,
+                            allowMissing: false);
+                    }
+
+                    handles.Add(handle);
+                    DirectorySecurity security = new DirectoryInfo(current).GetAccessControl();
+                    VerifyTrustedDirectorySecurity(security);
+                    if (created)
+                    {
+                        VerifySecurityDescriptor(security, sddl);
+                    }
+                }
+            }
+            finally
+            {
+                foreach (SafeFileHandle handle in handles)
+                {
+                    handle.Dispose();
+                }
+            }
+        }
+
+        private static void CreateDirectoryWithSecurity(string path, string sddl)
+        {
+            const uint sdRevision = 1;
+            if (!WinAPI.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl,
+                sdRevision,
+                out IntPtr securityDescriptor,
+                out _))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    $"failed to create security descriptor for {path}");
+            }
+
+            try
+            {
+                WinAPI.SECURITY_ATTRIBUTES attributes = new()
+                {
+                    nLength = (uint)Marshal.SizeOf<WinAPI.SECURITY_ATTRIBUTES>(),
+                    lpSecurityDescriptor = securityDescriptor,
+                    bInheritHandle = false,
+                };
+                if (!WinAPI.CreateDirectory(path, ref attributes))
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    if (error != WinAPI.ERROR_ALREADY_EXISTS)
+                    {
+                        throw new Win32Exception(error, $"failed to securely create {path}");
+                    }
+                }
+            }
+            finally
+            {
+                WinAPI.LocalFree(securityDescriptor);
+            }
+        }
+
+        private static void VerifySecurityDescriptor(FileSystemSecurity actual, string expectedSddl)
+        {
+            RawSecurityDescriptor expected = new(expectedSddl);
+            string expectedCanonical = expected.GetSddlForm(AccessControlSections.All);
+            string actualCanonical = actual.GetSecurityDescriptorSddlForm(AccessControlSections.All);
+            if (!string.Equals(actualCanonical, expectedCanonical, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("new directory security does not match its creation descriptor");
+            }
+        }
+
+        private static void VerifyTrustedDirectorySecurity(DirectorySecurity security)
+        {
+            SecurityIdentifier system = new(WellKnownSidType.LocalSystemSid, null);
+            SecurityIdentifier administrators = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+            SecurityIdentifier trustedInstaller =
+                (SecurityIdentifier)new NTAccount(@"NT SERVICE\TrustedInstaller").Translate(typeof(SecurityIdentifier));
+            SecurityIdentifier owner = (SecurityIdentifier)security.GetOwner(typeof(SecurityIdentifier));
+            if (!owner.Equals(system) && !owner.Equals(administrators) && !owner.Equals(trustedInstaller))
+            {
+                throw new InvalidOperationException($"directory has untrusted owner {owner.Value}");
+            }
+
+            const FileSystemRights tamperRights =
+                FileSystemRights.Delete |
+                FileSystemRights.DeleteSubdirectoriesAndFiles |
+                FileSystemRights.ChangePermissions |
+                FileSystemRights.TakeOwnership;
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                includeExplicit: true,
+                includeInherited: true,
+                targetType: typeof(SecurityIdentifier)))
+            {
+                if (rule.AccessControlType != AccessControlType.Allow ||
+                    (rule.PropagationFlags & PropagationFlags.InheritOnly) != 0 ||
+                    (rule.FileSystemRights & tamperRights) == 0)
+                {
+                    continue;
+                }
+
+                SecurityIdentifier identity = (SecurityIdentifier)rule.IdentityReference;
+                if (!identity.Equals(system) &&
+                    !identity.Equals(administrators) &&
+                    !identity.Equals(trustedInstaller))
+                {
+                    throw new InvalidOperationException(
+                        $"directory grants path-tampering rights to {identity.Value}");
+                }
+            }
+        }
+
+        private static void LogLegacyYamlMigrationRequired(Session session, string destination)
+        {
+            foreach (string extension in new[] { "yaml", "yml" })
+            {
+                string legacyYaml = Path.Combine(ProgramDataDirectory, $"package-broker-policy.{extension}");
+                if (File.Exists(legacyYaml))
+                {
+                    session.Log(
+                        $"legacy YAML package broker policy remains at {legacyYaml}; convert it to strict JSON at {destination}");
+                }
+            }
+        }
+
+        private static PinnedPath PinPathWithoutReparse(
+            string path,
+            bool leafIsDirectory,
+            bool allowMissingLeaf,
+            uint leafAccess)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string root = Path.GetPathRoot(fullPath);
+            string parent = Path.GetDirectoryName(fullPath);
+            Stack<string> ancestors = new();
+            while (!string.IsNullOrEmpty(parent) &&
+                   !string.Equals(parent, root, StringComparison.OrdinalIgnoreCase))
+            {
+                ancestors.Push(parent);
+                parent = Path.GetDirectoryName(parent);
+            }
+
+            List<SafeFileHandle> handles = new();
+            try
+            {
+                foreach (string ancestor in ancestors)
+                {
+                    handles.Add(OpenPathWithoutReparse(
+                        ancestor,
+                        isDirectory: true,
+                        WinAPI.FILE_READ_ATTRIBUTES,
+                        WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE,
+                        allowMissing: false));
+                }
+
+                uint shareMode = (leafAccess & WinAPI.GENERIC_READ) != 0
+                    ? WinAPI.FILE_SHARE_READ
+                    : WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE;
+                SafeFileHandle leaf = OpenPathWithoutReparse(
+                    fullPath,
+                    leafIsDirectory,
+                    leafAccess,
+                    shareMode,
+                    allowMissingLeaf);
+                if (leaf != null)
+                {
+                    handles.Add(leaf);
+                }
+                return new PinnedPath(handles, leaf);
+            }
+            catch
+            {
+                foreach (SafeFileHandle handle in handles)
+                {
+                    handle.Dispose();
+                }
+                throw;
+            }
+        }
+
+        private static SafeFileHandle OpenPathWithoutReparse(
+            string path,
+            bool isDirectory,
+            uint desiredAccess,
+            uint shareMode,
+            bool allowMissing)
+        {
+            uint flags = WinAPI.FILE_FLAG_OPEN_REPARSE_POINT;
+            if (isDirectory)
+            {
+                flags |= WinAPI.FILE_FLAG_BACKUP_SEMANTICS;
+            }
+
+            SafeFileHandle handle = WinAPI.CreateFile(
+                path,
+                desiredAccess,
+                shareMode,
+                IntPtr.Zero,
+                WinAPI.OPEN_EXISTING,
+                flags,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                if (allowMissing && (error == 2 || error == 3))
+                {
+                    return null;
+                }
+                throw new Win32Exception(error, $"failed to open {path} without following reparse points");
+            }
+
+            if (!WinAPI.GetFileInformationByHandle(handle, out WinAPI.ByHandleFileInformation information))
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, $"failed to inspect {path}");
+            }
+
+            if ((information.FileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            {
+                handle.Dispose();
+                throw new InvalidOperationException($"{path} is a reparse point");
+            }
+            bool actualDirectory = (information.FileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (actualDirectory != isDirectory)
+            {
+                handle.Dispose();
+                throw new InvalidOperationException($"{path} has an unexpected filesystem type");
+            }
+            if (!isDirectory && information.NumberOfLinks != 1)
+            {
+                handle.Dispose();
+                throw new InvalidOperationException($"{path} has multiple hard links");
+            }
+
+            return handle;
+        }
+
+        private static string FileIdentity(SafeFileHandle handle)
+        {
+            if (!WinAPI.GetFileInformationByHandle(handle, out WinAPI.ByHandleFileInformation information))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "failed to query file identity");
+            }
+            return string.Join(
+                ":",
+                information.VolumeSerialNumber,
+                information.FileIndexHigh,
+                information.FileIndexLow);
+        }
+
+        private static bool FileIdentityMatches(SafeFileHandle handle, string expectedIdentity) =>
+            string.Equals(FileIdentity(handle), expectedIdentity, StringComparison.Ordinal);
+
+        private static string FileContentDigest(SafeFileHandle handle)
+        {
+            using SafeFileHandle borrowedHandle = new(handle.DangerousGetHandle(), ownsHandle: false);
+            using FileStream stream = new(borrowedHandle, FileAccess.Read);
+            stream.Position = 0;
+            using SHA256 sha256 = SHA256.Create();
+            string digest = Convert.ToBase64String(sha256.ComputeHash(stream));
+            stream.Position = 0;
+            return digest;
+        }
+
+        private static FileStream OpenPinnedFileStream(SafeFileHandle handle)
+        {
+            SafeFileHandle borrowedHandle = new(handle.DangerousGetHandle(), ownsHandle: false);
+            FileStream stream = new(borrowedHandle, FileAccess.Read);
+            stream.Position = 0;
+            return stream;
+        }
+
+        private static bool FileIdentityAndDigestMatch(
+            SafeFileHandle handle,
+            string expectedIdentity,
+            string expectedDigest) =>
+            FileIdentityMatches(handle, expectedIdentity) &&
+            string.Equals(FileContentDigest(handle), expectedDigest, StringComparison.Ordinal);
+
+        private static (
+            string SourceIdentity,
+            string SourceDigest,
+            string DestinationIdentity,
+            string DestinationDigest)
+            ReadPackageBrokerMigrationMarker(string marker)
+        {
+            JObject markerDocument = JObject.Parse(File.ReadAllText(marker, Encoding.UTF8));
+            string sourceIdentity = markerDocument.Value<string>("SourceIdentity");
+            string sourceDigest = markerDocument.Value<string>("SourceDigest");
+            string destinationIdentity = markerDocument.Value<string>("DestinationIdentity");
+            string destinationDigest = markerDocument.Value<string>("DestinationDigest");
+            if (string.IsNullOrEmpty(sourceIdentity) ||
+                string.IsNullOrEmpty(sourceDigest) ||
+                string.IsNullOrEmpty(destinationIdentity) ||
+                string.IsNullOrEmpty(destinationDigest))
+            {
+                throw new InvalidOperationException("package broker migration marker is incomplete");
+            }
+            return (sourceIdentity, sourceDigest, destinationIdentity, destinationDigest);
+        }
+
+        private static void DeleteFileByHandle(SafeFileHandle handle)
+        {
+            WinAPI.FileDispositionInfo disposition = new() { DeleteFile = true };
+            if (!WinAPI.SetFileInformationByHandle(
+                handle,
+                WinAPI.FileInfoByHandleClass.FileDispositionInfo,
+                ref disposition,
+                (uint)Marshal.SizeOf<WinAPI.FileDispositionInfo>()))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "failed to delete the pinned file");
+            }
+        }
+
+        private sealed class PinnedPath : IDisposable
+        {
+            private readonly IReadOnlyList<SafeFileHandle> handles;
+
+            internal PinnedPath(IReadOnlyList<SafeFileHandle> handles, SafeFileHandle leaf)
+            {
+                this.handles = handles;
+                Leaf = leaf;
+            }
+
+            internal SafeFileHandle Leaf { get; }
+
+            public void Dispose()
+            {
+                foreach (SafeFileHandle handle in handles)
+                {
+                    handle.Dispose();
                 }
             }
         }

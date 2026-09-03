@@ -82,5 +82,7 @@ namespace DevolutionsAgent.Resources
         /// features. See now-package-broker::policy_store::windows::default_policy_dir.
         /// </remarks>
         internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+        internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL = "O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
     }
 }

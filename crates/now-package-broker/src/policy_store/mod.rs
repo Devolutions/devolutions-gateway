@@ -53,7 +53,7 @@ trait PolicyStorage: Send + Sync {
     fn observe(&self, source: PolicyConfigurationSource, path: &Path) -> windows::DiskObservation;
     fn atomic_replace(
         &self,
-        dir: &Path,
+        hosting_dir: &windows::VerifiedHostingDirectory,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure>;
@@ -61,7 +61,7 @@ trait PolicyStorage: Send + Sync {
     /// destination (used for `Create`; see `windows::atomic_create`).
     fn atomic_create(
         &self,
-        dir: &Path,
+        hosting_dir: &windows::VerifiedHostingDirectory,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure>;
@@ -90,20 +90,20 @@ impl PolicyStorage for WindowsPolicyStorage {
 
     fn atomic_replace(
         &self,
-        dir: &Path,
+        hosting_dir: &windows::VerifiedHostingDirectory,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
-        windows::atomic_replace(dir, final_path, bytes)
+        windows::atomic_replace(hosting_dir, final_path, bytes)
     }
 
     fn atomic_create(
         &self,
-        dir: &Path,
+        hosting_dir: &windows::VerifiedHostingDirectory,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
-        windows::atomic_create(dir, final_path, bytes)
+        windows::atomic_create(hosting_dir, final_path, bytes)
     }
 }
 
@@ -297,11 +297,12 @@ impl PolicyStore {
                     0,
                     0,
                     0,
+                    0,
                 ),
             ),
             None => (
                 PolicyManagementState::Missing,
-                windows::DiskFingerprint::test_missing(0),
+                windows::DiskFingerprint::test_missing(0, 0),
             ),
         };
         let snapshot = Arc::new(Snapshot {
@@ -342,6 +343,7 @@ impl PolicyStore {
     pub(crate) fn test_set_active(&self, policy: Arc<PolicyDocument>) {
         let fingerprint = windows::DiskFingerprint::test_active(
             &serde_json::to_vec(&*policy).expect("test policy serializes"),
+            0,
             0,
             0,
             0,
@@ -714,43 +716,36 @@ impl PolicyStore {
         };
 
         let bytes = serde_json::to_vec_pretty(&final_policy).expect("BUG: PolicyDocument always serializes");
-        let canonical_dir = canonical_path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
+        let hosting_dir = observation
+            .hosting_dir
+            .as_ref()
+            .expect("BUG: a writable observation always carries its verified hosting directory");
 
         // `Create` must never replace an unexpectedly-reappeared destination (see
         // `windows::atomic_create`); every other operation already observed an
         // Active/Invalid document above and intentionally replaces it.
         let write_result = if request.operation == PolicyReplacementOperation::Create {
-            self.storage.atomic_create(&canonical_dir, &canonical_path, &bytes)
+            self.storage.atomic_create(hosting_dir, &canonical_path, &bytes)
         } else {
-            self.storage.atomic_replace(&canonical_dir, &canonical_path, &bytes)
+            self.storage.atomic_replace(hosting_dir, &canonical_path, &bytes)
         };
 
         let persisted = match write_result {
             Ok(persisted) => persisted,
             Err(windows::WriteFailure::PrePublication(io_error)) => {
-                // Disk is provably unchanged: the rename that would have published the
-                // new content never happened (or, for `Create`, failed because it must
-                // never overwrite an existing destination). The previously active policy
-                // (if any) is still exactly what it was.
                 let message = format!("{io_error:#}");
                 audit::write_failed(actor.sid, actor.executable, &intent, &canonical_path, &message);
 
-                if request.operation == PolicyReplacementOperation::Create {
-                    let reobservation = self.storage.observe(self.source, &self.configured_path);
-                    if reobservation.state != PolicyManagementState::Missing {
-                        // A leaf appeared between the Missing observation above and this
-                        // call: a real race, not a generic persistence failure. Publish
-                        // the freshly observed reality and report it, rather than ever
-                        // silently overwriting a file this transaction never actually
-                        // observed as absent.
-                        let management = self.publish_if_changed(reobservation, "Create raced with an unexpected leaf");
-                        return Err(stale_token_response(
-                            "the configured policy path unexpectedly changed while attempting to create a policy; \
-                             retry with the current management snapshot's store token"
-                                .to_owned(),
-                            management,
-                        ));
-                    }
+                let reobservation = self.storage.observe(self.source, &self.configured_path);
+                if reobservation.fingerprint != observation.fingerprint {
+                    let management =
+                        self.publish_if_changed(reobservation, "policy storage changed before publication");
+                    return Err(stale_token_response(
+                        "the configured policy storage changed while attempting to write; \
+                         retry with the current management snapshot's store token"
+                            .to_owned(),
+                        management,
+                    ));
                 }
 
                 return Err(error_response(
@@ -847,6 +842,9 @@ fn plan_revision(
                     "Update requires the same policy id ('{current_id}'); the draft specifies '{new_id}'"
                 ));
             }
+            if policy.metadata.revision >= 2_147_483_647 {
+                return Err("policy revision has reached the maximum supported value (2147483647)".to_owned());
+            }
             policy
                 .metadata
                 .revision
@@ -921,9 +919,12 @@ mod tests {
         /// reality rather than assuming the previous snapshot is still current.
         fail_next_write_post_publication: std::sync::Mutex<Option<String>>,
         race_next_write: std::sync::Mutex<Option<Vec<u8>>>,
+        race_directory_before_write: std::sync::Mutex<bool>,
+        race_directory_after_publish: std::sync::Mutex<bool>,
         target_generation: std::sync::Mutex<u32>,
         parent_generation: std::sync::Mutex<u32>,
         acl_generation: std::sync::Mutex<u32>,
+        dir_acl_generation: std::sync::Mutex<u32>,
     }
 
     impl FakePolicyStorage {
@@ -947,9 +948,12 @@ mod tests {
                 fail_next_write: std::sync::Mutex::new(None),
                 fail_next_write_post_publication: std::sync::Mutex::new(None),
                 race_next_write: std::sync::Mutex::new(None),
+                race_directory_before_write: std::sync::Mutex::new(false),
+                race_directory_after_publish: std::sync::Mutex::new(false),
                 target_generation: std::sync::Mutex::new(0),
                 parent_generation: std::sync::Mutex::new(0),
                 acl_generation: std::sync::Mutex::new(0),
+                dir_acl_generation: std::sync::Mutex::new(0),
             }
         }
 
@@ -998,6 +1002,26 @@ mod tests {
             *self.acl_generation.lock().expect("acl generation lock poisoned") += 1;
         }
 
+        fn change_directory_acl(&self) {
+            *self
+                .dir_acl_generation
+                .lock()
+                .expect("directory ACL generation lock poisoned") += 1;
+        }
+
+        fn hosting_dir(&self, path: &Path) -> windows::VerifiedHostingDirectory {
+            let parent_generation = *self.parent_generation.lock().expect("parent generation lock poisoned");
+            let dir_acl_generation = *self
+                .dir_acl_generation
+                .lock()
+                .expect("directory ACL generation lock poisoned");
+            windows::VerifiedHostingDirectory::for_fake_storage(
+                path.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
+                windows::test_identity(parent_generation),
+                windows::test_security_digest(dir_acl_generation),
+            )
+        }
+
         /// Simulate a directory-level capability change discovered on the *next*
         /// observation (item 20): e.g. an operator loosens or tightens a custom
         /// directory's ACL, or the filesystem capability changes, after the store
@@ -1031,13 +1055,50 @@ mod tests {
             *self.race_next_write.lock().expect("race lock poisoned") = Some(bytes);
         }
 
+        fn race_directory_before_next_write(&self) {
+            *self
+                .race_directory_before_write
+                .lock()
+                .expect("directory race lock poisoned") = true;
+        }
+
+        fn race_directory_after_next_publish(&self) {
+            *self
+                .race_directory_after_publish
+                .lock()
+                .expect("directory race lock poisoned") = true;
+        }
+
         fn write(
             &self,
+            hosting_dir: &windows::VerifiedHostingDirectory,
             bytes: &[u8],
             must_not_replace_existing: bool,
         ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
             if let Some(message) = self.fail_next_write.lock().expect("fail lock poisoned").take() {
                 return Err(windows::WriteFailure::PrePublication(anyhow::anyhow!("{message}")));
+            }
+
+            if std::mem::take(
+                &mut *self
+                    .race_directory_before_write
+                    .lock()
+                    .expect("directory race lock poisoned"),
+            ) {
+                *self
+                    .dir_acl_generation
+                    .lock()
+                    .expect("directory ACL generation lock poisoned") += 1;
+            }
+            let parent_generation = *self.parent_generation.lock().expect("parent generation lock poisoned");
+            let dir_acl_generation = *self
+                .dir_acl_generation
+                .lock()
+                .expect("directory ACL generation lock poisoned");
+            if !hosting_dir.matches_fake_state(parent_generation, dir_acl_generation) {
+                return Err(windows::WriteFailure::PrePublication(anyhow::anyhow!(
+                    "simulated hosting directory changed after observation"
+                )));
             }
 
             if let Some(raced_content) = self.race_next_write.lock().expect("race lock poisoned").take() {
@@ -1059,8 +1120,22 @@ mod tests {
 
             *self.target_generation.lock().expect("target generation lock poisoned") += 1;
             let target_generation = *self.target_generation.lock().expect("target generation lock poisoned");
-            let parent_generation = *self.parent_generation.lock().expect("parent generation lock poisoned");
             let acl_generation = *self.acl_generation.lock().expect("acl generation lock poisoned");
+
+            if std::mem::take(
+                &mut *self
+                    .race_directory_after_publish
+                    .lock()
+                    .expect("directory race lock poisoned"),
+            ) {
+                *self
+                    .dir_acl_generation
+                    .lock()
+                    .expect("directory ACL generation lock poisoned") += 1;
+                return Err(windows::WriteFailure::PostPublication(anyhow::anyhow!(
+                    "simulated hosting directory changed after publication"
+                )));
+            }
 
             // The rename above is the publication boundary (item 27): any failure from
             // here on is post-publication, even though this fake has no real separate
@@ -1084,6 +1159,7 @@ mod tests {
                     target_generation,
                     parent_generation,
                     acl_generation,
+                    dir_acl_generation,
                 ),
             })
         }
@@ -1095,16 +1171,21 @@ mod tests {
             let write_capability = *self.write_capability.lock().expect("capability lock poisoned");
             let read_only_reason = *self.read_only_reason.lock().expect("read-only reason lock poisoned");
             let target_insecure = *self.target_insecure.lock().expect("insecure flag lock poisoned");
+            let dir_acl_generation = *self
+                .dir_acl_generation
+                .lock()
+                .expect("directory ACL generation lock poisoned");
 
             match &*self.disk.lock().expect("disk lock poisoned") {
                 None => windows::DiskObservation {
                     state: PolicyManagementState::Missing,
                     policy: None,
                     invalid_diagnostics: None,
-                    fingerprint: windows::DiskFingerprint::test_missing(parent_generation),
+                    fingerprint: windows::DiskFingerprint::test_missing(parent_generation, dir_acl_generation),
                     write_capability,
                     read_only_reason,
                     canonical_path: path.to_owned(),
+                    hosting_dir: (write_capability == PolicyWriteCapability::Writable).then(|| self.hosting_dir(path)),
                 },
                 Some(bytes) => {
                     let target_generation = *self.target_generation.lock().expect("target generation lock poisoned");
@@ -1129,10 +1210,17 @@ mod tests {
                                     validation::DiskFailureReason::InsecureStorage,
                                 )],
                             }),
-                            fingerprint: windows::DiskFingerprint::test_invalid(bytes, target_generation),
+                            fingerprint: windows::DiskFingerprint::test_invalid(
+                                bytes,
+                                target_generation,
+                                parent_generation,
+                                acl_generation,
+                                dir_acl_generation,
+                            ),
                             write_capability: effective_write_capability,
                             read_only_reason: effective_read_only_reason,
                             canonical_path: path.to_owned(),
+                            hosting_dir: None,
                         };
                     }
 
@@ -1152,10 +1240,18 @@ mod tests {
                                             validation::DiskFailureReason::FailedSemanticValidation,
                                         )],
                                     }),
-                                    fingerprint: windows::DiskFingerprint::test_invalid(bytes, target_generation),
+                                    fingerprint: windows::DiskFingerprint::test_invalid(
+                                        bytes,
+                                        target_generation,
+                                        parent_generation,
+                                        acl_generation,
+                                        dir_acl_generation,
+                                    ),
                                     write_capability: effective_write_capability,
                                     read_only_reason: effective_read_only_reason,
                                     canonical_path: path.to_owned(),
+                                    hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
+                                        .then(|| self.hosting_dir(path)),
                                 };
                             }
 
@@ -1168,10 +1264,13 @@ mod tests {
                                     target_generation,
                                     parent_generation,
                                     acl_generation,
+                                    dir_acl_generation,
                                 ),
                                 write_capability: effective_write_capability,
                                 read_only_reason: effective_read_only_reason,
                                 canonical_path: path.to_owned(),
+                                hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
+                                    .then(|| self.hosting_dir(path)),
                             }
                         }
                         Err(_) => windows::DiskObservation {
@@ -1183,10 +1282,18 @@ mod tests {
                                     validation::DiskFailureReason::MalformedContent,
                                 )],
                             }),
-                            fingerprint: windows::DiskFingerprint::test_invalid(bytes, target_generation),
+                            fingerprint: windows::DiskFingerprint::test_invalid(
+                                bytes,
+                                target_generation,
+                                parent_generation,
+                                acl_generation,
+                                dir_acl_generation,
+                            ),
                             write_capability: effective_write_capability,
                             read_only_reason: effective_read_only_reason,
                             canonical_path: path.to_owned(),
+                            hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
+                                .then(|| self.hosting_dir(path)),
                         },
                     }
                 }
@@ -1195,20 +1302,20 @@ mod tests {
 
         fn atomic_replace(
             &self,
-            _dir: &Path,
+            hosting_dir: &windows::VerifiedHostingDirectory,
             _final_path: &Path,
             bytes: &[u8],
         ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
-            self.write(bytes, false)
+            self.write(hosting_dir, bytes, false)
         }
 
         fn atomic_create(
             &self,
-            _dir: &Path,
+            hosting_dir: &windows::VerifiedHostingDirectory,
             _final_path: &Path,
             bytes: &[u8],
         ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
-            self.write(bytes, true)
+            self.write(hosting_dir, bytes, true)
         }
     }
 
@@ -1285,6 +1392,19 @@ mod tests {
         )
         .expect("same-id update is allowed");
         assert_eq!(revision, 6);
+    }
+
+    #[test]
+    fn update_rejects_maximum_revision() {
+        let active = policy("policy-a", 2_147_483_647);
+        let error = plan_revision(
+            PolicyReplacementOperation::Update,
+            PolicyManagementState::Active,
+            Some(&active),
+            "policy-a",
+        )
+        .expect_err("the maximum committed revision cannot be incremented");
+        assert!(error.contains("maximum supported value"));
     }
 
     #[test]
@@ -1800,6 +1920,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hosting_directory_change_before_write_fails_without_publication() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let token = current_token(&store);
+        storage.race_directory_before_next_write();
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::Update,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-a"),
+        );
+        let error = store
+            .replace(request, actor(&system_sid()))
+            .await
+            .expect_err("a changed hosting directory must fail before publication");
+
+        assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
+        assert_ne!(current_token(&store), token);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("previous policy remains active")
+                .metadata
+                .revision,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn hosting_directory_change_after_publication_fails_and_reobserves() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let token = current_token(&store);
+        storage.race_directory_after_next_publish();
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::Update,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-a"),
+        );
+        let error = store
+            .replace(request, actor(&system_sid()))
+            .await
+            .expect_err("a changed hosting directory must fail postverification");
+
+        assert_eq!(error.code, ErrorCode::PolicyActivationFailed);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("published policy is reobserved")
+                .metadata
+                .revision,
+            2
+        );
+    }
+
+    #[tokio::test]
     async fn concurrent_replace_calls_are_serialized_and_only_one_wins() {
         let storage = Arc::new(FakePolicyStorage::writable());
         storage.seed(&policy("policy-a", 1));
@@ -1923,6 +2106,44 @@ mod tests {
         let before = current_token(&store);
 
         storage.change_acl();
+        store.reload_from_disk("test").await;
+
+        assert_ne!(current_token(&store), before);
+    }
+
+    #[tokio::test]
+    async fn token_rotates_on_hosting_directory_acl_change_alone() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let before = current_token(&store);
+
+        storage.change_directory_acl();
+        store.reload_from_disk("test").await;
+
+        assert_ne!(current_token(&store), before);
+    }
+
+    #[tokio::test]
+    async fn missing_token_rotates_on_hosting_directory_acl_change() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let before = current_token(&store);
+
+        storage.change_directory_acl();
+        store.reload_from_disk("test").await;
+
+        assert_ne!(current_token(&store), before);
+    }
+
+    #[tokio::test]
+    async fn invalid_token_rotates_on_hosting_directory_acl_change() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed_invalid(b"not JSON");
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let before = current_token(&store);
+
+        storage.change_directory_acl();
         store.reload_from_disk("test").await;
 
         assert_ne!(current_token(&store), before);

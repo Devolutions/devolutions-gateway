@@ -8,18 +8,10 @@
 //! for how it becomes the opaque store token), and the atomic same-directory
 //! temp-file-then-rename write with post-write verification.
 //!
-//! Windows provides no target-identity compare-and-swap primitive for file replacement
-//! (`ReplaceFileW`'s write-through mode is not universally supported, and there is no
-//! `MoveFileEx`-family option conditioned on the destination's current file id). What is
-//! implemented here is the strongest supported approximation: the hosting directory is
-//! opened without delete sharing and held for the duration of each observation/write (so
-//! it cannot be deleted or replaced mid-operation), restricted to trusted principals so
-//! untrusted processes cannot race the temporary file, written through a same-volume
-//! atomic rename ([`atomic_replace`], or [`atomic_create`] when the destination must not
-//! be overwritten), and verified (security, exact bytes, parse) after the fact. This
-//! narrows -- it does not eliminate -- the residual race with a *different*, already
-//! SYSTEM/Administrators-trusted writer (including an external editor) acting on the same
-//! file at the same time; Windows offers no primitive that closes that specific gap.
+//! Windows provides no target-identity compare-and-swap primitive for file replacement.
+//! The verified hosting-directory handle remains open across observation and path-based publication.
+//! Temporary files are restricted, renamed atomically on the same volume, and verified after publication.
+//! Another trusted writer can still race the policy file because Windows provides no primitive that closes that gap.
 
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
@@ -133,34 +125,38 @@ pub(super) fn validate_configured_path_shape(path: &Path) -> Result<(), String> 
 /// the advisory reason it would map to if unwritable.
 type ProbeResult = Result<(), (PolicyReadOnlyReason, String)>;
 
-/// Caches the one-time, side-effecting filesystem atomic-replace capability probe
-/// ([`probe_write_capability`]) so it is not repeated on every re-observation/publication
-/// (item 20): only the cheap, side-effect-free security/shape/ancestor verification in
-/// [`observe`] happens every time. Invalidated (and re-probed) automatically whenever the
-/// verified directory's own identity changes (e.g. it was deleted and recreated, possibly
-/// on a different volume), so a stale probe result can never be trusted past the exact
-/// directory object it was actually measured against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AtomicityProbeKey {
+    identity: FileIdentity,
+    security_digest: [u8; 32],
+}
+
+/// Caches successful filesystem atomic-replace probes by directory identity and security digest.
+/// Failed probes are retried on every observation.
 pub(super) struct AtomicityProbeCache {
-    cached: std::sync::Mutex<Option<(FileIdentity, ProbeResult)>>,
+    cached_success: std::sync::Mutex<Option<AtomicityProbeKey>>,
 }
 
 impl AtomicityProbeCache {
     pub(super) fn new() -> Self {
         Self {
-            cached: std::sync::Mutex::new(None),
+            cached_success: std::sync::Mutex::new(None),
         }
     }
 
-    /// Returns the cached probe result for `dir`/`dir_identity`, re-probing (and
-    /// updating the cache) if this is the first call or the directory's identity no
-    /// longer matches what was last cached.
-    fn get_or_probe(&self, dir: &Path, dir_identity: FileIdentity) -> ProbeResult {
-        let mut cached = self.cached.lock().expect("atomicity probe cache lock poisoned");
+    /// Returns the cached probe result for `dir`/`dir_identity`/`dir_security_digest`,
+    /// re-probing (and updating the cache) if this is the first call or either the
+    /// directory's identity or its own security digest no longer matches what was last
+    /// cached.
+    fn get_or_probe(&self, dir: &Path, dir_identity: FileIdentity, dir_security_digest: [u8; 32]) -> ProbeResult {
+        let key = AtomicityProbeKey {
+            identity: dir_identity,
+            security_digest: dir_security_digest,
+        };
+        let mut cached_success = self.cached_success.lock().expect("atomicity probe cache lock poisoned");
 
-        if let Some((cached_identity, result)) = cached.as_ref()
-            && *cached_identity == dir_identity
-        {
-            return result.clone();
+        if cached_success.as_ref() == Some(&key) {
+            return Ok(());
         }
 
         let result = probe_write_capability(dir).map_err(|error| {
@@ -171,7 +167,11 @@ impl AtomicityProbeCache {
             };
             (reason, format!("{error:#}"))
         });
-        *cached = Some((dir_identity, result.clone()));
+        if result.is_ok() {
+            *cached_success = Some(key);
+        } else {
+            *cached_success = None;
+        }
         result
     }
 }
@@ -220,6 +220,73 @@ fn open_and_verify_directory_identity(path: &Path) -> anyhow::Result<(File, Path
         .with_context(|| format!("failed to resolve {}", path.display()))?;
 
     Ok((handle, final_path))
+}
+
+/// Holds a verified hosting directory open from observation through publication.
+/// The handle blocks replacement of that object but does not make path-based publication a compare-and-swap operation.
+/// Test storage models the same checks with identity and security generations.
+pub(super) struct VerifiedHostingDirectory {
+    handle: Option<File>,
+    canonical_path: PathBuf,
+    identity: FileIdentity,
+    security_digest: [u8; 32],
+}
+
+impl VerifiedHostingDirectory {
+    /// The canonical directory path resolved from the verified handle when this was
+    /// built (item 22).
+    pub(super) fn canonical_path(&self) -> &Path {
+        &self.canonical_path
+    }
+
+    /// The hosting directory's identity as observed when this was built.
+    pub(super) fn identity(&self) -> FileIdentity {
+        self.identity
+    }
+
+    /// Build a synthetic instance for `FakePolicyStorage`
+    /// (`crate::policy_store::tests::FakePolicyStorage`), which models the hosting
+    /// directory purely with generation counters and has no real Windows directory
+    /// handle to hold.
+    #[cfg(test)]
+    pub(super) fn for_fake_storage(canonical_path: PathBuf, identity: FileIdentity, security_digest: [u8; 32]) -> Self {
+        Self {
+            handle: None,
+            canonical_path,
+            identity,
+            security_digest,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn matches_fake_state(&self, identity_generation: u32, security_generation: u32) -> bool {
+        self.identity == test_identity(identity_generation)
+            && self.security_digest == test_security_digest(security_generation)
+    }
+
+    /// Re-verify that this held-open directory still has the identity and security state
+    /// observed for the transaction.
+    fn verify_unchanged(&self) -> anyhow::Result<[u8; 32]> {
+        let handle = self.handle.as_ref().expect(
+            "BUG: reverify is only ever called by the real Windows write path (atomic_replace/atomic_create), \
+             which always holds a real handle",
+        );
+        policy_security::verify_policy_directory_security(handle)
+            .context("hosting directory failed security verification during post-write verification")?;
+        let identity = policy_security::file_identity(handle)
+            .context("failed to re-query hosting directory identity during post-write verification")?;
+        ensure!(
+            identity == self.identity,
+            "hosting directory identity changed unexpectedly while its handle was held open"
+        );
+        let current_security = policy_security::security_state_digest(handle)
+            .context("failed to recompute hosting directory security digest during write verification")?;
+        ensure!(
+            current_security == self.security_digest,
+            "hosting directory security changed while its handle was held open"
+        );
+        Ok(current_security)
+    }
 }
 
 /// Create the dedicated default policy directory (if it does not already exist) with an
@@ -403,15 +470,8 @@ fn volume_filesystem_name(dir: &Path) -> anyhow::Result<String> {
     Ok(String::from_utf16_lossy(&filesystem_name[..nul_at]))
 }
 
-/// Internal, never-serialized identity of exactly what was observed on disk: resolved
-/// target and parent object identity, exact content digest, and security-relevant state
-/// (including a summary of the *ancestor chain*, not just the immediate parent; see item
-/// 20). Two observations comparing equal here are guaranteed indistinguishable from the
-/// store's perspective; anything else (content byte-swap, ACL/security change anywhere
-/// from the leaf up through its ancestor chain, the parent directory replaced out from
-/// under the leaf, a leaf appearing where it was absent, ...) compares unequal. This is
-/// the only signal that drives the opaque store token to rotate (see
-/// `PolicyStore::token_for`); the fingerprint itself never leaves the process.
+/// Internal identity of the object, content, and verified security state observed on disk.
+/// Fingerprint changes rotate the opaque store token; fingerprints are never serialized.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DiskFingerprint {
     /// A successfully parsed, security-verified, and semantically-valid policy file.
@@ -420,20 +480,24 @@ pub(super) enum DiskFingerprint {
         target: FileIdentity,
         content_digest: [u8; 32],
         security_digest: [u8; 32],
+        /// Digest of the hosting directory's own owner and DACL.
+        dir_security_digest: [u8; 32],
         ancestor_security_digest: [u8; 32],
     },
     /// No file at the resolved path. Carries the verified identity of the parent
-    /// directory (and its ancestor chain's security summary), so a parent replacement
-    /// (or a differently identified custom path) is still distinguishable even though
-    /// there is no leaf to identify. `parent`/`ancestor_security_digest` are `None` when
-    /// even the directory itself could not be verified (its own security/ancestor check
-    /// failed): still Missing -- there is no leaf to distrust either way -- but `path`
-    /// (the canonical, or best-effort literal, configured path) still prevents two
-    /// distinct configured paths in that situation from colliding (mirrors
-    /// `Invalid::path`; item 15).
+    /// directory (its own security digest, and its ancestor chain's security summary),
+    /// so a parent replacement (or a differently identified custom path) is still
+    /// distinguishable even though there is no leaf to identify.
+    /// `parent`/`dir_security_digest`/`ancestor_security_digest` are `None` when even the
+    /// directory itself could not be verified (its own security/ancestor check failed):
+    /// still Missing -- there is no leaf to distrust either way -- but `path` (the
+    /// canonical, or best-effort literal, configured path) still prevents two distinct
+    /// configured paths in that situation from colliding (mirrors `Invalid::path`; item
+    /// 15).
     Missing {
         path: PathBuf,
         parent: Option<FileIdentity>,
+        dir_security_digest: Option<[u8; 32]>,
         ancestor_security_digest: Option<[u8; 32]>,
     },
     /// A file exists but could not be trusted or activated: unreadable, failed storage
@@ -450,6 +514,7 @@ pub(super) enum DiskFingerprint {
     Invalid {
         path: PathBuf,
         parent: Option<FileIdentity>,
+        dir_security_digest: Option<[u8; 32]>,
         ancestor_security_digest: Option<[u8; 32]>,
         target: Option<FileIdentity>,
         content_digest: Option<[u8; 32]>,
@@ -474,44 +539,56 @@ impl DiskFingerprint {
     /// own security digest and the ancestor-chain summary, since the fake models "some
     /// security-relevant state changed" as a single dimension rather than distinguishing
     /// which level of the tree).
+    /// `dir_acl_generation` is independent so a hosting-directory-only ACL change (with no
+    /// leaf or ancestor-chain change) still rotates the fingerprint on its own.
     pub(super) fn test_active(
         content: &[u8],
         target_generation: u32,
         parent_generation: u32,
         acl_generation: u32,
+        dir_acl_generation: u32,
     ) -> Self {
         Self::Active {
             parent: test_identity(parent_generation),
             target: test_identity(target_generation),
             content_digest: sha256_digest(content),
             security_digest: sha256_digest(&acl_generation.to_le_bytes()),
+            dir_security_digest: sha256_digest(&dir_acl_generation.to_le_bytes()),
             ancestor_security_digest: sha256_digest(&acl_generation.to_le_bytes()),
         }
     }
 
-    pub(super) fn test_missing(parent_generation: u32) -> Self {
+    pub(super) fn test_missing(parent_generation: u32, dir_acl_generation: u32) -> Self {
         Self::Missing {
             path: PathBuf::from(r"C:\fake\package-broker-policy.json"),
             parent: Some(test_identity(parent_generation)),
+            dir_security_digest: Some(test_security_digest(dir_acl_generation)),
             ancestor_security_digest: Some(sha256_digest(b"test-ancestor-security")),
         }
     }
 
-    pub(super) fn test_invalid(content: &[u8], target_generation: u32) -> Self {
+    pub(super) fn test_invalid(
+        content: &[u8],
+        target_generation: u32,
+        parent_generation: u32,
+        acl_generation: u32,
+        dir_acl_generation: u32,
+    ) -> Self {
         Self::Invalid {
             path: PathBuf::from(r"C:\fake\package-broker-policy.json"),
-            parent: Some(test_identity(0)),
-            ancestor_security_digest: Some(sha256_digest(b"test-ancestor-security")),
+            parent: Some(test_identity(parent_generation)),
+            dir_security_digest: Some(test_security_digest(dir_acl_generation)),
+            ancestor_security_digest: Some(test_security_digest(acl_generation)),
             target: Some(test_identity(target_generation)),
             content_digest: Some(sha256_digest(content)),
-            security_digest: Some(sha256_digest(b"test-security")),
+            security_digest: Some(test_security_digest(acl_generation)),
             reason: validation::DiskFailureReason::MalformedContent,
         }
     }
 }
 
 #[cfg(test)]
-fn test_identity(generation: u32) -> FileIdentity {
+pub(super) fn test_identity(generation: u32) -> FileIdentity {
     let mut file_id = [0u8; 16];
     file_id[..4].copy_from_slice(&generation.to_le_bytes());
     FileIdentity {
@@ -520,7 +597,12 @@ fn test_identity(generation: u32) -> FileIdentity {
     }
 }
 
-fn sha256_digest(bytes: &[u8]) -> [u8; 32] {
+#[cfg(test)]
+pub(super) fn test_security_digest(generation: u32) -> [u8; 32] {
+    sha256_digest(&generation.to_le_bytes())
+}
+
+pub(super) fn sha256_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hasher.finalize().into()
@@ -548,6 +630,9 @@ pub(super) struct DiskObservation {
     /// never re-deriving it from the original configuration string -- for observation,
     /// the watcher, the store token, audit, and writes.
     pub canonical_path: PathBuf,
+    /// The hosting directory verified during this observation.
+    /// Writable observations keep it alive through publication and postverification.
+    pub hosting_dir: Option<VerifiedHostingDirectory>,
 }
 
 /// Context accumulated while observation fails partway through, for building the most
@@ -558,6 +643,7 @@ pub(super) struct DiskObservation {
 #[derive(Default)]
 struct InvalidContext {
     parent: Option<FileIdentity>,
+    dir_security_digest: Option<[u8; 32]>,
     ancestor_security_digest: Option<[u8; 32]>,
     target: Option<FileIdentity>,
     content_digest: Option<[u8; 32]>,
@@ -640,7 +726,7 @@ pub(super) fn observe(
         PolicyConfigurationSource::ConfiguredPath => verify_custom_directory_secure(dir),
     };
 
-    let (canonical_dir, ancestor_security_digest) = match secured {
+    let (canonical_dir, _) = match secured {
         Ok(resolved) => resolved,
         Err(error) => {
             tracing::warn!(
@@ -673,11 +759,13 @@ pub(super) fn observe(
                     fingerprint: DiskFingerprint::Missing {
                         path: configured_path.to_owned(),
                         parent: None,
+                        dir_security_digest: None,
                         ancestor_security_digest: None,
                     },
                     write_capability,
                     read_only_reason: Some(read_only_reason),
                     canonical_path: configured_path.to_owned(),
+                    hosting_dir: None,
                 },
                 _ => invalid_observation(
                     configured_path,
@@ -740,21 +828,87 @@ pub(super) fn observe(
         }
     };
 
-    // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
-    // verified directory identity, never repeated on every observation.
-    let (base_write_capability, base_read_only_reason) = match probe_cache.get_or_probe(&canonical_dir, parent) {
-        Ok(()) => (PolicyWriteCapability::Writable, None),
-        Err((reason, diagnostic)) => {
+    if let Err(error) = policy_security::verify_policy_directory_security(&dir_handle) {
+        tracing::warn!(
+            path = %canonical_dir.display(), error = %format!("{error:#}"),
+            "Held policy directory failed security verification"
+        );
+        return invalid_observation(
+            &canonical_path,
+            validation::DiskFailureReason::InsecureStorage,
+            InvalidContext {
+                parent: Some(parent),
+                ..Default::default()
+            },
+            PolicyWriteCapability::ReadOnly,
+            Some(PolicyReadOnlyReason::UnsafePath),
+        );
+    }
+    let dir_security_digest = match policy_security::security_state_digest(&dir_handle) {
+        Ok(digest) => digest,
+        Err(error) => {
             tracing::warn!(
-                path = %canonical_dir.display(), %diagnostic,
-                "Policy directory is not writable through the management API"
+                path = %canonical_dir.display(), %error,
+                "Failed to compute the policy directory security digest"
             );
-            (PolicyWriteCapability::ReadOnly, Some(reason))
+            return invalid_observation(
+                &canonical_path,
+                validation::DiskFailureReason::Unreadable,
+                InvalidContext {
+                    parent: Some(parent),
+                    ..Default::default()
+                },
+                PolicyWriteCapability::ReadOnly,
+                Some(PolicyReadOnlyReason::UnsafePath),
+            );
         }
     };
+    let ancestor_security_digest =
+        match policy_security::verify_policy_ancestor_chain(&canonical_dir, "policy directory") {
+            Ok(digest) => digest,
+            Err(error) => {
+                tracing::warn!(
+                    path = %canonical_dir.display(), error = %format!("{error:#}"),
+                    "Held policy directory ancestor chain failed security verification"
+                );
+                return invalid_observation(
+                    &canonical_path,
+                    validation::DiskFailureReason::InsecureStorage,
+                    InvalidContext {
+                        parent: Some(parent),
+                        dir_security_digest: Some(dir_security_digest),
+                        ..Default::default()
+                    },
+                    PolicyWriteCapability::ReadOnly,
+                    Some(PolicyReadOnlyReason::UnsafePath),
+                );
+            }
+        };
+
+    // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
+    // verified directory identity and security digest, never repeated on every observation.
+    let (base_write_capability, base_read_only_reason) =
+        match probe_cache.get_or_probe(&canonical_dir, parent, dir_security_digest) {
+            Ok(()) => (PolicyWriteCapability::Writable, None),
+            Err((reason, diagnostic)) => {
+                tracing::warn!(
+                    path = %canonical_dir.display(), %diagnostic,
+                    "Policy directory is not writable through the management API"
+                );
+                (PolicyWriteCapability::ReadOnly, Some(reason))
+            }
+        };
+
+    let hosting_dir = (base_write_capability == PolicyWriteCapability::Writable).then_some(VerifiedHostingDirectory {
+        handle: Some(dir_handle),
+        canonical_path: canonical_dir.clone(),
+        identity: parent,
+        security_digest: dir_security_digest,
+    });
 
     let invalid_ctx = InvalidContext {
         parent: Some(parent),
+        dir_security_digest: Some(dir_security_digest),
         ancestor_security_digest: Some(ancestor_security_digest),
         ..Default::default()
     };
@@ -774,11 +928,13 @@ pub(super) fn observe(
                 fingerprint: DiskFingerprint::Missing {
                     path: canonical_path.clone(),
                     parent: Some(parent),
+                    dir_security_digest: Some(dir_security_digest),
                     ancestor_security_digest: Some(ancestor_security_digest),
                 },
                 write_capability: base_write_capability,
                 read_only_reason: base_read_only_reason,
                 canonical_path,
+                hosting_dir,
             };
         }
         Err(error) => {
@@ -977,12 +1133,14 @@ pub(super) fn observe(
         &content,
         VerifiedIdentity {
             parent,
+            dir_security_digest,
             ancestor_security_digest,
             target,
             security_digest,
         },
         base_write_capability,
         base_read_only_reason,
+        hosting_dir,
     )
 }
 
@@ -990,6 +1148,7 @@ pub(super) fn observe(
 /// grouped so [`observation_from_parts`] does not need one parameter per field.
 struct VerifiedIdentity {
     parent: FileIdentity,
+    dir_security_digest: [u8; 32],
     ancestor_security_digest: [u8; 32],
     target: FileIdentity,
     security_digest: [u8; 32],
@@ -1010,9 +1169,11 @@ fn observation_from_parts(
     identity: VerifiedIdentity,
     write_capability: PolicyWriteCapability,
     read_only_reason: Option<PolicyReadOnlyReason>,
+    hosting_dir: Option<VerifiedHostingDirectory>,
 ) -> DiskObservation {
     let VerifiedIdentity {
         parent,
+        dir_security_digest,
         ancestor_security_digest,
         target,
         security_digest,
@@ -1020,7 +1181,7 @@ fn observation_from_parts(
 
     let content_digest = sha256_digest(content);
 
-    let invalid_with = |reason: validation::DiskFailureReason| DiskObservation {
+    let invalid_with = |reason: validation::DiskFailureReason, hosting_dir| DiskObservation {
         state: PolicyManagementState::Invalid,
         policy: None,
         invalid_diagnostics: Some(InvalidPolicyDiagnostics {
@@ -1030,6 +1191,7 @@ fn observation_from_parts(
         fingerprint: DiskFingerprint::Invalid {
             path: path.to_owned(),
             parent: Some(parent),
+            dir_security_digest: Some(dir_security_digest),
             ancestor_security_digest: Some(ancestor_security_digest),
             target: Some(target),
             content_digest: Some(content_digest),
@@ -1039,6 +1201,7 @@ fn observation_from_parts(
         write_capability,
         read_only_reason,
         canonical_path: path.to_owned(),
+        hosting_dir,
     };
 
     let policy = match serde_json::from_slice::<PolicyDocument>(content) {
@@ -1049,7 +1212,7 @@ fn observation_from_parts(
             // and could otherwise leak content fragments to any authenticated (but not
             // necessarily elevated) caller of `GET /v1/policy/management`.
             tracing::warn!(%parse_error, "Configured policy file content failed to parse");
-            return invalid_with(validation::DiskFailureReason::MalformedContent);
+            return invalid_with(validation::DiskFailureReason::MalformedContent, hosting_dir);
         }
     };
 
@@ -1063,7 +1226,7 @@ fn observation_from_parts(
             findings = ?committed_validation.findings,
             "Configured policy file failed authoritative semantic validation"
         );
-        return invalid_with(validation::DiskFailureReason::FailedSemanticValidation);
+        return invalid_with(validation::DiskFailureReason::FailedSemanticValidation, hosting_dir);
     }
 
     DiskObservation {
@@ -1075,11 +1238,13 @@ fn observation_from_parts(
             target,
             content_digest,
             security_digest,
+            dir_security_digest,
             ancestor_security_digest,
         },
         write_capability,
         read_only_reason,
         canonical_path: path.to_owned(),
+        hosting_dir,
     }
 }
 
@@ -1103,6 +1268,7 @@ fn invalid_observation(
         fingerprint: DiskFingerprint::Invalid {
             path: path.to_owned(),
             parent: context.parent,
+            dir_security_digest: context.dir_security_digest,
             ancestor_security_digest: context.ancestor_security_digest,
             target: context.target,
             content_digest: context.content_digest,
@@ -1112,6 +1278,7 @@ fn invalid_observation(
         write_capability,
         read_only_reason,
         canonical_path: path.to_owned(),
+        hosting_dir: None,
     }
 }
 
@@ -1156,10 +1323,20 @@ pub(super) enum WriteFailure {
 /// store already observed an Active or Invalid policy at `final_path` under its write
 /// lock immediately before calling this, so an existing destination is expected and
 /// intentionally replaced.
-pub(super) fn atomic_replace(dir: &Path, final_path: &Path, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
-    write_temp_then(dir, bytes, |temp_path| move_replace(temp_path, final_path))
+pub(super) fn atomic_replace(
+    hosting_dir: &VerifiedHostingDirectory,
+    final_path: &Path,
+    bytes: &[u8],
+) -> Result<PersistedPolicy, WriteFailure> {
+    hosting_dir
+        .verify_unchanged()
+        .context("hosting directory changed after policy observation")
         .map_err(WriteFailure::PrePublication)?;
-    reopen_and_verify_persisted(dir, final_path, bytes).map_err(WriteFailure::PostPublication)
+    write_temp_then(hosting_dir.canonical_path(), bytes, |temp_path| {
+        move_replace(temp_path, final_path)
+    })
+    .map_err(WriteFailure::PrePublication)?;
+    reopen_and_verify_persisted(hosting_dir, final_path, bytes).map_err(WriteFailure::PostPublication)
 }
 
 /// Atomically persist `bytes` to `final_path` only if nothing exists there yet: unlike
@@ -1170,10 +1347,20 @@ pub(super) fn atomic_replace(dir: &Path, final_path: &Path, bytes: &[u8]) -> Res
 /// (a [`WriteFailure::PrePublication`], since the destination was never touched) and the
 /// caller must re-observe and report a stale token (see `PolicyStore::replace`) rather
 /// than ever silently overwriting a file it never actually observed as absent.
-pub(super) fn atomic_create(dir: &Path, final_path: &Path, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
-    write_temp_then(dir, bytes, |temp_path| move_create_new(temp_path, final_path))
+pub(super) fn atomic_create(
+    hosting_dir: &VerifiedHostingDirectory,
+    final_path: &Path,
+    bytes: &[u8],
+) -> Result<PersistedPolicy, WriteFailure> {
+    hosting_dir
+        .verify_unchanged()
+        .context("hosting directory changed after policy observation")
         .map_err(WriteFailure::PrePublication)?;
-    reopen_and_verify_persisted(dir, final_path, bytes).map_err(WriteFailure::PostPublication)
+    write_temp_then(hosting_dir.canonical_path(), bytes, |temp_path| {
+        move_create_new(temp_path, final_path)
+    })
+    .map_err(WriteFailure::PrePublication)?;
+    reopen_and_verify_persisted(hosting_dir, final_path, bytes).map_err(WriteFailure::PostPublication)
 }
 
 /// Create a uniquely named temporary file in `dir` with an admin-only ACL established at
@@ -1235,16 +1422,17 @@ fn write_temp_then(dir: &Path, bytes: &[u8], commit: impl FnOnce(&Path) -> anyho
 /// handle/content evidence immediately afterward is the strongest supported
 /// approximation, not a complete fix.
 fn reopen_and_verify_persisted(
-    dir: &Path,
+    hosting_dir: &VerifiedHostingDirectory,
     final_path: &Path,
     expected_bytes: &[u8],
 ) -> anyhow::Result<PersistedPolicy> {
-    let dir_handle =
-        open_directory_no_reparse(dir).context("failed to reopen policy directory for post-write verification")?;
-    let parent = policy_security::file_identity(&dir_handle)
-        .context("failed to query policy directory identity for post-write verification")?;
-    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(dir, "policy directory")
-        .context("policy directory ancestor chain failed verification immediately after writing")?;
+    let dir_security_digest = hosting_dir
+        .verify_unchanged()
+        .context("held policy directory changed during replacement")?;
+    let parent = hosting_dir.identity();
+    let ancestor_security_digest =
+        policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
+            .context("policy directory ancestor chain failed verification immediately after writing")?;
 
     let final_file = OpenOptions::new()
         .read(true)
@@ -1293,6 +1481,7 @@ fn reopen_and_verify_persisted(
             target,
             content_digest,
             security_digest,
+            dir_security_digest,
             ancestor_security_digest,
         },
     })
@@ -1409,12 +1598,24 @@ mod tests {
         assert!(leftover.is_empty(), "probe left files behind: {leftover:?}");
     }
 
+    #[test]
+    fn failed_atomicity_probe_is_not_cached() {
+        let dir = temp_dir();
+        let missing = dir.path().join("missing");
+        let cache = AtomicityProbeCache::new();
+
+        let result = cache.get_or_probe(&missing, test_identity(1), test_security_digest(1));
+
+        assert!(result.is_err());
+        assert!(cache.cached_success.lock().unwrap().is_none());
+    }
+
     // ─── DiskFingerprint rotation/stability semantics ─────────────────────────
 
     #[test]
     fn active_fingerprint_is_stable_for_identical_inputs() {
-        let a = DiskFingerprint::test_active(b"same bytes", 1, 1, 1);
-        let b = DiskFingerprint::test_active(b"same bytes", 1, 1, 1);
+        let a = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
+        let b = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
         assert_eq!(a, b);
     }
 
@@ -1422,36 +1623,43 @@ mod tests {
     fn active_fingerprint_rotates_on_same_byte_target_replacement() {
         // Same content, but a different target generation (the file object itself was
         // replaced, e.g. deleted and recreated with identical bytes).
-        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1);
-        let after = DiskFingerprint::test_active(b"same bytes", 2, 1, 1);
+        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
+        let after = DiskFingerprint::test_active(b"same bytes", 2, 1, 1, 1);
         assert_ne!(before, after);
     }
 
     #[test]
     fn active_fingerprint_rotates_on_acl_change() {
-        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1);
-        let after = DiskFingerprint::test_active(b"same bytes", 1, 1, 2);
+        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
+        let after = DiskFingerprint::test_active(b"same bytes", 1, 1, 2, 1);
         assert_ne!(before, after);
     }
 
     #[test]
     fn active_fingerprint_rotates_on_parent_replacement() {
-        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1);
-        let after = DiskFingerprint::test_active(b"same bytes", 1, 2, 1);
+        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
+        let after = DiskFingerprint::test_active(b"same bytes", 1, 2, 1, 1);
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn active_fingerprint_rotates_on_hosting_directory_acl_change() {
+        let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
+        let after = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 2);
         assert_ne!(before, after);
     }
 
     #[test]
     fn missing_fingerprints_differ_for_different_parents() {
-        let a = DiskFingerprint::test_missing(1);
-        let b = DiskFingerprint::test_missing(2);
+        let a = DiskFingerprint::test_missing(1, 1);
+        let b = DiskFingerprint::test_missing(2, 1);
         assert_ne!(a, b);
     }
 
     #[test]
     fn missing_fingerprint_is_stable_for_the_same_parent() {
-        let a = DiskFingerprint::test_missing(7);
-        let b = DiskFingerprint::test_missing(7);
+        let a = DiskFingerprint::test_missing(7, 1);
+        let b = DiskFingerprint::test_missing(7, 1);
         assert_eq!(a, b);
     }
 
@@ -1685,6 +1893,7 @@ mod tests {
         DiskFingerprint::Invalid {
             path: PathBuf::from(path),
             parent: None,
+            dir_security_digest: None,
             ancestor_security_digest: None,
             target: None,
             content_digest: None,
@@ -1725,6 +1934,7 @@ mod tests {
         DiskFingerprint::Invalid {
             path: PathBuf::from(path),
             parent: Some(test_identity(parent_generation)),
+            dir_security_digest: Some(sha256_digest(b"directory-security")),
             ancestor_security_digest: Some(sha256_digest(ancestor_marker)),
             target: Some(test_identity(target_generation)),
             content_digest: Some(sha256_digest(content)),

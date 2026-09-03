@@ -3,13 +3,14 @@ use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use std::{ptr, slice};
 
 use anyhow::{Context, Result, bail};
 use tracing::{error, warn};
 use windows::Win32::Foundation::{
-    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM, MAX_PATH,
-    WAIT_EVENT, WAIT_FAILED, WPARAM,
+    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FILETIME, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM,
+    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -24,10 +25,11 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
-    LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION,
-    PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW,
-    STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
+    LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
+    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE,
+    QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -101,6 +103,28 @@ impl Process {
         unsafe { path.set_len(length as usize) };
 
         Ok(OsString::from_wide(&path).into())
+    }
+
+    pub fn creation_time(&self) -> Result<SystemTime> {
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+
+        // SAFETY: All output pointers are valid for the duration of the call.
+        unsafe { GetProcessTimes(self.handle.raw(), &mut creation, &mut exit, &mut kernel, &mut user) }?;
+
+        const WINDOWS_TO_UNIX_EPOCH_SECONDS: u64 = 11_644_473_600;
+        const TICKS_PER_SECOND: u64 = 10_000_000;
+
+        let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+        let seconds = ticks / TICKS_PER_SECOND;
+        let unix_seconds = seconds
+            .checked_sub(WINDOWS_TO_UNIX_EPOCH_SECONDS)
+            .context("process creation time predates the Unix epoch")?;
+        let nanos = u32::try_from((ticks % TICKS_PER_SECOND) * 100).expect("FILETIME subsecond value fits in u32");
+
+        Ok(SystemTime::UNIX_EPOCH + Duration::new(unix_seconds, nanos))
     }
 
     pub fn inject_dll(&self, path: &Path) -> Result<()> {
