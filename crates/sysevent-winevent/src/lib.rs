@@ -25,7 +25,7 @@ impl WinEvent {
         // SAFETY: Proper UTF-16, null-terminated string.
         let handle = unsafe { EventLog::RegisterEventSourceW(std::ptr::null(), source_name_utf16.as_ptr()) };
 
-        if handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        if event_source_registration_failed(handle) {
             return Err(SysEventError::Platform(format!(
                 "failed to register event source '{source_name}'"
             )));
@@ -141,6 +141,10 @@ impl Drop for WinEvent {
     }
 }
 
+fn event_source_registration_failed(handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    handle.is_null()
+}
+
 fn severity_to_event_type(severity: Severity) -> u16 {
     match severity {
         Severity::Critical => EventLog::EVENTLOG_ERROR_TYPE,
@@ -158,6 +162,14 @@ fn to_null_terminated_utf16(input: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_source_registration_failure_sentinel() {
+        assert!(event_source_registration_failed(std::ptr::null_mut()));
+        assert!(!event_source_registration_failed(
+            windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE
+        ));
+    }
 
     #[test]
     fn severity_to_event_type_mapping() {
