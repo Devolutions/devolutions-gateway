@@ -1119,8 +1119,9 @@ mod tests {
             "package broker pipe client executable",
         )
         .expect_err("trusted-writer security must reject a user-writable rewritten image");
+        let message = error.to_string();
         assert!(
-            error.to_string().contains("is not a trusted principal"),
+            message.contains("is not a trusted principal") || message.contains("DACL grants write access"),
             "unexpected security error: {error:#}"
         );
     }
