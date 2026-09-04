@@ -27,6 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 hex = "0.4"
+hmac = "0.13"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
 notify = { version = "7", default-features = false }
@@ -37,8 +38,10 @@ parking_lot = "0.12"
 regex = "1"
 semver = "1"
 serde_json = "1"
-serde_yaml = "0.9"
-sha2 = "0.10"
+sha2 = "0.11"
+sysevent = { path = "../sysevent" }
+sysevent-codes = { path = "../sysevent-codes" }
+sysevent-winevent = { path = "../sysevent-winevent" }
 tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
 tokio-util = "0.7"
 tower-service = "0.3"

@@ -1,9 +1,12 @@
 //! Windows code-signing validation helpers.
 
+use std::fs::File;
 use std::path::Path;
 
 use anyhow::{Context as _, bail};
-use win_api_wrappers::security::crypt::{AuthenticodeSignatureStatus, authenticode_status};
+use win_api_wrappers::security::crypt::{
+    AuthenticodeSignatureStatus, WinVerifyTrustResult, authenticode_status, authenticode_status_for_file,
+};
 
 /// List of allowed thumbprints for Devolutions code signing certificates.
 pub const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
@@ -50,7 +53,21 @@ pub fn is_devolutions_certificate_thumbprint(calculated_thumbprint: &[u8; 20]) -
 }
 
 pub fn validate_devolutions_authenticode_signature(path: &Path) -> anyhow::Result<String> {
-    let wintrust_result = authenticode_status(path).with_context(|| {
+    let wintrust_result = authenticode_status(path);
+    validate_devolutions_authenticode_result(path, wintrust_result)
+}
+
+/// Validate the exact retained executable object identified by `path`.
+pub fn validate_devolutions_authenticode_signature_for_file(path: &Path, file: &File) -> anyhow::Result<String> {
+    let wintrust_result = authenticode_status_for_file(path, file);
+    validate_devolutions_authenticode_result(path, wintrust_result)
+}
+
+fn validate_devolutions_authenticode_result(
+    path: &Path,
+    wintrust_result: anyhow::Result<WinVerifyTrustResult>,
+) -> anyhow::Result<String> {
+    let wintrust_result = wintrust_result.with_context(|| {
         format!(
             "failed to read authenticode signature for executable '{}'",
             path.display()

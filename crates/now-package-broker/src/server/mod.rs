@@ -1,23 +1,27 @@
 //! Runtime implementation of the shared NOW package broker server facade.
 
+// See `responses.rs` for why `ErrorResponse` is large and not boxed.
+#![expect(
+    clippy::result_large_err,
+    reason = "ErrorResponse's size is dictated by the shared now-policy-api contract, not under this crate's control"
+)]
+
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use axum::extract::Request;
-use axum::http::{Method, StatusCode, header};
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
     CancelRequest, CancelResponse, CancelResponseKind, CapabilitiesResponse, CapabilitiesResponseKind, Decision,
     DecisionInfo, Elevation, ErrorCode, ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse,
     ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName,
-    OperationStatus, OperationSubmission, PackageRequest, PolicyManagementResponse, PolicyReplacementRequest,
-    PolicyReplacementResponse, PolicyResponse, PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse,
-    Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
+    OperationStatus, OperationSubmission, PackageRequest, PolicyManagementResponse, PolicyManagementResponseKind,
+    PolicyReplacementRequest, PolicyReplacementResponse, PolicyReplacementResponseKind, PolicyResponse,
+    PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse, PolicyValidationResponseKind, Scope,
+    StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -28,10 +32,11 @@ use crate::command_builder::build_command;
 use crate::evaluator;
 use crate::executor::{CommandExecutor, ExecutionContext};
 use crate::operation_tracker::OperationTracker;
+use crate::policy_store::{PolicyStore, PolicyWriteActor};
 
 mod connection;
 mod execution;
-mod responses;
+pub(crate) mod responses;
 
 pub use connection::serve_connection;
 use responses::{
@@ -81,8 +86,9 @@ impl ManagerProbeCache {
 
 /// Shared server state.
 pub struct BrokerState {
-    /// Current policy. `None` means the broker is paused (policy file missing or corrupted).
-    pub policy: RwLock<Option<Arc<PolicyDocument>>>,
+    /// Owns the configured/resolved policy path, observed state, and transactional
+    /// replacement; the store's state is Missing/Invalid when the broker is paused.
+    pub policy_store: Arc<PolicyStore>,
     pub executor: Arc<dyn CommandExecutor>,
     pub pipe_name: String,
     pub tracker: OperationTracker,
@@ -100,25 +106,56 @@ struct EvaluatedRequest {
 }
 
 /// Build the axum router for a single authenticated pipe client.
+///
+/// Body-size limiting is entirely owned by `now_policy_server_template::api_router_from_shared`
+/// (route ownership stays there; see the shared-contract pin comment in the workspace
+/// `Cargo.toml`): it applies [`MAX_REQUEST_BODY_BYTES`] (256 KiB) to every operation
+/// endpoint (`POST /v1/package-operations/*`) and the larger, dedicated
+/// `MAX_POLICY_MANAGEMENT_BODY_BYTES` (16 MiB) to the two policy-management routes,
+/// `POST /v1/policy/validate` and `PUT /v1/policy`. This broker has nothing to add for
+/// either limit -- both are applied inside `api_router_from_shared` itself, not here --
+/// and must never re-apply a body-size layer of its own on top, which would only risk
+/// silently drifting from the shared contract's own limits. See
+/// `agent_policy_tester::windows::policy_management_body_size_limits` for the end-to-end
+/// `>256 KiB` valid / `>16 MiB` reject coverage.
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection { state, client });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
-        .layer(middleware::from_fn(restrict_phase_one_policy_routes))
-}
-
-async fn restrict_phase_one_policy_routes(request: Request, next: Next) -> Response {
-    match (request.method(), request.uri().path()) {
-        (_, "/v1/policy/management" | "/v1/policy/validate") => StatusCode::NOT_FOUND.into_response(),
-        (method, "/v1/policy") if method != Method::GET && method != Method::HEAD => {
-            (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "GET, HEAD")]).into_response()
-        }
-        _ => next.run(request).await,
-    }
 }
 
 struct BrokerConnection {
     state: Arc<BrokerState>,
     client: PipeClient,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PolicyWriteAuthorizationAudit {
+    Attempted,
+    Denied(&'static str),
+}
+
+impl BrokerConnection {
+    fn authorize_policy_write(
+        &self,
+        mut audit: impl FnMut(PolicyWriteAuthorizationAudit),
+    ) -> Result<(), ErrorResponse> {
+        audit(PolicyWriteAuthorizationAudit::Attempted);
+
+        if let Err(error) = self.client.validate_connection(self.state.skip_signature_validation) {
+            let reason = "pipe client authentication failed";
+            audit(PolicyWriteAuthorizationAudit::Denied(reason));
+            return Err(auth_error("policy replacement", error));
+        }
+
+        if !self.client.is_elevated_administrator() {
+            let reason = "pipe client token is not an elevated Administrator";
+            audit(PolicyWriteAuthorizationAudit::Denied(reason));
+            warn!(user_sid = %self.client.user_sid(), "Rejected package broker policy replacement request: {reason}");
+            return Err(error_response(ErrorCode::AdministratorRequired, reason));
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -134,48 +171,94 @@ impl PackageBrokerServer for BrokerConnection {
     async fn active_policy(&self) -> Result<PolicyResponse, ErrorResponse> {
         self.client
             .validate_connection(self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(error = format!("{error:#}"), "Rejected package broker policy request");
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+            .map_err(|error| auth_error("policy", error))?;
 
         self.state.policy_response()
     }
 
     async fn policy_management(&self) -> Result<PolicyManagementResponse, ErrorResponse> {
-        Err(error_response(
-            ErrorCode::UnsupportedEndpoint,
-            "policy management is unavailable",
-        ))
+        self.client
+            .validate_connection(self.state.skip_signature_validation)
+            .map_err(|error| auth_error("policy management", error))?;
+
+        Ok(PolicyManagementResponse {
+            response_kind: PolicyManagementResponseKind,
+            response_version: api_version(),
+            server: server_context(),
+            management: self.state.policy_store.management_snapshot(),
+        })
     }
 
     async fn validate_policy(
         &self,
-        _request: PolicyValidationRequest,
+        request: PolicyValidationRequest,
     ) -> Result<PolicyValidationResponse, ErrorResponse> {
-        Err(error_response(
-            ErrorCode::UnsupportedEndpoint,
-            "policy validation is unavailable",
-        ))
+        self.client
+            .validate_connection(self.state.skip_signature_validation)
+            .map_err(|error| auth_error("policy validation", error))?;
+
+        // Bound to the same process-random key `replace_policy`'s transaction verifies
+        // against, so a receipt issued here is always accepted there.
+        let validation = self.state.policy_store.validate_draft(&request.draft);
+
+        Ok(PolicyValidationResponse {
+            response_kind: PolicyValidationResponseKind,
+            response_version: api_version(),
+            server: server_context(),
+            validation,
+        })
     }
 
     async fn replace_policy(
         &self,
-        _request: PolicyReplacementRequest,
+        request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
-        Err(error_response(
-            ErrorCode::UnsupportedEndpoint,
-            "policy replacement is unavailable",
-        ))
+        let intent = format!("{:?}", request.operation);
+        let configured_path = PathBuf::from(self.state.policy_store.management_snapshot().configured_path);
+
+        // One attempted sysevent+trace for the whole write lifecycle, recorded here at
+        // the server boundary (where the OS-identified pipe client SID/executable, request
+        // intent, and configured path are all in hand) rather than duplicated again once
+        // the request reaches `PolicyStore::replace`.
+        self.authorize_policy_write(|audit| match audit {
+            PolicyWriteAuthorizationAudit::Attempted => crate::audit::write_attempted(
+                self.client.user_sid(),
+                self.client.executable_path(),
+                &intent,
+                &configured_path,
+            ),
+            PolicyWriteAuthorizationAudit::Denied(reason) => crate::audit::write_denied(
+                self.client.user_sid(),
+                self.client.executable_path(),
+                &intent,
+                &configured_path,
+                reason,
+            ),
+        })?;
+
+        let actor = PolicyWriteActor {
+            sid: self.client.user_sid(),
+            executable: self.client.executable_path(),
+        };
+
+        self.state
+            .policy_store
+            .replace(request, actor)
+            .await
+            .map(|success| PolicyReplacementResponse {
+                response_kind: PolicyReplacementResponseKind,
+                response_version: api_version(),
+                server: server_context(),
+                policy: success.policy,
+                validation: success.validation,
+                management: success.management,
+            })
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
         self.client
             .validate_request(&request, self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(error = format!("{error:#}"), "Rejected package broker evaluate request");
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+            .map_err(|error| auth_error("evaluate", error))?;
 
         self.state.evaluate(request).await
     }
@@ -183,10 +266,7 @@ impl PackageBrokerServer for BrokerConnection {
     async fn execute(&self, request: PackageRequest) -> Result<ExecutionResponse, ErrorResponse> {
         self.client
             .validate_request(&request, self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(error = format!("{error:#}"), "Rejected package broker execute request");
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+            .map_err(|error| auth_error("execute", error))?;
 
         self.state.execute(request, self.client.user_sid()).await
     }
@@ -194,10 +274,7 @@ impl PackageBrokerServer for BrokerConnection {
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
         self.client
             .validate_status_request(&request, self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(error = format!("{error:#}"), "Rejected package broker status request");
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+            .map_err(|error| auth_error("status", error))?;
 
         let owner_key = request.client.owner_key();
         self.state.status_for_client(request, owner_key).await
@@ -206,20 +283,28 @@ impl PackageBrokerServer for BrokerConnection {
     async fn cancel(&self, request: CancelRequest) -> Result<CancelResponse, ErrorResponse> {
         self.client
             .validate_cancel_request(&request, self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(error = format!("{error:#}"), "Rejected package broker cancel request");
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+            .map_err(|error| auth_error("cancel", error))?;
 
         let owner_key = request.client.owner_key();
         self.state.cancel_for_client(request, owner_key).await
     }
 }
 
+/// Reject a request whose pipe client failed Authenticode/identity validation
+/// (`PipeClient::validate_connection` and friends): trace the detailed underlying error
+/// for diagnosis, and return the sanitized, consistent `Unauthorized` response every
+/// route uses for this condition.
+fn auth_error(context: &str, error: anyhow::Error) -> ErrorResponse {
+    warn!(
+        error = format!("{error:#}"),
+        "Rejected package broker {context} request"
+    );
+    error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
+}
+
 impl BrokerState {
     fn active_policy_snapshot(&self) -> Option<Arc<PolicyDocument>> {
-        let guard = self.policy.read().expect("policy lock poisoned");
-        guard.as_ref().map(Arc::clone)
+        self.policy_store.active_policy()
     }
 
     #[expect(
@@ -240,8 +325,8 @@ impl BrokerState {
     }
 
     async fn health(&self) -> HealthResponse {
-        let policy_guard = self.policy.read().expect("policy lock poisoned");
-        let (status, policy_id) = match policy_guard.as_ref() {
+        let policy = self.policy_store.active_policy();
+        let (status, policy_id) = match &policy {
             Some(policy) => (HealthStatus::Ready, policy.metadata.id.to_string()),
             None => (HealthStatus::Paused, String::new()),
         };
@@ -262,6 +347,11 @@ impl BrokerState {
             server: server_context(),
             transports: vec![Transport::HttpNamedPipe],
             managers: self.probed_manager_capabilities(user_sid).await,
+            // The shared contract exposes a single `max_request_body_bytes` figure, with
+            // no separate field for the larger policy-management limit (see
+            // `build_router_for_client`): this always reflects the general per-operation
+            // limit, which is what every `POST /v1/package-operations/*` caller actually
+            // needs to know to size its own requests.
             max_request_body_bytes: MAX_REQUEST_BODY_BYTES as u64,
         }
     }
@@ -607,6 +697,7 @@ mod tests {
 
     use super::*;
     use crate::executor::{ExecutionOutput, OperationCanceled, ProcessStartedCallback};
+    use crate::test_support::system_sid;
 
     struct NoopExecutor;
 
@@ -669,7 +760,7 @@ mod tests {
 
     fn state() -> BrokerState {
         BrokerState {
-            policy: RwLock::new(Some(Arc::new(permissive_policy()))),
+            policy_store: PolicyStore::for_tests(Some(permissive_policy())),
             executor: Arc::new(NoopExecutor),
             pipe_name: "test-pipe".to_owned(),
             tracker: OperationTracker::new(),
@@ -680,11 +771,11 @@ mod tests {
 
     fn shared_state(policy: Option<PolicyDocument>) -> Arc<BrokerState> {
         let mut state = state();
-        state.policy = RwLock::new(policy.map(Arc::new));
+        state.policy_store = PolicyStore::for_tests(policy);
         Arc::new(state)
     }
 
-    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> Response {
+    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> axum::response::Response {
         let client = PipeClient::from_current_process().expect("capture current test process");
         let mut router = build_router_for_client(state, client);
         router
@@ -699,7 +790,7 @@ mod tests {
             .expect("router is infallible")
     }
 
-    async fn response_json(response: Response) -> serde_json::Value {
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("read response body");
@@ -721,6 +812,306 @@ mod tests {
         assert!(body.get("Policy").is_none());
     }
 
+    // ─── Elevation/administrator gating at the HTTP route layer (item 23/25) ──
+    //
+    // Only meaningful with the `dev-skip-broker-signature` feature: without it, every
+    // pipe client (including these synthetic ones, whose `executable_path` does not
+    // point at a real Devolutions-signed binary) fails Authenticode validation
+    // regardless of elevation, so these tests would only ever observe 401 and never
+    // actually reach the elevation gate they exist to exercise. See
+    // `crate::auth::PipeClient::{test_elevated_administrator, test_unelevated}`.
+    #[cfg(feature = "dev-skip-broker-signature")]
+    mod elevation_gating {
+        use super::*;
+
+        async fn route_request_as(
+            state: Arc<BrokerState>,
+            client: PipeClient,
+            method: Method,
+            uri: &str,
+            body: Option<serde_json::Value>,
+        ) -> axum::response::Response {
+            let mut router = build_router_for_client(state, client);
+            let request = match body {
+                Some(value) => Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&value).expect("serialize test body")))
+                    .expect("valid test request"),
+                None => Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("valid test request"),
+            };
+            router.call(request).await.expect("router is infallible")
+        }
+
+        fn draft_json(id: &str) -> serde_json::Value {
+            serde_json::json!({
+                "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
+                "PolicyVersion": "1.0.0",
+                "PolicyType": "PackageBrokerPolicy",
+                "Metadata": { "Id": id, "Publisher": "Test" },
+                "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+                "Rules": [],
+            })
+        }
+
+        fn dev_state() -> Arc<BrokerState> {
+            let mut broker_state = state();
+            broker_state.skip_signature_validation = true;
+            Arc::new(broker_state)
+        }
+
+        fn authorization_audit(
+            client: PipeClient,
+            skip_signature_validation: bool,
+        ) -> (Result<(), ErrorResponse>, Vec<PolicyWriteAuthorizationAudit>) {
+            let mut broker_state = state();
+            broker_state.skip_signature_validation = skip_signature_validation;
+            let connection = BrokerConnection {
+                state: Arc::new(broker_state),
+                client,
+            };
+            let mut audit = Vec::new();
+
+            let result = connection.authorize_policy_write(|event| audit.push(event));
+
+            (result, audit)
+        }
+
+        #[test]
+        fn denied_policy_writes_audit_attempt_before_authorization_denial() {
+            let unauthenticated =
+                PipeClient::test_unelevated(system_sid(), PathBuf::from("unsigned-policy-client.exe"));
+            let (result, audit) = authorization_audit(unauthenticated, false);
+            let error = result.expect_err("unsigned client should be denied");
+            assert_eq!(error.code, ErrorCode::Unauthorized);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client authentication failed")
+                ]
+            );
+
+            let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+            let (result, audit) = authorization_audit(unelevated, true);
+            let error = result.expect_err("unelevated client should be denied");
+            assert_eq!(error.code, ErrorCode::AdministratorRequired);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client token is not an elevated Administrator")
+                ]
+            );
+        }
+
+        #[test]
+        fn elevation_gate_is_independent_of_signature_and_image_checks() {
+            // The test-only provenance bypass models injected-equivalent control of an approved process image.
+            let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("approved-policy-client.exe"));
+            let (result, audit) = authorization_audit(unelevated, true);
+            let error = result.expect_err("an unelevated injected-equivalent client cannot replace policy");
+            assert_eq!(error.code, ErrorCode::AdministratorRequired);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client token is not an elevated Administrator")
+                ]
+            );
+
+            let elevated =
+                PipeClient::test_elevated_administrator(system_sid(), PathBuf::from("approved-policy-client.exe"));
+            let (result, audit) = authorization_audit(elevated, true);
+            result.expect("an elevated Administrator independently satisfies the policy-write authorization gate");
+            assert_eq!(audit, [PolicyWriteAuthorizationAudit::Attempted]);
+        }
+
+        #[tokio::test]
+        async fn management_and_validation_succeed_without_elevation() {
+            let state = dev_state();
+            let client = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+
+            let management = route_request_as(
+                Arc::clone(&state),
+                client.clone(),
+                Method::GET,
+                "/v1/policy/management",
+                None,
+            )
+            .await;
+            assert_eq!(management.status(), StatusCode::OK);
+
+            let validate_body = serde_json::json!({
+                "RequestKind": "PolicyValidationRequest",
+                "RequestVersion": "1.0",
+                "Draft": draft_json("policy-a"),
+            });
+            let validate =
+                route_request_as(state, client, Method::POST, "/v1/policy/validate", Some(validate_body)).await;
+            assert_eq!(validate.status(), StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn replace_requires_administrator_even_with_signature_bypass_active() {
+            let state = dev_state();
+            let client = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+
+            let management = response_json(
+                route_request_as(
+                    Arc::clone(&state),
+                    client.clone(),
+                    Method::GET,
+                    "/v1/policy/management",
+                    None,
+                )
+                .await,
+            )
+            .await;
+            let store_token = management["Management"]["StoreToken"].as_str().unwrap().to_owned();
+
+            let replace_body = serde_json::json!({
+                "RequestKind": "PolicyReplacementRequest",
+                "RequestVersion": "1.0",
+                "ExpectedStoreToken": store_token,
+                "Operation": "Update",
+                "ConflictHandling": "Reject",
+                "WarningsAcknowledged": true,
+                "Draft": draft_json("test-policy"),
+                "ValidationReceipt": "hmac-sha256:0000",
+            });
+            let replace = route_request_as(state, client, Method::PUT, "/v1/policy", Some(replace_body)).await;
+
+            // The dev-only signature bypass proves it took effect (this is not a 401),
+            // but it must never also bypass elevation/Administrators membership: the
+            // request is rejected before the store (and therefore the bogus receipt)
+            // is ever consulted.
+            assert_eq!(replace.status(), StatusCode::FORBIDDEN);
+            let body = response_json(replace).await;
+            let error: ErrorResponse = serde_json::from_value(body).expect("deserialize error response");
+            assert_eq!(error.code, ErrorCode::AdministratorRequired);
+        }
+
+        #[tokio::test]
+        async fn replace_reaches_the_store_for_an_elevated_administrator() {
+            let state = dev_state();
+            let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+            let elevated = PipeClient::test_elevated_administrator(system_sid(), PathBuf::from("elevated.exe"));
+
+            let management = response_json(
+                route_request_as(
+                    Arc::clone(&state),
+                    unelevated,
+                    Method::GET,
+                    "/v1/policy/management",
+                    None,
+                )
+                .await,
+            )
+            .await;
+            let store_token = management["Management"]["StoreToken"].as_str().unwrap().to_owned();
+
+            // A deliberately bogus receipt: this proves the request passed the
+            // elevation/Administrators gate (it is rejected by store-level validation,
+            // not by `AdministratorRequired`), without needing the full validate-then-
+            // replace round trip.
+            let replace_body = serde_json::json!({
+                "RequestKind": "PolicyReplacementRequest",
+                "RequestVersion": "1.0",
+                "ExpectedStoreToken": store_token,
+                "Operation": "Update",
+                "ConflictHandling": "Reject",
+                "WarningsAcknowledged": true,
+                "Draft": draft_json("test-policy"),
+                "ValidationReceipt": "hmac-sha256:0000",
+            });
+            let replace = route_request_as(state, elevated, Method::PUT, "/v1/policy", Some(replace_body)).await;
+
+            let body = response_json(replace).await;
+            let error: ErrorResponse = serde_json::from_value(body).expect("deserialize error response");
+            assert_ne!(
+                error.code,
+                ErrorCode::AdministratorRequired,
+                "an elevated Administrator's request must reach the store, not be denied at the auth gate"
+            );
+        }
+    }
+
+    // ─── Policy-management body-size limit, applied by the shared router ──────
+    //
+    // Same feature-gating rationale as `elevation_gating` above: without the dev
+    // signature bypass, every request (regardless of size) is rejected with 401 before
+    // the body-size layer is ever reached, so these tests would not actually exercise
+    // it. The router used here is the exact same `build_router_for_client` the real
+    // named-pipe server serves every connection through (see its doc comment): the
+    // 16 MiB policy-management limit and 256 KiB operation-endpoint limit are both
+    // applied entirely inside `now_policy_server_template::api_router_from_shared`, so
+    // this proves the *final* (not this broker's own) limit end to end. The Agent E2E
+    // suite (`agent_policy_tester::windows::policy_management_body_size_limits`)
+    // exercises the same two limits again over the real named-pipe HTTP transport.
+    #[cfg(feature = "dev-skip-broker-signature")]
+    mod policy_management_body_limits {
+        use now_policy_server_template::MAX_POLICY_MANAGEMENT_BODY_BYTES;
+
+        use super::*;
+
+        /// Post a `/v1/policy/validate` request whose serialized body is at least
+        /// `target_len` bytes, via a single large filler string in `Draft` (not a
+        /// well-formed policy draft): `Draft` is a raw `serde_json::Value`, so any valid
+        /// JSON value deserializes, and the body-size limit is enforced by the router
+        /// before the draft's content is ever inspected. One contiguous allocation for
+        /// the filler plus one for its serialized form, instead of building a large tree
+        /// of many small values.
+        async fn route_oversized_validate(state: Arc<BrokerState>, target_len: usize) -> axum::response::Response {
+            let client = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
+            let mut router = build_router_for_client(state, client);
+            let body = serde_json::json!({
+                "RequestKind": "PolicyValidationRequest",
+                "RequestVersion": "1.0",
+                "Draft": "a".repeat(target_len),
+            });
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/v1/policy/validate")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).expect("serialize test body")))
+                .expect("valid test request");
+            router.call(request).await.expect("router is infallible")
+        }
+
+        fn dev_state() -> Arc<BrokerState> {
+            let mut broker_state = state();
+            broker_state.skip_signature_validation = true;
+            Arc::new(broker_state)
+        }
+
+        #[tokio::test]
+        async fn validate_accepts_a_body_over_the_operation_limit_but_under_the_management_limit() {
+            // Comfortably above the 256 KiB operation-endpoint limit
+            // (`MAX_REQUEST_BODY_BYTES`) but still well inside the dedicated 16 MiB
+            // policy-management limit: proves `/v1/policy/validate` does not share the
+            // smaller operation-endpoint limit.
+            let response = route_oversized_validate(dev_state(), MAX_REQUEST_BODY_BYTES * 2).await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn validate_rejects_a_body_over_the_management_limit() {
+            let response =
+                route_oversized_validate(dev_state(), MAX_POLICY_MANAGEMENT_BODY_BYTES + MAX_REQUEST_BODY_BYTES).await;
+
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let error: ErrorResponse =
+                serde_json::from_value(response_json(response).await).expect("deserialize error response");
+            assert_eq!(error.code, ErrorCode::PayloadTooLarge);
+        }
+    }
+
     #[test]
     fn policy_response_returns_not_found_when_unavailable() {
         let Err(error) = shared_state(None).policy_response() else {
@@ -728,22 +1119,6 @@ mod tests {
         };
         assert_eq!(error.code, ErrorCode::NotFound);
         assert_eq!(error.message, "active policy is unavailable");
-    }
-
-    #[tokio::test]
-    async fn phase_one_router_does_not_expose_policy_management_routes() {
-        for (method, uri, expected_status) in [
-            (Method::GET, "/v1/policy/management", StatusCode::NOT_FOUND),
-            (Method::POST, "/v1/policy/validate", StatusCode::NOT_FOUND),
-            (Method::PUT, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
-            (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
-        ] {
-            let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
-            assert_eq!(response.status(), expected_status, "{uri}");
-            if expected_status == StatusCode::METHOD_NOT_ALLOWED {
-                assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET, HEAD");
-            }
-        }
     }
 
     #[test]
@@ -760,7 +1135,7 @@ mod tests {
         let policy_a = Arc::new(policy_a);
         let policy_b = Arc::new(policy_b);
         let state = shared_state(None);
-        *state.policy.write().expect("policy lock") = Some(Arc::clone(&policy_a));
+        state.policy_store.test_set_active(Arc::clone(&policy_a));
 
         const READER_COUNT: usize = 4;
         const ITERATIONS: usize = 1_000;
@@ -793,7 +1168,7 @@ mod tests {
                 } else {
                     Arc::clone(&policy_a)
                 };
-                *state.policy.write().expect("policy lock") = Some(replacement);
+                state.policy_store.test_set_active(replacement);
                 std::thread::yield_now();
             }
         });
@@ -924,7 +1299,7 @@ mod tests {
             probe_count: AtomicUsize::new(0),
         });
         let state = Arc::new(BrokerState {
-            policy: RwLock::new(None),
+            policy_store: PolicyStore::for_tests(None),
             executor: Arc::clone(&executor) as Arc<dyn CommandExecutor>,
             pipe_name: "test-pipe".to_owned(),
             tracker: OperationTracker::new(),
@@ -934,15 +1309,11 @@ mod tests {
         (state, executor)
     }
 
-    fn test_sid() -> Sid {
-        Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).unwrap()
-    }
-
     #[tokio::test]
     async fn capabilities_only_advertise_probed_managers() {
         let (state, _) = make_state(vec![ManagerName::Winget, ManagerName::PowerShell]);
 
-        let response = state.capabilities(&test_sid()).await;
+        let response = state.capabilities(&system_sid()).await;
 
         let managers: Vec<ManagerName> = response.managers.iter().map(|capability| capability.manager).collect();
         assert_eq!(managers, vec![ManagerName::Winget, ManagerName::PowerShell]);
@@ -952,15 +1323,27 @@ mod tests {
     async fn capabilities_empty_when_no_manager_available() {
         let (state, _) = make_state(Vec::new());
 
-        let response = state.capabilities(&test_sid()).await;
+        let response = state.capabilities(&system_sid()).await;
 
         assert!(response.managers.is_empty());
+    }
+
+    /// The capabilities response advertises the general per-operation body-size limit:
+    /// the shared contract has no separate field for the larger policy-management
+    /// limit, so this must never be conflated with `MAX_POLICY_MANAGEMENT_BODY_BYTES`.
+    #[tokio::test]
+    async fn capabilities_advertise_the_operation_endpoint_body_limit() {
+        let (state, _) = make_state(Vec::new());
+
+        let response = state.capabilities(&system_sid()).await;
+
+        assert_eq!(response.max_request_body_bytes, MAX_REQUEST_BODY_BYTES as u64);
     }
 
     #[tokio::test]
     async fn manager_probe_is_cached_per_user() {
         let (state, executor) = make_state(vec![ManagerName::Winget]);
-        let sid = test_sid();
+        let sid = system_sid();
 
         state.capabilities(&sid).await;
         state.capabilities(&sid).await;
@@ -972,7 +1355,7 @@ mod tests {
     async fn manager_probe_is_refreshed_after_ttl_expiry() {
         let (state, executor) =
             make_state_with_cache(vec![ManagerName::Winget], ManagerProbeCache::with_ttl(Duration::ZERO));
-        let sid = test_sid();
+        let sid = system_sid();
 
         state.capabilities(&sid).await;
         state.capabilities(&sid).await;
@@ -1031,7 +1414,7 @@ mod tests {
 
     fn state_with_executor(executor: Arc<dyn CommandExecutor>) -> BrokerState {
         BrokerState {
-            policy: RwLock::new(Some(Arc::new(permissive_policy()))),
+            policy_store: PolicyStore::for_tests(Some(permissive_policy())),
             executor,
             pipe_name: "test-pipe".to_owned(),
             tracker: OperationTracker::new(),

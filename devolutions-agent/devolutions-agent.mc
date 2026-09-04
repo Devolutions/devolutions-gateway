@@ -1,6 +1,11 @@
 ; ----------------------------------------------------------------------
-; Devolutions Gateway - Windows Event Log message definitions (.mc)
+; Devolutions Agent - Windows Event Log message definitions (.mc)
 ; English (0x409), French (0x40c), German (0x407)
+;
+; Mirrors the shared `sysevent-codes` crate's event catalog (see
+; `devolutions-gateway/devolutions-gateway.mc` for the analogous Gateway catalog): every
+; `pub const *: u32` code declared there has a matching `MessageId`/`SymbolicName` entry
+; here, kept in sync by the `message_catalog_parity` test in `crates/sysevent-codes`.
 ; ----------------------------------------------------------------------
 
 MessageIdTypedef=DWORD
@@ -383,10 +388,9 @@ Aufnahmespeicher niedrig. Kontext=%1 VerbleibendeBytes=%2 Schwelle=%3
 ; ======================================================================
 ; 8000-8099 Package Broker / Policy Management
 ;
-; Emitted by the Agent's package-broker policy store, not by the Gateway itself; kept
-; here (like 6000-6099 Agent Integration) so this catalog stays a complete mirror of the
-; shared `sysevent-codes` crate. See `devolutions-agent/devolutions-agent.mc` for the
-; catalog actually linked into the Agent binary that emits these.
+; Audit trail for the Agent package-broker managed policy store (`PUT /v1/policy` and
+; external edits detected by the store's file watcher). Never carries full policy
+; content: only actor identity, intent, path, old/new policy id/revision, and outcome.
 ; ======================================================================
 
 MessageId=8000

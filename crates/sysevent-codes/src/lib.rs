@@ -380,6 +380,168 @@ pub fn recording_storage_low(remaining_bytes: u64, threshold_bytes: u64) -> Entr
         .field("threshold_bytes", threshold_bytes)
 }
 
+// 8000-8099 **Package Broker / Policy Management**
+//
+// Audit trail for the Agent package-broker managed policy store (`PUT /v1/policy` and
+// external edits detected by the store's file watcher). Never carries full policy
+// content: only actor identity, intent, path, old/new policy id/revision, and outcome.
+
+/// A write was attempted by the OS-identified connected pipe client before final
+/// signature and privilege authorization.
+pub const POLICY_WRITE_ATTEMPTED: u32 = 8000;
+/// A write was rejected before reaching the store (signature, elevation, or
+/// Administrators-membership check failed).
+pub const POLICY_WRITE_DENIED: u32 = 8001;
+/// A write was rejected because the expected store token no longer matched.
+pub const POLICY_WRITE_CONFLICT: u32 = 8002;
+/// A write with `ConfirmOverwrite` succeeded against a freshly observed token.
+pub const POLICY_WRITE_CONFIRMED_OVERWRITE: u32 = 8003;
+/// A write reached the store but did not complete (validation, precondition, or
+/// persistence failure).
+pub const POLICY_WRITE_FAILED: u32 = 8004;
+/// A write completed and the new policy is now active.
+pub const POLICY_WRITE_SUCCEEDED: u32 = 8005;
+/// An external edit (outside the management API) was detected and adopted.
+pub const POLICY_EXTERNAL_CHANGE_APPLIED: u32 = 8010;
+/// An external edit (outside the management API) was detected but rejected (fails
+/// closed: the configured policy becomes Invalid/paused rather than served).
+pub const POLICY_EXTERNAL_CHANGE_REJECTED: u32 = 8011;
+
+pub fn policy_write_attempted(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+) -> Entry {
+    Entry::new("Policy management write attempted")
+        .event_code(POLICY_WRITE_ATTEMPTED)
+        .severity(Severity::Info)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+}
+
+pub fn policy_write_denied(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    reason: impl ToString,
+) -> Entry {
+    Entry::new("Policy management write denied")
+        .event_code(POLICY_WRITE_DENIED)
+        .severity(Severity::Warning)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+        .field("reason", reason)
+}
+
+pub fn policy_write_conflict(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+) -> Entry {
+    Entry::new("Policy management write conflict")
+        .event_code(POLICY_WRITE_CONFLICT)
+        .severity(Severity::Notice)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "audit event needs the full old/new identity for a security trail"
+)]
+pub fn policy_write_confirmed_overwrite(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    path: impl AsRef<Path>,
+    old_id: impl ToString,
+    old_revision: impl ToString,
+    new_id: impl ToString,
+    new_revision: u32,
+    intent: impl ToString,
+) -> Entry {
+    Entry::new("Policy management confirmed overwrite")
+        .event_code(POLICY_WRITE_CONFIRMED_OVERWRITE)
+        .severity(Severity::Notice)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("path", path.as_ref().display())
+        .field("old_id", old_id)
+        .field("old_revision", old_revision)
+        .field("new_id", new_id)
+        .field("new_revision", new_revision)
+        .field("intent", intent)
+}
+
+pub fn policy_write_failed(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    reason: impl ToString,
+) -> Entry {
+    Entry::new("Policy management write failed")
+        .event_code(POLICY_WRITE_FAILED)
+        .severity(Severity::Error)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+        .field("reason", reason)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "audit event needs the full old/new identity for a security trail"
+)]
+pub fn policy_write_succeeded(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    path: impl AsRef<Path>,
+    old_id: impl ToString,
+    old_revision: impl ToString,
+    new_id: impl ToString,
+    new_revision: u32,
+    intent: impl ToString,
+) -> Entry {
+    Entry::new("Policy management write succeeded")
+        .event_code(POLICY_WRITE_SUCCEEDED)
+        .severity(Severity::Info)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("path", path.as_ref().display())
+        .field("old_id", old_id)
+        .field("old_revision", old_revision)
+        .field("new_id", new_id)
+        .field("new_revision", new_revision)
+        .field("intent", intent)
+}
+
+pub fn policy_external_change_applied(path: impl AsRef<Path>, new_id: impl ToString, new_revision: u32) -> Entry {
+    Entry::new("External policy change applied")
+        .event_code(POLICY_EXTERNAL_CHANGE_APPLIED)
+        .severity(Severity::Notice)
+        .field("path", path.as_ref().display())
+        .field("new_id", new_id)
+        .field("new_revision", new_revision)
+}
+
+pub fn policy_external_change_rejected(path: impl AsRef<Path>, reason: impl ToString) -> Entry {
+    Entry::new("External policy change rejected")
+        .event_code(POLICY_EXTERNAL_CHANGE_REJECTED)
+        .severity(Severity::Warning)
+        .field("path", path.as_ref().display())
+        .field("reason", reason)
+}
+
 // 9000-9099 **Diagnostics**
 
 pub const DEBUG_OPTIONS_ENABLED: u32 = 9001;

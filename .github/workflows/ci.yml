@@ -699,7 +699,11 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         run: |
           Enter-VsDevShell
-          $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
+          $mc = Get-Command -Name mc.exe -CommandType Application -All | Select-Object -First 1
+          if ($null -eq $mc -or -not (Test-Path -LiteralPath $mc.Source -PathType Leaf)) {
+            throw "mc.exe was not found in the Visual Studio developer environment"
+          }
+          $path = Split-Path -Parent $mc.Source
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
@@ -953,6 +957,9 @@ jobs:
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
           choco install nasm
 
+          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
+          Install-Module VsDevShell -Force
+
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
@@ -966,6 +973,19 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         uses: microsoft/setup-msbuild@v3
 
+      - name: Find mc.exe
+        id: find_mc
+        if: ${{ matrix.os == 'windows' }}
+        run: |
+          Enter-VsDevShell
+          $mc = Get-Command -Name mc.exe -CommandType Application -All | Select-Object -First 1
+          if ($null -eq $mc -or -not (Test-Path -LiteralPath $mc.Source -PathType Leaf)) {
+            throw "mc.exe was not found in the Visual Studio developer environment"
+          }
+          $path = Split-Path -Parent $mc.Source
+          Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        shell: pwsh
+
       - name: Build
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
@@ -976,6 +996,7 @@ jobs:
             $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
             $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
             $Env:DAGENT_MULTI_PWSH_EXECUTABLE = "${{ steps.multi-pwsh.outputs.executable-path }}"
+            $Env:WindowsSdkVerBinPath = '${{ steps.find_mc.outputs.windows_sdk_ver_bin_path }}'
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
@@ -1313,7 +1334,22 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      - name: Run Agent policy tester as LocalSystem
+      - name: Run Agent policy tester (unelevated)
+        shell: pwsh
+        run: |
+          $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-unelevated.ps1"
+          $tempPath = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
+          $outputPath = Join-Path $tempPath "agent-policy-tester-unelevated.out"
+          New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
+          Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+          psexec -accepteula -l pwsh.exe -NoProfile -File $scriptPath -TempPath $tempPath -OutputPath $outputPath
+          $exitCode = $LASTEXITCODE
+          Get-Content -LiteralPath $outputPath
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
+      - name: Run Agent policy tester as LocalSystem (elevated)
         shell: pwsh
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-as-system.ps1"
@@ -1323,6 +1359,15 @@ jobs:
           if ($exitCode -ne 0) {
             exit $exitCode
           }
+
+      # The dev-signature-bypass-only unit tests (elevation/Administrators gating at the
+      # HTTP route layer; see `now-package-broker::server::tests::elevation_gating`) only
+      # compile and run under this feature, so they are exercised here alongside the
+      # other `dev-skip-broker-signature`-dependent steps in this job rather than in the
+      # default `cargo test --workspace` run.
+      - name: Run now-package-broker dev-skip-broker-signature tests
+        shell: pwsh
+        run: cargo test --locked -p now-package-broker --features dev-skip-broker-signature
 
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}

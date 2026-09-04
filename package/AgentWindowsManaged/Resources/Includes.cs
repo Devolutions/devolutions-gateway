@@ -60,5 +60,29 @@ namespace DevolutionsAgent.Resources
         ///    NT AUTHORITY\SYSTEM Allow  FullControl
         /// </remarks>
         internal static readonly string PROGRAM_DATA_PEDM_SDDL = "O:SYG:SYD:(A;OICI;FA;;;SY)";
+
+        /// <summary>
+        /// SDDL string representing desired %programdata%\devolutions\packagebroker ACL
+        /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`
+        /// </summary>
+        /// <remarks>
+        /// Owner  : NT AUTHORITY\SYSTEM
+        /// Group  : NT AUTHORITY\SYSTEM
+        /// Access :
+        ///    NT AUTHORITY\SYSTEM Allow  FullControl
+        ///    BUILTIN\Administrators Allow  FullControl
+        /// </remarks>
+        /// <remarks>
+        /// Deliberately a dedicated, top-level sibling of %programdata%\devolutions\agent
+        /// rather than a subdirectory of it, and deliberately narrower than
+        /// PROGRAM_DATA_SDDL: it grants neither LOCAL SERVICE nor Users any access at
+        /// all, so the package-broker managed policy directory's own strict
+        /// ancestor-security check (SYSTEM/Administrators only) is never defeated by a
+        /// grant that only makes sense for the shared Agent directory's unrelated
+        /// features. See now-package-broker::policy_store::windows::default_policy_dir.
+        /// </remarks>
+        internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+        internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL = "O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
     }
 }

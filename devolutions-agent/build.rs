@@ -3,6 +3,9 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     win::embed_version_rc();
+
+    #[cfg(target_os = "windows")]
+    win::embed_devolutions_agent_mc();
 }
 
 fn generate_psu_agent_proto() {
@@ -99,5 +102,155 @@ END"#,
         );
 
         version_rc
+    }
+
+    /// Compile `devolutions-agent.mc` (the Windows Event Log message catalog for the
+    /// package-broker policy audit trail; see `crates/sysevent-codes`) and link its
+    /// generated resources into the binary registered as this event source's
+    /// `EventMessageFile` (see `package/AgentWindowsManaged/Program.cs`).
+    ///
+    /// Mirrors `devolutions-gateway/build.rs`'s `embed_devolutions_gateway_mc`.
+    ///
+    /// Prerequisite (release and production builds only; debug builds never need this): `mc.exe` from
+    /// the Windows SDK must be resolvable, either already on `PATH` (e.g. by building
+    /// from a "Developer Command Prompt/PowerShell for VS"), or via the
+    /// `WindowsSdkVerBinPath`/`WindowsSdkDir` environment variable. See [`find_mc`] and
+    /// the CI workflow's "Find mc.exe" step for how this is resolved automatically there.
+    pub(super) fn embed_devolutions_agent_mc() {
+        use std::env;
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        // --- gate: only release-like builds --------------------------------
+        let profile = env::var("PROFILE").unwrap_or_default();
+        if !matches!(profile.as_str(), "release" | "production") {
+            return;
+        }
+
+        // --- gate: missing mc.exe is a hard failure for release-like builds
+        //
+        // A release-like build silently missing the Windows Event Log message-table resource
+        // would ship without formatted audit messages (the package-broker policy audit
+        // trail; see `crates/sysevent-codes`) and without anyone noticing until an
+        // operator inspects Event Viewer. Debug builds stay free of this requirement
+        // (gated above) so an ordinary `cargo build`/`cargo check` never needs the
+        // Windows SDK, but a release-like build must fail loudly and actionably instead of
+        // silently producing an incomplete binary.
+        let mc_exe_path = find_mc().unwrap_or_else(|| {
+            panic!(
+                "mc.exe not found, but it is required to embed the Windows Event Log message catalog \
+                 in a release or production build of Devolutions Agent (see `embed_devolutions_agent_mc` in this build \
+                 script). Build from a \"Developer Command Prompt/PowerShell for VS\" (or otherwise put the \
+                 Windows SDK `bin\\<version>\\x64` directory on PATH), or set the `WindowsSdkVerBinPath` or \
+                 `WindowsSdkDir` environment variable to the Windows SDK installation. This is not required \
+                 for debug builds."
+            )
+        });
+
+        // --- inputs/paths ---------------------------------------------------
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+        let mc_file = manifest_dir.join("devolutions-agent.mc");
+
+        // Always tell Cargo to re-run if the .mc changes.
+        println!("cargo:rerun-if-changed={}", mc_file.display());
+
+        // --- prepare OUT_DIR ------------------------------------------------
+        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
+        // We'll run mc.exe with current_dir = OUT_DIR so the generated .rc lands in OUT_DIR.
+        let rc_path = out_dir.join("devolutions-agent.rc");
+
+        // --- run mc.exe -----------------------------------------------------
+        // Requires Windows SDK tools in PATH (use a "x64 Native Tools Command Prompt for VS").
+        // Flags:
+        //   -u : Unicode
+        //   -m : Generate message resource .bin files
+        //   -h <dir> : header output dir (we put it in OUT_DIR; the header is unused by Rust)
+        //   -r <dir> : message .bin output dir (OUT_DIR)
+        let status = Command::new(mc_exe_path)
+            .current_dir(&out_dir)
+            .arg("-um")
+            .arg("-h")
+            .arg(".")
+            .arg("-r")
+            .arg(".")
+            .arg(mc_file.canonicalize().expect("failed to canonicalize .mc path"))
+            .status()
+            .expect("failed to spawn mc.exe");
+        if !status.success() {
+            panic!("mc.exe failed with status {status}");
+        }
+
+        // --- compile the generated .rc via embed-resource -------------------
+        if !rc_path.exists() {
+            panic!("mc.exe did not produce expected .rc file at {}", rc_path.display());
+        }
+
+        embed_resource::compile(rc_path, embed_resource::NONE)
+            .manifest_required()
+            .expect("BUG: failed to embed devolutions-agent.rc");
+
+        // Optional: make Cargo re-run if locale bins change (paranoid but harmless).
+        // These are standard names emitted by mc.exe for EN/FR/DE in our .mc.
+        for loc in &["MSG00409.bin", "MSG0040c.bin", "MSG00407.bin"] {
+            let p = out_dir.join(loc);
+            println!("cargo:rerun-if-changed={}", p.display());
+        }
+    }
+
+    fn find_mc() -> Option<std::path::PathBuf> {
+        if let Ok(sdk_bin) = env::var("WindowsSdkVerBinPath") {
+            let sdk_bin = std::path::Path::new(&sdk_bin);
+            for candidate in [sdk_bin.join("mc.exe"), sdk_bin.join("x64").join("mc.exe")] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        if let Some(candidate) = env::var_os("PATH").and_then(|path| {
+            env::split_paths(&path)
+                .map(|dir| dir.join("mc.exe"))
+                .find(|path| path.is_file())
+        }) {
+            return Some(candidate);
+        }
+
+        if let Ok(sdk_dir) = env::var("WindowsSdkDir") {
+            let bin_dir = std::path::Path::new(&sdk_dir).join("bin");
+            let candidate = bin_dir.join("x64").join("mc.exe");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+
+            let mut versioned: Vec<_> = fs::read_dir(bin_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect();
+            versioned.sort_by_key(|path| {
+                std::cmp::Reverse(
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .and_then(|name| {
+                            name.split('.')
+                                .map(str::parse::<u32>)
+                                .collect::<Result<Vec<_>, _>>()
+                                .ok()
+                        })
+                        .unwrap_or_default(),
+                )
+            });
+            if let Some(candidate) = versioned
+                .into_iter()
+                .map(|dir| dir.join("x64").join("mc.exe"))
+                .find(|path| path.is_file())
+            {
+                return Some(candidate);
+            }
+        }
+
+        None
     }
 }

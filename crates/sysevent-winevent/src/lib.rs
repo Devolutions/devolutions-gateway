@@ -25,7 +25,7 @@ impl WinEvent {
         // SAFETY: Proper UTF-16, null-terminated string.
         let handle = unsafe { EventLog::RegisterEventSourceW(std::ptr::null(), source_name_utf16.as_ptr()) };
 
-        if handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        if is_null_handle(handle) {
             return Err(SysEventError::Platform(format!(
                 "failed to register event source '{source_name}'"
             )));
@@ -132,13 +132,26 @@ impl SystemEventSink for WinEvent {
 
 impl Drop for WinEvent {
     fn drop(&mut self) {
-        if *self.handle != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE as EventLogHandle {
+        if !is_null_handle(*self.handle as windows_sys::Win32::Foundation::HANDLE) {
             // SAFETY: DeregisterEventSource is thread-safe and idempotent.
             unsafe {
                 EventLog::DeregisterEventSource(*self.handle as windows_sys::Win32::Foundation::HANDLE);
             }
         }
     }
+}
+
+/// Returns whether a `HANDLE` returned by a Win32 API call represents failure to
+/// register/open, i.e. is `NULL`.
+///
+/// `RegisterEventSourceW` signals failure with a `NULL` handle -- *not*
+/// `INVALID_HANDLE_VALUE` (`(HANDLE)-1`), which is what some other Win32 APIs (e.g.
+/// `CreateFileW`) use instead; see the `RegisterEventSourceW` documentation. Treating a
+/// `NULL` handle as valid would let every subsequent `ReportEventW` call silently fail
+/// against a handle that was never actually registered, rather than surfacing the real
+/// registration failure at construction time.
+fn is_null_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    handle.is_null()
 }
 
 fn severity_to_event_type(severity: Severity) -> u16 {
@@ -158,6 +171,35 @@ fn to_null_terminated_utf16(input: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── is_null_handle: the RegisterEventSourceW NULL-vs-INVALID_HANDLE_VALUE seam ───
+    //
+    // `RegisterEventSourceW`/`DeregisterEventSource` themselves are not mockable here
+    // (they are direct FFI calls into `advapi32.dll`), but the failure-classification
+    // logic they depend on is a pure function over a raw handle value, so it is fully
+    // testable without touching the real Windows Event Log.
+
+    #[test]
+    fn null_handle_is_detected_as_failure() {
+        assert!(is_null_handle(std::ptr::null_mut()));
+    }
+
+    #[test]
+    fn invalid_handle_value_is_not_treated_as_a_null_handle() {
+        // Some Win32 APIs (e.g. `CreateFileW`) signal failure with `INVALID_HANDLE_VALUE`
+        // (`(HANDLE)-1`), but `RegisterEventSourceW` never returns it: pins that
+        // `is_null_handle` checks specifically for `NULL`, not `INVALID_HANDLE_VALUE`,
+        // which is the exact distinction this function exists to get right.
+        let invalid = windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        assert!(!invalid.is_null(), "sanity check: INVALID_HANDLE_VALUE is not NULL");
+        assert!(!is_null_handle(invalid));
+    }
+
+    #[test]
+    fn nonzero_handle_is_not_a_failure() {
+        let handle = 0x1234usize as windows_sys::Win32::Foundation::HANDLE;
+        assert!(!is_null_handle(handle));
+    }
 
     #[test]
     fn severity_to_event_type_mapping() {
