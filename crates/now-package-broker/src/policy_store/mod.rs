@@ -407,12 +407,9 @@ impl PolicyStore {
     }
 
     /// Reconcile the store's published snapshot with a freshly observed disk state,
-    /// swapping it in (and logging/auditing the change) only if the observation's
-    /// fingerprint differs from what is currently published. Returns the resulting
-    /// authoritative management snapshot -- guaranteed to reflect `observation` when it
-    /// differed, so a caller that just detected a stale token can publish the current
-    /// reality *before* reporting `StalePolicyStoreToken`, and `ErrorResponse::management`
-    /// is always exactly that published snapshot.
+    /// swapping it in when disk identity or capability differs from the published snapshot.
+    /// Policy-change auditing occurs only when the fingerprint changes.
+    /// Returns the resulting authoritative management snapshot.
     ///
     /// Write capability is always taken from this fresh `observation`, never carried
     /// forward from the previous snapshot (item 20): a directory that became writable or
@@ -435,6 +432,7 @@ impl PolicyStore {
             return self.management_snapshot();
         }
 
+        let policy_changed = observation.fingerprint != previous.fingerprint;
         let store_token = Self::token_for(&previous, &observation.fingerprint);
         let new_snapshot = Arc::new(Snapshot {
             state: observation.state,
@@ -447,23 +445,25 @@ impl PolicyStore {
             canonical_path: observation.canonical_path,
         });
 
-        match (&new_snapshot.state, &new_snapshot.policy) {
-            (PolicyManagementState::Active, Some(policy)) => {
-                tracing::info!(
-                    policy_id = %policy.metadata.id,
-                    revision = policy.metadata.revision,
-                    %cause,
-                    "External policy change applied; broker resumed/updated"
-                );
-                audit::external_change_applied(
-                    &new_snapshot.canonical_path,
-                    &policy.metadata.id,
-                    policy.metadata.revision,
-                );
-            }
-            (state, _) => {
-                tracing::warn!(?state, %cause, "External policy change left the configured policy unavailable");
-                audit::external_change_rejected(&new_snapshot.canonical_path, &format!("{state:?}"));
+        if policy_changed {
+            match (&new_snapshot.state, &new_snapshot.policy) {
+                (PolicyManagementState::Active, Some(policy)) => {
+                    tracing::info!(
+                        policy_id = %policy.metadata.id,
+                        revision = policy.metadata.revision,
+                        %cause,
+                        "External policy change applied; broker resumed/updated"
+                    );
+                    audit::external_change_applied(
+                        &new_snapshot.canonical_path,
+                        &policy.metadata.id,
+                        policy.metadata.revision,
+                    );
+                }
+                (state, _) => {
+                    tracing::warn!(?state, %cause, "External policy change left the configured policy unavailable");
+                    audit::external_change_rejected(&new_snapshot.canonical_path, &format!("{state:?}"));
+                }
             }
         }
 
