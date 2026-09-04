@@ -45,7 +45,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
   Introduces a package broker in Devolutions Agent that enables
   policy-driven software installation and management. It supports winget
-  and PowerShell package managers, JSON policy definitions with
+  and PowerShell package managers, JSON and YAML policy definitions with
   evaluation and schema generation, elevated and non-elevated execution
   with user impersonation, and pipe-based authentication that validates
   the effective user and calling executable signature.
