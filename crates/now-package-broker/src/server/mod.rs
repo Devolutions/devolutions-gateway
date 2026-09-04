@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::extract::Request;
-use axum::http::{Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
@@ -110,7 +110,7 @@ async fn restrict_phase_one_policy_routes(request: Request, next: Next) -> Respo
     match (request.method(), request.uri().path()) {
         (_, "/v1/policy/management" | "/v1/policy/validate") => StatusCode::NOT_FOUND.into_response(),
         (method, "/v1/policy") if method != Method::GET && method != Method::HEAD => {
-            StatusCode::METHOD_NOT_ALLOWED.into_response()
+            (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "GET, HEAD")]).into_response()
         }
         _ => next.run(request).await,
     }
@@ -734,6 +734,9 @@ mod tests {
         ] {
             let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
             assert_eq!(response.status(), expected_status, "{uri}");
+            if expected_status == StatusCode::METHOD_NOT_ALLOWED {
+                assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET, HEAD");
+            }
         }
     }
 
