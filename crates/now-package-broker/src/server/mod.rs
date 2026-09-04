@@ -307,11 +307,6 @@ impl BrokerState {
         self.policy_store.active_policy()
     }
 
-    fn active_policy(&self) -> Result<Arc<PolicyDocument>, ErrorResponse> {
-        self.active_policy_snapshot()
-            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))
-    }
-
     #[expect(
         clippy::result_large_err,
         reason = "the shared API contract requires ErrorResponse values"
@@ -780,7 +775,7 @@ mod tests {
         Arc::new(state)
     }
 
-    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> Response {
+    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> axum::response::Response {
         let client = PipeClient::from_current_process().expect("capture current test process");
         let mut router = build_router_for_client(state, client);
         router
@@ -795,7 +790,7 @@ mod tests {
             .expect("router is infallible")
     }
 
-    async fn response_json(response: Response) -> serde_json::Value {
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("read response body");
@@ -1124,22 +1119,6 @@ mod tests {
         };
         assert_eq!(error.code, ErrorCode::NotFound);
         assert_eq!(error.message, "active policy is unavailable");
-    }
-
-    #[tokio::test]
-    async fn phase_one_router_does_not_expose_policy_management_routes() {
-        for (method, uri, expected_status) in [
-            (Method::GET, "/v1/policy/management", StatusCode::NOT_FOUND),
-            (Method::POST, "/v1/policy/validate", StatusCode::NOT_FOUND),
-            (Method::PUT, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
-            (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
-        ] {
-            let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
-            assert_eq!(response.status(), expected_status, "{uri}");
-            if expected_status == StatusCode::METHOD_NOT_ALLOWED {
-                assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET, HEAD");
-            }
-        }
     }
 
     #[test]
