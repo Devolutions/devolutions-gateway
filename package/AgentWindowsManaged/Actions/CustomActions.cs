@@ -1995,6 +1995,14 @@ namespace DevolutionsAgent.Actions
                         legacyPath.Leaf,
                         expectedSourceIdentity,
                         expectedSourceDigest);
+                if (removeLegacy && IsLegacyPackageBrokerPolicyExplicitlyConfigured(
+                    legacyJson,
+                    legacyPath.Leaf,
+                    out string configuredDiagnostic))
+                {
+                    session.Log($"preserving the configured legacy package broker policy during commit: {configuredDiagnostic}");
+                    removeLegacy = false;
+                }
                 if (removeLegacy)
                 {
                     if (!TryVerifyLegacyPolicySourceSecurity(
@@ -2033,6 +2041,149 @@ namespace DevolutionsAgent.Actions
                 session.Log($"failed to commit legacy package broker policy migration: {e}");
                 return ActionResult.Failure;
             }
+        }
+
+        private static bool IsLegacyPackageBrokerPolicyExplicitlyConfigured(
+            string legacyPath,
+            SafeFileHandle legacyHandle,
+            out string diagnostic)
+        {
+            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+            try
+            {
+                using PinnedPath configPathHandle = PinPathWithoutReparse(
+                    configPath,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES);
+                if (configPathHandle.Leaf == null)
+                {
+                    diagnostic = string.Empty;
+                    return false;
+                }
+
+                string configJson;
+                using (FileStream configStream = OpenPinnedFileStream(configPathHandle.Leaf))
+                using (StreamReader reader = new(
+                    configStream,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+                    detectEncodingFromByteOrderMarks: false))
+                {
+                    configJson = reader.ReadToEnd();
+                }
+                if (ContainsNonStrictJsonSyntax(configJson))
+                {
+                    diagnostic = $"could not safely parse PackageBroker.PolicyPath from non-strict JSON in {configPath}";
+                    return true;
+                }
+                using JsonTextReader jsonReader = new(new StringReader(configJson))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                    SupportMultipleContent = false,
+                };
+                JObject config = JObject.Load(
+                    jsonReader,
+                    new JsonLoadSettings
+                    {
+                        CommentHandling = CommentHandling.Load,
+                        DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error,
+                    });
+                if (jsonReader.Read())
+                {
+                    diagnostic = $"could not safely parse multiple JSON values in {configPath}";
+                    return true;
+                }
+                JToken configuredToken = config["PackageBroker"]?["PolicyPath"];
+                if (configuredToken == null || configuredToken.Type == JTokenType.Null)
+                {
+                    diagnostic = string.Empty;
+                    return false;
+                }
+                if (configuredToken.Type != JTokenType.String ||
+                    string.IsNullOrWhiteSpace(configuredToken.Value<string>()))
+                {
+                    diagnostic = $"PackageBroker.PolicyPath in {configPath} is not a valid path string";
+                    return true;
+                }
+
+                string configuredPath = configuredToken.Value<string>();
+                using PinnedPath configuredPathHandle = PinPathWithoutReparse(
+                    configuredPath,
+                    leafIsDirectory: false,
+                    allowMissingLeaf: true,
+                    leafAccess: WinAPI.FILE_READ_ATTRIBUTES);
+                if (configuredPathHandle.Leaf == null)
+                {
+                    diagnostic = $"PackageBroker.PolicyPath in {configPath} could not be resolved safely";
+                    return true;
+                }
+                if (!string.Equals(
+                    FileIdentity(configuredPathHandle.Leaf),
+                    FileIdentity(legacyHandle),
+                    StringComparison.Ordinal))
+                {
+                    diagnostic = string.Empty;
+                    return false;
+                }
+
+                diagnostic = $"PackageBroker.PolicyPath in {configPath} still points to {legacyPath}";
+                return true;
+            }
+            catch (Exception e)
+            {
+                diagnostic = $"could not safely determine PackageBroker.PolicyPath from {configPath}: {e.Message}";
+                return true;
+            }
+        }
+
+        private static bool ContainsNonStrictJsonSyntax(string json)
+        {
+            bool inString = false;
+            bool escaped = false;
+            for (int index = 0; index < json.Length; index++)
+            {
+                char current = json[index];
+                if (inString)
+                {
+                    if (escaped)
+                    {
+                        escaped = false;
+                    }
+                    else if (current == '\\')
+                    {
+                        escaped = true;
+                    }
+                    else if (current == '"')
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (current == '"')
+                {
+                    inString = true;
+                    continue;
+                }
+                if (current == '/' && index + 1 < json.Length && (json[index + 1] == '/' || json[index + 1] == '*'))
+                {
+                    return true;
+                }
+                if (current != ',')
+                {
+                    continue;
+                }
+                int next = index + 1;
+                while (next < json.Length && char.IsWhiteSpace(json[next]))
+                {
+                    next++;
+                }
+                if (next < json.Length && (json[next] == '}' || json[next] == ']'))
+                {
+                    return true;
+                }
+            }
+            return inString || escaped;
         }
 
         [CustomAction]

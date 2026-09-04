@@ -32,8 +32,6 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::thread::Thread;
-use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::{
@@ -102,13 +100,7 @@ impl PipeClient {
         );
         Self::ensure_process_active(process_id, &process)?;
         let process_instance = process_instance_identity(process_id, &process)?;
-        let token = connected_pipe_client_token(server).context("failed to capture pipe client token")?;
-        let client = Self::from_process_and_token(
-            process_instance,
-            Arc::clone(&process),
-            token,
-            enforce_executable_security,
-        )?;
+        let client = Self::from_process(process_instance, Arc::clone(&process), enforce_executable_security)?;
         let confirmed_process_id =
             connected_pipe_client_process_id(server).context("failed to confirm pipe client process id")?;
         if confirmed_process_id != process_id {
@@ -144,10 +136,7 @@ impl PipeClient {
                 format!("failed to open pipe client process {process_id} for image identity capture")
             })?,
         );
-        let token = process
-            .token(TOKEN_QUERY | TOKEN_DUPLICATE)
-            .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
-        Self::from_process_and_token(process_instance_identity(process_id, &process)?, process, token, false)
+        Self::from_process(process_instance_identity(process_id, &process)?, process, false)
     }
 
     #[cfg(test)]
@@ -157,35 +146,18 @@ impl PipeClient {
                 format!("failed to open pipe client process {process_id} for image identity capture")
             })?,
         );
-        let token = process
-            .token(TOKEN_QUERY | TOKEN_DUPLICATE)
-            .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
-        Self::from_process_and_token(process_instance_identity(process_id, &process)?, process, token, true)
+        Self::from_process(process_instance_identity(process_id, &process)?, process, true)
     }
 
-    fn from_process_and_token(
+    fn from_process(
         process_instance: ProcessInstanceIdentity,
         process: Arc<Process>,
-        token: Token,
         enforce_executable_security: bool,
     ) -> anyhow::Result<Self> {
         let process_id = process_instance.process_id;
-        let process_token = process
+        let token = process
             .token(TOKEN_QUERY | TOKEN_DUPLICATE)
             .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
-        let process_authentication_id = process_token
-            .statistics()
-            .with_context(|| format!("failed to query pipe client process {process_id} token identity"))?
-            .AuthenticationId;
-        let connected_authentication_id = token
-            .statistics()
-            .context("failed to query connected pipe client token identity")?
-            .AuthenticationId;
-        if process_authentication_id.LowPart != connected_authentication_id.LowPart
-            || process_authentication_id.HighPart != connected_authentication_id.HighPart
-        {
-            bail!("pipe client process token does not match the connected client token");
-        }
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
@@ -231,22 +203,6 @@ impl PipeClient {
         let is_administrator = token
             .is_member(&administrators_sid)
             .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
-        let process_user_sid = process_token
-            .sid_and_attributes()
-            .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
-            .sid;
-        let process_is_elevated = process_token
-            .is_elevated()
-            .with_context(|| format!("failed to query pipe client process {process_id} token elevation"))?;
-        let process_is_administrator = process_token
-            .is_member(&administrators_sid)
-            .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
-        if process_user_sid != user_sid
-            || process_is_elevated != is_elevated
-            || process_is_administrator != is_administrator
-        {
-            bail!("pipe client process security context does not match the connected client token");
-        }
         process
             .verify_image_file_mapping(&executable_file)
             .with_context(|| format!("pipe client process {process_id} executable image changed during capture"))?;
@@ -494,38 +450,6 @@ fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<
     Ok(process_id)
 }
 
-fn connected_pipe_client_token(server: &NamedPipeServer) -> anyhow::Result<Token> {
-    use std::os::windows::io::AsRawHandle as _;
-
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Security::RevertToSelf;
-    use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
-
-    struct ImpersonationGuard;
-
-    impl Drop for ImpersonationGuard {
-        fn drop(&mut self) {
-            // SAFETY: The current thread is impersonating the connected pipe client.
-            if revert_failure_requires_abort(unsafe { RevertToSelf() }.is_err()) {
-                std::process::abort();
-            }
-        }
-    }
-
-    // SAFETY: `server` is a connected named-pipe server instance.
-    unsafe { ImpersonateNamedPipeClient(HANDLE(server.as_raw_handle())) }
-        .context("failed to impersonate named-pipe client")?;
-    let _guard = ImpersonationGuard;
-
-    Thread::current()
-        .token(TOKEN_QUERY | TOKEN_DUPLICATE, true)
-        .context("failed to open the impersonated pipe client token")
-}
-
-fn revert_failure_requires_abort(revert_failed: bool) -> bool {
-    revert_failed
-}
-
 fn process_instance_identity(process_id: u32, process: &Process) -> anyhow::Result<ProcessInstanceIdentity> {
     Ok(ProcessInstanceIdentity {
         process_id,
@@ -648,20 +572,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connected_pipe_identity_uses_the_impersonated_client_token() {
+    async fn connected_pipe_identity_uses_process_token_without_request_bytes() {
         use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
-        use windows::Win32::Storage::FileSystem::SECURITY_IMPERSONATION;
 
         let pipe_name = format!(
             r"\\.\pipe\Devolutions.Now.PackageBroker.auth-test.{}",
             uuid::Uuid::new_v4()
         );
         let server = ServerOptions::new().create(&pipe_name).expect("create test pipe");
-        let client_task = tokio::spawn(async move {
-            ClientOptions::new()
-                .security_qos_flags(SECURITY_IMPERSONATION.0)
-                .open(&pipe_name)
-        });
+        let client_task = tokio::spawn(async move { ClientOptions::new().open(&pipe_name) });
 
         server.connect().await.expect("connect test pipe");
         let _client = client_task.await.expect("join test client").expect("open test pipe");
@@ -674,9 +593,81 @@ mod tests {
         assert_eq!(actual.user_sid, expected.user_sid);
         assert_eq!(actual.is_elevated, expected.is_elevated);
         assert_eq!(actual.is_administrator, expected.is_administrator);
+    }
+
+    #[tokio::test]
+    async fn duplicated_pipe_cannot_outlive_original_connector_process() {
+        use std::io::{BufRead as _, BufReader};
+        use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
+        use std::process::Stdio;
+
+        use tokio::net::windows::named_pipe::ServerOptions;
+        use win_api_wrappers::handle::Handle;
+        use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
+        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE};
+
+        let pipe_name = format!(
+            r"\\.\pipe\Devolutions.Now.PackageBroker.auth-exit-test.{}",
+            uuid::Uuid::new_v4()
+        );
+        let server = ServerOptions::new().create(&pipe_name).expect("create test pipe");
+        let script = format!(
+            "$p=[IO.Pipes.NamedPipeClientStream]::new('.', '{name}', [IO.Pipes.PipeDirection]::InOut); \
+             $p.Connect(); [Console]::Out.WriteLine($p.SafePipeHandle.DangerousGetHandle().ToInt64()); \
+             [Console]::Out.Flush(); Start-Sleep -Seconds 30",
+            name = pipe_name.trim_start_matches(r"\\.\pipe\")
+        );
+        let mut connector = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", &script])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start connector process");
+
+        server.connect().await.expect("accept connector");
+        let connector_handle = {
+            let stdout = connector.stdout.take().expect("connector stdout");
+            let raw = BufReader::new(stdout)
+                .lines()
+                .next()
+                .expect("connector handle line")
+                .expect("read connector handle")
+                .parse::<isize>()
+                .expect("parse connector handle");
+            HANDLE(raw as *mut core::ffi::c_void)
+        };
+        // SAFETY: The connector PID is live, and the returned process handle is owned.
+        let source_process = unsafe { OpenProcess(PROCESS_DUP_HANDLE, false, connector.id()) }.expect("open connector");
+        // SAFETY: OpenProcess returned an owned process handle.
+        let source_process = unsafe { Handle::new_owned(source_process) }.expect("retain connector process");
+        // SAFETY: GetCurrentProcess returns a valid pseudo handle.
+        let current_process = unsafe { GetCurrentProcess() };
+        let mut duplicate = HANDLE::default();
+        // SAFETY: The source handle value was reported by the connector, both process handles are valid,
+        // and `duplicate` is a live output pointer.
+        unsafe {
+            DuplicateHandle(
+                source_process.raw(),
+                connector_handle,
+                current_process,
+                &mut duplicate,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+        }
+        .expect("duplicate connected pipe handle");
+        // SAFETY: DuplicateHandle returned an owned handle.
+        let _duplicate = unsafe { OwnedHandle::from_raw_handle(duplicate.0) };
+
+        connector.kill().expect("terminate original connector");
+        connector.wait().expect("wait for original connector");
+
+        let error = PipeClient::from_connected_pipe_without_executable_security(&server)
+            .expect_err("an inherited pipe cannot authenticate after its original connector exits");
         assert!(
-            Thread::current().token(TOKEN_QUERY, true).is_err(),
-            "pipe-client impersonation must be reverted before returning"
+            error.to_string().contains("exited while its identity was captured")
+                || error.to_string().contains("failed to reopen pipe client process"),
+            "unexpected error: {error:#}"
         );
     }
 
@@ -693,12 +684,6 @@ mod tests {
 
         ensure_same_process_instance(expected, actual)
             .expect_err("a recycled PID with a different creation time must be rejected");
-    }
-
-    #[test]
-    fn failed_impersonation_reversion_requires_abort() {
-        assert!(revert_failure_requires_abort(true));
-        assert!(!revert_failure_requires_abort(false));
     }
 
     #[test]
