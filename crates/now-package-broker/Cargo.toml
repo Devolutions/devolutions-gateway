@@ -37,7 +37,6 @@ parking_lot = "0.12"
 regex = "1"
 semver = "1"
 serde_json = "1"
-serde_yaml = "0.9"
 sha2 = "0.10"
 tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
 tokio-util = "0.7"
