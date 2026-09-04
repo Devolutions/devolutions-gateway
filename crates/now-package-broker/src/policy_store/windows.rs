@@ -302,6 +302,8 @@ impl VerifiedHostingDirectory {
 /// The ACL is passed as explicit `SECURITY_ATTRIBUTES` to `CreateDirectoryW` itself (see
 /// [`policy_security::admin_only_security_attributes`]), so there is no window between
 /// creation and securing it during which an untrusted principal could race the directory.
+/// The existing ancestor chain is verified before creation, and missing ancestors are never
+/// created by the runtime fallback.
 ///
 /// The broker owns this directory end-to-end, but unlike a naive "create, then chmod"
 /// approach, an *existing* directory (e.g. from a previous run) is only ever verified,
@@ -314,10 +316,8 @@ impl VerifiedHostingDirectory {
 /// a digest summarizing the verified ancestor chain (item 20), for folding into
 /// [`DiskFingerprint`].
 fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(PathBuf, [u8; 32])> {
-    if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create ancestor directories for {}", dir.display()))?;
-    }
+    policy_security::verify_policy_ancestor_chain(dir, "policy directory")
+        .context("policy directory ancestor chain failed verification before creation")?;
 
     let security_attributes = policy_security::admin_only_security_attributes(true)
         .context("build admin-only security attributes for the policy directory")?;
@@ -3137,6 +3137,24 @@ mod tests {
         let error = policy_security::verify_policy_ancestor_chain(&candidate_dir, "policy directory").unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("reparse point"), "unexpected error: {message}");
+    }
+
+    #[test]
+    fn default_directory_creation_rejects_junction_before_side_effects() {
+        let root = temp_dir();
+        let attacker_target = root.path().join("attacker-target");
+        std::fs::create_dir(&attacker_target).unwrap();
+        let junction = root.path().join("Devolutions");
+        create_directory_junction(&junction, &attacker_target);
+        let candidate = junction.join("PackageBroker");
+
+        let error = ensure_default_directory_secured(&candidate).unwrap_err();
+
+        assert!(format!("{error:#}").contains("reparse point"));
+        assert!(
+            !attacker_target.join("PackageBroker").exists(),
+            "rejected junction must not receive a privileged directory"
+        );
     }
 
     /// Create a directory junction (`mklink /J`) without requiring elevation.
