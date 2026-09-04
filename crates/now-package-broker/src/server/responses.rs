@@ -1,14 +1,5 @@
 //! NOW API response mapping helpers.
 
-// `ErrorResponse` (from the shared `now-policy-api` contract) carries the atomic
-// management snapshot and validation result needed by `StalePolicyStoreToken` and
-// policy-management errors, which makes it large; every helper here that can fail
-// returns it directly rather than boxing, to match the trait's fixed method signatures.
-#![expect(
-    clippy::result_large_err,
-    reason = "ErrorResponse's size is dictated by the shared now-policy-api contract, not under this crate's control"
-)]
-
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
