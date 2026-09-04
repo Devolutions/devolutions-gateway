@@ -51,9 +51,15 @@ trait PolicyStorage: Send + Sync {
     /// separately cached snapshot, so it can never silently drift from the state it
     /// describes.
     fn observe(&self, source: PolicyConfigurationSource, path: &Path) -> windows::DiskObservation;
+    /// Observe for a replacement transaction, retaining the exact target handle when one exists.
+    fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> windows::DiskObservation {
+        self.observe(source, path)
+    }
     fn atomic_replace(
         &self,
         hosting_dir: &windows::VerifiedHostingDirectory,
+        observed_target: Option<windows::RetainedPolicyFile>,
+        expected_fingerprint: &windows::DiskFingerprint,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure>;
@@ -88,13 +94,19 @@ impl PolicyStorage for WindowsPolicyStorage {
         windows::observe(source, path, &self.probe_cache)
     }
 
+    fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> windows::DiskObservation {
+        windows::observe_for_write(source, path, &self.probe_cache)
+    }
+
     fn atomic_replace(
         &self,
         hosting_dir: &windows::VerifiedHostingDirectory,
+        observed_target: Option<windows::RetainedPolicyFile>,
+        expected_fingerprint: &windows::DiskFingerprint,
         final_path: &Path,
         bytes: &[u8],
     ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
-        windows::atomic_replace(hosting_dir, final_path, bytes)
+        windows::atomic_replace(hosting_dir, observed_target, expected_fingerprint, final_path, bytes)
     }
 
     fn atomic_create(
@@ -508,6 +520,8 @@ impl PolicyStore {
                             event.kind,
                             EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
                         ) {
+                            // Do not filter reserved transaction names because this callback cannot verify their identity or security.
+                            // The write lock and debounce coalesce legitimate internal transaction events.
                             let _ = rt_tx.blocking_send(());
                         }
                     }
@@ -591,7 +605,7 @@ impl PolicyStore {
         let _guard = self.write_lock.lock().await;
 
         let previous = self.snapshot();
-        let observation = self.storage.observe(self.source, &self.configured_path);
+        let mut observation = self.storage.observe_for_write(self.source, &self.configured_path);
         let current_token = Self::token_for(&previous, &observation.fingerprint);
         // The canonical path resolved by *this* observation (item 22): every audit/write
         // call below uses only this value, never `self.configured_path` (the literal,
@@ -727,9 +741,14 @@ impl PolicyStore {
         let write_result = if request.operation == PolicyReplacementOperation::Create {
             self.storage.atomic_create(hosting_dir, &canonical_path, &bytes)
         } else {
-            self.storage.atomic_replace(hosting_dir, &canonical_path, &bytes)
+            self.storage.atomic_replace(
+                hosting_dir,
+                observation.retained_target.take(),
+                &observation.fingerprint,
+                &canonical_path,
+                &bytes,
+            )
         };
-
         let persisted = match write_result {
             Ok(persisted) => persisted,
             Err(windows::WriteFailure::PrePublication(io_error)) => {
@@ -751,6 +770,35 @@ impl PolicyStore {
                 return Err(error_response(
                     ErrorCode::PolicyPersistenceFailed,
                     format!("failed to persist the policy: {message}"),
+                ));
+            }
+            Err(windows::WriteFailure::ConcurrentChange(io_error)) => {
+                tracing::warn!(
+                    path = %canonical_path.display(),
+                    error = %format!("{io_error:#}"),
+                    "Policy replacement could not complete conditional publication"
+                );
+                let reobservation = self.storage.observe(self.source, &self.configured_path);
+                if reobservation.fingerprint == observation.fingerprint {
+                    audit::write_failed(
+                        actor.sid,
+                        actor.executable,
+                        &intent,
+                        &canonical_path,
+                        "conditional publication failed without an observed storage change",
+                    );
+                    return Err(error_response(
+                        ErrorCode::PolicyPersistenceFailed,
+                        "failed to conditionally persist the policy",
+                    ));
+                }
+                audit::write_conflict(actor.sid, actor.executable, &intent, &canonical_path);
+                let management = self.publish_if_changed(reobservation, "policy storage changed during publication");
+                return Err(stale_token_response(
+                    "the configured policy changed while attempting to publish the replacement; \
+                     retry with the current management snapshot's store token"
+                        .to_owned(),
+                    management,
                 ));
             }
             Err(windows::WriteFailure::PostPublication(io_error)) => {
@@ -912,6 +960,7 @@ mod tests {
         /// though its hosting directory is fine (so Repair must still be blocked).
         target_insecure: std::sync::Mutex<bool>,
         fail_next_write: std::sync::Mutex<Option<String>>,
+        fail_next_concurrent_check: std::sync::Mutex<Option<String>>,
         /// Same shape as `fail_next_write`, but simulates a failure discovered only
         /// *after* the atomic rename already made the new content live (item 27): the
         /// fake's `write` still applies the write to `disk` before returning this error,
@@ -946,6 +995,7 @@ mod tests {
                 disk: std::sync::Mutex::new(None),
                 target_insecure: std::sync::Mutex::new(false),
                 fail_next_write: std::sync::Mutex::new(None),
+                fail_next_concurrent_check: std::sync::Mutex::new(None),
                 fail_next_write_post_publication: std::sync::Mutex::new(None),
                 race_next_write: std::sync::Mutex::new(None),
                 race_directory_before_write: std::sync::Mutex::new(false),
@@ -976,6 +1026,13 @@ mod tests {
 
         fn fail_next_write(&self, message: &str) {
             *self.fail_next_write.lock().expect("fail lock poisoned") = Some(message.to_owned());
+        }
+
+        fn fail_next_concurrent_check(&self, message: &str) {
+            *self
+                .fail_next_concurrent_check
+                .lock()
+                .expect("concurrent-check lock poisoned") = Some(message.to_owned());
         }
 
         /// Simulate a write failure discovered only after the atomic rename already
@@ -1078,6 +1135,14 @@ mod tests {
             if let Some(message) = self.fail_next_write.lock().expect("fail lock poisoned").take() {
                 return Err(windows::WriteFailure::PrePublication(anyhow::anyhow!("{message}")));
             }
+            if let Some(message) = self
+                .fail_next_concurrent_check
+                .lock()
+                .expect("concurrent-check lock poisoned")
+                .take()
+            {
+                return Err(windows::WriteFailure::ConcurrentChange(anyhow::anyhow!("{message}")));
+            }
 
             if std::mem::take(
                 &mut *self
@@ -1103,6 +1168,15 @@ mod tests {
 
             if let Some(raced_content) = self.race_next_write.lock().expect("race lock poisoned").take() {
                 self.set_disk(Some(raced_content));
+                return Err(if must_not_replace_existing {
+                    windows::WriteFailure::PrePublication(anyhow::anyhow!(
+                        "simulated ERROR_ALREADY_EXISTS: destination already exists"
+                    ))
+                } else {
+                    windows::WriteFailure::ConcurrentChange(anyhow::anyhow!(
+                        "simulated target changed after token validation"
+                    ))
+                });
             }
 
             {
@@ -1186,6 +1260,7 @@ mod tests {
                     read_only_reason,
                     canonical_path: path.to_owned(),
                     hosting_dir: (write_capability == PolicyWriteCapability::Writable).then(|| self.hosting_dir(path)),
+                    retained_target: None,
                 },
                 Some(bytes) => {
                     let target_generation = *self.target_generation.lock().expect("target generation lock poisoned");
@@ -1221,6 +1296,7 @@ mod tests {
                             read_only_reason: effective_read_only_reason,
                             canonical_path: path.to_owned(),
                             hosting_dir: None,
+                            retained_target: None,
                         };
                     }
 
@@ -1252,6 +1328,7 @@ mod tests {
                                     canonical_path: path.to_owned(),
                                     hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
                                         .then(|| self.hosting_dir(path)),
+                                    retained_target: None,
                                 };
                             }
 
@@ -1271,6 +1348,7 @@ mod tests {
                                 canonical_path: path.to_owned(),
                                 hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
                                     .then(|| self.hosting_dir(path)),
+                                retained_target: None,
                             }
                         }
                         Err(_) => windows::DiskObservation {
@@ -1294,18 +1372,43 @@ mod tests {
                             canonical_path: path.to_owned(),
                             hosting_dir: (effective_write_capability == PolicyWriteCapability::Writable)
                                 .then(|| self.hosting_dir(path)),
+                            retained_target: None,
                         },
                     }
                 }
             }
         }
 
+        fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> windows::DiskObservation {
+            let mut observation = self.observe(source, path);
+            if observation.write_capability == PolicyWriteCapability::Writable
+                && matches!(
+                    observation.state,
+                    PolicyManagementState::Active | PolicyManagementState::Invalid
+                )
+            {
+                observation.retained_target =
+                    Some(windows::RetainedPolicyFile::for_fake(observation.fingerprint.clone()));
+            }
+            observation
+        }
+
         fn atomic_replace(
             &self,
             hosting_dir: &windows::VerifiedHostingDirectory,
+            observed_target: Option<windows::RetainedPolicyFile>,
+            expected_fingerprint: &windows::DiskFingerprint,
             _final_path: &Path,
             bytes: &[u8],
         ) -> Result<windows::PersistedPolicy, windows::WriteFailure> {
+            let target = observed_target.ok_or_else(|| {
+                windows::WriteFailure::ConcurrentChange(anyhow::anyhow!(
+                    "fake write observation did not retain the target"
+                ))
+            })?;
+            target
+                .verify_matches(expected_fingerprint)
+                .map_err(windows::WriteFailure::ConcurrentChange)?;
             self.write(hosting_dir, bytes, false)
         }
 
@@ -1324,6 +1427,22 @@ mod tests {
             sid,
             executable: Path::new(r"C:\Program Files\Devolutions\Agent\DevolutionsAgent.exe"),
         }
+    }
+
+    #[test]
+    fn fake_write_observation_retains_fingerprint_evidence() {
+        let storage = FakePolicyStorage::writable();
+        storage.seed(&policy("policy-a", 1));
+        let path = Path::new(r"C:\fake\package-broker-policy.json");
+
+        let reload = storage.observe(PolicyConfigurationSource::ConfiguredPath, path);
+        let write = storage.observe_for_write(PolicyConfigurationSource::ConfiguredPath, path);
+
+        assert!(reload.retained_target.is_none());
+        let retained = write
+            .retained_target
+            .expect("write observation retains target evidence");
+        retained.verify_matches(&write.fingerprint).unwrap();
     }
 
     fn draft_json(id: &str) -> serde_json::Value {
@@ -1920,6 +2039,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_concurrency_check_without_state_change_is_a_persistence_failure() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        storage.fail_next_concurrent_check("simulated identity query failure");
+        let store = PolicyStore::for_tests_with_storage(storage);
+        let token = current_token(&store);
+        let sid = system_sid();
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::Update,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-a"),
+        );
+        let error = store
+            .replace(request, actor(&sid))
+            .await
+            .expect_err("an unchanged failed concurrency check must report persistence failure");
+
+        assert_eq!(error.code, ErrorCode::PolicyPersistenceFailed);
+        assert_eq!(current_token(&store), token);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("previous policy remains active")
+                .metadata
+                .revision,
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn hosting_directory_change_before_write_fails_without_publication() {
         let storage = Arc::new(FakePolicyStorage::writable());
         storage.seed(&policy("policy-a", 1));
@@ -2341,6 +2493,102 @@ mod tests {
         assert_eq!(
             management.policy.expect("policy").metadata.id.to_string(),
             "policy-raced-in"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_race_never_overwrites_and_reports_a_fresh_snapshot() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let token = current_token(&store);
+        let sid = system_sid();
+        storage.race_in_content_before_next_write(&policy("policy-external", 7));
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::Update,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-a"),
+        );
+        let error = store
+            .replace(request, actor(&sid))
+            .await
+            .expect_err("an external update must never be overwritten");
+
+        assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
+        let active = store.active_policy().expect("external policy is active");
+        assert_eq!(active.metadata.id.to_string(), "policy-external");
+        assert_eq!(active.metadata.revision, 7);
+        let management = error.management.expect("conflict carries the current snapshot");
+        assert_eq!(management.store_token, current_token(&store));
+        assert_eq!(management.policy.expect("policy").metadata.revision, 7);
+    }
+
+    #[tokio::test]
+    async fn replace_identity_race_never_overwrites_external_content() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed(&policy("policy-a", 1));
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let token = current_token(&store);
+        let sid = system_sid();
+        storage.race_in_content_before_next_write(&policy("policy-external", 7));
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::ReplaceIdentity,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-b"),
+        );
+        let error = store
+            .replace(request, actor(&sid))
+            .await
+            .expect_err("an external replacement must never be overwritten");
+
+        assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("external policy is active")
+                .metadata
+                .id
+                .to_string(),
+            "policy-external"
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_race_never_overwrites_external_content() {
+        let storage = Arc::new(FakePolicyStorage::writable());
+        storage.seed_invalid(b"{malformed".to_vec());
+        let store = PolicyStore::for_tests_with_storage(Arc::clone(&storage));
+        let token = current_token(&store);
+        let sid = system_sid();
+        storage.race_in_content_before_next_write(&policy("policy-external", 7));
+
+        let request = replacement_request(
+            &store,
+            &token,
+            PolicyReplacementOperation::Repair,
+            PolicyConflictHandling::Reject,
+            draft_json("policy-a"),
+        );
+        let error = store
+            .replace(request, actor(&sid))
+            .await
+            .expect_err("an external repair must never be overwritten");
+
+        assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("external policy is active")
+                .metadata
+                .id
+                .to_string(),
+            "policy-external"
         );
     }
 

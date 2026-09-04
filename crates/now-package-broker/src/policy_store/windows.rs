@@ -1,21 +1,20 @@
 //! Windows filesystem primitives backing the policy store.
 //!
-//! Owns: resolving the default policy directory/path, creating that dedicated directory
-//! securely (SYSTEM/Administrators only, established atomically at creation), verifying
-//! (never rewriting) a custom-configured directory's existing security -- including both
-//! directories' ancestor chains -- observing the exact on-disk state of the policy file
-//! as an internal [`DiskFingerprint`] (never itself exposed; see `PolicyStore::token_for`
-//! for how it becomes the opaque store token), and the atomic same-directory
-//! temp-file-then-rename write with post-write verification.
+//! Resolves and securely creates the default policy directory.
+//! Verifies custom directories and their ancestor chains without modifying them.
+//! Captures exact file state as an internal [`DiskFingerprint`] that `PolicyStore::token_for` converts into an opaque token.
+//! Publishes crash-safe replacements within the hosting directory.
 //!
-//! Windows provides no target-identity compare-and-swap primitive for file replacement.
-//! The verified hosting-directory handle remains open across observation and path-based publication.
-//! Temporary files are restricted, renamed atomically on the same volume, and verified after publication.
-//! Another trusted writer can still race the policy file because Windows provides no primitive that closes that gap.
+//! Replacement observations retain the exact target without write or delete sharing.
+//! Publication renames that handle to a reserved tombstone, then renames a flushed secure temporary handle to the final leaf without replacing any raced-in content.
+//! A durable admin-only marker lets startup restore the exact tombstone or preserve a newer final file after interruption.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
+use std::mem::size_of;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail, ensure};
@@ -26,10 +25,17 @@ use now_policy_api::{
 };
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::str::{U16CStrExt as _, U16CString};
+use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
+#[cfg(test)]
+use windows::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING;
 use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeInformationW,
-    GetVolumePathNameW, MOVE_FILE_FLAGS, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL,
+    CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_DISPOSITION_INFO_EX_FLAGS,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ,
+    FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE, FILE_SHARE_NONE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo, FileRenameInfoEx, GetVolumeInformationW,
+    GetVolumePathNameW, MOVE_FILE_FLAGS, MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL, SetFileInformationByHandle,
 };
 
 use crate::policy_security::{self, FileIdentity};
@@ -37,6 +43,7 @@ use crate::policy_store::validation;
 
 /// Base file name for the policy file (a fixed name inside its dedicated directory).
 pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
+const FILE_SYNCHRONIZE: u32 = 0x0010_0000;
 
 /// Default dedicated directory hosting the policy file: `%PROGRAMDATA%\Devolutions\PackageBroker`.
 ///
@@ -181,7 +188,7 @@ impl AtomicityProbeCache {
 /// derived from re-verifying it) is alive.
 fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
     OpenOptions::new()
-        .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL).0)
+        .access_mode((FILE_READ_ATTRIBUTES | FILE_TRAVERSE | READ_CONTROL).0 | FILE_SYNCHRONIZE)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
         .open(path)
@@ -222,8 +229,8 @@ fn open_and_verify_directory_identity(path: &Path) -> anyhow::Result<(File, Path
     Ok((handle, final_path))
 }
 
-/// Holds a verified hosting directory open from observation through publication.
-/// The handle blocks replacement of that object but does not make path-based publication a compare-and-swap operation.
+/// Holds a verified hosting directory open from observation through handle-based publication.
+/// The handle blocks replacement of that object and anchors relative transaction names.
 /// Test storage models the same checks with identity and security generations.
 pub(super) struct VerifiedHostingDirectory {
     handle: Option<File>,
@@ -366,21 +373,14 @@ impl std::fmt::Display for UnsupportedFilesystem {
 
 impl std::error::Error for UnsupportedFilesystem {}
 
-/// Filesystem names known to support the exact same-directory atomic-replace-by-rename
-/// semantics (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`) that [`atomic_replace`]
-/// relies on. Conservative by design: an unrecognized filesystem is treated as
-/// unsupported rather than assumed compatible.
+/// Filesystem names known to support atomic same-directory handle renames.
+/// Conservative by design: an unrecognized filesystem is treated as unsupported.
 const ATOMIC_REPLACE_CAPABLE_FILESYSTEMS: &[&str] = &["NTFS", "ReFS"];
 
-/// Prove (rather than merely assume from ACL/create/delete access alone) that `dir`'s
-/// filesystem supports the same-directory atomic-replace-by-rename semantics
-/// [`atomic_replace`] depends on.
+/// Verifies that `dir` supports the handle-based tombstone and create-new publication semantics required by [`atomic_replace`].
 ///
-/// Two layers: a conservative filesystem-name classification (some filesystems and filter
-/// drivers accept a rename call but silently fall back to non-atomic/copy-then-delete
-/// behavior), followed by a fully nondestructive probe that exercises the exact rename
-/// primitive `atomic_replace` uses against disposable, uniquely named temporary files --
-/// never the configured policy file itself.
+/// First, it conservatively classifies the filesystem because some filesystems and filter drivers silently use non-atomic copy-then-delete renames.
+/// It then runs a nondestructive probe of the exact rename primitives against uniquely named disposable files.
 fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     let filesystem = volume_filesystem_name(dir).context("query volume filesystem")?;
     if !ATOMIC_REPLACE_CAPABLE_FILESYSTEMS
@@ -393,17 +393,38 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     let probe_id = uuid::Uuid::new_v4();
     let source_path = dir.join(format!(".package-broker-write-probe-{probe_id}-a.tmp"));
     let target_path = dir.join(format!(".package-broker-write-probe-{probe_id}-b.tmp"));
+    let tombstone_path = dir.join(format!(".package-broker-write-probe-{probe_id}-old.tmp"));
 
     let probe_result = (|| -> anyhow::Result<()> {
         std::fs::write(&source_path, b"probe-source").context("create write-capability probe source file")?;
         std::fs::write(&target_path, b"probe-target").context("create write-capability probe target file")?;
-        // Exercise the exact primitive `atomic_replace` depends on, not just create/delete.
-        move_replace(&source_path, &target_path).context("probe atomic same-directory replacement")?;
+        let dir_handle = open_directory_no_reparse(dir)?;
+        let source = open_transaction_file(&source_path)?;
+        let target = open_transaction_file(&target_path)?;
+        rename_file_handle(
+            &target,
+            &dir_handle,
+            tombstone_path.file_name().expect("probe path has leaf"),
+        )
+        .context("probe target-to-tombstone handle rename")?;
+        rename_file_handle(
+            &source,
+            &dir_handle,
+            target_path.file_name().expect("probe path has leaf"),
+        )
+        .context("probe create-new handle publication")?;
         let replaced = std::fs::read(&target_path).context("read write-capability probe result")?;
         ensure!(
             replaced == b"probe-source",
             "atomic replacement did not take effect on this filesystem"
         );
+        delete_file_handle(&target).context("probe POSIX tombstone unlink")?;
+        drop(target);
+        ensure!(
+            !tombstone_path.exists(),
+            "POSIX tombstone unlink did not remove the directory entry"
+        );
+        drop(source);
         Ok(())
     })();
 
@@ -416,8 +437,12 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     // whatever its rename result reported.
     let source_cleanup = cleanup_probe_file(&source_path);
     let target_cleanup = cleanup_probe_file(&target_path);
+    let tombstone_cleanup = cleanup_probe_file(&tombstone_path);
 
-    probe_result.and(source_cleanup).and(target_cleanup)
+    probe_result
+        .and(source_cleanup)
+        .and(target_cleanup)
+        .and(tombstone_cleanup)
 }
 
 /// Remove a write-capability probe file, tolerating only the file already being absent
@@ -608,6 +633,89 @@ pub(super) fn sha256_digest(bytes: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// Exact policy file handle retained from a write transaction's token observation through publication.
+pub(super) enum RetainedPolicyFile {
+    Real(File),
+    #[cfg(test)]
+    Fake(Box<DiskFingerprint>),
+}
+
+impl RetainedPolicyFile {
+    pub(super) fn verify_matches(&self, expected: &DiskFingerprint) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if let Self::Fake(observed) = self {
+            ensure!(
+                observed.as_ref() == expected,
+                "fake retained target does not match the observed fingerprint"
+            );
+            return Ok(());
+        }
+        let handle = match self {
+            Self::Real(handle) => handle,
+            #[cfg(test)]
+            Self::Fake(_) => unreachable!("fake retained target returned before Windows verification"),
+        };
+        let (expected_target, expected_content, expected_security) = match expected {
+            DiskFingerprint::Active {
+                target,
+                content_digest,
+                security_digest,
+                ..
+            } => (*target, *content_digest, *security_digest),
+            DiskFingerprint::Invalid {
+                target: Some(target),
+                content_digest: Some(content_digest),
+                security_digest: Some(security_digest),
+                ..
+            } => (*target, *content_digest, *security_digest),
+            _ => bail!("write observation did not retain a complete target fingerprint"),
+        };
+
+        ensure!(
+            policy_security::file_identity(handle)? == expected_target,
+            "retained policy file identity changed after token validation"
+        );
+        ensure!(
+            policy_security::file_link_count(handle)? == 1,
+            "retained policy file acquired another hard link after token validation"
+        );
+        policy_security::verify_policy_file_security(handle)
+            .context("retained policy file security changed after token validation")?;
+        ensure!(
+            policy_security::security_state_digest(handle)? == expected_security,
+            "retained policy file security digest changed after token validation"
+        );
+
+        let bytes = read_file_from_start(handle)?;
+        ensure!(
+            sha256_digest(&bytes) == expected_content,
+            "retained policy file content changed after token validation"
+        );
+        Ok(())
+    }
+
+    fn handle(&self) -> &File {
+        match self {
+            Self::Real(handle) => handle,
+            #[cfg(test)]
+            Self::Fake(_) => panic!("fake retained targets have no Windows handle"),
+        }
+    }
+
+    #[cfg(test)]
+    fn into_handle(self) -> File {
+        match self {
+            Self::Real(handle) => handle,
+            Self::Fake(_) => panic!("fake retained targets have no Windows handle"),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_fake(fingerprint: DiskFingerprint) -> Self {
+        Self::Fake(Box::new(fingerprint))
+    }
+}
+
 /// Exact observed state of the policy file on disk, together with the write capability
 /// resolved *as part of the same observation* (item 20/26): capability is never derived
 /// from a separately cached snapshot, so it can never silently drift from the state it
@@ -633,6 +741,8 @@ pub(super) struct DiskObservation {
     /// The hosting directory verified during this observation.
     /// Writable observations keep it alive through publication and postverification.
     pub hosting_dir: Option<VerifiedHostingDirectory>,
+    /// Exact target handle retained by write observations.
+    pub retained_target: Option<RetainedPolicyFile>,
 }
 
 /// Context accumulated while observation fails partway through, for building the most
@@ -699,6 +809,23 @@ pub(super) fn observe(
     configured_path: &Path,
     probe_cache: &AtomicityProbeCache,
 ) -> DiskObservation {
+    observe_impl(source, configured_path, probe_cache, false)
+}
+
+pub(super) fn observe_for_write(
+    source: PolicyConfigurationSource,
+    configured_path: &Path,
+    probe_cache: &AtomicityProbeCache,
+) -> DiskObservation {
+    observe_impl(source, configured_path, probe_cache, true)
+}
+
+fn observe_impl(
+    source: PolicyConfigurationSource,
+    configured_path: &Path,
+    probe_cache: &AtomicityProbeCache,
+    retain_target: bool,
+) -> DiskObservation {
     if let Err(diagnostic) = validate_configured_path_shape(configured_path) {
         tracing::warn!(
             path = %configured_path.display(), reason = %diagnostic,
@@ -763,6 +890,7 @@ pub(super) fn observe(
                     read_only_reason: Some(read_only_reason),
                     canonical_path: configured_path.to_owned(),
                     hosting_dir: None,
+                    retained_target: None,
                 },
                 _ => invalid_observation(
                     configured_path,
@@ -882,6 +1010,28 @@ pub(super) fn observe(
             }
         };
 
+    let recovery = recover_create_temporary_files(&canonical_dir)
+        .and_then(|()| recover_interrupted_transaction(&dir_handle, &canonical_dir, leaf_name));
+    if let Err(error) = recovery {
+        tracing::error!(
+            path = %canonical_dir.display(),
+            error = %format!("{error:#}"),
+            "Policy transaction recovery failed closed"
+        );
+        return invalid_observation(
+            &canonical_path,
+            validation::DiskFailureReason::InsecureStorage,
+            InvalidContext {
+                parent: Some(parent),
+                dir_security_digest: Some(dir_security_digest),
+                ancestor_security_digest: Some(ancestor_security_digest),
+                ..Default::default()
+            },
+            PolicyWriteCapability::ReadOnly,
+            Some(PolicyReadOnlyReason::UnsafePath),
+        );
+    }
+
     // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
     // verified directory identity and security digest, never repeated on every observation.
     let (base_write_capability, base_read_only_reason) =
@@ -910,12 +1060,20 @@ pub(super) fn observe(
         ..Default::default()
     };
 
-    let file = match OpenOptions::new()
-        .read(true)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(&canonical_path)
-    {
+    let file_result = if retain_target {
+        OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ.0 | DELETE.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(&canonical_path)
+    } else {
+        OpenOptions::new()
+            .read(true)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(&canonical_path)
+    };
+    let file = match file_result {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return DiskObservation {
@@ -932,6 +1090,7 @@ pub(super) fn observe(
                 read_only_reason: base_read_only_reason,
                 canonical_path,
                 hosting_dir,
+                retained_target: None,
             };
         }
         Err(error) => {
@@ -1125,6 +1284,8 @@ pub(super) fn observe(
     // The file itself is securely stored (whatever its content turns out to be): a
     // malformed/semantically-invalid document past this point still allows Repair
     // through the directory's own (already resolved) capability -- item 26.
+    let retained_target = retain_target.then_some(RetainedPolicyFile::Real(file));
+
     observation_from_parts(
         &canonical_path,
         &content,
@@ -1138,6 +1299,7 @@ pub(super) fn observe(
         base_write_capability,
         base_read_only_reason,
         hosting_dir,
+        retained_target,
     )
 }
 
@@ -1167,6 +1329,7 @@ fn observation_from_parts(
     write_capability: PolicyWriteCapability,
     read_only_reason: Option<PolicyReadOnlyReason>,
     hosting_dir: Option<VerifiedHostingDirectory>,
+    retained_target: Option<RetainedPolicyFile>,
 ) -> DiskObservation {
     let VerifiedIdentity {
         parent,
@@ -1178,7 +1341,8 @@ fn observation_from_parts(
 
     let content_digest = sha256_digest(content);
 
-    let invalid_with = |reason: validation::DiskFailureReason, hosting_dir| DiskObservation {
+    let mut retained_target = retained_target;
+    let mut invalid_with = |reason: validation::DiskFailureReason, hosting_dir| DiskObservation {
         state: PolicyManagementState::Invalid,
         policy: None,
         invalid_diagnostics: Some(InvalidPolicyDiagnostics {
@@ -1199,6 +1363,7 @@ fn observation_from_parts(
         read_only_reason,
         canonical_path: path.to_owned(),
         hosting_dir,
+        retained_target: retained_target.take(),
     };
 
     let policy = match serde_json::from_slice::<PolicyDocument>(content) {
@@ -1242,6 +1407,7 @@ fn observation_from_parts(
         read_only_reason,
         canonical_path: path.to_owned(),
         hosting_dir,
+        retained_target,
     }
 }
 
@@ -1276,6 +1442,7 @@ fn invalid_observation(
         read_only_reason,
         canonical_path: path.to_owned(),
         hosting_dir: None,
+        retained_target: None,
     }
 }
 
@@ -1293,19 +1460,14 @@ pub(super) struct PersistedPolicy {
     pub fingerprint: DiskFingerprint,
 }
 
-/// A write failure, distinguishing whether the atomic rename that publishes new content
-/// had already happened when the failure occurred (item 27). Windows offers no
-/// transactional rollback across that rename: once it succeeds, the new bytes are live,
-/// so a failure discovered only afterward (post-write reopen/identity/security/parse
-/// verification) is a fundamentally different situation from one discovered before it
-/// (temporary file creation/write/flush, or the rename call itself failing) -- the
-/// caller must never assume the previously active policy is still what is being served
-/// just because *a* later step failed.
+/// A write failure classified by whether publication occurred or a concurrent change won.
 pub(super) enum WriteFailure {
-    /// Failed before the rename: disk state is provably unchanged, so the previously
-    /// active/invalid/missing policy (if any) is still exactly what it was. Maps to
-    /// `ErrorCode::PolicyPersistenceFailed`.
+    /// Failed before new content was published.
+    /// Reobservation recovers any retained tombstone before this maps to `ErrorCode::PolicyPersistenceFailed`.
     PrePublication(anyhow::Error),
+    /// A concurrent external change prevented identity-bound publication.
+    /// The caller must synchronously reobserve and return a stale-token conflict.
+    ConcurrentChange(anyhow::Error),
     /// Failed after the rename made the new content live: the caller must synchronously
     /// reobserve disk under the same write lock and publish whatever that reveals rather
     /// than trusting the previous in-memory snapshot. Maps to
@@ -1313,27 +1475,735 @@ pub(super) enum WriteFailure {
     PostPublication(anyhow::Error),
 }
 
-/// Atomically persist `bytes` (the canonical serialization of the new active policy) to
-/// `final_path`, replacing whatever is currently there, then reopen and verify it.
+/// Conditionally persist `bytes` against the exact retained target observed for the store token.
 ///
-/// Used for every replacement operation except `Create` (see [`atomic_create`]): the
-/// store already observed an Active or Invalid policy at `final_path` under its write
-/// lock immediately before calling this, so an existing destination is expected and
-/// intentionally replaced.
+/// The observed target is moved by handle to a reserved tombstone and the flushed replacement is moved by handle to the final leaf without replacement.
+/// Any raced-in final entry is preserved and reported as [`WriteFailure::ConcurrentChange`].
+/// A durable marker makes every interruption recoverable before the next observation.
 pub(super) fn atomic_replace(
     hosting_dir: &VerifiedHostingDirectory,
+    observed_target: Option<RetainedPolicyFile>,
+    expected_fingerprint: &DiskFingerprint,
     final_path: &Path,
     bytes: &[u8],
 ) -> Result<PersistedPolicy, WriteFailure> {
+    let observed_target = observed_target
+        .context("replacement observation did not retain the target handle")
+        .map_err(WriteFailure::ConcurrentChange)?;
+    verify_replacement_evidence(hosting_dir, &observed_target, expected_fingerprint)
+        .map_err(WriteFailure::ConcurrentChange)?;
+
+    conditional_replace(hosting_dir, observed_target, expected_fingerprint, final_path, bytes)
+}
+
+fn verify_replacement_evidence(
+    hosting_dir: &VerifiedHostingDirectory,
+    observed_target: &RetainedPolicyFile,
+    expected_fingerprint: &DiskFingerprint,
+) -> anyhow::Result<()> {
     hosting_dir
         .verify_unchanged()
-        .context("hosting directory changed after policy observation")
-        .map_err(WriteFailure::PrePublication)?;
-    write_temp_then(hosting_dir.canonical_path(), bytes, |temp_path| {
-        move_replace(temp_path, final_path)
-    })
-    .map_err(WriteFailure::PrePublication)?;
-    reopen_and_verify_persisted(hosting_dir, final_path, bytes).map_err(WriteFailure::PostPublication)
+        .context("hosting directory changed after policy observation")?;
+    observed_target
+        .verify_matches(expected_fingerprint)
+        .context("observed policy changed before conditional publication")?;
+    let expected_ancestor_security = match expected_fingerprint {
+        DiskFingerprint::Active {
+            ancestor_security_digest,
+            ..
+        }
+        | DiskFingerprint::Invalid {
+            ancestor_security_digest: Some(ancestor_security_digest),
+            ..
+        } => *ancestor_security_digest,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "replacement observation has no ancestor security fingerprint"
+            ));
+        }
+    };
+    let current_ancestor_security =
+        policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
+            .context("policy directory ancestor security changed after token validation")?;
+    if current_ancestor_security != expected_ancestor_security {
+        return Err(anyhow::anyhow!(
+            "policy directory ancestor security changed after token validation"
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct TransactionPaths {
+    id: uuid::Uuid,
+    marker_staging: PathBuf,
+    marker: PathBuf,
+    old: PathBuf,
+    new: PathBuf,
+}
+
+impl TransactionPaths {
+    fn new(dir: &Path, final_path: &Path) -> anyhow::Result<Self> {
+        let leaf = final_path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .context("policy path has no Unicode leaf name")?;
+        let id = uuid::Uuid::new_v4();
+        let prefix = format!(".{leaf}.txn-{id}");
+        Ok(Self {
+            id,
+            marker_staging: dir.join(format!("{prefix}.marker.prepare")),
+            marker: dir.join(format!("{prefix}.marker")),
+            old: dir.join(format!("{prefix}.old")),
+            new: dir.join(format!("{prefix}.new")),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct TransactionMarker {
+    id: uuid::Uuid,
+    final_leaf: String,
+    old_identity: FileIdentity,
+    old_content_digest: [u8; 32],
+    old_security_digest: [u8; 32],
+    new_content_digest: [u8; 32],
+}
+
+impl TransactionMarker {
+    fn from_observation(
+        id: uuid::Uuid,
+        final_path: &Path,
+        expected: &DiskFingerprint,
+        new_bytes: &[u8],
+    ) -> anyhow::Result<Self> {
+        let (old_identity, old_content_digest, old_security_digest) = match expected {
+            DiskFingerprint::Active {
+                target,
+                content_digest,
+                security_digest,
+                ..
+            } => (*target, *content_digest, *security_digest),
+            DiskFingerprint::Invalid {
+                target: Some(target),
+                content_digest: Some(content_digest),
+                security_digest: Some(security_digest),
+                ..
+            } => (*target, *content_digest, *security_digest),
+            _ => bail!("replacement requires a complete observed target fingerprint"),
+        };
+        Ok(Self {
+            id,
+            final_leaf: final_path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .context("policy path has no Unicode leaf name")?
+                .to_owned(),
+            old_identity,
+            old_content_digest,
+            old_security_digest,
+            new_content_digest: sha256_digest(new_bytes),
+        })
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "Version": 1,
+            "TransactionId": self.id.to_string(),
+            "FinalLeaf": self.final_leaf,
+            "OldVolumeSerial": self.old_identity.volume_serial,
+            "OldFileId": hex::encode(self.old_identity.file_id),
+            "OldContentDigest": hex::encode(self.old_content_digest),
+            "OldSecurityDigest": hex::encode(self.old_security_digest),
+            "NewContentDigest": hex::encode(self.new_content_digest),
+        }))
+        .expect("transaction marker fields always serialize")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).context("transaction marker is not valid JSON")?;
+        let object = value.as_object().context("transaction marker must be an object")?;
+        ensure!(object.len() == 8, "transaction marker contains unexpected fields");
+        ensure!(
+            object.get("Version").and_then(serde_json::Value::as_u64) == Some(1),
+            "unsupported transaction marker"
+        );
+        let text = |name: &str| -> anyhow::Result<&str> {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .with_context(|| format!("transaction marker {name} is missing or invalid"))
+        };
+        let decode = |name: &str| -> anyhow::Result<[u8; 32]> {
+            let mut output = [0u8; 32];
+            hex::decode_to_slice(text(name)?, &mut output)
+                .with_context(|| format!("transaction marker {name} is invalid"))?;
+            Ok(output)
+        };
+        let mut file_id = [0u8; 16];
+        hex::decode_to_slice(text("OldFileId")?, &mut file_id).context("transaction marker OldFileId is invalid")?;
+        Ok(Self {
+            id: uuid::Uuid::parse_str(text("TransactionId")?).context("transaction marker id is invalid")?,
+            final_leaf: text("FinalLeaf")?.to_owned(),
+            old_identity: FileIdentity {
+                volume_serial: object
+                    .get("OldVolumeSerial")
+                    .and_then(serde_json::Value::as_u64)
+                    .context("transaction marker OldVolumeSerial is missing or invalid")?,
+                file_id,
+            },
+            old_content_digest: decode("OldContentDigest")?,
+            old_security_digest: decode("OldSecurityDigest")?,
+            new_content_digest: decode("NewContentDigest")?,
+        })
+    }
+}
+
+fn conditional_replace(
+    hosting_dir: &VerifiedHostingDirectory,
+    observed_target: RetainedPolicyFile,
+    expected_fingerprint: &DiskFingerprint,
+    final_path: &Path,
+    bytes: &[u8],
+) -> Result<PersistedPolicy, WriteFailure> {
+    use std::io::Write as _;
+
+    let dir_handle = hosting_dir
+        .handle
+        .as_ref()
+        .expect("real storage always retains the directory handle");
+    let paths =
+        TransactionPaths::new(hosting_dir.canonical_path(), final_path).map_err(WriteFailure::PrePublication)?;
+    let marker = TransactionMarker::from_observation(paths.id, final_path, expected_fingerprint, bytes)
+        .map_err(WriteFailure::ConcurrentChange)?;
+
+    let mut marker_file =
+        create_secure_transaction_file(&paths.marker_staging).map_err(WriteFailure::PrePublication)?;
+    if let Err(error) = marker_file
+        .write_all(&marker.to_bytes())
+        .and_then(|()| marker_file.sync_all())
+        .context("failed to persist policy transaction marker")
+    {
+        return match delete_file_handle(&marker_file) {
+            Ok(()) => Err(WriteFailure::PrePublication(error)),
+            Err(cleanup_error) => Err(WriteFailure::PrePublication(error.context(format!(
+                "incomplete transaction marker cleanup also failed: {cleanup_error:#}"
+            )))),
+        };
+    }
+    if let Err(error) = rename_file_handle(
+        &marker_file,
+        dir_handle,
+        paths.marker.file_name().expect("transaction marker path has leaf"),
+    ) {
+        return match delete_file_handle(&marker_file) {
+            Ok(()) => Err(WriteFailure::PrePublication(
+                anyhow::Error::new(error).context("failed to publish completed transaction marker"),
+            )),
+            Err(cleanup_error) => Err(WriteFailure::PrePublication(anyhow::Error::new(error).context(
+                format!("failed to publish completed transaction marker and staging cleanup failed: {cleanup_error:#}"),
+            ))),
+        };
+    }
+
+    let mut temp_file = match create_secure_transaction_file(&paths.new) {
+        Ok(file) => file,
+        Err(error) => {
+            return match delete_file_handle(&marker_file) {
+                Ok(()) => Err(WriteFailure::PrePublication(error)),
+                Err(cleanup_error) => Err(WriteFailure::PrePublication(
+                    error.context(format!("transaction marker cleanup also failed: {cleanup_error:#}")),
+                )),
+            };
+        }
+    };
+    if let Err(error) = temp_file
+        .write_all(bytes)
+        .and_then(|()| temp_file.sync_all())
+        .context("failed to persist replacement policy")
+        .and_then(|()| {
+            policy_security::verify_policy_file_security(&temp_file)
+                .context("replacement policy temporary file failed security verification")
+        })
+    {
+        if let Err(cleanup_error) = delete_file_handle(&temp_file) {
+            return Err(WriteFailure::PrePublication(error.context(format!(
+                "temporary replacement cleanup failed; transaction marker retained for recovery: {cleanup_error:#}"
+            ))));
+        }
+        return match delete_file_handle(&marker_file) {
+            Ok(()) => Err(WriteFailure::PrePublication(error)),
+            Err(cleanup_error) => Err(WriteFailure::PrePublication(
+                error.context(format!("transaction marker cleanup also failed: {cleanup_error:#}")),
+            )),
+        };
+    }
+
+    let prepared = PreparedTransaction {
+        dir_handle,
+        observed_target: &observed_target,
+        temp_file: &temp_file,
+        paths: &paths,
+        final_path,
+    };
+    publish_prepared_transaction(
+        &prepared,
+        || Ok(()),
+        || verify_replacement_evidence(hosting_dir, &observed_target, expected_fingerprint),
+        || Ok(()),
+    )?;
+
+    let persisted =
+        verify_persisted_handle(hosting_dir, &temp_file, final_path, bytes).map_err(WriteFailure::PostPublication)?;
+    delete_file_handle(observed_target.handle()).map_err(WriteFailure::PostPublication)?;
+    drop(observed_target);
+    delete_file_handle(&marker_file).map_err(WriteFailure::PostPublication)?;
+    drop(marker_file);
+    Ok(persisted)
+}
+
+struct PreparedTransaction<'a> {
+    dir_handle: &'a File,
+    observed_target: &'a RetainedPolicyFile,
+    temp_file: &'a File,
+    paths: &'a TransactionPaths,
+    final_path: &'a Path,
+}
+
+fn publish_prepared_transaction(
+    transaction: &PreparedTransaction<'_>,
+    after_tombstone: impl FnOnce() -> anyhow::Result<()>,
+    verify_before_publish: impl FnOnce() -> anyhow::Result<()>,
+    after_publish: impl FnOnce() -> anyhow::Result<()>,
+) -> Result<(), WriteFailure> {
+    if let Err(error) = rename_file_handle(
+        transaction.observed_target.handle(),
+        transaction.dir_handle,
+        transaction.paths.old.file_name().expect("transaction path has leaf"),
+    ) {
+        return Err(WriteFailure::PrePublication(
+            anyhow::Error::new(error).context("failed to reserve observed policy as transaction tombstone"),
+        ));
+    }
+
+    after_tombstone().map_err(|error| {
+        WriteFailure::PrePublication(error.context("transaction interrupted after reserving the observed policy"))
+    })?;
+
+    if let Err(error) = verify_before_publish() {
+        let restore_error = rename_file_handle(
+            transaction.observed_target.handle(),
+            transaction.dir_handle,
+            transaction.final_path.file_name().expect("policy path has leaf"),
+        )
+        .err();
+        return Err(WriteFailure::ConcurrentChange(match restore_error {
+            Some(restore_error) => error.context(format!(
+                "pre-publication evidence changed and the exact tombstone could not be restored: {restore_error}"
+            )),
+            None => error.context("pre-publication evidence changed; the exact tombstone was restored"),
+        }));
+    }
+
+    if let Err(publish_error) = rename_file_handle(
+        transaction.temp_file,
+        transaction.dir_handle,
+        transaction.final_path.file_name().expect("policy path has leaf"),
+    ) {
+        let restore_result = rename_file_handle(
+            transaction.observed_target.handle(),
+            transaction.dir_handle,
+            transaction.final_path.file_name().expect("policy path has leaf"),
+        );
+        if let Err(restore_error) = restore_result {
+            let final_guard = open_optional_final_guard(transaction.final_path).map_err(|error| {
+                WriteFailure::ConcurrentChange(error.context(format!(
+                    "replacement publication and tombstone restoration failed: {publish_error}; {restore_error}"
+                )))
+            })?;
+            let Some(final_guard) = final_guard else {
+                return Err(WriteFailure::PrePublication(
+                    anyhow::Error::new(publish_error).context(format!(
+                        "replacement publication failed and the original tombstone could not be restored: {restore_error}"
+                    )),
+                ));
+            };
+            drop(final_guard);
+            return Err(WriteFailure::ConcurrentChange(
+                anyhow::Error::new(publish_error).context("replacement lost a create-new publication race"),
+            ));
+        }
+        return Err(WriteFailure::PrePublication(
+            anyhow::Error::new(publish_error).context("replacement publication failed and the tombstone was restored"),
+        ));
+    }
+
+    after_publish()
+        .context("transaction interrupted after replacement publication")
+        .map_err(WriteFailure::PostPublication)?;
+
+    Ok(())
+}
+
+fn create_secure_transaction_file(path: &Path) -> anyhow::Result<File> {
+    let security_attributes =
+        policy_security::admin_only_security_attributes(false).context("build transaction file security")?;
+    let path = U16CString::from_os_str(path.as_os_str()).context("transaction path contains an interior NUL")?;
+    // SAFETY: The path and security attributes remain valid for the call, and the returned handle is owned.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_pcwstr(),
+            GENERIC_READ.0 | GENERIC_WRITE.0 | DELETE.0 | READ_CONTROL.0,
+            FILE_SHARE_NONE,
+            Some(security_attributes.as_ptr()),
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH,
+            None,
+        )
+    }
+    .context("failed to create secure transaction file")?;
+    // SAFETY: CreateFileW returned a new owned handle.
+    Ok(File::from(unsafe { OwnedHandle::from_raw_handle(handle.0) }))
+}
+
+fn open_transaction_file(path: &Path) -> anyhow::Result<File> {
+    OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ.0 | DELETE.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)
+        .with_context(|| format!("failed to open transaction remnant {}", path.display()))
+}
+
+fn rename_file_handle(file: &File, root: &File, new_name: &OsStr) -> std::io::Result<()> {
+    // Prefer a relative name anchored to the retained directory handle.
+    // Some Windows filesystems reject `RootDirectory` through `SetFileInformationByHandle`, so the fallback derives the absolute path from the same retained handle.
+    if set_file_rename_information(file, HANDLE(root.as_raw_handle()), new_name).is_ok() {
+        return Ok(());
+    }
+
+    let absolute = policy_security::final_path_from_handle(root)
+        .map_err(|error| std::io::Error::other(format!("failed to resolve rename root: {error:#}")))?
+        .join(new_name);
+    set_file_rename_information(file, HANDLE::default(), absolute.as_os_str())
+}
+
+#[expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "building and submitting one variable-length Win32 FILE_RENAME_INFO buffer is one logical FFI operation"
+)]
+fn set_file_rename_information(file: &File, root: HANDLE, new_name: &OsStr) -> std::io::Result<()> {
+    let name: Vec<u16> = new_name.encode_wide().collect();
+    let name_bytes = name.len().checked_mul(2).expect("file name byte length fits usize");
+    let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let buffer_len = name_offset
+        .checked_add(name_bytes)
+        .expect("rename information length fits usize")
+        .max(size_of::<FILE_RENAME_INFO>());
+    let mut buffer = vec![0usize; buffer_len.div_ceil(size_of::<usize>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let buffer_ptr = info.cast::<u8>();
+    // SAFETY: The buffer is sized for FILE_RENAME_INFO plus the complete UTF-16 file name.
+    unsafe {
+        (*info).Anonymous = FILE_RENAME_INFO_0 { Flags: 0 };
+        (*info).RootDirectory = root;
+        (*info).FileNameLength = u32::try_from(name_bytes).expect("Windows file name length fits u32");
+        std::ptr::copy_nonoverlapping(name.as_ptr(), buffer_ptr.add(name_offset).cast(), name.len());
+        let result = SetFileInformationByHandle(
+            HANDLE(file.as_raw_handle()),
+            FileRenameInfoEx,
+            buffer_ptr.cast(),
+            u32::try_from(name_offset + name_bytes).expect("rename buffer length fits u32"),
+        );
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => SetFileInformationByHandle(
+                HANDLE(file.as_raw_handle()),
+                FileRenameInfo,
+                buffer_ptr.cast(),
+                u32::try_from(name_offset + name_bytes).expect("rename buffer length fits u32"),
+            )
+            .map_err(std::io::Error::from),
+            Err(error) => Err(std::io::Error::from(error)),
+        }
+    }
+}
+
+fn delete_file_handle(file: &File) -> anyhow::Result<()> {
+    let extended = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_INFO_EX_FLAGS(
+            FILE_DISPOSITION_FLAG_DELETE.0
+                | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS.0
+                | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE.0,
+        ),
+    };
+    // SAFETY: The file handle is valid and extended points to a correctly sized input structure.
+    unsafe {
+        SetFileInformationByHandle(
+            HANDLE(file.as_raw_handle()),
+            FileDispositionInfoEx,
+            std::ptr::from_ref(&extended).cast(),
+            u32::try_from(size_of::<FILE_DISPOSITION_INFO_EX>()).expect("disposition structure size fits u32"),
+        )
+    }
+    .context("failed to unlink transaction file by handle")?;
+
+    Ok(())
+}
+
+fn recover_create_temporary_files(dir_path: &Path) -> anyhow::Result<()> {
+    let prefix = OsString::from(format!(".{POLICY_FILE_NAME}.tmp-"));
+    for entry in std::fs::read_dir(dir_path).context("failed to enumerate policy directory for create recovery")? {
+        let entry = entry.context("failed to enumerate policy create remnant")?;
+        let Some(remainder) = reserved_name_remainder(&entry.file_name(), &prefix)? else {
+            continue;
+        };
+        uuid::Uuid::parse_str(&remainder).context("policy directory contains a malformed create remnant")?;
+        let path = entry.path();
+        let file = open_transaction_file(&path)?;
+        verify_transaction_file_path(&file, &path)?;
+        policy_security::verify_policy_file_security(&file).context("policy create remnant security is invalid")?;
+        delete_file_handle(&file).context("failed to retire policy create remnant")?;
+        drop(file);
+    }
+    Ok(())
+}
+
+fn reserved_name_remainder(name: &OsStr, prefix: &OsStr) -> anyhow::Result<Option<String>> {
+    let name_wide: Vec<u16> = name.encode_wide().collect();
+    let prefix_wide: Vec<u16> = prefix.encode_wide().collect();
+    if name_wide.len() < prefix_wide.len() {
+        return Ok(None);
+    }
+    let candidate_prefix = OsString::from_wide(&name_wide[..prefix_wide.len()]);
+    if !policy_security::os_strings_match_case_insensitive(&candidate_prefix, prefix) {
+        return Ok(None);
+    }
+    String::from_utf16(&name_wide[prefix_wide.len()..])
+        .context("reserved policy remnant name is not Unicode")
+        .map(Some)
+}
+
+fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsStr) -> anyhow::Result<()> {
+    let final_leaf = final_leaf.to_str().context("policy leaf is not valid Unicode")?;
+    let transaction_prefix = OsString::from(format!(".{final_leaf}.txn-"));
+    let mut transaction_id = None;
+    let mut marker_staging_path = None;
+    let mut marker_path = None;
+    let mut old_path = None;
+    let mut new_path = None;
+
+    for entry in std::fs::read_dir(dir_path).context("failed to enumerate policy directory for transaction recovery")? {
+        let entry = entry.context("failed to enumerate policy transaction remnant")?;
+        let name = entry.file_name();
+        let Some(remainder) = reserved_name_remainder(&name, &transaction_prefix)? else {
+            continue;
+        };
+        let Some((id, kind)) = remainder.split_once('.') else {
+            bail!("policy directory contains a malformed transaction remnant");
+        };
+        let id = uuid::Uuid::parse_str(id).context("policy directory contains a malformed transaction id")?;
+        if transaction_id.replace(id).is_some_and(|previous| previous != id) {
+            bail!("policy directory contains multiple interrupted transactions");
+        }
+        let slot = match kind {
+            "marker.prepare" => &mut marker_staging_path,
+            "marker" => &mut marker_path,
+            "old" => &mut old_path,
+            "new" => &mut new_path,
+            _ => bail!("policy directory contains an unsupported transaction remnant"),
+        };
+        ensure!(
+            slot.replace(entry.path()).is_none(),
+            "policy directory contains duplicate transaction remnants"
+        );
+    }
+
+    let Some(id) = transaction_id else {
+        return Ok(());
+    };
+    if let Some(marker_staging_path) = marker_staging_path {
+        ensure!(
+            marker_path.is_none() && old_path.is_none() && new_path.is_none(),
+            "incomplete marker staging is mixed with published transaction remnants"
+        );
+        let marker_staging = open_transaction_file(&marker_staging_path)?;
+        verify_transaction_file_path(&marker_staging, &marker_staging_path)?;
+        policy_security::verify_policy_file_security(&marker_staging)
+            .context("transaction marker staging security is invalid")?;
+        let final_path = dir_path.join(final_leaf);
+        return recover_marker_staging(&final_path, marker_staging);
+    }
+    let marker_path = marker_path.context("interrupted policy transaction has no marker")?;
+    let paths = TransactionPaths {
+        id,
+        marker_staging: dir_path.join(format!(".{final_leaf}.txn-{id}.marker.prepare")),
+        marker: marker_path,
+        old: old_path.unwrap_or_else(|| dir_path.join(format!(".{final_leaf}.txn-{id}.old"))),
+        new: new_path.unwrap_or_else(|| dir_path.join(format!(".{final_leaf}.txn-{id}.new"))),
+    };
+    let marker_file = open_transaction_file(&paths.marker)?;
+    verify_transaction_file_path(&marker_file, &paths.marker)?;
+    policy_security::verify_policy_file_security(&marker_file).context("transaction marker security is invalid")?;
+    let marker_bytes = read_file_from_start(&marker_file)?;
+    let marker = TransactionMarker::from_bytes(&marker_bytes)?;
+    ensure!(marker.id == id, "transaction marker id does not match its name");
+    ensure!(
+        policy_security::os_strings_match_case_insensitive(OsStr::new(&marker.final_leaf), OsStr::new(final_leaf)),
+        "transaction marker targets a different policy leaf"
+    );
+
+    let old_file = open_optional_transaction_file(&paths.old)?;
+    if let Some(old_file) = &old_file {
+        verify_transaction_file_path(old_file, &paths.old)?;
+        verify_transaction_file_state(
+            old_file,
+            marker.old_identity,
+            marker.old_content_digest,
+            marker.old_security_digest,
+        )
+        .context("transaction tombstone does not match the observed policy")?;
+    }
+
+    let new_file = open_optional_transaction_file(&paths.new)?;
+    let new_content_matches = if let Some(new_file) = &new_file {
+        verify_transaction_file_path(new_file, &paths.new)?;
+        policy_security::verify_policy_file_security(new_file)
+            .context("transaction replacement security is invalid")?;
+        sha256_digest(&read_file_from_start(new_file)?) == marker.new_content_digest
+    } else {
+        true
+    };
+    if old_file.is_some() {
+        ensure!(
+            new_content_matches,
+            "transaction replacement content changed after tombstoning"
+        );
+    }
+
+    recover_verified_transaction(dir, dir_path, OsStr::new(final_leaf), marker_file, old_file, new_file)
+}
+
+fn recover_marker_staging(final_path: &Path, marker_staging: File) -> anyhow::Result<()> {
+    let final_guard = open_optional_final_guard(final_path)?
+        .context("incomplete marker staging exists but the original policy is absent")?;
+    delete_file_handle(&marker_staging).context("failed to retire incomplete transaction marker staging")?;
+    drop(marker_staging);
+    drop(final_guard);
+    Ok(())
+}
+
+fn recover_verified_transaction(
+    dir: &File,
+    dir_path: &Path,
+    final_leaf: &OsStr,
+    marker_file: File,
+    mut old_file: Option<File>,
+    new_file: Option<File>,
+) -> anyhow::Result<()> {
+    let final_path = dir_path.join(final_leaf);
+    let mut final_guard = open_optional_final_guard(&final_path)?;
+    let mut restored = false;
+    if final_guard.is_none() {
+        let old_file = old_file
+            .as_ref()
+            .context("interrupted transaction has neither a final policy nor a valid tombstone")?;
+        match rename_file_handle(old_file, dir, final_leaf) {
+            Ok(()) => restored = true,
+            Err(error) => {
+                final_guard = open_optional_final_guard(&final_path)?;
+                if final_guard.is_none() {
+                    return Err(error).context("failed to restore interrupted policy transaction");
+                }
+                tracing::warn!(%error, "An external policy appeared while transaction recovery restored the tombstone");
+            }
+        }
+    }
+
+    if !restored && let Some(old_file) = old_file.take() {
+        delete_file_handle(&old_file).context("failed to retire policy transaction tombstone")?;
+        drop(old_file);
+    }
+    if let Some(new_file) = new_file {
+        delete_file_handle(&new_file).context("failed to retire unpublished policy transaction replacement")?;
+        drop(new_file);
+    }
+    delete_file_handle(&marker_file).context("failed to retire policy transaction marker")?;
+    drop(marker_file);
+    drop(final_guard);
+    Ok(())
+}
+
+fn open_optional_final_guard(path: &Path) -> anyhow::Result<Option<File>> {
+    match OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES.0)
+        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+    {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to retain raced policy {}", path.display())),
+    }
+}
+
+fn open_optional_transaction_file(path: &Path) -> anyhow::Result<Option<File>> {
+    match open_transaction_file(path) {
+        Ok(file) => Ok(Some(file)),
+        Err(error)
+            if error
+                .root_cause()
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn verify_transaction_file_path(file: &File, expected: &Path) -> anyhow::Result<()> {
+    ensure!(
+        policy_security::file_link_count(file)? == 1,
+        "transaction file has multiple hard links"
+    );
+    let resolved = policy_security::final_path_from_handle(file)?;
+    ensure!(
+        policy_security::paths_match_case_insensitive(&resolved, expected),
+        "transaction file resolved to an unexpected path"
+    );
+    Ok(())
+}
+
+fn verify_transaction_file_state(
+    file: &File,
+    identity: FileIdentity,
+    content_digest: [u8; 32],
+    security_digest: [u8; 32],
+) -> anyhow::Result<()> {
+    ensure!(
+        policy_security::file_identity(file)? == identity,
+        "transaction file identity changed"
+    );
+    policy_security::verify_policy_file_security(file)?;
+    ensure!(
+        policy_security::security_state_digest(file)? == security_digest,
+        "transaction file security changed"
+    );
+    ensure!(
+        sha256_digest(&read_file_from_start(file)?) == content_digest,
+        "transaction file content changed"
+    );
+    Ok(())
+}
+
+fn read_file_from_start(file: &File) -> anyhow::Result<Vec<u8>> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = file;
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Atomically persist `bytes` to `final_path` only if nothing exists there yet: unlike
@@ -1412,14 +2282,24 @@ fn write_temp_then(dir: &Path, bytes: &[u8], commit: impl FnOnce(&Path) -> anyho
 /// validated the draft moments earlier: this is the single path every committed document
 /// is trusted through, whether freshly written or later re-observed.
 ///
-/// This narrows -- it does not eliminate -- the residual race with a *different*, already
-/// SYSTEM/Administrators-trusted writer (including an external editor) concurrently
-/// replacing the same file between the rename and this reopen: Windows provides no
-/// identity-conditioned replace primitive, so re-verifying the strongest available
-/// handle/content evidence immediately afterward is the strongest supported
-/// approximation, not a complete fix.
 fn reopen_and_verify_persisted(
     hosting_dir: &VerifiedHostingDirectory,
+    final_path: &Path,
+    expected_bytes: &[u8],
+) -> anyhow::Result<PersistedPolicy> {
+    let final_file = OpenOptions::new()
+        .read(true)
+        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(final_path)
+        .context("failed to reopen policy file for post-write verification")?;
+
+    verify_persisted_handle(hosting_dir, &final_file, final_path, expected_bytes)
+}
+
+fn verify_persisted_handle(
+    hosting_dir: &VerifiedHostingDirectory,
+    final_file: &File,
     final_path: &Path,
     expected_bytes: &[u8],
 ) -> anyhow::Result<PersistedPolicy> {
@@ -1430,27 +2310,27 @@ fn reopen_and_verify_persisted(
     let ancestor_security_digest =
         policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
             .context("policy directory ancestor chain failed verification immediately after writing")?;
-
-    let final_file = OpenOptions::new()
-        .read(true)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(final_path)
-        .context("failed to reopen policy file for post-write verification")?;
-
-    let target = policy_security::file_identity(&final_file)
+    let resolved =
+        policy_security::final_path_from_handle(final_file).context("failed to resolve persisted policy handle")?;
+    ensure!(
+        policy_security::paths_match_case_insensitive(&resolved, final_path),
+        "persisted policy handle resolved to an unexpected path"
+    );
+    let target = policy_security::file_identity(final_file)
         .context("failed to query policy file identity for post-write verification")?;
 
-    policy_security::verify_policy_file_security(&final_file)
+    policy_security::verify_policy_file_security(final_file)
         .context("policy file failed security verification immediately after being written")?;
 
-    let security_digest = policy_security::security_state_digest(&final_file)
+    let security_digest = policy_security::security_state_digest(final_file)
         .context("failed to compute policy file security digest immediately after being written")?;
 
     let mut persisted = Vec::new();
     {
-        use std::io::Read as _;
-        (&final_file)
+        use std::io::{Read as _, Seek as _, SeekFrom};
+        let mut reader = final_file;
+        reader.seek(SeekFrom::Start(0))?;
+        reader
             .read_to_end(&mut persisted)
             .context("failed to re-read persisted policy file")?;
     }
@@ -1495,6 +2375,7 @@ fn move_file(from: &Path, to: &Path, flags: MOVE_FILE_FLAGS) -> anyhow::Result<(
 }
 
 /// Atomically rename `from` onto `to`, replacing `to` if it already exists.
+#[cfg(test)]
 fn move_replace(from: &Path, to: &Path) -> anyhow::Result<()> {
     move_file(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
         .context("failed to atomically replace policy file")
@@ -1568,6 +2449,438 @@ mod tests {
 
         assert!(!source.exists());
         assert_eq!(std::fs::read(&destination).unwrap(), b"replacement");
+    }
+
+    fn open_deletable_test_file(path: &Path, content: &[u8]) -> File {
+        std::fs::write(path, content).unwrap();
+        OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ.0 | DELETE.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0)
+            .open(path)
+            .unwrap()
+    }
+
+    #[test]
+    fn handle_rename_never_replaces_an_existing_destination() {
+        let dir = temp_dir();
+        let source = dir.path().join("source.tmp");
+        let destination = dir.path().join("destination.json");
+        let source_file = open_deletable_test_file(&source, b"source");
+        std::fs::write(&destination, b"destination").unwrap();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+
+        rename_file_handle(&source_file, &dir_file, destination.file_name().unwrap()).unwrap_err();
+
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+        assert_eq!(std::fs::read(&destination).unwrap(), b"destination");
+    }
+
+    #[test]
+    fn retained_directory_prevents_path_retarget_during_handle_rename() {
+        let root = temp_dir();
+        let dir = root.path().join("held");
+        std::fs::create_dir(&dir).unwrap();
+        let source = dir.join("source.tmp");
+        let destination = dir.join("destination.json");
+        let source_file = open_deletable_test_file(&source, b"source");
+        let dir_file = open_directory_no_reparse(&dir).unwrap();
+
+        assert!(std::fs::rename(&dir, root.path().join("retargeted")).is_err());
+        rename_file_handle(&source_file, &dir_file, destination.file_name().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read(&destination).unwrap(), b"source");
+        assert!(!root.path().join("retargeted").exists());
+    }
+
+    #[test]
+    fn retained_write_observation_blocks_external_target_changes() {
+        let dir = temp_dir();
+        let path = dir.path().join("policy.json");
+        let replacement = dir.path().join("replacement.json");
+        let retained = open_deletable_test_file(&path, b"observed");
+        std::fs::write(&replacement, b"replacement").unwrap();
+
+        assert!(std::fs::write(&path, b"edited").is_err());
+        assert!(std::fs::remove_file(&path).is_err());
+        assert!(std::fs::rename(&path, dir.path().join("replaced.json")).is_err());
+        assert!(move_replace(&replacement, &path).is_err());
+        assert_eq!(read_file_from_start(&retained).unwrap(), b"observed");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn handle_cleanup_removes_read_only_transaction_files() {
+        let dir = temp_dir();
+        let path = dir.path().join("readonly.old");
+        std::fs::write(&path, b"old").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        let file = open_transaction_file(&path).unwrap();
+
+        delete_file_handle(&file).unwrap();
+        drop(file);
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn conditional_publication_preserves_a_final_created_after_tombstoning() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let observed = RetainedPolicyFile::Real(open_deletable_test_file(&final_path, b"observed"));
+        let marker = open_deletable_test_file(&paths.marker, b"marker");
+        let replacement = open_deletable_test_file(&paths.new, b"replacement");
+
+        let prepared = PreparedTransaction {
+            dir_handle: &dir_file,
+            observed_target: &observed,
+            temp_file: &replacement,
+            paths: &paths,
+            final_path: &final_path,
+        };
+        let result = publish_prepared_transaction(
+            &prepared,
+            || {
+                std::fs::write(&final_path, b"external")?;
+                Ok(())
+            },
+            || Ok(()),
+            || Ok(()),
+        );
+
+        assert!(matches!(result, Err(WriteFailure::ConcurrentChange(_))));
+        let old = observed.into_handle();
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            Some(old),
+            Some(replacement),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"external");
+        assert!(!paths.old.exists());
+        assert!(!paths.new.exists());
+        assert!(!paths.marker.exists());
+    }
+
+    #[test]
+    fn interrupted_publication_recovers_the_exact_observed_target() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let observed = RetainedPolicyFile::Real(open_deletable_test_file(&final_path, b"observed"));
+        let marker = open_deletable_test_file(&paths.marker, b"marker");
+        let replacement = open_deletable_test_file(&paths.new, b"replacement");
+
+        let prepared = PreparedTransaction {
+            dir_handle: &dir_file,
+            observed_target: &observed,
+            temp_file: &replacement,
+            paths: &paths,
+            final_path: &final_path,
+        };
+        let result = publish_prepared_transaction(
+            &prepared,
+            || anyhow::bail!("simulated crash after tombstone"),
+            || Ok(()),
+            || Ok(()),
+        );
+        assert!(matches!(result, Err(WriteFailure::PrePublication(_))));
+        assert!(!final_path.exists());
+        assert!(paths.old.exists());
+
+        let old = observed.into_handle();
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            Some(old),
+            Some(replacement),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"observed");
+        assert!(!paths.new.exists());
+        assert!(!paths.marker.exists());
+    }
+
+    #[test]
+    fn changed_post_tombstone_evidence_restores_observed_target_before_conflict() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let observed = RetainedPolicyFile::Real(open_deletable_test_file(&final_path, b"observed"));
+        let marker = open_deletable_test_file(&paths.marker, b"marker");
+        let replacement = open_deletable_test_file(&paths.new, b"replacement");
+        let prepared = PreparedTransaction {
+            dir_handle: &dir_file,
+            observed_target: &observed,
+            temp_file: &replacement,
+            paths: &paths,
+            final_path: &final_path,
+        };
+
+        let result = publish_prepared_transaction(
+            &prepared,
+            || Ok(()),
+            || anyhow::bail!("simulated retained target mutation"),
+            || Ok(()),
+        );
+
+        assert!(matches!(result, Err(WriteFailure::ConcurrentChange(_))));
+        assert_eq!(read_file_from_start(observed.handle()).unwrap(), b"observed");
+        assert!(final_path.exists());
+        assert!(!paths.old.exists());
+
+        drop(observed);
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            None,
+            Some(replacement),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"observed");
+        assert!(!paths.new.exists());
+        assert!(!paths.marker.exists());
+    }
+
+    #[test]
+    fn recovery_preserves_published_replacement_after_interruption() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let observed = RetainedPolicyFile::Real(open_deletable_test_file(&final_path, b"observed"));
+        let marker = open_deletable_test_file(&paths.marker, b"marker");
+        let replacement = open_deletable_test_file(&paths.new, b"replacement");
+
+        let prepared = PreparedTransaction {
+            dir_handle: &dir_file,
+            observed_target: &observed,
+            temp_file: &replacement,
+            paths: &paths,
+            final_path: &final_path,
+        };
+        let result = publish_prepared_transaction(
+            &prepared,
+            || Ok(()),
+            || Ok(()),
+            || anyhow::bail!("simulated crash after publication"),
+        );
+        assert!(matches!(result, Err(WriteFailure::PostPublication(_))));
+        assert_eq!(read_file_from_start(&replacement).unwrap(), b"replacement");
+        assert!(paths.old.exists());
+
+        let old = observed.into_handle();
+        drop(replacement);
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            Some(old),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"replacement");
+        assert!(!paths.old.exists());
+        assert!(!paths.marker.exists());
+    }
+
+    #[test]
+    fn recovery_restores_exact_tombstone_when_final_is_absent() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let new_path = dir.path().join("new");
+        let marker = open_deletable_test_file(&marker_path, b"marker");
+        let old = open_deletable_test_file(&old_path, b"old");
+        let new = open_deletable_test_file(&new_path, b"new");
+
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            OsStr::new("policy.json"),
+            marker,
+            Some(old),
+            Some(new),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(dir.path().join("policy.json")).unwrap(), b"old");
+        assert!(!marker_path.exists());
+        assert!(!old_path.exists());
+        assert!(!new_path.exists());
+    }
+
+    #[test]
+    fn recovery_discards_incomplete_marker_staging_only_when_final_is_present() {
+        let dir = temp_dir();
+        let final_path = dir.path().join("policy.json");
+        let staging_path = dir.path().join("marker.prepare");
+        std::fs::write(&final_path, b"original").unwrap();
+        let staging = open_deletable_test_file(&staging_path, b"partial marker");
+
+        recover_marker_staging(&final_path, staging).unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"original");
+        assert!(!staging_path.exists());
+    }
+
+    #[test]
+    fn recovery_retains_incomplete_marker_staging_when_final_is_absent() {
+        let dir = temp_dir();
+        let final_path = dir.path().join("policy.json");
+        let staging_path = dir.path().join("marker.prepare");
+        let staging = open_deletable_test_file(&staging_path, b"partial marker");
+
+        recover_marker_staging(&final_path, staging).unwrap_err();
+
+        assert_eq!(std::fs::read(&staging_path).unwrap(), b"partial marker");
+        assert!(staging_path.exists());
+    }
+
+    #[test]
+    fn recovery_preserves_original_before_tombstoning() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let marker_path = dir.path().join("marker");
+        let new_path = dir.path().join("new");
+        std::fs::write(&final_path, b"original").unwrap();
+        let marker = open_deletable_test_file(&marker_path, b"marker");
+        let new = open_deletable_test_file(&new_path, b"new");
+
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            None,
+            Some(new),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"original");
+        assert!(!marker_path.exists());
+        assert!(!new_path.exists());
+    }
+
+    #[test]
+    fn recovery_preserves_final_created_after_tombstoning() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let new_path = dir.path().join("new");
+        std::fs::write(&final_path, b"external").unwrap();
+        let marker = open_deletable_test_file(&marker_path, b"marker");
+        let old = open_deletable_test_file(&old_path, b"old");
+        let new = open_deletable_test_file(&new_path, b"new");
+
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            marker,
+            Some(old),
+            Some(new),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"external");
+        assert!(!marker_path.exists());
+        assert!(!old_path.exists());
+        assert!(!new_path.exists());
+    }
+
+    #[test]
+    fn recovery_failure_never_discards_the_only_tombstone() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let marker = open_deletable_test_file(&marker_path, b"marker");
+        let old = open_deletable_test_file(&old_path, b"old");
+
+        recover_verified_transaction(
+            &dir_file,
+            dir.path(),
+            OsStr::new(r"missing\policy.json"),
+            marker,
+            Some(old),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(std::fs::read(&old_path).unwrap(), b"old");
+        assert!(marker_path.exists());
+        assert!(old_path.exists());
+    }
+
+    #[test]
+    fn recovery_rejects_multiple_or_untrusted_remnants() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let id_a = uuid::Uuid::new_v4();
+        let id_b = uuid::Uuid::new_v4();
+        std::fs::write(dir.path().join(format!(".policy.json.txn-{id_a}.marker")), b"untrusted").unwrap();
+        std::fs::write(dir.path().join(format!(".policy.json.txn-{id_b}.marker")), b"untrusted").unwrap();
+        assert!(
+            recover_interrupted_transaction(&dir_file, dir.path(), OsStr::new("policy.json"))
+                .unwrap_err()
+                .to_string()
+                .contains("multiple")
+        );
+
+        std::fs::remove_file(dir.path().join(format!(".policy.json.txn-{id_b}.marker"))).unwrap();
+        assert!(recover_interrupted_transaction(&dir_file, dir.path(), OsStr::new("policy.json")).is_err());
+    }
+
+    #[test]
+    fn create_recovery_rejects_malformed_or_untrusted_remnants() {
+        let dir = temp_dir();
+        let malformed = dir.path().join(format!(".{POLICY_FILE_NAME}.tmp-not-a-uuid"));
+        std::fs::write(&malformed, b"partial").unwrap();
+        assert!(recover_create_temporary_files(dir.path()).is_err());
+
+        std::fs::remove_file(&malformed).unwrap();
+        let untrusted = dir
+            .path()
+            .join(format!(".{POLICY_FILE_NAME}.tmp-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&untrusted, b"partial").unwrap();
+        assert!(recover_create_temporary_files(dir.path()).is_err());
+    }
+
+    #[test]
+    fn transaction_marker_round_trips_exact_state() {
+        let expected = DiskFingerprint::test_active(b"old", 2, 3, 4, 5);
+        let marker =
+            TransactionMarker::from_observation(uuid::Uuid::new_v4(), Path::new(r"C:\policy.json"), &expected, b"new")
+                .unwrap();
+
+        let decoded = TransactionMarker::from_bytes(&marker.to_bytes()).unwrap();
+
+        assert_eq!(decoded.id, marker.id);
+        assert_eq!(decoded.final_leaf, marker.final_leaf);
+        assert_eq!(decoded.old_identity, marker.old_identity);
+        assert_eq!(decoded.old_content_digest, marker.old_content_digest);
+        assert_eq!(decoded.old_security_digest, marker.old_security_digest);
+        assert_eq!(decoded.new_content_digest, marker.new_content_digest);
     }
 
     // ─── probe_write_capability / volume_filesystem_name ──────────────────────

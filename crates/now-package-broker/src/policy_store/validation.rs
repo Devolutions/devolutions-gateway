@@ -31,12 +31,13 @@ use crate::evaluator::wildcard::pattern_compiles;
 /// validation receipt. Bump this whenever validation semantics change, so a receipt
 /// computed by an older/newer broker can never be mistaken for a match against the
 /// current logic.
-pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/2";
+pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/3";
 
 /// Maximum number of rules accepted in a single policy, mirroring the shared contract's
 /// documented schema bound (`schemars(length(max = 1024))` on `PolicyDraftDocument::rules`),
 /// which is not itself enforced at deserialization time.
 const MAX_RULES: usize = 1024;
+const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
 
 /// Authoritatively validate raw draft JSON.
@@ -537,10 +538,19 @@ fn check_supported_match_criteria(idx: usize, rule: &PolicyRule, findings: &mut 
     }
 }
 
-/// `Reason` and the `Constraints` allow/deny collections, none of which are covered by
-/// `serde`/`schemars` enforcement (plain `Option<String>`/`Vec<CustomParameterString>`
-/// fields with no bound-checking `Deserialize` impl of their own).
+/// Enforces the schema-only `Priority`, `Reason`, and constraint collection bounds that Serde does not validate.
 fn check_rule_bounds(idx: usize, rule: &PolicyRule, findings: &mut Vec<PolicyFinding>) {
+    if rule.priority > MAX_RULE_PRIORITY {
+        push_rule_finding(
+            findings,
+            rule,
+            PolicyFindingSeverity::Error,
+            PolicyFindingCode::InvalidFieldValue,
+            format!("/Rules/{idx}/Priority"),
+            format!("Priority {} exceeds the maximum {MAX_RULE_PRIORITY}", rule.priority),
+        );
+    }
+
     if let Some(reason) = &rule.reason {
         check_string_bounds(reason, 0, 512, &format!("/Rules/{idx}/Reason"), findings);
     }
@@ -1430,6 +1440,29 @@ mod tests {
     }
 
     #[test]
+    fn rule_priority_enforces_shared_schema_boundaries() {
+        for accepted in [0, MAX_RULE_PRIORITY] {
+            let mut draft = minimal_draft();
+            draft["Rules"] = json!([rule("r1", json!({ "Priority": accepted }))]);
+            let result = validate_draft(&draft);
+            assert!(result.is_valid, "priority {accepted}: {:?}", result.findings);
+        }
+
+        for rejected in [MAX_RULE_PRIORITY + 1, u32::MAX] {
+            let mut draft = minimal_draft();
+            draft["Rules"] = json!([rule("r1", json!({ "Priority": rejected }))]);
+            let result = validate_draft(&draft);
+            assert!(!result.is_valid, "priority {rejected} must be rejected");
+            assert!(result.findings.iter().any(|finding| {
+                finding.code == PolicyFindingCode::InvalidFieldValue
+                    && finding.path == "/Rules/0/Priority"
+                    && finding.rule_id == Some(now_policy_api::ResourceId::from("r1"))
+                    && finding.message == format!("Priority {rejected} exceeds the maximum {MAX_RULE_PRIORITY}")
+            }));
+        }
+    }
+
+    #[test]
     fn empty_package_names_remain_valid() {
         let mut draft = minimal_draft();
         draft["Rules"] = json!([rule(
@@ -1938,6 +1971,23 @@ mod tests {
                 .iter()
                 .any(|f| f.code == PolicyFindingCode::DuplicateRuleId)
         );
+    }
+
+    #[test]
+    fn committed_policy_with_oversized_rule_priority_is_invalid() {
+        let mut policy = minimal_committed_policy("test-policy", 1);
+        let mut policy_rule: PolicyRule = serde_json::from_value(rule("r1", json!({}))).unwrap();
+        policy_rule.priority = MAX_RULE_PRIORITY + 1;
+        policy.rules.push(policy_rule);
+
+        let result = validate_committed_policy(&policy);
+
+        assert!(!result.is_valid);
+        assert!(result.findings.iter().any(|finding| {
+            finding.code == PolicyFindingCode::InvalidFieldValue
+                && finding.path == "/Rules/0/Priority"
+                && finding.rule_id == Some(now_policy_api::ResourceId::from("r1"))
+        }));
     }
 
     #[test]
