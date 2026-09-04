@@ -37,6 +37,7 @@ pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/2";
 /// documented schema bound (`schemars(length(max = 1024))` on `PolicyDraftDocument::rules`),
 /// which is not itself enforced at deserialization time.
 const MAX_RULES: usize = 1024;
+const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
 
 /// Authoritatively validate raw draft JSON.
 ///
@@ -175,6 +176,15 @@ fn finding(
     path: impl Into<String>,
     message: impl Into<String>,
 ) -> PolicyFinding {
+    let message = message.into();
+    let message = if message.chars().count() <= MAX_FINDING_MESSAGE_CHARS {
+        message
+    } else {
+        let mut bounded = message.chars().take(MAX_FINDING_MESSAGE_CHARS - 3).collect::<String>();
+        bounded.push_str("...");
+        bounded
+    };
+
     PolicyFinding {
         finding_version: API_VERSION_STR.into(),
         severity,
@@ -182,7 +192,7 @@ fn finding(
         path: path.into(),
         rule_id: None,
         arguments: BTreeMap::new(),
-        message: message.into(),
+        message,
     }
 }
 
@@ -1822,6 +1832,28 @@ mod tests {
                 .iter()
                 .any(|f| f.code == PolicyFindingCode::InvalidWildcardPattern)
         );
+        assert!(findings.iter().all(|finding| {
+            finding.message.chars().count() <= MAX_FINDING_MESSAGE_CHARS && finding.message.ends_with("...")
+        }));
+    }
+
+    #[test]
+    fn finding_messages_are_bounded_by_unicode_character_count() {
+        let within_limit = error(
+            PolicyFindingCode::SchemaViolation,
+            "",
+            "\u{00e9}".repeat(MAX_FINDING_MESSAGE_CHARS),
+        );
+        assert_eq!(within_limit.message.chars().count(), MAX_FINDING_MESSAGE_CHARS);
+        assert!(!within_limit.message.ends_with("..."));
+
+        let over_limit = error(
+            PolicyFindingCode::SchemaViolation,
+            "",
+            "\u{00e9}".repeat(MAX_FINDING_MESSAGE_CHARS + 1),
+        );
+        assert_eq!(over_limit.message.chars().count(), MAX_FINDING_MESSAGE_CHARS);
+        assert!(over_limit.message.ends_with("..."));
     }
 
     #[test]

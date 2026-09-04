@@ -1,4 +1,20 @@
 //! Package broker pipe client authentication.
+//!
+//! `ProcessImageFileMapping`, retained-handle Authenticode, and current file and ancestor ACL checks authenticate approved image and file provenance when the broker accepts a connection.
+//! They do not attest runtime code integrity or prove that the current stream bytes are the bytes originally mapped into the process.
+//! The checks reject an untrusted caller that creates an image section and then rewrites the same stream because the retained file or its path fails the trusted-writer policy.
+//!
+//! Same-integrity injection or hollowing of an approved non-PPL process is outside signed-image authentication.
+//! For read, management, and validation operations, controlling that process grants no authority beyond what the same local user can exercise by running signed UniGetUI.
+//! Policy replacement independently requires the actual pipe client token to be elevated with the Administrators group enabled.
+//! A standard or medium-integrity user who injects a medium-integrity approved process therefore cannot replace policy.
+//! SYSTEM and elevated-Administrator injection are inside the policy-write trust boundary.
+//! Stronger runtime integrity requires an OS-enforced boundary such as an appropriate WDAC policy or compatible PPL protection levels for the caller and broker.
+//!
+//! Current ACL verification cannot reconstruct historical write access.
+//! The provenance guarantee assumes the approved binary and every ancestor were secure when created and have never been writable by an untrusted principal.
+//! After an ACL or path compromise, operators must reinstall or remediate the deployment before trusting it again.
+//! Installer and package verification should establish secure deployment, while these checks fail closed on present insecurity.
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -20,10 +36,19 @@ use win_api_wrappers::thread::Thread;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
-use windows::Win32::Storage::FileSystem::{FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE};
-use windows::Win32::System::Threading::{PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::Storage::FileSystem::{
+    FILE_EXECUTE, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+};
+use windows::Win32::System::Threading::{
+    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+};
+
+use crate::policy_security::RetainedExecutableSecurity;
 
 const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
+const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(
+    PROCESS_QUERY_INFORMATION.0 | PROCESS_QUERY_LIMITED_INFORMATION.0 | PROCESS_VM_READ.0 | PROCESS_SYNCHRONIZE.0,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProcessInstanceIdentity {
@@ -38,6 +63,7 @@ pub(crate) struct PipeClient {
     process: Option<Arc<Process>>,
     executable_path: PathBuf,
     executable_file: Option<Arc<File>>,
+    executable_security: Option<Arc<RetainedExecutableSecurity>>,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
     /// Whether the pipe client process token is elevated, captured at connect.
@@ -54,29 +80,50 @@ pub(crate) struct PipeClient {
 impl PipeClient {
     /// Captures the identity of the process on the other end of a connected pipe instance.
     ///
-    /// Deliberately limited to fast, local syscalls (no account-name resolution, which may
-    /// hit a domain controller), because it runs before any signature gate and is therefore
-    /// unauthenticated work a connection flood can trigger.
-    pub(crate) fn from_connected_pipe(server: &NamedPipeServer) -> anyhow::Result<Self> {
+    /// This unauthenticated identity capture performs blocking process and local-filesystem checks,
+    /// so callers must run it as bounded blocking work.
+    /// Account-name resolution remains deferred because it may contact a domain controller.
+    pub(crate) fn from_connected_pipe(
+        server: &NamedPipeServer,
+        skip_signature_validation: bool,
+    ) -> anyhow::Result<Self> {
+        Self::from_connected_pipe_with_security(server, !signature_validation_skipped(skip_signature_validation))
+    }
+
+    fn from_connected_pipe_with_security(
+        server: &NamedPipeServer,
+        enforce_executable_security: bool,
+    ) -> anyhow::Result<Self> {
         let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
         let process = Arc::new(
-            Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)
-                .with_context(|| format!("failed to open pipe client process {process_id}"))?,
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS).with_context(|| {
+                format!("failed to open pipe client process {process_id} for image identity capture")
+            })?,
         );
         Self::ensure_process_active(process_id, &process)?;
         let process_instance = process_instance_identity(process_id, &process)?;
         let token = connected_pipe_client_token(server).context("failed to capture pipe client token")?;
-        let client = Self::from_process_and_token(process_instance, Arc::clone(&process), token)?;
+        let client = Self::from_process_and_token(
+            process_instance,
+            Arc::clone(&process),
+            token,
+            enforce_executable_security,
+        )?;
         let confirmed_process_id =
             connected_pipe_client_process_id(server).context("failed to confirm pipe client process id")?;
         if confirmed_process_id != process_id {
             bail!("pipe client process changed while its identity was captured");
         }
         Self::ensure_process_active(process_id, &process)?;
-        let confirmation = Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)
+        let confirmation = Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
             .with_context(|| format!("failed to reopen pipe client process {process_id}"))?;
         ensure_same_process_instance(process_instance, process_instance_identity(process_id, &confirmation)?)?;
         Ok(client)
+    }
+
+    #[cfg(test)]
+    fn from_connected_pipe_without_executable_security(server: &NamedPipeServer) -> anyhow::Result<Self> {
+        Self::from_connected_pipe_with_security(server, false)
     }
 
     fn ensure_process_active(process_id: u32, process: &Process) -> anyhow::Result<()> {
@@ -93,19 +140,34 @@ impl PipeClient {
     #[cfg(test)]
     fn from_process_id(process_id: u32) -> anyhow::Result<Self> {
         let process = Arc::new(
-            Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)
-                .with_context(|| format!("failed to open pipe client process {process_id}"))?,
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS).with_context(|| {
+                format!("failed to open pipe client process {process_id} for image identity capture")
+            })?,
         );
         let token = process
             .token(TOKEN_QUERY | TOKEN_DUPLICATE)
             .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
-        Self::from_process_and_token(process_instance_identity(process_id, &process)?, process, token)
+        Self::from_process_and_token(process_instance_identity(process_id, &process)?, process, token, false)
+    }
+
+    #[cfg(test)]
+    fn from_process_id_with_security(process_id: u32) -> anyhow::Result<Self> {
+        let process = Arc::new(
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS).with_context(|| {
+                format!("failed to open pipe client process {process_id} for image identity capture")
+            })?,
+        );
+        let token = process
+            .token(TOKEN_QUERY | TOKEN_DUPLICATE)
+            .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
+        Self::from_process_and_token(process_instance_identity(process_id, &process)?, process, token, true)
     }
 
     fn from_process_and_token(
         process_instance: ProcessInstanceIdentity,
         process: Arc<Process>,
         token: Token,
+        enforce_executable_security: bool,
     ) -> anyhow::Result<Self> {
         let process_id = process_instance.process_id;
         let process_token = process
@@ -127,24 +189,36 @@ impl PipeClient {
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
-        let native_executable_path = process
-            .exe_path_native()
-            .with_context(|| format!("failed to query pipe client process {process_id} native executable path"))?;
-        let executable_file = Arc::new(open_native_executable_file(&native_executable_path).with_context(|| {
+        let (_image_address, mapped_executable_path) = process
+            .main_image_mapped_path()
+            .with_context(|| format!("failed to query pipe client process {process_id} mapped executable image"))?;
+        if !is_supported_local_image_path(&mapped_executable_path) {
+            bail!("pipe client process {process_id} mapped executable is not on a supported local volume");
+        }
+        let executable_file = Arc::new(open_native_executable_file(&mapped_executable_path).with_context(|| {
             format!(
-                "failed to retain pipe client executable '{}'",
+                "failed to retain pipe client process {process_id} mapped executable '{}'",
                 executable_path.display()
             )
         })?);
-        let confirmed_native_executable_path = process
-            .exe_path_native()
-            .with_context(|| format!("failed to confirm pipe client process {process_id} native executable path"))?;
-        if !crate::policy_security::paths_match_case_insensitive(
-            &native_executable_path,
-            &confirmed_native_executable_path,
-        ) {
-            bail!("pipe client executable changed while its identity was captured");
-        }
+        process.verify_image_file_mapping(&executable_file).with_context(|| {
+            format!("pipe client process {process_id} mapped executable file does not match its image")
+        })?;
+        let executable_security = enforce_executable_security
+            .then(|| {
+                crate::policy_security::verify_retained_executable_security(
+                    &executable_file,
+                    "package broker pipe client executable",
+                )
+                .with_context(|| {
+                    format!(
+                        "pipe client process {process_id} executable '{}' failed trusted-writer security validation",
+                        executable_path.display()
+                    )
+                })
+            })
+            .transpose()?
+            .map(Arc::new);
         let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
@@ -173,6 +247,9 @@ impl PipeClient {
         {
             bail!("pipe client process security context does not match the connected client token");
         }
+        process
+            .verify_image_file_mapping(&executable_file)
+            .with_context(|| format!("pipe client process {process_id} executable image changed during capture"))?;
 
         Ok(Self {
             process_id,
@@ -180,6 +257,7 @@ impl PipeClient {
             process: Some(process),
             executable_path,
             executable_file: Some(executable_file),
+            executable_security,
             user_sid,
             is_elevated,
             is_administrator,
@@ -207,6 +285,7 @@ impl PipeClient {
             process: None,
             executable_path,
             executable_file: None,
+            executable_security: None,
             user_sid,
             is_elevated: true,
             is_administrator: true,
@@ -224,6 +303,7 @@ impl PipeClient {
             process: None,
             executable_path,
             executable_file: None,
+            executable_security: None,
             user_sid,
             is_elevated: false,
             is_administrator: false,
@@ -285,6 +365,9 @@ impl PipeClient {
             return Ok(());
         }
 
+        self.executable_security
+            .as_ref()
+            .context("pipe client executable trusted-writer security guard is not retained")?;
         let executable_file = self
             .executable_file
             .as_deref()
@@ -464,7 +547,7 @@ fn ensure_same_process_instance(
 
 fn open_executable_file(path: &Path) -> anyhow::Result<File> {
     OpenOptions::new()
-        .access_mode(GENERIC_READ.0 | FILE_READ_ATTRIBUTES.0)
+        .access_mode(GENERIC_READ.0 | FILE_READ_ATTRIBUTES.0 | FILE_EXECUTE.0)
         .share_mode(FILE_SHARE_READ.0)
         .open(path)
         .context("failed to open executable without write or delete sharing")
@@ -474,6 +557,11 @@ fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
     let mut global_root_path = OsString::from(r"\\?\GLOBALROOT");
     global_root_path.push(native_path.as_os_str());
     open_executable_file(Path::new(&global_root_path))
+}
+
+fn is_supported_local_image_path(path: &Path) -> bool {
+    let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
+    path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
 }
 
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
@@ -552,6 +640,7 @@ mod tests {
             process: None,
             executable_path: PathBuf::new(),
             executable_file: None,
+            executable_security: None,
             user_sid: system_sid(),
             is_elevated: true,
             is_administrator: true,
@@ -578,7 +667,8 @@ mod tests {
         let _client = client_task.await.expect("join test client").expect("open test pipe");
 
         let expected = PipeClient::from_current_process().expect("capture current process identity");
-        let actual = PipeClient::from_connected_pipe(&server).expect("capture connected pipe client identity");
+        let actual = PipeClient::from_connected_pipe_without_executable_security(&server)
+            .expect("capture connected pipe client identity");
 
         assert_eq!(actual.process_id, expected.process_id);
         assert_eq!(actual.user_sid, expected.user_sid);
@@ -713,6 +803,45 @@ mod tests {
     }
 
     #[test]
+    fn process_image_file_mapping_accepts_the_main_image_and_rejects_a_signed_substitute() {
+        let process = Process::get_by_pid(std::process::id(), PROCESS_IDENTITY_ACCESS).expect("open current process");
+        let executable =
+            open_executable_file(&std::env::current_exe().expect("current executable")).expect("open current image");
+        process
+            .verify_image_file_mapping(&executable)
+            .expect("current executable must match its process image");
+
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let signed_substitute = open_executable_file(&PathBuf::from(windows_dir).join(r"System32\cmd.exe"))
+            .expect("open signed substitute");
+        process
+            .verify_image_file_mapping(&signed_substitute)
+            .expect_err("a different signed image mapping must not substitute for the main executable");
+    }
+
+    #[test]
+    fn mapped_image_path_rejects_network_and_non_volume_devices() {
+        assert!(is_supported_local_image_path(Path::new(
+            r"\Device\HarddiskVolume3\Program Files\Devolutions\client.exe"
+        )));
+        assert!(is_supported_local_image_path(Path::new(
+            r"\Device\Volume{01234567-89ab-cdef-0123-456789abcdef}\client.exe"
+        )));
+
+        for path in [
+            r"\Device\Mup\server\share\client.exe",
+            r"\Device\LanmanRedirector\server\share\client.exe",
+            r"\Device\WebDavRedirector\server\share\client.exe",
+            r"\??\UNC\server\share\client.exe",
+            r"\\server\share\client.exe",
+        ] {
+            assert!(!is_supported_local_image_path(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
     fn retained_executable_handle_rejects_junction_retarget_to_signed_file() {
         use win_api_wrappers::security::crypt::{
             AuthenticodeSignatureStatus, authenticode_status, authenticode_status_for_file,
@@ -772,49 +901,234 @@ mod tests {
     }
 
     #[test]
-    fn process_capture_uses_the_mapped_image_instead_of_a_retargeted_launch_path() {
+    fn process_capture_uses_the_running_image_instead_of_a_signed_path_replacement() {
         let Some(windows_dir) = std::env::var_os("WINDIR") else {
             return;
         };
         let root = tempfile::tempdir().expect("create process image test directory");
-        let original_dir = PathBuf::from(&windows_dir).join("System32");
-        let replacement_dir = root.path().join("replacement");
-        std::fs::create_dir(&replacement_dir).expect("create replacement directory");
-        let original_file = original_dir.join("cmd.exe");
-        let replacement_file = replacement_dir.join("cmd.exe");
-        std::fs::copy(
-            PathBuf::from(&windows_dir).join(r"System32\where.exe"),
-            &replacement_file,
-        )
-        .expect("copy replacement executable");
-
-        let junction = root.path().join("client-dir");
-        create_directory_junction(&junction, &original_dir);
-        let aliased_file = junction.join("cmd.exe");
-        let mut child = std::process::Command::new(&aliased_file)
-            .args(["/D", "/C", "ping -n 30 127.0.0.1 > nul"])
+        let launch_path = root.path().join("client.exe");
+        let mapped_path = root.path().join("mapped-client.exe");
+        std::fs::copy(std::env::current_exe().expect("current test executable"), &launch_path)
+            .expect("copy unsigned process image");
+        let mut child = std::process::Command::new(&launch_path)
+            .args(["--exact", "auth::tests::process_reimaging_child", "--ignored"])
             .spawn()
-            .expect("start executable through junction");
+            .expect("start unsigned copied executable");
+        let process = Process::get_by_pid(child.id(), PROCESS_IDENTITY_ACCESS).expect("open child process");
+        let reported_launch_path = process.exe_path().expect("query reported process path");
+        assert!(crate::policy_security::paths_match_case_insensitive(
+            &reported_launch_path,
+            &launch_path
+        ));
 
-        std::fs::remove_dir(&junction).expect("remove original junction");
-        create_directory_junction(&junction, &replacement_dir);
-        let client = PipeClient::from_process_id(child.id()).expect("capture process image identity");
+        std::fs::rename(&launch_path, &mapped_path).expect("rename the running mapped executable");
+        std::fs::copy(PathBuf::from(&windows_dir).join(r"System32\cmd.exe"), &launch_path)
+            .expect("place signed executable at cached launch path");
+
+        let path_status = win_api_wrappers::security::crypt::authenticode_status(&reported_launch_path)
+            .expect("verify signed path replacement");
+        assert!(matches!(
+            path_status.status,
+            win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid
+        ));
+        let (_, mapped_native_path) = process
+            .main_image_mapped_path()
+            .expect("locate the running image section");
+        let mapped_candidate =
+            open_native_executable_file(&mapped_native_path).expect("open the running image candidate");
+        process
+            .verify_image_file_mapping(&mapped_candidate)
+            .expect("renamed running image must match its process");
+        let signed_replacement = open_executable_file(&launch_path).expect("open signed path replacement");
+        process
+            .verify_image_file_mapping(&signed_replacement)
+            .expect_err("signed replacement must not match the process image file mapping");
+        let security_error = PipeClient::from_process_id_with_security(child.id())
+            .expect_err("a user-writable process image must fail trusted-writer security");
+        assert!(
+            security_error
+                .to_string()
+                .contains("trusted-writer security validation"),
+            "unexpected security error: {security_error:#}"
+        );
+
+        let client = PipeClient::from_process_id(child.id()).expect("capture section-backed process image identity");
         let retained_id = file_id_from_handle(client.executable_file.as_deref().expect("retained executable"))
             .expect("query retained executable identity");
 
         assert!(same_file(
             &retained_id,
-            &file_id(&original_file).expect("query original executable identity")
+            &file_id(&mapped_path).expect("query running mapped executable identity")
         ));
         assert!(!same_file(
             &retained_id,
-            &file_id(&replacement_file).expect("query replacement executable identity")
+            &file_id(&launch_path).expect("query signed replacement executable identity")
         ));
+        let retained_status = win_api_wrappers::security::crypt::authenticode_status_for_file(
+            client.executable_path(),
+            client.executable_file.as_deref().expect("retained executable"),
+        );
+        assert!(
+            match retained_status {
+                Ok(status) => !matches!(
+                    status.status,
+                    win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid
+                ),
+                Err(_) => true,
+            },
+            "section-backed verification must reject the unsigned mapped image"
+        );
 
         child.kill().expect("terminate child");
         child.wait().expect("wait for child");
         drop(client);
-        std::fs::remove_dir(&junction).expect("remove replacement junction");
+    }
+
+    #[test]
+    fn same_stream_signed_rewrite_passes_class_44_but_fails_caller_security() {
+        use std::ffi::c_void;
+        use std::io::{Seek as _, SeekFrom, Write as _};
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use std::os::windows::io::AsRawHandle as _;
+
+        use win_api_wrappers::handle::Handle;
+        use windows::Win32::Foundation::{HANDLE, NTSTATUS};
+        use windows::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
+        use windows::Win32::System::Threading::{GetCurrentProcess, PROCESS_ALL_ACCESS};
+
+        const SECTION_ALL_ACCESS: u32 = 0x000F_001F;
+        const PAGE_READONLY: u32 = 0x02;
+        const SEC_IMAGE: u32 = 0x0100_0000;
+
+        #[link(name = "ntdll")]
+        unsafe extern "system" {
+            fn NtCreateSection(
+                section_handle: *mut HANDLE,
+                desired_access: u32,
+                object_attributes: *const c_void,
+                maximum_size: *const i64,
+                section_page_protection: u32,
+                allocation_attributes: u32,
+                file_handle: HANDLE,
+            ) -> NTSTATUS;
+            fn NtCreateProcessEx(
+                process_handle: *mut HANDLE,
+                desired_access: u32,
+                object_attributes: *const c_void,
+                parent_process: HANDLE,
+                flags: u32,
+                section_handle: HANDLE,
+                debug_port: HANDLE,
+                exception_port: HANDLE,
+                job_member_level: u32,
+            ) -> NTSTATUS;
+        }
+
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let root = tempfile::tempdir().expect("create same-stream test directory");
+        let image_path = root.path().join("client.exe");
+        let signed_bytes =
+            std::fs::read(PathBuf::from(windows_dir).join(r"System32\cmd.exe")).expect("read signed control image");
+        let mut unsigned_bytes = signed_bytes.clone();
+        let dos_stub_byte = unsigned_bytes
+            .get_mut(0x40)
+            .expect("signed control image must contain a DOS stub");
+        *dos_stub_byte ^= 1;
+        std::fs::write(&image_path, &unsigned_bytes).expect("write tampered process image");
+        assert!(
+            !win_api_wrappers::security::crypt::authenticode_status(&image_path).is_ok_and(|status| matches!(
+                status.status,
+                win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid
+            )),
+            "the image used to create the process must not retain a valid signature"
+        );
+
+        let mut writer = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .open(&image_path)
+            .expect("open image stream for the herpaderping control");
+
+        let mut section_handle = HANDLE::default();
+        // SAFETY: All optional pointers are null, `writer` supplies a live file handle,
+        // and the returned section handle is wrapped immediately.
+        unsafe {
+            NtCreateSection(
+                &mut section_handle,
+                SECTION_ALL_ACCESS,
+                std::ptr::null(),
+                std::ptr::null(),
+                PAGE_READONLY,
+                SEC_IMAGE,
+                HANDLE(writer.as_raw_handle()),
+            )
+        }
+        .ok()
+        .expect("create image section from the unsigned stream");
+        // SAFETY: NtCreateSection returned an owned section handle.
+        let section = unsafe { Handle::new_owned(section_handle) }.expect("retain image section");
+
+        let mut process_handle = HANDLE::default();
+        // SAFETY: GetCurrentProcess has no preconditions and returns a pseudo handle.
+        let parent_process = unsafe { GetCurrentProcess() };
+        // SAFETY: `section` is a live SEC_IMAGE section and the current-process pseudo
+        // handle is valid. The returned process handle is wrapped immediately.
+        unsafe {
+            NtCreateProcessEx(
+                &mut process_handle,
+                PROCESS_ALL_ACCESS.0,
+                std::ptr::null(),
+                parent_process,
+                0,
+                section.raw(),
+                HANDLE::default(),
+                HANDLE::default(),
+                0,
+            )
+        }
+        .ok()
+        .expect("create process from the unsigned image section");
+        // SAFETY: NtCreateProcessEx returned an owned process handle.
+        let process = Process::from(unsafe { Handle::new_owned(process_handle) }.expect("retain created process"));
+        drop(section);
+
+        writer.seek(SeekFrom::Start(0)).expect("rewind image stream");
+        writer.write_all(&signed_bytes).expect("write signed replacement bytes");
+        writer.sync_all().expect("flush signed replacement bytes");
+        drop(writer);
+
+        let (_, mapped_native_path) = process
+            .main_image_mapped_path()
+            .expect("locate the created process image section");
+        let candidate = open_native_executable_file(&mapped_native_path).expect("open same-stream candidate");
+        process
+            .verify_image_file_mapping(&candidate)
+            .expect("class 44 must still match the same rewritten file object");
+        let path_status = win_api_wrappers::security::crypt::authenticode_status_for_file(&image_path, &candidate)
+            .expect("verify signed rewritten stream");
+        assert!(matches!(
+            path_status.status,
+            win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid
+        ));
+
+        let error = crate::policy_security::verify_retained_executable_security(
+            &candidate,
+            "package broker pipe client executable",
+        )
+        .expect_err("trusted-writer security must reject a user-writable rewritten image");
+        assert!(
+            error.to_string().contains("is not a trusted principal"),
+            "unexpected security error: {error:#}"
+        );
+    }
+
+    #[test]
+    #[ignore = "helper process for the process-reimaging regression"]
+    fn process_reimaging_child() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
     }
 
     fn create_directory_junction(link: &Path, target: &Path) {

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
+use std::fs::File;
 use std::os::windows::ffi::OsStringExt;
+use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::{ptr, slice};
@@ -22,14 +24,15 @@ use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnviron
 use windows::Win32::System::LibraryLoader::{
     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GetModuleFileNameW, GetModuleHandleExW, GetProcAddress,
 };
+use windows::Win32::System::ProcessStatus::K32GetMappedFileNameW;
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
     GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
-    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_FORMAT, PROCESS_NAME_NATIVE,
-    PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW,
-    STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
+    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE,
+    QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -43,7 +46,10 @@ use crate::security::attributes::SecurityAttributes;
 use crate::security::privilege::{self, ScopedPrivileges};
 use crate::thread::Thread;
 use crate::token::Token;
-use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
+use crate::undoc::{
+    NtQueryInformationProcess, ProcessBasicInformation, ProcessImageFileMapping, ProcessImageInformation,
+    RTL_USER_PROCESS_PARAMETERS, SECTION_IMAGE_INFORMATION,
+};
 use crate::utils::{Allocation, AnsiString, ComContext, CommandLine, WideString, u32size_of};
 
 #[derive(Debug)]
@@ -70,14 +76,6 @@ impl Process {
     }
 
     pub fn exe_path(&self) -> Result<PathBuf> {
-        self.exe_path_with_format(PROCESS_NAME_WIN32)
-    }
-
-    pub fn exe_path_native(&self) -> Result<PathBuf> {
-        self.exe_path_with_format(PROCESS_NAME_NATIVE)
-    }
-
-    fn exe_path_with_format(&self, format: PROCESS_NAME_FORMAT) -> Result<PathBuf> {
         let mut path = Vec::with_capacity(MAX_PATH as usize);
 
         let mut status;
@@ -89,7 +87,7 @@ impl Process {
             status = unsafe {
                 QueryFullProcessImageNameW(
                     self.handle.raw(),
-                    format,
+                    PROCESS_NAME_WIN32,
                     windows::core::PWSTR(path.as_mut_ptr()),
                     &mut length,
                 )
@@ -111,6 +109,77 @@ impl Process {
         unsafe { path.set_len(length as usize) };
 
         Ok(OsString::from_wide(&path).into())
+    }
+
+    /// Returns an address and candidate native path for the process's main image.
+    ///
+    /// `ProcessImageInformation` comes from the kernel image section rather than the
+    /// target-controlled PEB or loader module list.
+    /// Callers must confirm the opened candidate with [`Process::verify_image_file_mapping`].
+    pub fn main_image_mapped_path(&self) -> Result<(usize, PathBuf)> {
+        let mut image = SECTION_IMAGE_INFORMATION::default();
+
+        // SAFETY: `image` is a writable buffer with the exact native structure size.
+        unsafe {
+            NtQueryInformationProcess(
+                self.handle.raw(),
+                ProcessImageInformation,
+                (&raw mut image).cast(),
+                u32size_of::<SECTION_IMAGE_INFORMATION>(),
+                None,
+            )
+        }?;
+
+        let image_address = image.TransferAddress as usize;
+        if image_address == 0 {
+            bail!(Error::NullPointer("SECTION_IMAGE_INFORMATION::TransferAddress"));
+        }
+        let mut capacity = MAX_PATH as usize;
+        loop {
+            let mut path = vec![0u16; capacity];
+
+            // SAFETY: `image_address` is inside the kernel-reported main image section,
+            // and `path` is a writable UTF-16 output buffer.
+            let length = unsafe {
+                K32GetMappedFileNameW(self.handle.raw(), image_address as *const c_void, path.as_mut_slice())
+            };
+            if length == 0 {
+                bail!(Error::last_error());
+            }
+            if usize::try_from(length).expect("u32 fits in usize") < path.len() {
+                path.truncate(length as usize);
+                return Ok((image_address, OsString::from_wide(&path).into()));
+            }
+
+            capacity = capacity
+                .checked_mul(2)
+                .filter(|capacity| u16::try_from(*capacity).is_ok())
+                .context("main image mapped path is too long")?;
+        }
+    }
+
+    /// Verifies that `file` shares the section-object pointer used by this process's main image.
+    ///
+    /// `ProcessImageFileMapping` compares the kernel file objects' section pointers.
+    /// It identifies the backing file object but does not attest the bytes originally mapped
+    /// into the image section.
+    /// The file handle is an input buffer despite `NtQueryInformationProcess`'s generic output-buffer signature.
+    /// The handle must include `SYNCHRONIZE | FILE_EXECUTE` access.
+    pub fn verify_image_file_mapping(&self, file: &File) -> Result<()> {
+        let mut file_handle = HANDLE(file.as_raw_handle());
+
+        // SAFETY: ProcessImageFileMapping reads one valid HANDLE-sized input value.
+        unsafe {
+            NtQueryInformationProcess(
+                self.handle.raw(),
+                ProcessImageFileMapping,
+                (&raw mut file_handle).cast(),
+                u32size_of::<HANDLE>(),
+                None,
+            )
+        }?;
+
+        Ok(())
     }
 
     pub fn creation_time(&self) -> Result<SystemTime> {

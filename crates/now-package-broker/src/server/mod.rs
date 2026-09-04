@@ -873,7 +873,7 @@ mod tests {
         fn authorization_audit(
             client: PipeClient,
             skip_signature_validation: bool,
-        ) -> (ErrorResponse, Vec<PolicyWriteAuthorizationAudit>) {
+        ) -> (Result<(), ErrorResponse>, Vec<PolicyWriteAuthorizationAudit>) {
             let mut broker_state = state();
             broker_state.skip_signature_validation = skip_signature_validation;
             let connection = BrokerConnection {
@@ -882,18 +882,17 @@ mod tests {
             };
             let mut audit = Vec::new();
 
-            let error = connection
-                .authorize_policy_write(|event| audit.push(event))
-                .expect_err("client should be denied");
+            let result = connection.authorize_policy_write(|event| audit.push(event));
 
-            (error, audit)
+            (result, audit)
         }
 
         #[test]
         fn denied_policy_writes_audit_attempt_before_authorization_denial() {
             let unauthenticated =
                 PipeClient::test_unelevated(system_sid(), PathBuf::from("unsigned-policy-client.exe"));
-            let (error, audit) = authorization_audit(unauthenticated, false);
+            let (result, audit) = authorization_audit(unauthenticated, false);
+            let error = result.expect_err("unsigned client should be denied");
             assert_eq!(error.code, ErrorCode::Unauthorized);
             assert_eq!(
                 audit,
@@ -904,7 +903,8 @@ mod tests {
             );
 
             let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("unelevated.exe"));
-            let (error, audit) = authorization_audit(unelevated, true);
+            let (result, audit) = authorization_audit(unelevated, true);
+            let error = result.expect_err("unelevated client should be denied");
             assert_eq!(error.code, ErrorCode::AdministratorRequired);
             assert_eq!(
                 audit,
@@ -913,6 +913,28 @@ mod tests {
                     PolicyWriteAuthorizationAudit::Denied("pipe client token is not an elevated Administrator")
                 ]
             );
+        }
+
+        #[test]
+        fn elevation_gate_is_independent_of_signature_and_image_checks() {
+            // The test-only provenance bypass models injected-equivalent control of an approved process image.
+            let unelevated = PipeClient::test_unelevated(system_sid(), PathBuf::from("approved-policy-client.exe"));
+            let (result, audit) = authorization_audit(unelevated, true);
+            let error = result.expect_err("an unelevated injected-equivalent client cannot replace policy");
+            assert_eq!(error.code, ErrorCode::AdministratorRequired);
+            assert_eq!(
+                audit,
+                [
+                    PolicyWriteAuthorizationAudit::Attempted,
+                    PolicyWriteAuthorizationAudit::Denied("pipe client token is not an elevated Administrator")
+                ]
+            );
+
+            let elevated =
+                PipeClient::test_elevated_administrator(system_sid(), PathBuf::from("approved-policy-client.exe"));
+            let (result, audit) = authorization_audit(elevated, true);
+            result.expect("an elevated Administrator independently satisfies the policy-write authorization gate");
+            assert_eq!(audit, [PolicyWriteAuthorizationAudit::Attempted]);
         }
 
         #[tokio::test]

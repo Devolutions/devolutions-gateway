@@ -44,7 +44,7 @@ pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
 /// subdirectory of it: `Agent` is shared with unrelated Agent features and its own
 /// ancestor-security check must tolerate whatever grants those features require there,
 /// which can never be proven as strict as the dedicated policy directory itself needs
-/// its *own* ancestor chain to be (see [`policy_security::verify_directory_ancestor_chain`]).
+/// its *own* ancestor chain to be (see [`policy_security::verify_policy_ancestor_chain`]).
 /// A directory nested under `Agent` would inherit `Agent` as an ancestor and could never
 /// honestly advertise [`PolicyWriteCapability::Writable`]. This dedicated root is created
 /// and secured by this crate alone (both by the Agent installer at install time and, as
@@ -194,7 +194,7 @@ fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
 /// Fails closed on any ambiguity: missing path, wrong object type, or reparse point.
 ///
 /// This only verifies `path` itself; callers additionally verify the ancestor chain with
-/// [`policy_security::verify_directory_ancestor_chain`], so an untrusted principal further
+/// [`policy_security::verify_policy_ancestor_chain`], so an untrusted principal further
 /// up the tree (e.g. on the shared `%ProgramData%\Devolutions\Agent` parent, where the
 /// installer grants `LOCAL SERVICE` write access for unrelated Agent features) cannot
 /// delete or replace this directory out from under an already-verified identity check.

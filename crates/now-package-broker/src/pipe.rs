@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use win_api_wrappers::identity::sid::Sid;
@@ -76,13 +77,14 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                                 // Capture may open a network-backed executable path. Keep
                                 // that blocking work off the accept loop and retain the
                                 // connection slot until it completes, even after a timeout.
-                                let capture = tokio::task::spawn_blocking(move || {
-                                    let client = PipeClient::from_connected_pipe(&server);
-                                    (server, permit, client)
+                                let skip_signature_validation = state.skip_signature_validation;
+                                let capture = spawn_bounded_capture(permit, move || {
+                                    let client = PipeClient::from_connected_pipe(&server, skip_signature_validation);
+                                    (server, client)
                                 });
-                                let (server, _permit, client) = match capture.await {
-                                    Ok((server, permit, Ok(client))) => (server, permit, client),
-                                    Ok((_server, _permit, Err(error))) => {
+                                let (_permit, server, client) = match capture.await {
+                                    Ok((permit, (server, Ok(client)))) => (permit, server, client),
+                                    Ok((_permit, (_server, Err(error)))) => {
                                         warn!(%error, "Rejected named pipe client");
                                         return;
                                     }
@@ -116,6 +118,14 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
             }
         }
     }
+}
+
+fn spawn_bounded_capture<T, F>(permit: OwnedSemaphorePermit, capture: F) -> JoinHandle<(OwnedSemaphorePermit, T)>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || (permit, capture()))
 }
 
 fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result<NamedPipeServer> {
@@ -180,4 +190,54 @@ fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security
     .init();
 
     Ok(attrs)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn timed_out_capture_keeps_its_permit_until_blocking_work_finishes() {
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = Arc::clone(&permits).acquire_owned().await.expect("acquire permit");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let capture = spawn_bounded_capture(permit, move || {
+            started_tx.send(()).expect("signal capture start");
+            release_rx.recv().expect("wait for capture release");
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("blocking capture should start");
+
+        assert!(tokio::time::timeout(Duration::from_millis(10), capture).await.is_err());
+        assert_eq!(permits.available_permits(), 0);
+
+        release_tx.send(()).expect("release blocking capture");
+        for _ in 0..100 {
+            if permits.available_permits() == 1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("detached capture did not release its permit after completing");
+    }
+
+    #[tokio::test]
+    async fn completed_capture_returns_its_permit_to_the_connection_task() {
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = Arc::clone(&permits).acquire_owned().await.expect("acquire permit");
+
+        let (permit, value) = spawn_bounded_capture(permit, || 42)
+            .await
+            .expect("join blocking capture");
+
+        assert_eq!(value, 42);
+        assert_eq!(permits.available_permits(), 0);
+        drop(permit);
+        assert_eq!(permits.available_permits(), 1);
+    }
 }

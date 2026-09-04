@@ -1,9 +1,11 @@
 //! Admin-only-writable file security validation.
 //!
-//! Shared by three trust boundaries in the package broker:
+//! Shared by four trust boundaries in the package broker:
 //! - The policy file, which is the entire authorization control for the broker.
 //! - The dedicated directory hosting the default policy file, which the broker itself
 //!   creates and secures.
+//! - Authenticated pipe-client executables, which must not be replaceable or writable by
+//!   the untrusted user whose process is requesting broker access.
 //! - Package-manager executables resolved for elevated/machine-scope execution
 //!   (e.g. `winget.exe`, `choco.exe`).
 //!
@@ -199,7 +201,7 @@ pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
 /// renaming, or deleting entries (including the atomic-replace temporary file), or
 /// rewriting the directory's own security descriptor.
 ///
-/// Unlike [`verify_ancestor_directories`], which only cares about redirecting an
+/// Unlike [`retain_executable_ancestor_directories`], which only cares about redirecting an
 /// *existing* path component and therefore tolerates create rights on higher ancestors,
 /// this directory is exclusively owned by the broker: create rights would let an
 /// untrusted principal plant or race the atomic-replace temporary file, so they are
@@ -416,6 +418,7 @@ pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
 #[derive(Debug)]
 pub(crate) struct VerifiedExecutable {
     _file: File,
+    _ancestor_handles: Vec<File>,
     path: PathBuf,
 }
 
@@ -428,6 +431,43 @@ impl VerifiedExecutable {
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Security guard for an executable file already retained by its caller.
+///
+/// The caller must keep both its file handle and this guard alive.
+/// The file handle binds later checks to the same object and denies new writers, while the
+/// guard pins each verified ancestor against rename or reparse-point substitution.
+#[derive(Debug)]
+pub(crate) struct RetainedExecutableSecurity {
+    _ancestor_handles: Vec<File>,
+    path: PathBuf,
+}
+
+/// Verify trusted-writer security for an already-retained executable and pin its ancestors.
+///
+/// The executable and every ancestor must permit only SYSTEM, built-in Administrators, or TrustedInstaller to modify or replace trusted content.
+/// Read-only ACEs for other principals remain valid.
+/// This observes current security state and cannot prove that the path was never writable by an untrusted principal before the handle was retained.
+pub(crate) fn verify_retained_executable_security(
+    file: &File,
+    subject: &str,
+) -> anyhow::Result<RetainedExecutableSecurity> {
+    let path = final_path_from_handle(file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+
+    verify_handle_security(
+        file,
+        subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        WRITE_ACCESS_MASK,
+    )?;
+
+    let ancestor_handles = retain_executable_ancestor_directories(&path, subject)?;
+
+    Ok(RetainedExecutableSecurity {
+        _ancestor_handles: ancestor_handles,
+        path,
+    })
 }
 
 /// Verify that a resolved package-manager executable which will be launched with an
@@ -480,24 +520,12 @@ pub(crate) fn verify_elevated_executable_security(
         .open(path)
         .with_context(|| format!("failed to open {subject}"))?;
 
-    // Resolve the path from the handle itself: if `path` traversed a reparse point
-    // (symlink, junction, ...), this yields the real target, which is the very object
-    // pinned by the guard handle.
-    let final_path =
-        final_path_from_handle(&file).with_context(|| format!("failed to resolve final path of {subject}"))?;
-
-    verify_handle_security(
-        &file,
-        &subject,
-        TrustedWriters::AdminOrTrustedInstaller,
-        WRITE_ACCESS_MASK,
-    )?;
-
-    verify_elevated_executable_ancestor_directories(&final_path, &subject)?;
+    let security = verify_retained_executable_security(&file, &subject)?;
 
     Ok(Some(VerifiedExecutable {
         _file: file,
-        path: final_path,
+        _ancestor_handles: security._ancestor_handles,
+        path: security.path,
     }))
 }
 
@@ -666,8 +694,7 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
     target.is_absolute().then_some(AppExecAlias { package_family, target })
 }
 
-/// Verify that every ancestor directory of `path` denies untrusted principals the rights
-/// needed to tamper with the executable's resolution or loading.
+/// Verify and retain every ancestor directory of `path`.
 ///
 /// The directory hosting the executable is checked against
 /// [`PARENT_DIRECTORY_TAMPER_MASK`], which additionally rejects create rights: a principal
@@ -678,8 +705,57 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// file when the image is finally loaded. Create rights higher up are harmless (and are
 /// granted to unprivileged users on stock drive roots), since they cannot redirect an
 /// existing path component.
-pub(crate) fn verify_elevated_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
-    verify_ancestor_directories(path, subject, PARENT_DIRECTORY_TAMPER_MASK)
+///
+/// Each ancestor is opened without delete sharing and with
+/// `FILE_FLAG_OPEN_REPARSE_POINT`.
+/// Keeping the returned handles alive prevents a verified component from being renamed,
+/// deleted, or replaced after the check.
+fn retain_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
+    let mut handles = Vec::new();
+    let mut current = path.parent();
+    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
+
+    while let Some(dir) = current {
+        let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
+        let handle = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(dir)
+            .with_context(|| format!("failed to open {dir_subject}"))?;
+
+        let attributes = handle
+            .metadata()
+            .with_context(|| format!("failed to query metadata for {dir_subject}"))?
+            .file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            bail!("{dir_subject} is a reparse point (junction/symlink)");
+        }
+        if attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            bail!("{dir_subject} is not a directory");
+        }
+
+        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
+        if !paths_match_case_insensitive(&resolved, dir) {
+            bail!(
+                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
+                resolved.display()
+            );
+        }
+
+        verify_handle_security(
+            &handle,
+            &dir_subject,
+            TrustedWriters::AdminOrTrustedInstaller,
+            tamper_mask,
+        )?;
+
+        handles.push(handle);
+        tamper_mask = DIRECTORY_TAMPER_MASK;
+        current = dir.parent();
+    }
+
+    Ok(handles)
 }
 
 /// Verify that every ancestor of `dir` (starting at its parent; `dir` itself must already
@@ -688,9 +764,9 @@ pub(crate) fn verify_elevated_executable_ancestor_directories(path: &Path, subje
 /// principals the rights needed to delete, rename, or replace `dir` out from under an
 /// already-verified identity check -- a "path-swap" further up the tree.
 ///
-/// Unlike [`verify_elevated_executable_ancestor_directories`] (and the shared
-/// [`verify_ancestor_directories`] helper it relies on, which this deliberately never
-/// calls or alters), every level here is opened with `FILE_FLAG_OPEN_REPARSE_POINT` and
+/// Unlike [`retain_executable_ancestor_directories`], this check tolerates create rights
+/// on every level.
+/// Every level is opened with `FILE_FLAG_OPEN_REPARSE_POINT` and
 /// rejected outright if it turns out to be a reparse point (junction/symlink) rather than
 /// transparently traversed, and its handle-resolved final path is compared against the
 /// exact literal component being verified: a directory silently retargeted partway up the
@@ -784,41 +860,6 @@ pub(crate) fn os_strings_match_case_insensitive(a: &OsStr, b: &OsStr) -> bool {
 /// denies untrusted principals the rights needed to delete, rename, or replace `dir` out
 /// from under an already-verified identity check -- a "path-swap" further up the tree.
 ///
-/// Unlike [`verify_elevated_executable_ancestor_directories`], create rights are tolerated
-/// at *every* level, including the immediate parent: other, unrelated features may
-/// legitimately create sibling entries in a shared ancestor (the installer grants
-/// `LOCAL SERVICE` write access to the shared `%ProgramData%\Devolutions\Agent` directory
-/// for unrelated Agent subtrees), and that alone cannot redirect or replace `dir`, which is
-/// what this check actually defends against. Only delete/rename/take-ownership rights
-/// ([`DIRECTORY_TAMPER_MASK`]) are rejected.
-fn verify_ancestor_directories(path: &Path, subject: &str, first_level_mask: u32) -> anyhow::Result<()> {
-    let mut current = path.parent();
-    let mut tamper_mask = first_level_mask;
-
-    while let Some(dir) = current {
-        let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
-
-        let handle = OpenOptions::new()
-            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
-            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
-            .open(dir)
-            .with_context(|| format!("failed to open {dir_subject}"))?;
-
-        verify_handle_security(
-            &handle,
-            &dir_subject,
-            TrustedWriters::AdminOrTrustedInstaller,
-            tamper_mask,
-        )?;
-
-        tamper_mask = DIRECTORY_TAMPER_MASK;
-        current = dir.parent();
-    }
-
-    Ok(())
-}
-
 /// Resolve the normalized final path of an open file from its handle.
 pub(crate) fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
     let handle = HANDLE(file.as_raw_handle());
@@ -1398,9 +1439,10 @@ mod tests {
     }
 
     #[test]
-    fn winget_app_exec_alias_passes_elevated_verification() {
-        // Opportunistic end-to-end check: the alias itself cannot be opened for read,
-        // so verification must transparently target the real WindowsApps binary.
+    fn winget_app_exec_alias_uses_resolved_target_security() {
+        // Opportunistic end-to-end check: the alias itself cannot be opened for read, so
+        // verification must transparently target the real WindowsApps binary. A locally
+        // modified WindowsApps ACL is expected to fail the same strict security check.
         let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
             return;
         };
@@ -1416,10 +1458,14 @@ mod tests {
             }
             // Non-elevated test runs cannot open `Program Files\WindowsApps` ancestors for
             // READ_CONTROL; the agent service (SYSTEM) can. Everything up to the ancestor
-            // walk — alias resolution and file-level verification — must have succeeded.
+            // walk must have succeeded unless the resolved target itself has an insecure
+            // owner or write grant.
             Err(error) => {
+                let message = error.to_string();
                 assert!(
-                    error.to_string().contains("ancestor directory"),
+                    message.contains("ancestor directory")
+                        || message.contains("owner")
+                        || message.contains("DACL grants write access"),
                     "unexpected error: {error:#}"
                 );
             }

@@ -176,6 +176,33 @@ pub const SECURITY_MAX_SID_SIZE: u32 = 256;
 pub struct PROCESSINFOCLASS(i32);
 /// https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntqueryinformationprocess
 pub const ProcessBasicInformation: PROCESSINFOCLASS = PROCESSINFOCLASS(0);
+/// Kernel-backed image-section information for the process's main executable.
+pub const ProcessImageInformation: PROCESSINFOCLASS = PROCESSINFOCLASS(37);
+/// Compares an input `SYNCHRONIZE | FILE_EXECUTE` file handle with the process image file.
+pub const ProcessImageFileMapping: PROCESSINFOCLASS = PROCESSINFOCLASS(44);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SECTION_IMAGE_INFORMATION {
+    pub TransferAddress: *mut c_void,
+    pub ZeroBits: u32,
+    pub MaximumStackSize: usize,
+    pub CommittedStackSize: usize,
+    pub SubSystemType: u32,
+    pub SubSystemVersion: u32,
+    pub OperatingSystemVersion: u32,
+    pub ImageCharacteristics: u16,
+    pub DllCharacteristics: u16,
+    pub Machine: u16,
+    pub ImageContainsCode: u8,
+    pub ImageFlags: u8,
+    pub LoaderFlags: u32,
+    pub ImageFileSize: u32,
+    pub CheckSum: u32,
+}
+
+const _: () =
+    assert!(size_of::<SECTION_IMAGE_INFORMATION>() == if cfg!(target_pointer_width = "64") { 64 } else { 48 });
 
 /// https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntqueryinformationprocess
 pub unsafe fn NtQueryInformationProcess(
