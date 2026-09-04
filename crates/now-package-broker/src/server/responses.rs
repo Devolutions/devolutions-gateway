@@ -188,6 +188,10 @@ pub(super) fn policy_info(policy: &PolicyDocument) -> ResponsePolicyInfo {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
 pub(super) fn diagnostics(
     command: &[String],
     include_command_preview: bool,
@@ -210,6 +214,10 @@ pub(super) fn diagnostics(
     Ok(Some(OperationDiagnostics { command_preview }))
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
 pub(super) fn parse_rule_id(rule_id: &str) -> Result<RuleId, ErrorResponse> {
     RuleId::parse(rule_id).map_err(|error| {
         error_response(
@@ -219,6 +227,10 @@ pub(super) fn parse_rule_id(rule_id: &str) -> Result<RuleId, ErrorResponse> {
     })
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
 pub(super) fn new_operation_id() -> Result<ResourceId, ErrorResponse> {
     let raw = format!("op-{}", uuid::Uuid::new_v4());
     ResourceId::parse(&raw).map_err(|error| {
@@ -251,5 +263,7 @@ pub(super) fn error_response(code: ErrorCode, message: impl Into<String>) -> Err
         code,
         message: message.into(),
         details: Vec::new(),
+        validation: None,
+        management: None,
     }
 }

@@ -8,7 +8,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use now_policy::PolicyDocument;
-use now_policy::schema::{parse_policy_json, parse_policy_yaml};
+use now_policy::schema::parse_policy_json;
 use tracing::info;
 
 use crate::policy_security;
@@ -75,7 +75,7 @@ fn deserialize_policy(content: &str, path: &Path) -> anyhow::Result<PolicyDocume
 
     match ext.as_str() {
         "yaml" | "yml" => {
-            parse_policy_yaml(content).map_err(|e| anyhow::anyhow!("invalid YAML policy at {}: {e}", path.display()))
+            serde_yaml::from_str(content).map_err(|e| anyhow::anyhow!("invalid YAML policy at {}: {e}", path.display()))
         }
         _ => parse_policy_json(content).map_err(|e| anyhow::anyhow!("invalid JSON policy at {}: {e}", path.display())),
     }
@@ -103,4 +103,23 @@ pub fn find_default_policy() -> anyhow::Result<PathBuf> {
 /// Candidate default policy path used when no default policy file exists yet.
 pub fn default_policy_candidate() -> PathBuf {
     default_policy_dir().join(format!("{POLICY_FILE_BASE}.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yaml_policy_remains_supported() {
+        let expected = parse_policy_json(include_str!("assets/samples/corporate-allowlist.policy.json"))
+            .expect("sample policy is valid");
+        let yaml = serde_yaml::to_string(&expected).expect("serialize sample policy as YAML");
+
+        let actual = deserialize_policy(&yaml, Path::new("policy.yaml")).expect("deserialize YAML policy");
+
+        assert_eq!(
+            serde_json::to_value(actual).expect("serialize actual policy"),
+            serde_json::to_value(expected).expect("serialize expected policy")
+        );
+    }
 }

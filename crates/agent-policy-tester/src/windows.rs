@@ -242,6 +242,15 @@ async fn unavailable_policy_and_method_restrictions(agent_path: &Path) -> anyhow
         );
     }
 
+    for (method, path) in [("GET", "/v1/policy/management"), ("POST", "/v1/policy/validate")] {
+        let response = request(&agent.pipe_name, method, path).await?;
+        ensure!(
+            response.status == 404,
+            "{method} {path} returned HTTP {}",
+            response.status
+        );
+    }
+
     let response = request(&agent.pipe_name, "GET", "/v1/not-a-route").await?;
     ensure!(
         response.status == 404,

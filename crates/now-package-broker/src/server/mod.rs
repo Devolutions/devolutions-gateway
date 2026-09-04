@@ -5,14 +5,19 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use axum::extract::Request;
+use axum::http::{Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
     CancelRequest, CancelResponse, CancelResponseKind, CapabilitiesResponse, CapabilitiesResponseKind, Decision,
     DecisionInfo, Elevation, ErrorCode, ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse,
     ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName,
-    OperationStatus, OperationSubmission, PackageRequest, PolicyResponse, PolicyResponseKind, Scope, StatusRequest,
-    StatusResponse, StatusResponseKind, Transport,
+    OperationStatus, OperationSubmission, PackageRequest, PolicyManagementResponse, PolicyReplacementRequest,
+    PolicyReplacementResponse, PolicyResponse, PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse,
+    Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -98,6 +103,17 @@ struct EvaluatedRequest {
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection { state, client });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
+        .layer(middleware::from_fn(restrict_phase_one_policy_routes))
+}
+
+async fn restrict_phase_one_policy_routes(request: Request, next: Next) -> Response {
+    match (request.method(), request.uri().path()) {
+        (_, "/v1/policy/management" | "/v1/policy/validate") => StatusCode::NOT_FOUND.into_response(),
+        (method, "/v1/policy") if method != Method::GET && method != Method::HEAD => {
+            StatusCode::METHOD_NOT_ALLOWED.into_response()
+        }
+        _ => next.run(request).await,
+    }
 }
 
 struct BrokerConnection {
@@ -124,6 +140,33 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         self.state.policy_response()
+    }
+
+    async fn policy_management(&self) -> Result<PolicyManagementResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy management is unavailable",
+        ))
+    }
+
+    async fn validate_policy(
+        &self,
+        _request: PolicyValidationRequest,
+    ) -> Result<PolicyValidationResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy validation is unavailable",
+        ))
+    }
+
+    async fn replace_policy(
+        &self,
+        _request: PolicyReplacementRequest,
+    ) -> Result<PolicyReplacementResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy replacement is unavailable",
+        ))
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
@@ -174,6 +217,10 @@ impl PackageBrokerServer for BrokerConnection {
 }
 
 impl BrokerState {
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     fn active_policy(&self) -> Result<Arc<PolicyDocument>, ErrorResponse> {
         let guard = self.policy.read().expect("policy lock poisoned");
         guard
@@ -182,6 +229,10 @@ impl BrokerState {
             .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     fn policy_response(&self) -> Result<PolicyResponse, ErrorResponse> {
         let policy = self.active_policy()?;
 
@@ -424,6 +475,10 @@ impl BrokerState {
         })
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
@@ -632,7 +687,7 @@ mod tests {
         Arc::new(state)
     }
 
-    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> axum::response::Response {
+    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> Response {
         let client = PipeClient::from_current_process().expect("capture current test process");
         let mut router = build_router_for_client(state, client);
         router
@@ -647,7 +702,7 @@ mod tests {
             .expect("router is infallible")
     }
 
-    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    async fn response_json(response: Response) -> serde_json::Value {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("read response body");
@@ -667,6 +722,19 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Unauthorized);
         assert_eq!(error.message, "pipe client authentication failed");
         assert!(body.get("Policy").is_none());
+    }
+
+    #[tokio::test]
+    async fn phase_one_router_does_not_expose_policy_management_routes() {
+        for (method, uri, expected_status) in [
+            (Method::GET, "/v1/policy/management", StatusCode::NOT_FOUND),
+            (Method::POST, "/v1/policy/validate", StatusCode::NOT_FOUND),
+            (Method::PUT, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
+            (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
+        ] {
+            let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
+            assert_eq!(response.status(), expected_status, "{uri}");
+        }
     }
 
     #[test]
