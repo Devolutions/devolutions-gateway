@@ -2909,7 +2909,16 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa26c720c68b866f2c96ef5c1264b3e6f473fe5d4ce61cd44bbe913e553018"
 dependencies = [
- "hmac",
+ "hmac 0.13.0",
+]
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -4802,6 +4811,7 @@ dependencies = [
  "devolutions-agent-shared",
  "devolutions-gateway-task",
  "hex",
+ "hmac 0.12.1",
  "hyper 1.10.1",
  "hyper-util",
  "notify 7.0.0",
@@ -5189,7 +5199,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
 dependencies = [
  "digest 0.11.3",
- "hmac",
+ "hmac 0.13.0",
 ]
 
 [[package]]
@@ -5339,7 +5349,7 @@ dependencies = [
  "ecdsa",
  "ed25519-dalek",
  "hex",
- "hmac",
+ "hmac 0.13.0",
  "http 1.4.2",
  "inout 0.2.2",
  "md-5 0.11.0",
@@ -5423,7 +5433,7 @@ dependencies = [
  "cipher 0.5.2",
  "crypto-bigint",
  "des",
- "hmac",
+ "hmac 0.13.0",
  "inout 0.2.2",
  "oid",
  "pbkdf2",
@@ -5637,7 +5647,7 @@ dependencies = [
  "byteorder",
  "bytes 1.12.1",
  "fallible-iterator 0.2.0",
- "hmac",
+ "hmac 0.13.0",
  "md-5 0.11.0",
  "memchr",
  "rand 0.10.2",
@@ -6418,7 +6428,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9935425142ac6e252364413291d96c8bc9898d0876a801824c7af4eae397b689"
 dependencies = [
  "ctutils",
- "hmac",
+ "hmac 0.13.0",
 ]
 
 [[package]]
@@ -7325,7 +7335,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "getrandom 0.3.4",
- "hmac",
+ "hmac 0.13.0",
  "md-5 0.11.0",
  "md4",
  "num-derive",
