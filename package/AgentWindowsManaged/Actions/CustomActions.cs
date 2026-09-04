@@ -1971,22 +1971,18 @@ namespace DevolutionsAgent.Actions
             {
                 string expectedSourceIdentity;
                 string expectedSourceDigest;
-                string markerIdentity;
-                using (PinnedPath markerPath = PinPathWithoutReparse(
+                using PinnedPath markerPath = PinPathWithoutReparse(
                     marker,
                     leafIsDirectory: false,
                     allowMissingLeaf: true,
-                    leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+                    leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+                if (markerPath.Leaf == null)
                 {
-                    if (markerPath.Leaf == null)
-                    {
-                        return ActionResult.Success;
-                    }
-                    VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
-                    (expectedSourceIdentity, expectedSourceDigest, _, _) =
-                        ReadPackageBrokerMigrationMarker(markerPath.Leaf);
-                    markerIdentity = FileIdentity(markerPath.Leaf);
+                    return ActionResult.Success;
                 }
+                VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
+                (expectedSourceIdentity, expectedSourceDigest, _, _) =
+                    ReadPackageBrokerMigrationMarker(markerPath.Leaf);
 
                 using PinnedPath legacyPath = PinPathWithoutReparse(
                     legacyJson,
@@ -2011,19 +2007,8 @@ namespace DevolutionsAgent.Actions
                     }
                 }
 
-                using (PinnedPath markerPath = PinPathWithoutReparse(
-                    marker,
-                    leafIsDirectory: false,
-                    allowMissingLeaf: false,
-                    leafAccess: WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
-                {
-                    VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
-                    if (!string.Equals(FileIdentity(markerPath.Leaf), markerIdentity, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException("package broker migration marker changed during commit");
-                    }
-                    DeleteFileByHandle(markerPath.Leaf);
-                }
+                VerifyPackageBrokerSecurity(FileSecurityFromHandle(markerPath.Leaf));
+                DeleteFileByHandle(markerPath.Leaf);
 
                 if (!removeLegacy)
                 {
