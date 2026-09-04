@@ -211,15 +211,12 @@ async fn unavailable_policy_and_method_restrictions(agent_path: &Path) -> anyhow
 
     let response = request(&agent.pipe_name, "GET", "/v1/policy").await?;
     ensure!(
-        response.status == 503,
+        response.status == 404,
         "unavailable policy returned HTTP {}",
         response.status
     );
     let error = response.json()?;
-    ensure!(
-        error["Code"] == "BrokerPaused",
-        "unexpected unavailable-policy error code"
-    );
+    ensure!(error["Code"] == "NotFound", "unexpected unavailable-policy error code");
     ensure!(
         error["Message"] == "active policy is unavailable",
         "unexpected unavailable-policy error message"

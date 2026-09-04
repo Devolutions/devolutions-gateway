@@ -217,16 +217,9 @@ impl PackageBrokerServer for BrokerConnection {
 }
 
 impl BrokerState {
-    #[expect(
-        clippy::result_large_err,
-        reason = "the shared API contract requires ErrorResponse values"
-    )]
-    fn active_policy(&self) -> Result<Arc<PolicyDocument>, ErrorResponse> {
+    fn active_policy_snapshot(&self) -> Option<Arc<PolicyDocument>> {
         let guard = self.policy.read().expect("policy lock poisoned");
-        guard
-            .as_ref()
-            .map(Arc::clone)
-            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))
+        guard.as_ref().map(Arc::clone)
     }
 
     #[expect(
@@ -234,7 +227,9 @@ impl BrokerState {
         reason = "the shared API contract requires ErrorResponse values"
     )]
     fn policy_response(&self) -> Result<PolicyResponse, ErrorResponse> {
-        let policy = self.active_policy()?;
+        let policy = self
+            .active_policy_snapshot()
+            .ok_or_else(|| error_response(ErrorCode::NotFound, "active policy is unavailable"))?;
 
         Ok(PolicyResponse {
             response_kind: PolicyResponseKind,
@@ -504,7 +499,9 @@ impl BrokerState {
         }
 
         let received_at = Utc::now();
-        let policy = self.active_policy()?;
+        let policy = self
+            .active_policy_snapshot()
+            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))?;
 
         if let Some(reason) = policy_validity_failure(&policy, received_at) {
             warn!(%reason, "Rejecting request: policy outside validity window");
@@ -724,6 +721,15 @@ mod tests {
         assert!(body.get("Policy").is_none());
     }
 
+    #[test]
+    fn policy_response_returns_not_found_when_unavailable() {
+        let Err(error) = shared_state(None).policy_response() else {
+            panic!("expected unavailable policy response");
+        };
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.message, "active policy is unavailable");
+    }
+
     #[tokio::test]
     async fn phase_one_router_does_not_expose_policy_management_routes() {
         for (method, uri, expected_status) in [
@@ -895,6 +901,14 @@ mod tests {
             panic!("expected request to be evaluated");
         };
         assert!(evaluated.would_execute);
+    }
+
+    #[test]
+    fn package_evaluation_without_policy_remains_paused() {
+        let Err(error) = shared_state(None).evaluate_request(&request()) else {
+            panic!("expected unavailable policy to pause package evaluation");
+        };
+        assert_eq!(error.code, ErrorCode::BrokerPaused);
     }
 
     fn make_state(available: Vec<ManagerName>) -> (Arc<BrokerState>, Arc<FakeExecutor>) {
