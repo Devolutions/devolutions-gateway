@@ -216,6 +216,16 @@ pub(crate) fn verify_policy_directory_security(dir: &File) -> anyhow::Result<()>
     )
 }
 
+/// Verify the relaxed tamper policy used for an already-open ancestor directory.
+pub(crate) fn verify_policy_ancestor_directory_security(dir: &File, subject: &str) -> anyhow::Result<()> {
+    verify_handle_security(
+        dir,
+        subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        DIRECTORY_TAMPER_MASK,
+    )
+}
+
 /// Compute a digest over a file or directory's owner and complete DACL entries.
 /// Used only to fold "security-relevant state" into the policy store's opaque token so an
 /// ACL change rotates it; never to authorize anything by itself.
@@ -816,12 +826,7 @@ pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow:
             );
         }
 
-        verify_handle_security(
-            &handle,
-            &dir_subject,
-            TrustedWriters::AdminOrTrustedInstaller,
-            DIRECTORY_TAMPER_MASK,
-        )?;
+        verify_policy_ancestor_directory_security(&handle, &dir_subject)?;
 
         let level_security_digest =
             security_state_digest(&handle).with_context(|| format!("failed to digest {dir_subject} security"))?;
@@ -1300,6 +1305,26 @@ mod tests {
         assert!(
             error.to_string().contains("grants write access"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn production_shaped_shared_vendor_acl_is_relaxed_but_dedicated_policy_acl_is_strict() {
+        // Mirrors `%ProgramData%\Devolutions`: Users may create siblings, but cannot
+        // delete children or rewrite the directory security.
+        let shared = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;BU)");
+        shared
+            .verify_with_mask(DIRECTORY_TAMPER_MASK)
+            .expect("shared vendor create-only rights are compatible with pinned descendants");
+        assert!(
+            shared.verify().is_err(),
+            "the same ACL is too weak for the dedicated PackageBroker directory"
+        );
+
+        let hostile = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x40;;;BU)");
+        assert!(
+            hostile.verify_with_mask(DIRECTORY_TAMPER_MASK).is_err(),
+            "shared vendor delete-child rights can replace pinned descendants"
         );
     }
 

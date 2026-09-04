@@ -25,7 +25,7 @@ use now_policy_api::{
 };
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::str::{U16CStrExt as _, U16CString};
-use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
+use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, NTSTATUS};
 #[cfg(test)]
 use windows::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING;
 use windows::Win32::Storage::FileSystem::{
@@ -33,9 +33,10 @@ use windows::Win32::Storage::FileSystem::{
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_DISPOSITION_INFO_EX_FLAGS,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ,
-    FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE, FILE_SHARE_NONE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo, FileRenameInfoEx, GetVolumeInformationW,
-    GetVolumePathNameW, MOVE_FILE_FLAGS, MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL, SetFileInformationByHandle,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE,
+    FILE_SHARE_NONE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo,
+    FileRenameInfoEx, GetVolumeInformationW, GetVolumePathNameW, MOVE_FILE_FLAGS, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    READ_CONTROL, SetFileInformationByHandle,
 };
 
 use crate::policy_security::{self, FileIdentity};
@@ -44,6 +45,24 @@ use crate::policy_store::validation;
 /// Base file name for the policy file (a fixed name inside its dedicated directory).
 pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
 const FILE_SYNCHRONIZE: u32 = 0x0010_0000;
+const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
+
+#[repr(C)]
+struct IoStatusBlock {
+    status_or_pointer: usize,
+    information: usize,
+}
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtSetInformationFile(
+        file_handle: HANDLE,
+        io_status_block: *mut IoStatusBlock,
+        file_information: *const core::ffi::c_void,
+        length: u32,
+        file_information_class: i32,
+    ) -> NTSTATUS;
+}
 
 /// Default dedicated directory hosting the policy file: `%PROGRAMDATA%\Devolutions\PackageBroker`.
 ///
@@ -188,7 +207,7 @@ impl AtomicityProbeCache {
 /// derived from re-verifying it) is alive.
 fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
     OpenOptions::new()
-        .access_mode((FILE_READ_ATTRIBUTES | FILE_TRAVERSE | READ_CONTROL).0 | FILE_SYNCHRONIZE)
+        .access_mode((FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | READ_CONTROL).0 | FILE_SYNCHRONIZE)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
         .open(path)
@@ -316,30 +335,115 @@ impl VerifiedHostingDirectory {
 /// a digest summarizing the verified ancestor chain (item 20), for folding into
 /// [`DiskFingerprint`].
 fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(PathBuf, [u8; 32])> {
-    policy_security::verify_policy_ancestor_chain(dir, "policy directory")
-        .context("policy directory ancestor chain failed verification before creation")?;
-
     let security_attributes = policy_security::admin_only_security_attributes(true)
         .context("build admin-only security attributes for the policy directory")?;
+    let vendor = dir.parent().context("default policy directory has no vendor parent")?;
+    let program_data = vendor
+        .parent()
+        .context("default policy directory is outside ProgramData")?;
+    let vendor_name = vendor
+        .file_name()
+        .context("default policy vendor directory has no name")?;
+    let leaf_name = dir.file_name().context("default policy directory has no name")?;
+    ensure!(
+        policy_security::os_strings_match_case_insensitive(vendor_name, OsStr::new("Devolutions"))
+            && policy_security::os_strings_match_case_insensitive(leaf_name, OsStr::new("PackageBroker")),
+        "default policy directory has an unexpected shape"
+    );
 
-    if let Err(create_error) = win_api_wrappers::fs::create_directory(dir, Some(&security_attributes)) {
-        // Whatever the reason `CreateDirectoryW` failed (already exists, or lost a race
-        // with another process), only a directory actually present at this exact path
-        // changes the outcome, and even then only via the verification below -- never by
-        // trusting the create call's failure reason alone.
-        if !dir.is_dir() {
-            return Err(create_error).with_context(|| format!("failed to create {}", dir.display()));
-        }
-    }
+    let (program_data_handle, canonical_program_data) = open_and_verify_directory_identity(program_data)?;
+    ensure!(
+        policy_security::paths_match_case_insensitive(&canonical_program_data, program_data),
+        "ProgramData resolved to an unexpected location"
+    );
+    policy_security::verify_policy_ancestor_directory_security(&program_data_handle, "ProgramData directory")?;
+    policy_security::verify_policy_ancestor_chain(&canonical_program_data, "ProgramData directory")?;
 
-    let (handle, final_path) = open_and_verify_directory_identity(dir)?;
-    policy_security::verify_policy_directory_security(&handle).context(
-        "an existing policy directory does not meet the required security bar; \
-         it was not created by this call and will not be silently repaired",
+    let vendor_handle = ensure_secure_directory_component(
+        &program_data_handle,
+        vendor_name,
+        &security_attributes,
+        DirectorySecurityRole::SharedAncestor,
+        |_| Ok(()),
     )?;
+    let handle = ensure_secure_directory_component(
+        &vendor_handle,
+        leaf_name,
+        &security_attributes,
+        DirectorySecurityRole::DedicatedPolicy,
+        |_| Ok(()),
+    )?;
+    let final_path = policy_security::final_path_from_handle(&handle)?;
     let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(&final_path, "policy directory")?;
 
     Ok((final_path, ancestor_security_digest))
+}
+
+#[derive(Clone, Copy)]
+enum DirectorySecurityRole {
+    SharedAncestor,
+    DedicatedPolicy,
+}
+
+fn ensure_secure_directory_component(
+    parent: &File,
+    name: &OsStr,
+    security_attributes: &win_api_wrappers::security::attributes::SecurityAttributes,
+    security_role: DirectorySecurityRole,
+    before_create: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<File> {
+    let path = policy_security::final_path_from_handle(parent)
+        .context("failed to resolve secure directory component parent")?
+        .join(name);
+    let opened = match open_and_verify_directory_identity(&path) {
+        Ok(opened) => opened,
+        Err(error)
+            if error
+                .root_cause()
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            before_create(&path)?;
+            let create_error = win_api_wrappers::fs::create_directory(&path, Some(security_attributes)).err();
+            if let Some(create_error) = &create_error {
+                tracing::debug!(
+                    path = %path.display(),
+                    error = %format!("{create_error:#}"),
+                    "Secure directory creation lost a race; reopening the winner"
+                );
+            }
+            match open_and_verify_directory_identity(&path) {
+                Ok(opened) => opened,
+                Err(reopen_error) => {
+                    if let Some(create_error) = create_error {
+                        return Err(create_error).with_context(|| {
+                            format!(
+                                "failed to securely create {} and no race winner could be reopened ({reopen_error:#})",
+                                path.display()
+                            )
+                        });
+                    }
+                    return Err(reopen_error).with_context(|| format!("failed to reopen {}", path.display()));
+                }
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    let (handle, final_path) = opened;
+    ensure!(
+        policy_security::paths_match_case_insensitive(&final_path, &path),
+        "{} resolved to unexpected location {}",
+        path.display(),
+        final_path.display()
+    );
+    match security_role {
+        DirectorySecurityRole::SharedAncestor => {
+            policy_security::verify_policy_ancestor_directory_security(&handle, "shared policy ancestor directory")
+        }
+        DirectorySecurityRole::DedicatedPolicy => policy_security::verify_policy_directory_security(&handle),
+    }
+    .with_context(|| format!("{} does not meet the required directory security", path.display()))?;
+    Ok(handle)
 }
 
 /// Verify (never rewrite) that a custom-configured policy directory already meets the
@@ -1876,16 +1980,15 @@ fn open_transaction_file(path: &Path) -> anyhow::Result<File> {
 }
 
 fn rename_file_handle(file: &File, root: &File, new_name: &OsStr) -> std::io::Result<()> {
-    // Prefer a relative name anchored to the retained directory handle.
-    // Some Windows filesystems reject `RootDirectory` through `SetFileInformationByHandle`, so the fallback derives the absolute path from the same retained handle.
-    if set_file_rename_information(file, HANDLE(root.as_raw_handle()), new_name).is_ok() {
-        return Ok(());
+    let root_handle = HANDLE(root.as_raw_handle());
+    match set_file_rename_information(file, root_handle, new_name) {
+        Ok(()) => Ok(()),
+        Err(win32_error) => nt_set_file_rename_information(file, root_handle, new_name).map_err(|nt_error| {
+            std::io::Error::other(format!(
+                "handle-relative rename failed through Win32 ({win32_error}) and NT ({nt_error})"
+            ))
+        }),
     }
-
-    let absolute = policy_security::final_path_from_handle(root)
-        .map_err(|error| std::io::Error::other(format!("failed to resolve rename root: {error:#}")))?
-        .join(new_name);
-    set_file_rename_information(file, HANDLE::default(), absolute.as_os_str())
 }
 
 #[expect(
@@ -1896,10 +1999,9 @@ fn set_file_rename_information(file: &File, root: HANDLE, new_name: &OsStr) -> s
     let name: Vec<u16> = new_name.encode_wide().collect();
     let name_bytes = name.len().checked_mul(2).expect("file name byte length fits usize");
     let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
-    let buffer_len = name_offset
+    let buffer_len = size_of::<FILE_RENAME_INFO>()
         .checked_add(name_bytes)
-        .expect("rename information length fits usize")
-        .max(size_of::<FILE_RENAME_INFO>());
+        .expect("rename information length fits usize");
     let mut buffer = vec![0usize; buffer_len.div_ceil(size_of::<usize>())];
     let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
     let buffer_ptr = info.cast::<u8>();
@@ -1913,7 +2015,7 @@ fn set_file_rename_information(file: &File, root: HANDLE, new_name: &OsStr) -> s
             HANDLE(file.as_raw_handle()),
             FileRenameInfoEx,
             buffer_ptr.cast(),
-            u32::try_from(name_offset + name_bytes).expect("rename buffer length fits u32"),
+            u32::try_from(buffer_len).expect("rename buffer length fits u32"),
         );
         match result {
             Ok(()) => Ok(()),
@@ -1921,11 +2023,48 @@ fn set_file_rename_information(file: &File, root: HANDLE, new_name: &OsStr) -> s
                 HANDLE(file.as_raw_handle()),
                 FileRenameInfo,
                 buffer_ptr.cast(),
-                u32::try_from(name_offset + name_bytes).expect("rename buffer length fits u32"),
+                u32::try_from(buffer_len).expect("rename buffer length fits u32"),
             )
             .map_err(std::io::Error::from),
             Err(error) => Err(std::io::Error::from(error)),
         }
+    }
+}
+
+#[expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "building and submitting one variable-length native FILE_RENAME_INFORMATION_EX buffer is one logical FFI operation"
+)]
+fn nt_set_file_rename_information(file: &File, root: HANDLE, new_name: &OsStr) -> std::io::Result<()> {
+    let name: Vec<u16> = new_name.encode_wide().collect();
+    let name_bytes = name.len().checked_mul(2).expect("file name byte length fits usize");
+    let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let buffer_len = size_of::<FILE_RENAME_INFO>()
+        .checked_add(name_bytes)
+        .expect("rename information length fits usize");
+    let mut buffer = vec![0usize; buffer_len.div_ceil(size_of::<usize>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let buffer_ptr = info.cast::<u8>();
+    let mut io_status = IoStatusBlock {
+        status_or_pointer: 0,
+        information: 0,
+    };
+
+    // SAFETY: The aligned buffer contains FILE_RENAME_INFORMATION_EX followed by the complete UTF-16 name.
+    unsafe {
+        (*info).Anonymous = FILE_RENAME_INFO_0 { Flags: 0 };
+        (*info).RootDirectory = root;
+        (*info).FileNameLength = u32::try_from(name_bytes).expect("Windows file name length fits u32");
+        std::ptr::copy_nonoverlapping(name.as_ptr(), buffer_ptr.add(name_offset).cast(), name.len());
+        NtSetInformationFile(
+            HANDLE(file.as_raw_handle()),
+            &mut io_status,
+            buffer_ptr.cast(),
+            u32::try_from(buffer_len).expect("rename buffer length fits u32"),
+            FILE_RENAME_INFORMATION_EX_CLASS,
+        )
+        .ok()
+        .map_err(std::io::Error::from)
     }
 }
 
@@ -2476,6 +2615,39 @@ mod tests {
     }
 
     #[test]
+    fn relative_handle_rename_uses_retained_directory_root() {
+        let dir = temp_dir();
+        let source = dir.path().join("source.tmp");
+        let destination = dir.path().join("destination.json");
+        let source_file = open_deletable_test_file(&source, b"source");
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+
+        rename_file_handle(&source_file, &dir_file, destination.file_name().unwrap()).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
+    fn native_relative_handle_rename_uses_retained_directory_root() {
+        let dir = temp_dir();
+        let source = dir.path().join("source-native.tmp");
+        let destination = dir.path().join("destination-native.json");
+        let source_file = open_deletable_test_file(&source, b"source");
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+
+        nt_set_file_rename_information(
+            &source_file,
+            HANDLE(dir_file.as_raw_handle()),
+            destination.file_name().unwrap(),
+        )
+        .unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
     fn retained_directory_prevents_path_retarget_during_handle_rename() {
         let root = temp_dir();
         let dir = root.path().join("held");
@@ -2982,25 +3154,33 @@ mod tests {
     // real operation, and require the failure (when one occurs) to be exactly the
     // anticipated privilege limitation rather than silently skipping the test.
     #[test]
-    fn default_directory_is_created_secured_or_fails_on_the_expected_privilege_limitation() {
+    fn missing_component_is_created_secured_or_fails_on_the_expected_privilege_limitation() {
         let dir = temp_dir();
-        let candidate = dir.path().join("package-broker");
+        let parent = open_directory_no_reparse(dir.path()).unwrap();
+        let security_attributes = policy_security::admin_only_security_attributes(true).unwrap();
 
-        match ensure_default_directory_secured(&candidate) {
-            Ok((canonical, _ancestor_security_digest)) => {
+        match ensure_secure_directory_component(
+            &parent,
+            OsStr::new("PackageBroker"),
+            &security_attributes,
+            DirectorySecurityRole::DedicatedPolicy,
+            |_| Ok(()),
+        ) {
+            Ok(handle) => {
                 // Elevated/SYSTEM test host: verify the directory really is admin-only and
                 // that a *second* call (existing-directory path) does not need to (and does
                 // not) fail.
-                assert!(
-                    canonical.is_absolute(),
-                    "canonical directory must be an absolute, handle-resolved path"
-                );
-                let (handle, _) = open_and_verify_directory_identity(&candidate).unwrap();
                 policy_security::verify_policy_directory_security(&handle)
                     .expect("freshly created directory must already be admin-only secured");
                 drop(handle);
-                ensure_default_directory_secured(&candidate)
-                    .expect("re-verifying an already-secured directory succeeds");
+                ensure_secure_directory_component(
+                    &parent,
+                    OsStr::new("PackageBroker"),
+                    &security_attributes,
+                    DirectorySecurityRole::DedicatedPolicy,
+                    |_| Ok(()),
+                )
+                .expect("re-verifying an already-secured directory succeeds");
             }
             Err(error) => {
                 let message = format!("{error:#}");
@@ -3146,15 +3326,78 @@ mod tests {
         std::fs::create_dir(&attacker_target).unwrap();
         let junction = root.path().join("Devolutions");
         create_directory_junction(&junction, &attacker_target);
-        let candidate = junction.join("PackageBroker");
+        let security_attributes = policy_security::admin_only_security_attributes(true).unwrap();
+        let parent = open_directory_no_reparse(root.path()).unwrap();
 
-        let error = ensure_default_directory_secured(&candidate).unwrap_err();
+        let error = ensure_secure_directory_component(
+            &parent,
+            OsStr::new("Devolutions"),
+            &security_attributes,
+            DirectorySecurityRole::SharedAncestor,
+            |_| Ok(()),
+        )
+        .unwrap_err();
 
         assert!(format!("{error:#}").contains("reparse point"));
         assert!(
             !attacker_target.join("PackageBroker").exists(),
             "rejected junction must not receive a privileged directory"
         );
+    }
+
+    #[test]
+    fn hostile_component_creation_races_are_reopened_and_rejected() {
+        let root = temp_dir();
+        let security_attributes = policy_security::admin_only_security_attributes(true).unwrap();
+        let attacker_target = root.path().join("attacker-target");
+        std::fs::create_dir(&attacker_target).unwrap();
+        let parent = open_directory_no_reparse(root.path()).unwrap();
+
+        let error = ensure_secure_directory_component(
+            &parent,
+            OsStr::new("raced-junction"),
+            &security_attributes,
+            DirectorySecurityRole::SharedAncestor,
+            |path| {
+                create_directory_junction(path, &attacker_target);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("reparse point"));
+
+        let error = ensure_secure_directory_component(
+            &parent,
+            OsStr::new("raced-insecure"),
+            &security_attributes,
+            DirectorySecurityRole::DedicatedPolicy,
+            |path| {
+                std::fs::create_dir(path)?;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("required directory security"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn preacquired_delete_handle_blocks_default_tree_creation_without_side_effects() {
+        let root = temp_dir();
+        let attacker_handle = OpenOptions::new()
+            .access_mode(DELETE.0 | FILE_READ_ATTRIBUTES.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(root.path())
+            .unwrap();
+        let candidate = root.path().join("Devolutions").join("PackageBroker");
+
+        ensure_default_directory_secured(&candidate).unwrap_err();
+
+        assert!(!root.path().join("Devolutions").exists());
+        drop(attacker_handle);
     }
 
     /// Create a directory junction (`mklink /J`) without requiring elevation.
