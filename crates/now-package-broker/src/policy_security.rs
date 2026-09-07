@@ -1170,9 +1170,10 @@ mod tests {
     }
 
     #[test]
-    fn winget_app_exec_alias_passes_elevated_verification() {
-        // Opportunistic end-to-end check: the alias itself cannot be opened for read,
-        // so verification must transparently target the real WindowsApps binary.
+    fn winget_app_exec_alias_uses_resolved_target_security() {
+        // Opportunistic end-to-end check: the alias itself cannot be opened for read, so
+        // verification must transparently target the real WindowsApps binary. A locally
+        // modified WindowsApps ACL is expected to fail the same strict security check.
         let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
             return;
         };
@@ -1188,10 +1189,14 @@ mod tests {
             }
             // Non-elevated test runs cannot open `Program Files\WindowsApps` ancestors for
             // READ_CONTROL; the agent service (SYSTEM) can. Everything up to the ancestor
-            // walk — alias resolution and file-level verification — must have succeeded.
+            // walk must have succeeded unless the resolved target itself has an insecure
+            // owner or write grant.
             Err(error) => {
+                let message = error.to_string();
                 assert!(
-                    error.to_string().contains("ancestor directory"),
+                    message.contains("ancestor directory")
+                        || message.contains("owner")
+                        || message.contains("DACL grants write access"),
                     "unexpected error: {error:#}"
                 );
             }
