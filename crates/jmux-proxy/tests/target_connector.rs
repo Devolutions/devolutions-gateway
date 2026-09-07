@@ -145,10 +145,10 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
         ),
     )
     .await;
-    assert!(matches!(
-        receive_message(&mut peer_reader).await,
-        Message::OpenSuccess(_)
-    ));
+    let Message::OpenSuccess(open_success) = receive_message(&mut peer_reader).await else {
+        panic!("expected OPEN SUCCESS");
+    };
+    assert_eq!(open_success.sender_channel_id, 0);
 
     server_task.abort();
     proxy_task.abort();
