@@ -1365,19 +1365,20 @@ mod tests {
     #[test]
     fn system_owned_admin_only_policy_file_is_accepted() {
         let temp = tempfile::NamedTempFile::new().unwrap();
+        let path = temp.path().canonicalize().unwrap();
 
         let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).unwrap();
 
         // Setting the owner to Administrators requires an elevated token; skip otherwise.
         // The equivalent owner/DACL combinations are covered by the SDDL-based tests above.
-        if set_security(temp.path(), Some(&admins), &[]).is_err() {
+        if set_security(&path, Some(&admins), &[]).is_err() {
             return;
         }
 
         let system = Sid::from_well_known(WinLocalSystemSid, None).unwrap();
         let users = Sid::from_well_known(windows::Win32::Security::WinBuiltinUsersSid, None).unwrap();
         set_security(
-            temp.path(),
+            &path,
             None,
             &[
                 grant(GENERIC_ALL.0, system),
@@ -1390,10 +1391,10 @@ mod tests {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-            .open(temp.path())
+            .open(&path)
             .unwrap();
 
-        verify_policy_file_path(&file, temp.path()).expect("ordinary policy path must be accepted");
+        verify_policy_file_path(&file, &path).expect("ordinary policy path must be accepted");
         verify_policy_file_security(&file).expect("SYSTEM/Administrators-only policy file must be accepted");
     }
 

@@ -200,10 +200,10 @@ fn empty_policy() -> Value {
 }
 
 fn create_data_dir() -> anyhow::Result<tempfile::TempDir> {
-    let system_root = std::env::var_os("SystemRoot").context("SystemRoot is not defined")?;
+    let program_data = std::env::var_os("ProgramData").context("ProgramData is not defined")?;
     let data_dir = tempfile::Builder::new()
         .prefix("dgw-agent-policy-")
-        .tempdir_in(Path::new(&system_root).join("Temp"))
+        .tempdir_in(program_data)
         .context("create Agent data directory")?;
     secure_policy_path(data_dir.path(), true)?;
     Ok(data_dir)
