@@ -84,11 +84,11 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                                 let (_permit, server, client) = match capture.await {
                                 Ok((permit, (server, Ok(client)))) => (permit, server, client),
                                 Ok((_permit, (_server, Err(error)))) => {
-                                    warn!(%error, "Rejected named pipe client");
+                                    warn!(error = format!("{error:#}"), "Rejected named pipe client");
                                     return;
                                 }
                                 Err(error) => {
-                                    error!(%error, "Named pipe client identity capture task failed");
+                                    error!(error = format!("{error:#}"), "Named pipe client identity capture task failed");
                                     return;
                                 }
                                 };
