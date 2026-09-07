@@ -86,9 +86,10 @@ pub async fn resolve_route(
 
 /// Attempt to route a connection via the agent tunnel.
 ///
-/// Returns `Ok(Some(stream))` if routed through an agent, `Ok(None)` if the caller
-/// should fall through to direct connect, or `Err` if an explicit agent was specified
-/// but not found (or all candidates failed).
+/// Returns `Ok(Some((stream, agent, target_addr)))` when routed through an agent.
+/// `target_addr` is `None` when the agent sends the legacy success response.
+/// Returns `Ok(None)` when the caller should use a direct connection.
+/// Returns `Err` when the requested agent is unavailable or all matching agents fail.
 pub async fn try_route(
     handle: Option<&AgentTunnelHandle>,
     explicit_agent_id: Option<Uuid>,
