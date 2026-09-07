@@ -7,12 +7,11 @@ use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/4";
+pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/5";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
 const MAX_FINDINGS: usize = 128;
-const FINDINGS_TRUNCATED_MESSAGE: &str = "additional validation findings were omitted";
 const MATCH_COLLECTION_MAXIMA: &[(&str, usize)] = &[
     ("Operations", 3),
     ("Managers", 16),
@@ -42,32 +41,31 @@ const CONSTRAINT_COLLECTION_MAXIMA: &[(&str, usize)] = &[
 ];
 struct Findings {
     values: Vec<PolicyFinding>,
-    saturated: bool,
+    has_error: bool,
 }
 impl Findings {
     fn new() -> Self {
         Self {
             values: Vec::with_capacity(MAX_FINDINGS),
-            saturated: false,
+            has_error: false,
         }
     }
     fn push(&mut self, finding: PolicyFinding) {
-        if self.saturated {
-            return;
-        }
-        if self.values.len() == MAX_FINDINGS - 1 {
-            self.values.push(error(
-                PolicyFindingCode::SchemaViolation,
-                "",
-                FINDINGS_TRUNCATED_MESSAGE,
-            ));
-            self.saturated = true;
-        } else {
+        let is_error = finding.severity == PolicyFindingSeverity::Error;
+        self.has_error |= is_error;
+        if self.values.len() < MAX_FINDINGS {
             self.values.push(finding);
+        } else if is_error
+            && !self
+                .values
+                .iter()
+                .any(|existing| existing.severity == PolicyFindingSeverity::Error)
+        {
+            self.values[MAX_FINDINGS - 1] = finding;
         }
     }
     fn is_saturated(&self) -> bool {
-        self.saturated
+        self.values.len() == MAX_FINDINGS
     }
 }
 pub fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult {
@@ -105,7 +103,7 @@ pub fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult {
     }
     match serde_json::from_value::<PolicyDraftDocument>(raw.clone()) {
         Ok(draft) => {
-            semantic_checks(&draft, &mut findings);
+            semantic_checks(raw, &draft, &mut findings);
             if has_error(&findings) {
                 invalid_result(findings)
             } else {
@@ -123,10 +121,7 @@ pub(crate) fn validate_committed_policy(policy: &now_policy::PolicyDocument) -> 
     validate_draft(&raw)
 }
 fn has_error(findings: &Findings) -> bool {
-    findings
-        .values
-        .iter()
-        .any(|finding| finding.severity == PolicyFindingSeverity::Error)
+    findings.has_error
 }
 fn invalid_result(findings: Findings) -> PolicyValidationResult {
     PolicyValidationResult {
@@ -349,7 +344,7 @@ pub(crate) fn disk_failure_finding(reason: DiskFailureReason) -> PolicyFinding {
     };
     error(PolicyFindingCode::SchemaViolation, "", message)
 }
-fn semantic_checks(draft: &PolicyDraftDocument, findings: &mut Findings) {
+fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, findings: &mut Findings) {
     if draft.rules.len() > MAX_RULES {
         check_max_len(draft.rules.len(), MAX_RULES, "/Rules", findings);
         return;
@@ -362,7 +357,7 @@ fn semantic_checks(draft: &PolicyDraftDocument, findings: &mut Findings) {
         }
         check_rule(index, rule, findings);
     }
-    if findings.is_saturated() {
+    if has_error(findings) {
         return;
     }
     if draft.enforcement.audit_mode == Some(true) {
@@ -383,7 +378,7 @@ fn semantic_checks(draft: &PolicyDraftDocument, findings: &mut Findings) {
         if findings.is_saturated() {
             return;
         }
-        check_sensitive_options(index, rule, findings);
+        check_sensitive_options(raw, index, rule, findings);
     }
 }
 fn check_metadata(metadata: &PolicyDraftMetadata, findings: &mut Findings) {
@@ -665,7 +660,7 @@ fn check_patterns<S: AsRef<str>>(
         }
     }
 }
-fn check_sensitive_options(index: usize, rule: &PolicyRule, findings: &mut Findings) {
+fn check_sensitive_options(raw: &serde_json::Value, index: usize, rule: &PolicyRule, findings: &mut Findings) {
     if !rule.enabled || rule.decision != Decision::Allow {
         return;
     }
@@ -677,25 +672,37 @@ fn check_sensitive_options(index: usize, rule: &PolicyRule, findings: &mut Findi
         (
             constraints.allow_skip_hash_check && reachable(&matches.skip_hash_check),
             "SkipHashCheck",
+            "SkipHashCheck",
+            "AllowSkipHashCheck",
         ),
         (
             constraints.allow_pre_release && reachable(&matches.pre_release),
             "PreRelease",
+            "PreRelease",
+            "AllowPreRelease",
         ),
         (
             constraints.allow_custom_install_location && reachable(&matches.has_custom_install_location),
+            "AllowCustomInstallLocation",
+            "HasCustomInstallLocation",
             "AllowCustomInstallLocation",
         ),
         (
             constraints.allow_pre_post_commands && reachable(&matches.has_pre_post_commands),
             "AllowPrePostCommands",
+            "HasPrePostCommands",
+            "AllowPrePostCommands",
         ),
         (
             constraints.allow_kill_before_operation && reachable(&matches.has_kill_before_operation),
             "AllowKillBeforeOperation",
+            "HasKillBeforeOperation",
+            "AllowKillBeforeOperation",
         ),
         (
             constraints.allow_uninstall_previous && reachable(&matches.has_uninstall_previous),
+            "AllowUninstallPrevious",
+            "HasUninstallPrevious",
             "AllowUninstallPrevious",
         ),
         (
@@ -707,17 +714,24 @@ fn check_sensitive_options(index: usize, rule: &PolicyRule, findings: &mut Findi
                     .take(128)
                     .any(|pattern| pattern.as_ref() == "*"),
             "AllowCustomParameters",
+            "HasCustomParameters",
+            "AllowCustomParameters",
         ),
     ];
-    for (enabled, option) in options {
+    for (enabled, option, match_field, constraint_field) in options {
         if findings.is_saturated() {
             return;
         }
         if enabled {
-            let path = if rule.constraints.is_some() {
-                format!("/Rules/{index}/Constraints/{option}")
+            let rule_path = format!("/Rules/{index}");
+            let match_path = format!("{rule_path}/Match/{match_field}");
+            let constraint_path = format!("{rule_path}/Constraints/{constraint_field}");
+            let path = if raw.pointer(&match_path).is_some() {
+                match_path
+            } else if raw.pointer(&constraint_path).is_some() {
+                constraint_path
             } else {
-                format!("/Rules/{index}")
+                rule_path
             };
             let mut finding = rule_finding(
                 rule,
@@ -728,7 +742,7 @@ fn check_sensitive_options(index: usize, rule: &PolicyRule, findings: &mut Findi
             );
             finding
                 .arguments
-                .insert("Option".to_owned(), serde_json::Value::from(option));
+                .insert("option".to_owned(), serde_json::Value::from(option));
             findings.push(finding);
         }
     }
@@ -844,7 +858,7 @@ mod tests {
         assert_eq!(result.findings[0].path, "/Rules");
     }
     #[test]
-    fn findings_are_capped_with_a_stable_terminal_finding() {
+    fn warning_findings_are_capped_without_invalidating_the_draft() {
         let mut raw = draft();
         raw["Rules"] = serde_json::Value::Array(
             (0..64)
@@ -859,22 +873,45 @@ mod tests {
         let first = validate_draft(&raw);
         let second = validate_draft(&raw);
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        assert!(!first.is_valid);
-        assert!(first.canonical_draft.is_none());
+        assert!(first.is_valid);
+        assert!(first.canonical_draft.is_some());
         assert!(first.validation_receipt.is_none());
         assert_eq!(first.findings.len(), MAX_FINDINGS);
-        assert_eq!(
-            first.findings.last().expect("terminal finding").code,
-            PolicyFindingCode::SchemaViolation
-        );
-        assert_eq!(
-            first.findings.last().expect("terminal finding").message,
-            FINDINGS_TRUNCATED_MESSAGE
+        assert!(
+            first
+                .findings
+                .iter()
+                .all(|finding| finding.severity == PolicyFindingSeverity::Warning)
         );
         assert_eq!(
             serde_json::to_value(&first.findings).expect("serialize findings"),
             serde_json::to_value(&second.findings).expect("serialize findings")
         );
+    }
+
+    #[test]
+    fn warning_heavy_draft_with_a_late_error_remains_invalid() {
+        let mut raw = draft();
+        let mut rules: Vec<_> = (0..64)
+            .map(|index| {
+                let mut value = rule(&format!("allow-{index}"), json!({ "Managers": ["Winget"] }));
+                value["Decision"] = json!("Allow");
+                value
+            })
+            .collect();
+        let mut invalid = rule("invalid-last", json!({ "Managers": ["Winget"] }));
+        invalid["Priority"] = json!(u64::from(MAX_RULE_PRIORITY) + 1);
+        rules.push(invalid);
+        raw["Rules"] = serde_json::Value::Array(rules);
+        let result = validate_draft(&raw);
+        assert!(!result.is_valid);
+        assert!(result.canonical_draft.is_none());
+        assert!(result.validation_receipt.is_none());
+        assert!(result.findings.iter().any(|finding| {
+            finding.severity == PolicyFindingSeverity::Error
+                && finding.code == PolicyFindingCode::InvalidFieldValue
+                && finding.path == "/Rules/64/Priority"
+        }));
     }
     #[test]
     fn oversized_pattern_collections_have_bounded_ordered_findings() {
@@ -987,6 +1024,64 @@ mod tests {
         assert_eq!(result.findings[0].code, PolicyFindingCode::AuditModeEnabled);
         assert_eq!(result.findings[1].code, PolicyFindingCode::DefaultAllow);
         assert!(has_code(&result, PolicyFindingCode::SensitiveOptionAllowed));
+    }
+
+    #[test]
+    fn sensitive_option_warnings_point_into_the_submitted_draft() {
+        let options = [
+            ("SkipHashCheck", "SkipHashCheck", "AllowSkipHashCheck"),
+            ("PreRelease", "PreRelease", "AllowPreRelease"),
+            (
+                "AllowCustomInstallLocation",
+                "HasCustomInstallLocation",
+                "AllowCustomInstallLocation",
+            ),
+            ("AllowPrePostCommands", "HasPrePostCommands", "AllowPrePostCommands"),
+            (
+                "AllowKillBeforeOperation",
+                "HasKillBeforeOperation",
+                "AllowKillBeforeOperation",
+            ),
+            (
+                "AllowUninstallPrevious",
+                "HasUninstallPrevious",
+                "AllowUninstallPrevious",
+            ),
+            ("AllowCustomParameters", "HasCustomParameters", "AllowCustomParameters"),
+        ];
+        for (option, match_field, constraint_field) in options {
+            for explicit in ["Match", "Constraints", "Default"] {
+                let mut raw = draft();
+                let mut allow = rule("allow", json!({ "Managers": ["Winget"] }));
+                allow["Decision"] = json!("Allow");
+                match explicit {
+                    "Match" => allow["Match"][match_field] = json!([true]),
+                    "Constraints" => {
+                        allow["Constraints"] = json!({});
+                        allow["Constraints"][constraint_field] = json!(true);
+                    }
+                    "Default" => {}
+                    _ => unreachable!(),
+                }
+                raw["Rules"] = json!([allow]);
+                let result = validate_draft(&raw);
+                assert!(result.is_valid, "{option} via {explicit}");
+                let finding = result
+                    .findings
+                    .iter()
+                    .find(|finding| finding.arguments.get("option") == Some(&json!(option)))
+                    .unwrap_or_else(|| panic!("missing {option} finding via {explicit}"));
+                let expected_path = match explicit {
+                    "Match" => format!("/Rules/0/Match/{match_field}"),
+                    "Constraints" => format!("/Rules/0/Constraints/{constraint_field}"),
+                    "Default" => "/Rules/0".to_owned(),
+                    _ => unreachable!(),
+                };
+                assert_eq!(finding.path, expected_path);
+                assert!(raw.pointer(&finding.path).is_some(), "missing {}", finding.path);
+                assert!(!finding.arguments.contains_key("Option"));
+            }
+        }
     }
 
     #[test]

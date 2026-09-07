@@ -24,7 +24,11 @@ impl ReceiptKey {
         findings: &[PolicyFinding],
     ) -> HmacSha256 {
         let canonical_json = serde_json::to_vec(canonical_draft).expect("canonical policy draft serializes");
-        let findings_json = serde_json::to_vec(findings).expect("policy findings serialize");
+        let finding_identities: Vec<_> = findings
+            .iter()
+            .map(|finding| (&finding.severity, &finding.code, &finding.rule_id, &finding.arguments))
+            .collect();
+        let findings_json = serde_json::to_vec(&finding_identities).expect("policy finding identities serialize");
         let mut mac = HmacSha256::new_from_slice(&self.0).expect("HMAC accepts any key length");
         mac.update(validator_version.as_bytes());
         mac.update(b"\0");
@@ -74,13 +78,16 @@ mod tests {
     use chrono::Utc;
     use now_policy::{PolicyDocument, PolicyDraftDocument};
     use now_policy_api::{
-        API_VERSION_STR, ErrorCode, PolicyConflictHandling, PolicyFindingCode, PolicyFindingSeverity,
-        PolicyManagementState, PolicyReplacementOperation, PolicyReplacementRequest, PolicyReplacementRequestKind,
-        PolicyStoreToken,
+        API_VERSION_STR, ErrorCode, PolicyConfigurationSource, PolicyConflictHandling, PolicyFindingCode,
+        PolicyFindingSeverity, PolicyManagementState, PolicyReadOnlyReason, PolicyReplacementOperation,
+        PolicyReplacementRequest, PolicyReplacementRequestKind, PolicyStoreToken, PolicyValidationResult,
+        PolicyWriteCapability,
     };
 
     use super::*;
-    use crate::policy_store::{Monitoring, PolicyStorage, PolicyStore, ReloadCause, TestStorage, plan_revision};
+    use crate::policy_store::{
+        Monitoring, PolicyStorage, PolicyStore, ReloadCause, TestStorage, observe_file, plan_revision,
+    };
     use crate::policy_watcher::{WatcherFailure, fail_closed};
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
@@ -146,12 +153,41 @@ mod tests {
         assert!(!key.verify("v1", &original, &[warning()], &receipt));
     }
     #[test]
+    fn receipt_ignores_diagnostic_location_but_binds_semantic_warning_identity() {
+        let key = ReceiptKey::generate();
+        let draft = draft("policy-a");
+        let original = warning();
+        let receipt = key.issue("v1", &draft, std::slice::from_ref(&original));
+        let mut relocated = original;
+        relocated.path = "/Rules/0".to_owned();
+        relocated.message = "localized warning".to_owned();
+        assert!(key.verify("v1", &draft, std::slice::from_ref(&relocated), &receipt));
+        relocated
+            .arguments
+            .insert("option".to_owned(), serde_json::json!("SkipHashCheck"));
+        assert!(!key.verify("v1", &draft, &[relocated], &receipt));
+    }
+    #[test]
     fn malformed_receipts_are_rejected() {
         let key = ReceiptKey::generate();
         let draft = draft("policy-a");
         for receipt in ["invalid", "hmac-sha256:not-hex", "hmac-sha256:00"] {
             assert!(!key.verify("v1", &draft, &[], &receipt.into()));
         }
+    }
+    #[test]
+    fn unsafe_path_shape_reports_insecure_storage() {
+        let observation = observe_file(
+            PolicyConfigurationSource::ConfiguredPath,
+            PathBuf::from(r"..\policy.json").as_path(),
+        );
+        assert_eq!(observation.state, PolicyManagementState::Invalid);
+        assert_eq!(observation.write_capability, PolicyWriteCapability::Unsupported);
+        assert_eq!(observation.read_only_reason, Some(PolicyReadOnlyReason::UnsafePath));
+        assert_eq!(
+            observation.invalid_diagnostics.expect("invalid diagnostics").findings[0].message,
+            "the configured policy file failed storage security validation"
+        );
     }
     #[tokio::test]
     async fn store_rejects_stale_request_after_retargeting_and_tampered_receipts() {
@@ -181,7 +217,42 @@ mod tests {
     async fn store_requires_warning_acknowledgement() {
         let store = PolicyStore::for_tests(None);
         let mut risky = serde_json::to_value(draft("risky")).expect("serialize draft");
-        risky["Enforcement"]["DefaultDecision"] = "Allow".into();
+        risky["Rules"] = serde_json::Value::Array(
+            (0..64)
+                .map(|index| {
+                    serde_json::json!({
+                        "Id": format!("allow-{index}"),
+                        "Priority": index,
+                        "Decision": "Allow",
+                        "Match": { "Managers": ["Winget"] }
+                    })
+                })
+                .collect(),
+        );
+        let validation = store.validate_draft(&risky);
+        let repeated = store.validate_draft(&risky);
+        assert!(validation.is_valid);
+        assert!(validation.canonical_draft.is_some());
+        assert!(validation.validation_receipt.is_some());
+        assert_eq!(validation.validation_receipt, repeated.validation_receipt);
+        assert_eq!(
+            serde_json::to_value(&validation.findings).expect("serialize findings"),
+            serde_json::to_value(&repeated.findings).expect("serialize repeated findings")
+        );
+        assert_eq!(validation.findings.len(), 128);
+        assert!(
+            validation
+                .findings
+                .iter()
+                .all(|finding| finding.severity == PolicyFindingSeverity::Warning)
+        );
+        let serialized = serde_json::to_value(&validation).expect("serialize complete validation result");
+        let round_trip: PolicyValidationResult =
+            serde_json::from_value(serialized.clone()).expect("deserialize complete validation result");
+        assert_eq!(
+            serde_json::to_value(round_trip).expect("serialize round-tripped validation result"),
+            serialized
+        );
         let mut replacement = request(&store, PolicyReplacementOperation::Create, risky);
         let error = store
             .replace(replacement.clone())
@@ -190,6 +261,87 @@ mod tests {
         assert_eq!(error.code, ErrorCode::WarningConfirmationRequired);
         replacement.warnings_acknowledged = true;
         store.replace(replacement).await.expect("acknowledged warning succeeds");
+    }
+    #[tokio::test]
+    async fn canonical_sensitive_warnings_accept_the_original_receipt() {
+        let options = [
+            ("SkipHashCheck", "SkipHashCheck", "AllowSkipHashCheck"),
+            ("PreRelease", "PreRelease", "AllowPreRelease"),
+            (
+                "AllowCustomInstallLocation",
+                "HasCustomInstallLocation",
+                "AllowCustomInstallLocation",
+            ),
+            ("AllowPrePostCommands", "HasPrePostCommands", "AllowPrePostCommands"),
+            (
+                "AllowKillBeforeOperation",
+                "HasKillBeforeOperation",
+                "AllowKillBeforeOperation",
+            ),
+            (
+                "AllowUninstallPrevious",
+                "HasUninstallPrevious",
+                "AllowUninstallPrevious",
+            ),
+            ("AllowCustomParameters", "HasCustomParameters", "AllowCustomParameters"),
+        ];
+        for (option, match_field, constraint_field) in options {
+            for explicit in ["Constraint", "EmptyMatch", "Default"] {
+                let store = PolicyStore::for_tests(None);
+                let mut raw = serde_json::to_value(draft(&format!("{option}-{explicit}"))).expect("serialize draft");
+                let mut rule = serde_json::json!({
+                    "Id": "allow-sensitive",
+                    "Priority": 1,
+                    "Decision": "Allow",
+                    "Match": { "Managers": ["Winget"] }
+                });
+                match explicit {
+                    "Constraint" => {
+                        rule["Constraints"] = serde_json::json!({});
+                        rule["Constraints"][constraint_field] = serde_json::json!(true);
+                    }
+                    "EmptyMatch" => rule["Match"][match_field] = serde_json::json!([]),
+                    "Default" => {}
+                    _ => unreachable!(),
+                }
+                raw["Rules"] = serde_json::json!([rule]);
+                let validation = store.validate_draft(&raw);
+                assert!(validation.is_valid, "{option} via {explicit}");
+                assert!(
+                    validation
+                        .findings
+                        .iter()
+                        .any(|finding| finding.arguments.get("option") == Some(&serde_json::json!(option))),
+                    "missing {option} warning via {explicit}"
+                );
+                let receipt = validation.validation_receipt.expect("valid receipt");
+                let canonical = serde_json::to_value(validation.canonical_draft.expect("valid canonical draft"))
+                    .expect("serialize canonical draft");
+                let replacement = PolicyReplacementRequest {
+                    request_kind: PolicyReplacementRequestKind,
+                    request_version: API_VERSION_STR.into(),
+                    expected_store_token: store.management_snapshot().store_token,
+                    operation: PolicyReplacementOperation::Create,
+                    conflict_handling: PolicyConflictHandling::Reject,
+                    warnings_acknowledged: true,
+                    draft: canonical.clone(),
+                    validation_receipt: receipt.clone(),
+                };
+                if option == "SkipHashCheck" && explicit == "Constraint" {
+                    let mut changed = replacement.clone();
+                    changed.draft["Rules"][0]["Constraints"]["AllowSkipHashCheck"] = serde_json::json!(false);
+                    let error = store
+                        .replace(changed)
+                        .await
+                        .expect_err("meaningful option change invalidates receipt");
+                    assert_eq!(error.code, ErrorCode::ValidationFailed);
+                }
+                store
+                    .replace(replacement)
+                    .await
+                    .unwrap_or_else(|error| panic!("{option} via {explicit} failed: {error:?}"));
+            }
+        }
     }
     #[tokio::test]
     async fn all_replacement_operations_enforce_state_identity_and_revision() {
@@ -314,13 +466,10 @@ mod tests {
             fail_closed(&store, failure).await;
             let unavailable = store.management_snapshot();
             assert_eq!(unavailable.store_token, first_unavailable.store_token);
-            assert_eq!(
-                unavailable.write_capability,
-                now_policy_api::PolicyWriteCapability::ReadOnly
-            );
+            assert_eq!(unavailable.write_capability, PolicyWriteCapability::ReadOnly);
             assert_eq!(
                 unavailable.read_only_reason,
-                Some(now_policy_api::PolicyReadOnlyReason::ManagementDisabled)
+                Some(PolicyReadOnlyReason::ManagementDisabled)
             );
             storage.set_disk_state(Some(policy("external", 9)), false, 9);
             assert_eq!(

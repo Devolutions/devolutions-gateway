@@ -516,7 +516,7 @@ fn observe_file(_source: PolicyConfigurationSource, configured_path: &Path) -> O
             configured_path.to_owned(),
             PolicyWriteCapability::Unsupported,
             Some(PolicyReadOnlyReason::UnsafePath),
-            validation::DiskFailureReason::UnsupportedFormat,
+            validation::DiskFailureReason::InsecureStorage,
             hasher,
         );
     }
