@@ -122,7 +122,8 @@ pub async fn try_route(
 
 /// Try connecting to target through agent candidates (try-fail-retry).
 ///
-/// Returns the connected `TunnelStream` and the agent that succeeded.
+/// Returns the connected stream, the agent that succeeded, and its reported target address.
+/// The address is `None` when the agent sends the legacy success response.
 ///
 /// Callers must handle `RoutingDecision::ExplicitAgentNotFound` and
 /// `RoutingDecision::Direct` before calling this function.
