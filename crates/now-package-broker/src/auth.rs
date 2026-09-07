@@ -1,6 +1,8 @@
 //! Package broker pipe client authentication.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::{Context as _, bail};
 use devolutions_agent_shared::windows::code_signing::validate_devolutions_authenticode_signature;
@@ -11,13 +13,26 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
+use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
-use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+use windows::Win32::System::Threading::{PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION};
+
+const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
+const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS =
+    PROCESS_ACCESS_RIGHTS(PROCESS_QUERY_LIMITED_INFORMATION.0 | PROCESS_SYNCHRONIZE.0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProcessInstanceIdentity {
+    process_id: u32,
+    creation_time: SystemTime,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct PipeClient {
     process_id: u32,
+    process_creation_time: SystemTime,
+    process: Option<Arc<Process>>,
     executable_path: PathBuf,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
@@ -35,12 +50,46 @@ impl PipeClient {
     /// unauthenticated work a connection flood can trigger.
     pub(crate) fn from_connected_pipe(server: &NamedPipeServer) -> anyhow::Result<Self> {
         let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
-        Self::from_process_id(process_id)
+        let process = Arc::new(
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
+                .with_context(|| format!("failed to open pipe client process {process_id}"))?,
+        );
+        Self::ensure_process_active(process_id, &process)?;
+        let process_instance = process_instance_identity(process_id, &process)?;
+        let client = Self::from_process(process_instance, Arc::clone(&process))?;
+        let confirmed_process_id =
+            connected_pipe_client_process_id(server).context("failed to confirm pipe client process id")?;
+        if confirmed_process_id != process_id {
+            bail!("pipe client process changed while its identity was captured");
+        }
+        Self::ensure_process_active(process_id, &process)?;
+        let confirmation = Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
+            .with_context(|| format!("failed to reopen pipe client process {process_id}"))?;
+        ensure_same_process_instance(process_instance, process_instance_identity(process_id, &confirmation)?)?;
+        Ok(client)
+    }
+
+    fn ensure_process_active(process_id: u32, process: &Process) -> anyhow::Result<()> {
+        match process
+            .wait(Some(0))
+            .with_context(|| format!("failed to query pipe client process {process_id} state"))?
+        {
+            WAIT_TIMEOUT => Ok(()),
+            WAIT_OBJECT_0 => bail!("pipe client process {process_id} exited while its identity was captured"),
+            status => bail!("unexpected wait status {status:?} for pipe client process {process_id}"),
+        }
     }
 
     fn from_process_id(process_id: u32) -> anyhow::Result<Self> {
-        let process = Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION)
-            .with_context(|| format!("failed to open pipe client process {process_id}"))?;
+        let process = Arc::new(
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
+                .with_context(|| format!("failed to open pipe client process {process_id}"))?,
+        );
+        Self::from_process(process_instance_identity(process_id, &process)?, process)
+    }
+
+    fn from_process(process_instance: ProcessInstanceIdentity, process: Arc<Process>) -> anyhow::Result<Self> {
+        let process_id = process_instance.process_id;
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
@@ -62,6 +111,8 @@ impl PipeClient {
 
         Ok(Self {
             process_id,
+            process_creation_time: process_instance.creation_time,
+            process: Some(process),
             executable_path,
             user_sid,
             is_elevated,
@@ -124,6 +175,7 @@ impl PipeClient {
     }
 
     pub(crate) fn validate_connection(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
+        self.validate_process_instance()?;
         if signature_validation_skipped(skip_signature_validation) {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());
@@ -133,12 +185,28 @@ impl PipeClient {
 
         debug!(
             process_id = self.process_id,
+            process_creation_time = ?self.process_creation_time,
             executable = %self.executable_path.display(),
             certificate_thumbprint = %thumbprint,
             "Package broker pipe client authenticated"
         );
 
         Ok(())
+    }
+
+    fn validate_process_instance(&self) -> anyhow::Result<()> {
+        let Some(process) = &self.process else {
+            return Ok(());
+        };
+
+        Self::ensure_process_active(self.process_id, process)?;
+        ensure_same_process_instance(
+            ProcessInstanceIdentity {
+                process_id: self.process_id,
+                creation_time: self.process_creation_time,
+            },
+            process_instance_identity(self.process_id, process)?,
+        )
     }
 
     /// Validate that the request's `effective_user` denotes the authenticated pipe client user.
@@ -231,6 +299,25 @@ fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<
     Ok(process_id)
 }
 
+fn process_instance_identity(process_id: u32, process: &Process) -> anyhow::Result<ProcessInstanceIdentity> {
+    Ok(ProcessInstanceIdentity {
+        process_id,
+        creation_time: process
+            .creation_time()
+            .with_context(|| format!("failed to query pipe client process {process_id} creation time"))?,
+    })
+}
+
+fn ensure_same_process_instance(
+    expected: ProcessInstanceIdentity,
+    actual: ProcessInstanceIdentity,
+) -> anyhow::Result<()> {
+    if expected != actual {
+        bail!("pipe client process instance changed while its identity was captured");
+    }
+    Ok(())
+}
+
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
 fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
@@ -305,11 +392,63 @@ mod tests {
     fn system_client() -> PipeClient {
         PipeClient {
             process_id: 0,
+            process_creation_time: SystemTime::UNIX_EPOCH,
+            process: None,
             executable_path: PathBuf::new(),
             user_sid: system_sid(),
             is_elevated: true,
             is_administrator: true,
         }
+    }
+
+    #[test]
+    fn mismatched_process_creation_time_is_rejected() {
+        let expected = ProcessInstanceIdentity {
+            process_id: 42,
+            creation_time: SystemTime::UNIX_EPOCH,
+        };
+        let actual = ProcessInstanceIdentity {
+            process_id: 42,
+            creation_time: SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(100),
+        };
+
+        ensure_same_process_instance(expected, actual)
+            .expect_err("a recycled PID with a different creation time must be rejected");
+    }
+
+    #[test]
+    fn exited_process_cannot_supply_executable_identity() {
+        let mut child = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "exit 0"])
+            .spawn()
+            .expect("start short-lived child");
+        let process_id = child.id();
+        let process = Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS).expect("open child while it is running");
+        child.wait().expect("wait for child");
+
+        let error = PipeClient::ensure_process_active(process_id, &process)
+            .expect_err("an exited process cannot authenticate a connected pipe client");
+        assert!(error.to_string().contains("exited while its identity was captured"));
+    }
+
+    #[test]
+    fn pipe_client_retains_process_handle_and_rejects_exit() {
+        let mut child = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+            .spawn()
+            .expect("start child");
+        let client = PipeClient::from_process_id(child.id()).expect("capture child identity");
+        assert!(
+            client.process.is_some(),
+            "the exact authenticated process handle must be retained"
+        );
+
+        child.kill().expect("terminate child");
+        child.wait().expect("wait for child");
+
+        client
+            .validate_process_instance()
+            .expect_err("an inherited pipe cannot outlive the authenticated process");
     }
 
     #[cfg(not(feature = "dev-skip-broker-signature"))]
@@ -398,6 +537,8 @@ mod tests {
             // even though the configuration requests skipping it.
             let client = PipeClient {
                 process_id: std::process::id(),
+                process_creation_time: SystemTime::UNIX_EPOCH,
+                process: None,
                 executable_path: std::env::current_exe().expect("current test executable path"),
                 user_sid: client_user_sid(),
                 is_elevated: false,
