@@ -1,5 +1,8 @@
 //! Package broker pipe client authentication.
 
+use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -13,14 +16,17 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
-use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
-use windows::Win32::System::Threading::{PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::Storage::FileSystem::{FILE_EXECUTE, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_READ};
+use windows::Win32::System::Threading::{
+    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+};
 
 const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
-const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS =
-    PROCESS_ACCESS_RIGHTS(PROCESS_QUERY_LIMITED_INFORMATION.0 | PROCESS_SYNCHRONIZE.0);
+const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(
+    PROCESS_QUERY_INFORMATION.0 | PROCESS_QUERY_LIMITED_INFORMATION.0 | PROCESS_VM_READ.0 | PROCESS_SYNCHRONIZE.0,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProcessInstanceIdentity {
@@ -34,6 +40,7 @@ pub(crate) struct PipeClient {
     process_creation_time: SystemTime,
     process: Option<Arc<Process>>,
     executable_path: PathBuf,
+    executable_file: Option<Arc<File>>,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
     /// Actual connected process token elevation, captured at connect.
@@ -90,12 +97,27 @@ impl PipeClient {
 
     fn from_process(process_instance: ProcessInstanceIdentity, process: Arc<Process>) -> anyhow::Result<Self> {
         let process_id = process_instance.process_id;
-        let executable_path = process
-            .exe_path()
-            .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
         let token = process
             .token(TOKEN_QUERY | TOKEN_DUPLICATE)
             .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
+        let executable_path = process
+            .exe_path()
+            .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
+        let (_image_address, mapped_executable_path) = process
+            .main_image_mapped_path()
+            .with_context(|| format!("failed to query pipe client process {process_id} mapped executable image"))?;
+        if !is_supported_local_image_path(&mapped_executable_path) {
+            bail!("pipe client process {process_id} mapped executable is not on a supported local volume");
+        }
+        let executable_file = Arc::new(open_native_executable_file(&mapped_executable_path).with_context(|| {
+            format!(
+                "failed to retain pipe client process {process_id} mapped executable '{}'",
+                executable_path.display()
+            )
+        })?);
+        process.verify_image_file_mapping(&executable_file).with_context(|| {
+            format!("pipe client process {process_id} mapped executable file does not match its image")
+        })?;
         let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
@@ -108,12 +130,16 @@ impl PipeClient {
         let is_administrator = token
             .is_member(&administrators_sid)
             .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
+        process
+            .verify_image_file_mapping(&executable_file)
+            .with_context(|| format!("pipe client process {process_id} executable image changed during capture"))?;
 
         Ok(Self {
             process_id,
             process_creation_time: process_instance.creation_time,
             process: Some(process),
             executable_path,
+            executable_file: Some(executable_file),
             user_sid,
             is_elevated,
             is_administrator,
@@ -251,12 +277,16 @@ impl PipeClient {
             bail!("request client executable path is not absolute");
         }
 
-        let actual_id = file_id(&self.executable_path).with_context(|| {
-            format!(
-                "failed to query pipe client executable '{}' file identity",
-                self.executable_path.display()
-            )
-        })?;
+        let actual_id = if let Some(executable_file) = &self.executable_file {
+            file_id_from_handle(executable_file).context("failed to query retained pipe client executable identity")?
+        } else {
+            file_id(&self.executable_path).with_context(|| {
+                format!(
+                    "failed to query pipe client executable '{}' file identity",
+                    self.executable_path.display()
+                )
+            })?
+        };
         let requested_id = file_id(requested_path).with_context(|| {
             format!("failed to query request client executable '{requested_executable_path}' file identity")
         })?;
@@ -318,6 +348,25 @@ fn ensure_same_process_instance(
     Ok(())
 }
 
+fn open_executable_file(path: &Path) -> anyhow::Result<File> {
+    OpenOptions::new()
+        .access_mode(GENERIC_READ.0 | FILE_READ_ATTRIBUTES.0 | FILE_EXECUTE.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(path)
+        .context("failed to open executable without write or delete sharing")
+}
+
+fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
+    let mut global_root_path = OsString::from(r"\\?\GLOBALROOT");
+    global_root_path.push(native_path.as_os_str());
+    open_executable_file(Path::new(&global_root_path))
+}
+
+fn is_supported_local_image_path(path: &Path) -> bool {
+    let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
+    path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
+}
+
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
 fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
@@ -327,22 +376,23 @@ fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
 
 /// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
 fn file_id(path: &Path) -> anyhow::Result<FILE_ID_INFO> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-    use std::os::windows::io::AsRawHandle as _;
+    use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_WRITE};
 
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Storage::FileSystem::{
-        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo,
-        GetFileInformationByHandleEx,
-    };
-
-    let file = std::fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .access_mode(FILE_READ_ATTRIBUTES.0)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
         .open(path)?;
 
-    let mut info = FILE_ID_INFO::default();
+    file_id_from_handle(&file)
+}
 
+fn file_id_from_handle(file: &File) -> anyhow::Result<FILE_ID_INFO> {
+    use std::os::windows::io::AsRawHandle as _;
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_ID_INFO::default();
     let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
 
     // SAFETY: `file` is an open file handle, and the output pointer points to a
@@ -395,6 +445,7 @@ mod tests {
             process_creation_time: SystemTime::UNIX_EPOCH,
             process: None,
             executable_path: PathBuf::new(),
+            executable_file: None,
             user_sid: system_sid(),
             is_elevated: true,
             is_administrator: true,
@@ -521,6 +572,45 @@ mod tests {
         assert!(!same_file(&exe_id, &temp_id));
     }
 
+    #[test]
+    fn process_image_file_mapping_accepts_the_main_image_and_rejects_a_signed_substitute() {
+        let process = Process::get_by_pid(std::process::id(), PROCESS_IDENTITY_ACCESS).expect("open current process");
+        let executable =
+            open_executable_file(&std::env::current_exe().expect("current executable")).expect("open current image");
+        process
+            .verify_image_file_mapping(&executable)
+            .expect("current executable must match its process image");
+
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let signed_substitute = open_executable_file(&PathBuf::from(windows_dir).join(r"System32\cmd.exe"))
+            .expect("open signed substitute");
+        process
+            .verify_image_file_mapping(&signed_substitute)
+            .expect_err("a different signed image mapping must not substitute for the main executable");
+    }
+
+    #[test]
+    fn mapped_image_path_rejects_network_and_non_volume_devices() {
+        assert!(is_supported_local_image_path(Path::new(
+            r"\Device\HarddiskVolume3\Program Files\Devolutions\client.exe"
+        )));
+        assert!(is_supported_local_image_path(Path::new(
+            r"\Device\Volume{01234567-89ab-cdef-0123-456789abcdef}\client.exe"
+        )));
+
+        for path in [
+            r"\Device\Mup\server\share\client.exe",
+            r"\Device\LanmanRedirector\server\share\client.exe",
+            r"\Device\WebDavRedirector\server\share\client.exe",
+            r"\??\UNC\server\share\client.exe",
+            r"\\server\share\client.exe",
+        ] {
+            assert!(!is_supported_local_image_path(Path::new(path)), "{path}");
+        }
+    }
+
     #[cfg(not(feature = "dev-skip-broker-signature"))]
     mod shipping_build {
         use super::*;
@@ -540,6 +630,7 @@ mod tests {
                 process_creation_time: SystemTime::UNIX_EPOCH,
                 process: None,
                 executable_path: std::env::current_exe().expect("current test executable path"),
+                executable_file: None,
                 user_sid: client_user_sid(),
                 is_elevated: false,
                 is_administrator: false,
