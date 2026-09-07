@@ -101,6 +101,7 @@ impl PipeClient {
         }
     }
 
+    #[cfg(test)]
     fn from_process_id(process_id: u32) -> anyhow::Result<Self> {
         let process = Arc::new(
             Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
