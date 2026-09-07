@@ -3,7 +3,7 @@
 //! Consumed by the upstream connection paths (forwarding, RDP clean path,
 //! generic client) to ensure consistent routing behavior and error messages.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use agent_tunnel_proto::DomainName;
@@ -95,7 +95,7 @@ pub async fn try_route(
     target: &RouteTarget,
     session_id: Uuid,
     target_addr: &str,
-) -> Result<Option<(TunnelStream, Arc<AgentPeer>)>> {
+) -> Result<Option<(TunnelStream, Arc<AgentPeer>, Option<SocketAddr>)>> {
     let Some(handle) = handle else {
         // An explicit `jet_agent_id` claim means the token requires routing via that
         // specific agent; silently falling back to a direct connect would bypass the
@@ -131,7 +131,7 @@ pub async fn route_and_connect(
     candidates: &[Arc<AgentPeer>],
     session_id: Uuid,
     target: &str,
-) -> Result<(TunnelStream, Arc<AgentPeer>)> {
+) -> Result<(TunnelStream, Arc<AgentPeer>, Option<SocketAddr>)> {
     if candidates.is_empty() {
         return Err(anyhow!("route_and_connect called with empty candidates"));
     }
@@ -147,14 +147,14 @@ pub async fn route_and_connect(
         );
 
         match handle.connect_via_agent(agent.agent_id, session_id, target).await {
-            Ok(stream) => {
+            Ok((stream, target_addr)) => {
                 info!(
                     agent_id = %agent.agent_id,
                     agent_name = %agent.name,
                     %target,
                     "Agent tunnel connection established"
                 );
-                return Ok((stream, Arc::clone(agent)));
+                return Ok((stream, Arc::clone(agent), target_addr));
             }
             Err(error) => {
                 warn!(

@@ -2,6 +2,8 @@
 //!
 //! Encoding and decoding live in [`crate::session_codec`].
 
+use std::net::SocketAddr;
+
 use uuid::Uuid;
 
 use crate::version::CURRENT_PROTOCOL_VERSION;
@@ -33,12 +35,18 @@ pub enum ConnectRequest {
 /// Agent's response to a [`ConnectRequest`].
 ///
 /// Wire layout:
-/// - Success: `[1B tag=0x00][2B version]`
+/// - Success: `[1B tag=0x00][2B version][optional 4B address length + address bytes]`
 /// - Error:   `[1B tag=0x01][2B version][4B reason_len][reason bytes]`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectResponse {
-    Success { protocol_version: u16 },
-    Error { protocol_version: u16, reason: String },
+    Success {
+        protocol_version: u16,
+        target_addr: Option<SocketAddr>,
+    },
+    Error {
+        protocol_version: u16,
+        reason: String,
+    },
 }
 
 impl ConnectRequest {
@@ -77,6 +85,14 @@ impl ConnectResponse {
     pub fn success() -> Self {
         Self::Success {
             protocol_version: CURRENT_PROTOCOL_VERSION,
+            target_addr: None,
+        }
+    }
+
+    pub fn success_with_target(target_addr: SocketAddr) -> Self {
+        Self::Success {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+            target_addr: Some(target_addr),
         }
     }
 
@@ -94,7 +110,7 @@ impl ConnectResponse {
     /// Extract the protocol version from any variant.
     pub fn protocol_version(&self) -> u16 {
         match self {
-            Self::Success { protocol_version } | Self::Error { protocol_version, .. } => *protocol_version,
+            Self::Success { protocol_version, .. } | Self::Error { protocol_version, .. } => *protocol_version,
         }
     }
 }

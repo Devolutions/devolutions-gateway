@@ -81,7 +81,7 @@ impl KdcConnector {
         .await
         .map_err(|e| HttpError::bad_gateway().build(format!("KDC routing through agent tunnel failed: {e:#}")))?;
 
-        if let Some((mut stream, _)) = route_result {
+        if let Some((mut stream, _, _)) = route_result {
             // The agent tunnel currently carries only TCP (`ConnectRequest::tcp`). If the
             // routing pipeline picked an agent for a udp:// KDC target — either by subnet
             // match or by explicit pin — we must reject explicitly. Silently falling

@@ -69,6 +69,9 @@ pub struct ConnectedTarget {
 }
 
 impl ConnectedTarget {
+    /// Wraps a connected stream and the concrete peer IP used for traffic auditing.
+    ///
+    /// When `target_ip` is `None`, the channel works normally but emits no traffic event.
     pub fn new(stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static, target_ip: Option<IpAddr>) -> Self {
         Self {
             stream: Box::new(stream),
@@ -142,6 +145,8 @@ impl JmuxProxy {
     /// Tries a custom target connection before falling back to direct TCP.
     ///
     /// Return `Ok(None)` when the target should use the default direct connection.
+    /// Return the concrete peer IP in `ConnectedTarget` to enable traffic auditing.
+    /// Connector errors do not emit `ConnectFailure` because they do not prove that a concrete address was attempted.
     #[must_use]
     pub fn with_target_connector<C, F>(mut self, connector: C) -> Self
     where
@@ -1238,25 +1243,6 @@ impl StreamResolverTask {
                         }
                         Ok(None) => {}
                         Err(error) => {
-                            if let Some(callback) = &traffic_callback
-                                && let Ok(target_ip) = host.parse::<IpAddr>()
-                            {
-                                let connect_and_disconnect_time = SystemTime::now();
-
-                                callback(TrafficEvent {
-                                    outcome: EventOutcome::ConnectFailure,
-                                    protocol: TransportProtocol::Tcp,
-                                    target_host: channel.target_host.clone(),
-                                    target_ip,
-                                    target_port: channel.target_port,
-                                    connect_at: connect_and_disconnect_time,
-                                    disconnect_at: connect_and_disconnect_time,
-                                    active_duration: std::time::Duration::ZERO,
-                                    bytes_tx: 0,
-                                    bytes_rx: 0,
-                                });
-                            }
-
                             msg_to_send_tx
                                 .send(Message::open_failure(
                                     channel.distant_id,

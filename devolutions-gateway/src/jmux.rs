@@ -135,11 +135,13 @@ pub async fn handle(
                 )
                 .await?;
 
-                let Some((stream, _agent)) = routed else {
+                let Some((stream, _agent, target_addr)) = routed else {
                     return Ok(None);
                 };
 
-                Ok(Some(ConnectedTarget::new(stream, target.host_ip())))
+                let target_ip = target_addr.map(|addr| addr.ip()).or_else(|| target.host_ip());
+
+                Ok(Some(ConnectedTarget::new(stream, target_ip)))
             }
         });
     }

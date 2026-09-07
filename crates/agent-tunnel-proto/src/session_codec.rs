@@ -57,9 +57,15 @@ impl Decode for ConnectRequest {
 impl Encode for ConnectResponse {
     fn encode(&self, buf: &mut BytesMut) {
         match self {
-            Self::Success { protocol_version } => {
+            Self::Success {
+                protocol_version,
+                target_addr,
+            } => {
                 buf.put_u8(TAG_RESPONSE_SUCCESS);
                 buf.put_u16(*protocol_version);
+                if let Some(target_addr) = target_addr {
+                    codec::put_string(buf, &target_addr.to_string());
+                }
             }
             Self::Error {
                 protocol_version,
@@ -80,7 +86,22 @@ impl Decode for ConnectResponse {
         let protocol_version = buf.get_u16();
 
         match tag {
-            TAG_RESPONSE_SUCCESS => Ok(Self::Success { protocol_version }),
+            TAG_RESPONSE_SUCCESS => {
+                let target_addr = if buf.has_remaining() {
+                    let value = codec::get_string(&mut buf)?;
+                    Some(value.parse().map_err(|_| ProtoError::InvalidField {
+                        field: "target_addr",
+                        reason: "not a socket address",
+                    })?)
+                } else {
+                    None
+                };
+
+                Ok(Self::Success {
+                    protocol_version,
+                    target_addr,
+                })
+            }
             TAG_RESPONSE_ERROR => {
                 let reason = codec::get_string(&mut buf)?;
                 Ok(Self::Error {

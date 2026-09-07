@@ -91,7 +91,7 @@ impl AgentTunnelHandle {
         agent_id: Uuid,
         session_id: Uuid,
         target: &str,
-    ) -> anyhow::Result<TunnelStream> {
+    ) -> anyhow::Result<(TunnelStream, Option<SocketAddr>)> {
         let conn = self
             .agent_connections
             .read()
@@ -122,9 +122,10 @@ impl AgentTunnelHandle {
         agent_tunnel_proto::validate_protocol_version(response.protocol_version())
             .map_err(|e| anyhow::anyhow!("ConnectResponse: {e}"))?;
 
-        if let ConnectResponse::Error { reason, .. } = &response {
-            anyhow::bail!("agent refused connection: {reason}");
-        }
+        let target_addr = match response {
+            ConnectResponse::Success { target_addr, .. } => target_addr,
+            ConnectResponse::Error { reason, .. } => anyhow::bail!("agent refused connection: {reason}"),
+        };
 
         info!(
             %agent_id,
@@ -134,7 +135,7 @@ impl AgentTunnelHandle {
         );
 
         let (send, recv) = session.into_inner();
-        Ok(TunnelStream { send, recv })
+        Ok((TunnelStream { send, recv }, target_addr))
     }
 }
 
