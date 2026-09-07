@@ -22,6 +22,7 @@ pub async fn handler(
         shutdown_signal,
         conf_handle,
         traffic_audit_handle,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     JmuxToken(claims): JmuxToken,
@@ -35,6 +36,7 @@ pub async fn handler(
             sessions,
             subscriber_tx,
             traffic_audit_handle,
+            agent_tunnel_handle,
             claims,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -54,6 +56,7 @@ async fn handle_socket(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
+    agent_tunnel_handle: Option<std::sync::Arc<agent_tunnel::AgentTunnelHandle>>,
     claims: JmuxTokenClaims,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -65,9 +68,16 @@ async fn handle_socket(
     );
 
     let session_id = claims.jet_aid;
-    let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx, traffic_audit_handle)
-        .instrument(info_span!("jmux", client = %source_addr, %session_id))
-        .await;
+    let result = crate::jmux::handle(
+        stream,
+        claims,
+        sessions,
+        subscriber_tx,
+        traffic_audit_handle,
+        agent_tunnel_handle,
+    )
+    .instrument(info_span!("jmux", client = %source_addr, %session_id))
+    .await;
 
     if let Err(error) = result {
         close_handle.server_error("JMUX failure".to_owned()).await;

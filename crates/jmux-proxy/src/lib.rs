@@ -12,7 +12,10 @@ mod id_allocator;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::future::Future;
 use std::io;
+use std::net::IpAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -22,7 +25,6 @@ use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
@@ -52,6 +54,28 @@ pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
 pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;
 pub type ApiRequestSender = mpsc::Sender<JmuxApiRequest>;
 pub type ApiRequestReceiver = mpsc::Receiver<JmuxApiRequest>;
+
+trait TargetStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> TargetStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type ErasedTargetStream = Box<dyn TargetStream>;
+type TargetConnectorFuture = Pin<Box<dyn Future<Output = anyhow::Result<Option<ConnectedTarget>>> + Send>>;
+type TargetConnector = Arc<dyn Fn(DestinationUrl) -> TargetConnectorFuture + Send + Sync>;
+
+pub struct ConnectedTarget {
+    stream: ErasedTargetStream,
+    target_ip: Option<IpAddr>,
+}
+
+impl ConnectedTarget {
+    pub fn new(stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static, target_ip: Option<IpAddr>) -> Self {
+        Self {
+            stream: Box::new(stream),
+            target_ip,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum JmuxApiRequest {
@@ -84,6 +108,7 @@ pub struct JmuxProxy {
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     traffic_callback: Option<TrafficCallback>,
+    target_connector: Option<TargetConnector>,
 }
 
 impl JmuxProxy {
@@ -98,6 +123,7 @@ impl JmuxProxy {
             jmux_reader,
             jmux_writer,
             traffic_callback: None,
+            target_connector: None,
         }
     }
 
@@ -110,6 +136,19 @@ impl JmuxProxy {
     #[must_use]
     pub fn with_requester_api(mut self, api_request_rx: ApiRequestReceiver) -> Self {
         self.api_request_rx = Some(api_request_rx);
+        self
+    }
+
+    /// Tries a custom target connection before falling back to direct TCP.
+    ///
+    /// Return `Ok(None)` when the target should use the default direct connection.
+    #[must_use]
+    pub fn with_target_connector<C, F>(mut self, connector: C) -> Self
+    where
+        C: Fn(DestinationUrl) -> F + Send + Sync + 'static,
+        F: Future<Output = anyhow::Result<Option<ConnectedTarget>>> + Send + 'static,
+    {
+        self.target_connector = Some(Arc::new(move |destination_url| Box::pin(connector(destination_url))));
         self
     }
 
@@ -186,6 +225,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_reader,
         jmux_writer,
         traffic_callback,
+        target_connector,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -206,6 +246,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         msg_to_send_tx,
         api_request_rx,
         traffic_callback,
+        target_connector,
         parent_span: span,
     }
     .spawn();
@@ -255,7 +296,7 @@ struct JmuxChannelCtx {
     // Traffic audit metadata
     target_host: String,
     /// Target server resolved address IP
-    target_ip: Option<std::net::IpAddr>,
+    target_ip: Option<IpAddr>,
     /// Target server port
     target_port: u16,
     /// Time the connection with target peer was established at
@@ -344,7 +385,6 @@ type DataReceiver = mpsc::Receiver<Bytes>;
 type DataSender = mpsc::Sender<Bytes>;
 type InternalMessageSender = mpsc::Sender<InternalMessage>;
 
-#[derive(Debug)]
 enum InternalMessage {
     Eof {
         id: LocalChannelId,
@@ -353,7 +393,7 @@ enum InternalMessage {
         // Boxing reduces enum size from 224 bytes to ~16 bytes
         // (clippy::large_enum_variant)
         channel: Box<JmuxChannelCtx>,
-        stream: TcpStream,
+        stream: ErasedTargetStream,
     },
     AbnormalTermination {
         id: LocalChannelId,
@@ -427,6 +467,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
     traffic_callback: Option<TrafficCallback>,
+    target_connector: Option<TargetConnector>,
     parent_span: Span,
 }
 
@@ -448,6 +489,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         msg_to_send_tx,
         mut api_request_rx,
         traffic_callback,
+        target_connector,
         parent_span,
     } = task;
 
@@ -501,7 +543,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             error!(%error, "Couldn't send leftover bytes");
                         }
 
-                        let (reader, writer) = stream.into_split();
+                        let stream = Box::new(stream) as ErasedTargetStream;
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -626,7 +669,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!("Channel accepted");
                         });
 
-                        let (reader, writer) = stream.into_split();
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -760,6 +803,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             traffic_callback: traffic_callback.clone(),
+                            target_connector: target_connector.clone(),
                         }
                         .spawn()
                         .detach();
@@ -958,7 +1002,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 // ---------------------- //
 
 struct DataReaderTask {
-    reader: OwnedReadHalf,
+    reader: tokio::io::ReadHalf<ErasedTargetStream>,
     local_id: LocalChannelId,
     distant_id: DistantChannelId,
     window_size_updated: Arc<Notify>,
@@ -1087,7 +1131,7 @@ impl DataReaderTask {
 // ---------------------- //
 
 struct DataWriterTask {
-    writer: OwnedWriteHalf,
+    writer: tokio::io::WriteHalf<ErasedTargetStream>,
     data_rx: DataReceiver,
     /// Tracks bytes written into the stream.
     bytes_tx: Arc<AtomicU64>,
@@ -1139,6 +1183,7 @@ struct StreamResolverTask {
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
     traffic_callback: Option<TrafficCallback>,
+    target_connector: Option<TargetConnector>,
 }
 
 impl StreamResolverTask {
@@ -1164,6 +1209,7 @@ impl StreamResolverTask {
             internal_msg_tx,
             msg_to_send_tx,
             traffic_callback,
+            target_connector,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -1172,6 +1218,59 @@ impl StreamResolverTask {
 
         match scheme {
             "tcp" => {
+                if let Some(connector) = target_connector {
+                    match connector(destination_url.clone()).await {
+                        Ok(Some(ConnectedTarget { stream, target_ip })) => {
+                            channel.target_ip = target_ip;
+                            channel.connect_at = SystemTime::now();
+
+                            internal_msg_tx
+                                .send(InternalMessage::StreamResolved {
+                                    channel: Box::new(channel),
+                                    stream,
+                                })
+                                .await
+                                .map_err(|_| {
+                                    anyhow::anyhow!("couldn't send back resolved stream through internal mpsc channel")
+                                })?;
+
+                            return Ok(());
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            if let Some(callback) = &traffic_callback
+                                && let Ok(target_ip) = host.parse::<IpAddr>()
+                            {
+                                let connect_and_disconnect_time = SystemTime::now();
+
+                                callback(TrafficEvent {
+                                    outcome: EventOutcome::ConnectFailure,
+                                    protocol: TransportProtocol::Tcp,
+                                    target_host: channel.target_host.clone(),
+                                    target_ip,
+                                    target_port: channel.target_port,
+                                    connect_at: connect_and_disconnect_time,
+                                    disconnect_at: connect_and_disconnect_time,
+                                    active_duration: std::time::Duration::ZERO,
+                                    bytes_tx: 0,
+                                    bytes_rx: 0,
+                                });
+                            }
+
+                            msg_to_send_tx
+                                .send(Message::open_failure(
+                                    channel.distant_id,
+                                    ReasonCode::GENERAL_FAILURE,
+                                    "target connection failed",
+                                ))
+                                .await
+                                .context("couldn't send OPEN FAILURE message through mpsc channel")?;
+
+                            return Err(error.context(format!("couldn't connect to {host}:{port}")));
+                        }
+                    }
+                }
+
                 // Perform DNS resolution first to get concrete IP addresses.
                 let socket_addrs = match tokio::net::lookup_host((host, port)).await {
                     Ok(addrs) => addrs,
@@ -1203,10 +1302,12 @@ impl StreamResolverTask {
                             internal_msg_tx
                                 .send(InternalMessage::StreamResolved {
                                     channel: Box::new(channel),
-                                    stream,
+                                    stream: Box::new(stream),
                                 })
                                 .await
-                                .context("couldn't send back resolved stream through internal mpsc channel")?;
+                                .map_err(|_| {
+                                    anyhow::anyhow!("couldn't send back resolved stream through internal mpsc channel")
+                                })?;
 
                             return Ok(());
                         }
