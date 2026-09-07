@@ -282,6 +282,7 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
 #[derive(Debug)]
 pub(crate) struct VerifiedExecutable {
     _file: File,
+    _ancestor_handles: Vec<File>,
     path: PathBuf,
 }
 
@@ -294,6 +295,39 @@ impl VerifiedExecutable {
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Security guard for an executable file already retained by its caller.
+///
+/// The caller must keep both its file handle and this guard alive.
+/// The file handle binds later checks to the same object and denies new writers, while the
+/// guard pins each verified ancestor against rename or reparse-point substitution.
+#[derive(Debug)]
+pub(crate) struct RetainedExecutableSecurity {
+    _ancestor_handles: Vec<File>,
+    path: PathBuf,
+}
+
+/// Verify trusted-writer security for an already-retained executable and pin its ancestors.
+pub(crate) fn verify_retained_executable_security(
+    file: &File,
+    subject: &str,
+) -> anyhow::Result<RetainedExecutableSecurity> {
+    let path = final_path_from_handle(file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+
+    verify_handle_security(
+        file,
+        subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        WRITE_ACCESS_MASK,
+    )?;
+
+    let ancestor_handles = retain_executable_ancestor_directories(&path, subject)?;
+
+    Ok(RetainedExecutableSecurity {
+        _ancestor_handles: ancestor_handles,
+        path,
+    })
 }
 
 /// Verify that a resolved package-manager executable which will be launched with an
@@ -346,24 +380,12 @@ pub(crate) fn verify_elevated_executable_security(
         .open(path)
         .with_context(|| format!("failed to open {subject}"))?;
 
-    // Resolve the path from the handle itself: if `path` traversed a reparse point
-    // (symlink, junction, ...), this yields the real target, which is the very object
-    // pinned by the guard handle.
-    let final_path =
-        final_path_from_handle(&file).with_context(|| format!("failed to resolve final path of {subject}"))?;
-
-    verify_handle_security(
-        &file,
-        &subject,
-        TrustedWriters::AdminOrTrustedInstaller,
-        WRITE_ACCESS_MASK,
-    )?;
-
-    verify_ancestor_directories(&final_path, &subject)?;
+    let security = verify_retained_executable_security(&file, &subject)?;
 
     Ok(Some(VerifiedExecutable {
         _file: file,
-        path: final_path,
+        _ancestor_handles: security._ancestor_handles,
+        path: security.path,
     }))
 }
 
@@ -544,14 +566,45 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// file when the image is finally loaded. Create rights higher up are harmless (and are
 /// granted to unprivileged users on stock drive roots), since they cannot redirect an
 /// existing path component.
-fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
-    verify_directory_chain(
-        path.parent(),
-        subject,
-        TrustedWriters::AdminOrTrustedInstaller,
-        TrustedWriters::AdminOrTrustedInstaller,
-        false,
-    )
+fn retain_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
+    let mut handles = Vec::new();
+    let mut current = path.parent();
+    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
+
+    while let Some(dir) = current {
+        let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
+        let handle = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(dir)
+            .with_context(|| format!("failed to open {dir_subject}"))?;
+
+        if is_reparse_point(&handle).with_context(|| format!("failed to inspect {dir_subject}"))? {
+            bail!("{dir_subject} is a reparse point");
+        }
+
+        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
+        if !windows_paths_equal(&resolved, dir) {
+            bail!(
+                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
+                resolved.display()
+            );
+        }
+
+        verify_handle_security(
+            &handle,
+            &dir_subject,
+            TrustedWriters::AdminOrTrustedInstaller,
+            tamper_mask,
+        )?;
+
+        handles.push(handle);
+        tamper_mask = DIRECTORY_TAMPER_MASK;
+        current = dir.parent();
+    }
+
+    Ok(handles)
 }
 
 fn verify_directory_chain(

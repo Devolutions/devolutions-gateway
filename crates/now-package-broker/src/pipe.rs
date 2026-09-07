@@ -78,7 +78,8 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                             let serve = async move {
                                 // Capture the client identity off the accept loop so a slow
                                 // lookup cannot stall accepting other connections.
-                                let client = match PipeClient::from_connected_pipe(&server) {
+                                let client =
+                                    match PipeClient::from_connected_pipe(&server, state.skip_signature_validation) {
                                     Ok(client) => client,
                                     Err(error) => {
                                         warn!(%error, "Rejected named pipe client");
