@@ -547,7 +547,7 @@ dependencies = [
  "sha1 0.10.7",
  "sync_wrapper 1.0.2",
  "tokio 1.52.3",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
@@ -1865,7 +1865,7 @@ dependencies = [
  "tokio-retry",
  "tokio-rustls",
  "tokio-test",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tower 0.5.3",
  "tower-http 0.5.2",
  "tracing",
@@ -1874,7 +1874,7 @@ dependencies = [
  "traffic-audit",
  "traffic-audit-libsql",
  "transport",
- "tungstenite",
+ "tungstenite 0.29.0",
  "typed-builder",
  "ulid",
  "url",
@@ -3780,7 +3780,7 @@ dependencies = [
  "sysinfo",
  "tinyjson",
  "tokio 1.52.3",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -7516,7 +7516,7 @@ dependencies = [
  "portpicker",
  "proptest",
  "tokio 1.52.3",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "transport",
 ]
 
@@ -7562,7 +7562,7 @@ dependencies = [
  "test-utils",
  "tokio 1.52.3",
  "tokio-rustls",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tokio-util",
  "typed-builder",
  "uuid",
@@ -7859,6 +7859,18 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "tokio 1.52.3",
+ "tungstenite 0.29.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
+dependencies = [
+ "futures-util",
+ "log",
  "native-tls",
  "rustls 0.23.43",
  "rustls-native-certs",
@@ -7866,7 +7878,7 @@ dependencies = [
  "tokio 1.52.3",
  "tokio-native-tls",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.30.0",
 ]
 
 [[package]]
@@ -8398,11 +8410,27 @@ dependencies = [
  "http 1.4.2",
  "httparse",
  "log",
- "native-tls",
  "rand 0.9.5",
+ "sha1 0.10.7",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
+dependencies = [
+ "bytes 1.12.1",
+ "data-encoding",
+ "http 1.4.2",
+ "httparse",
+ "log",
+ "native-tls",
+ "rand 0.10.2",
  "rustls 0.23.43",
  "rustls-pki-types",
- "sha1 0.10.7",
+ "sha1 0.11.0",
  "thiserror 2.0.20",
 ]
 
@@ -8654,7 +8682,7 @@ dependencies = [
  "num_cpus",
  "thiserror 2.0.20",
  "tokio 1.52.3",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
