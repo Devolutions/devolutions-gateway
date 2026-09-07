@@ -282,7 +282,6 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
 #[derive(Debug)]
 pub(crate) struct VerifiedExecutable {
     _file: File,
-    _ancestor_handles: Vec<File>,
     path: PathBuf,
 }
 
@@ -306,7 +305,6 @@ impl VerifiedExecutable {
 #[derive(Debug)]
 pub(crate) struct RetainedExecutableSecurity {
     _ancestor_handles: Vec<File>,
-    path: PathBuf,
 }
 
 /// Verify trusted-writer security for an already-retained executable and pin its ancestors.
@@ -327,7 +325,6 @@ pub(crate) fn verify_retained_executable_security(
 
     Ok(RetainedExecutableSecurity {
         _ancestor_handles: ancestor_handles,
-        path,
     })
 }
 
@@ -356,8 +353,6 @@ pub(crate) fn verify_elevated_executable_security(
         return Ok(None);
     }
 
-    let subject = format!("elevated package-manager executable '{}'", path.display());
-
     // App execution aliases (Microsoft Store shims such as the per-user `winget.exe`)
     // are reparse points that cannot be opened for read, so they cannot be verified or
     // pinned directly. `CreateProcess` resolves them internally, but the broker must
@@ -372,6 +367,7 @@ pub(crate) fn verify_elevated_executable_security(
         None => None,
     };
     let path = alias_target.as_deref().unwrap_or(path);
+    let subject = format!("elevated package-manager executable '{}'", path.display());
 
     // Share only read access: while this handle is alive the file cannot be opened for
     // write or delete (rename), and this open fails if such a handle already exists.
@@ -381,12 +377,32 @@ pub(crate) fn verify_elevated_executable_security(
         .open(path)
         .with_context(|| format!("failed to open {subject}"))?;
 
-    let security = verify_retained_executable_security(&file, &subject)?;
+    // Resolve the path from the handle itself: if `path` traversed a reparse point
+    // (symlink, junction, ...), this yields the real target, which is the very object
+    // pinned by the guard handle.
+    let final_path =
+        final_path_from_handle(&file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+
+    verify_handle_security(
+        &file,
+        &subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        WRITE_ACCESS_MASK,
+    )?;
+
+    // Preserve compatibility for existing package-manager installations under secured
+    // junctions or mount points. The stricter caller guard below rejects and pins reparses.
+    verify_directory_chain(
+        final_path.parent(),
+        &subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        TrustedWriters::AdminOrTrustedInstaller,
+        false,
+    )?;
 
     Ok(Some(VerifiedExecutable {
         _file: file,
-        _ancestor_handles: security._ancestor_handles,
-        path: security.path,
+        path: final_path,
     }))
 }
 
@@ -1184,6 +1200,8 @@ mod tests {
         if !alias.exists() {
             return;
         }
+        let resolved = resolve_app_exec_alias(&alias).expect("winget alias must resolve");
+        let resolved_target = resolved.target.display().to_string();
 
         match verify_elevated_executable_security(&alias, true) {
             Ok(guard) => {
@@ -1197,9 +1215,10 @@ mod tests {
             Err(error) => {
                 let message = error.to_string();
                 assert!(
-                    message.contains("ancestor directory")
-                        || message.contains("owner")
-                        || message.contains("DACL grants write access"),
+                    message.contains(&resolved_target)
+                        && (message.contains("ancestor directory")
+                            || message.contains("owner")
+                            || message.contains("DACL grants write access")),
                     "unexpected error: {error:#}"
                 );
             }

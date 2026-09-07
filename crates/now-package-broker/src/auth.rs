@@ -1,9 +1,10 @@
 //! Package broker pipe client authentication.
 //!
-//! The broker pins the pipe client process instance to the retained file object backing its
-//! main image, then verifies that object's current signature and trusted-writer security.
+//! After opening the pipe-reported process ID, the broker retains that process and the file
+//! object backing its main image, then verifies the file's signature and trusted-writer security.
 //! Policy replacement additionally requires an elevated Administrators token.
 //! These checks do not attest runtime memory integrity or historical file permissions.
+//! They also cannot prove which process instance owned the pipe before the initial process open.
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -60,8 +61,9 @@ pub(crate) struct PipeClient {
 impl PipeClient {
     /// Captures the identity of the process on the other end of a connected pipe instance.
     ///
-    /// Retains the process and main-image file handles, then rechecks the client process ID
-    /// and process instance so a PID reused during capture is rejected.
+    /// Retains the process and main-image file handles, then rechecks the reported process ID,
+    /// retained process liveness, and creation time during capture.
+    /// This cannot close the interval before the initial process handle is opened.
     /// This unauthenticated capture blocks on process and local-filesystem work, so callers
     /// must keep it off the accept loop and bound it with a connection permit.
     /// Account-name resolution remains deferred because it may contact a domain controller.
