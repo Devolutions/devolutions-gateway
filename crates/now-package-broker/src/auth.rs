@@ -1,8 +1,8 @@
 //! Package broker pipe client authentication.
 //!
-//! The broker binds an approved executable's retained file object to the connector's main
-//! image section, verifies its current signature and trusted-writer path, and separately
-//! requires an elevated Administrators token for policy replacement.
+//! The broker pins the pipe client process instance to the retained file object backing its
+//! main image, then verifies that object's current signature and trusted-writer security.
+//! Policy replacement additionally requires an elevated Administrators token.
 //! These checks do not attest runtime memory integrity or historical file permissions.
 
 use std::ffi::OsString;
@@ -60,7 +60,10 @@ pub(crate) struct PipeClient {
 impl PipeClient {
     /// Captures the identity of the process on the other end of a connected pipe instance.
     ///
-    /// This unauthenticated capture performs blocking process and local-filesystem checks.
+    /// Retains the process and main-image file handles, then rechecks the client process ID
+    /// and process instance so a PID reused during capture is rejected.
+    /// This unauthenticated capture blocks on process and local-filesystem work, so callers
+    /// must keep it off the accept loop and bound it with a connection permit.
     /// Account-name resolution remains deferred because it may contact a domain controller.
     pub(crate) fn from_connected_pipe(
         server: &NamedPipeServer,
@@ -413,6 +416,8 @@ fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
     open_executable_file(Path::new(&global_root_path))
 }
 
+/// Accept only local volume devices because remote providers cannot satisfy local
+/// trusted-writer and ancestor-pinning guarantees.
 fn is_supported_local_image_path(path: &Path) -> bool {
     let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
     path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
