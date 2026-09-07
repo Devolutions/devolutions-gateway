@@ -57,7 +57,7 @@ pub fn validate_devolutions_authenticode_signature(path: &Path) -> anyhow::Resul
     validate_devolutions_authenticode_result(path, wintrust_result)
 }
 
-/// Validate the exact retained executable object identified by `path`.
+/// Validate the signature of `file`; `path` only supplies subject metadata and error context.
 pub fn validate_devolutions_authenticode_signature_for_file(path: &Path, file: &File) -> anyhow::Result<String> {
     let wintrust_result = authenticode_status_for_file(path, file);
     validate_devolutions_authenticode_result(path, wintrust_result)
