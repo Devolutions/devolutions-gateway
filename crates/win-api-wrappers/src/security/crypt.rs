@@ -99,8 +99,8 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
     win_verify_trust_for_file(path, &file, catalog_info)
 }
 
-/// Verify the exact retained file object; `path` must identify that object and is retained
-/// as WinTrust subject metadata.
+/// Verify `file` itself.
+/// `path` is passed to WinTrust as subject metadata and must not be relied on for identity.
 pub fn win_verify_trust_for_file(
     path: &Path,
     file: &File,
@@ -187,7 +187,7 @@ pub fn authenticode_status(path: &Path) -> Result<WinVerifyTrustResult> {
     authenticode_status_for_file(path, &file)
 }
 
-/// Read Authenticode status from the exact retained file object identified by `path`.
+/// Read the Authenticode status of `file`; `path` only supplies WinTrust subject metadata.
 pub fn authenticode_status_for_file(path: &Path, file: &File) -> Result<WinVerifyTrustResult> {
     let catalog_info = CatalogInfo::try_from_file_handle(file)?;
     win_verify_trust_for_file(path, file, catalog_info)

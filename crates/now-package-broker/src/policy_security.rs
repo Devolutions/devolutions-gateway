@@ -299,9 +299,10 @@ impl VerifiedExecutable {
 
 /// Security guard for an executable file already retained by its caller.
 ///
-/// The caller must keep both its file handle and this guard alive.
-/// The file handle binds later checks to the same object and denies new writers, while the
-/// guard pins each verified ancestor against rename or reparse-point substitution.
+/// The caller must open the file without write or delete sharing, then keep both that handle
+/// and this guard alive.
+/// The handle binds later checks to the same object and blocks new writers, while the guard
+/// pins each verified ancestor against rename or reparse-point substitution.
 #[derive(Debug)]
 pub(crate) struct RetainedExecutableSecurity {
     _ancestor_handles: Vec<File>,
@@ -566,6 +567,8 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// file when the image is finally loaded. Create rights higher up are harmless (and are
 /// granted to unprivileged users on stock drive roots), since they cannot redirect an
 /// existing path component.
+/// Each ancestor must not itself be a reparse point and must resolve to its own path.
+/// The returned handles pin the verified chain and must be kept alive by the caller.
 fn retain_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
     let mut handles = Vec::new();
     let mut current = path.parent();

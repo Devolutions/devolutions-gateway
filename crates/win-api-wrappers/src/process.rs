@@ -111,10 +111,11 @@ impl Process {
         Ok(OsString::from_wide(&path).into())
     }
 
-    /// Returns an address and candidate native path for the process's main image.
+    /// Returns the main image's transfer address and a candidate native path for it.
     ///
-    /// `ProcessImageInformation` comes from the kernel image section rather than the
-    /// target-controlled PEB or loader module list.
+    /// The address comes from `ProcessImageInformation`, which reports the kernel image
+    /// section rather than the target-controlled PEB or loader module list.
+    /// The path identifies the file currently mapped at that address.
     /// Callers must confirm the opened candidate with [`Process::verify_image_file_mapping`].
     pub fn main_image_mapped_path(&self) -> Result<(usize, PathBuf)> {
         let mut image = SECTION_IMAGE_INFORMATION::default();
@@ -157,13 +158,12 @@ impl Process {
         }
     }
 
-    /// Verifies that `file` shares the section-object pointer used by this process's main image.
+    /// Verifies that `file` is the same kernel file object backing this process's main image.
     ///
-    /// `ProcessImageFileMapping` compares the kernel file objects' section pointers.
-    /// It identifies the backing file object but does not attest the bytes originally mapped
-    /// into the image section.
-    /// The file handle is an input buffer despite `NtQueryInformationProcess`'s generic output-buffer signature.
-    /// The handle must include `SYNCHRONIZE | FILE_EXECUTE` access.
+    /// `ProcessImageFileMapping` compares section-object pointers, but does not attest the
+    /// bytes originally mapped into the image section.
+    /// The handle is an input despite `NtQueryInformationProcess`'s generic output-buffer
+    /// signature, and must grant `SYNCHRONIZE | FILE_EXECUTE`.
     pub fn verify_image_file_mapping(&self, file: &File) -> Result<()> {
         let mut file_handle = HANDLE(file.as_raw_handle());
 
