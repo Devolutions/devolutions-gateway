@@ -76,7 +76,7 @@ public static class AgentPolicyTesterNativeDirectory
     "Staged policy tester at $stagedTesterPath" | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagingPath | Format-List Owner, Sddl | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagedTesterPath | Format-List Owner, Sddl | Out-File $outputPath -Append
-    & $stagedTesterPath $agentPath 2>&1 | Out-File $outputPath -Append
+    & $stagedTesterPath $agentPath elevated 2>&1 | Out-File $outputPath -Append
     $exitCode = $LASTEXITCODE
 } catch {
     $_ | Out-File $outputPath -Append
