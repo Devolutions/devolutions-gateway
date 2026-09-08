@@ -264,11 +264,15 @@ impl<'a> RoutePlan<'a> {
                         .connect_via_agent(agent.agent_id, session_id, target.as_addr())
                         .await
                     {
-                        Ok((stream, target_addr)) => {
-                            let server_addr = target_addr.unwrap_or_else(|| match target.host_ip() {
+                        Ok(stream) => {
+                            // The TCP peer lives on the agent side; surface the target
+                            // IP:port for logs/PCAP when the target is a literal IP, or
+                            // 0.0.0.0:<port> when it's a hostname the gateway never
+                            // resolved itself. Either is more useful than 0.0.0.0:0.
+                            let server_addr = match target.host_ip() {
                                 Some(ip) => SocketAddr::new(ip, target.port()),
                                 None => SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, target.port())),
-                            });
+                            };
 
                             return Ok(ConnectedUpstream {
                                 leg: UpstreamLeg::Tunnel(stream),

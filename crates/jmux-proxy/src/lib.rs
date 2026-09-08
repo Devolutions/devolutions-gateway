@@ -65,17 +65,12 @@ type TargetConnector = Arc<dyn Fn(DestinationUrl) -> TargetConnectorFuture + Sen
 
 pub struct ConnectedTarget {
     stream: ErasedTargetStream,
-    target_ip: Option<IpAddr>,
 }
 
 impl ConnectedTarget {
-    /// Wraps a connected stream and the concrete peer IP used for traffic auditing.
-    ///
-    /// When `target_ip` is `None`, the channel works normally but emits no traffic event.
-    pub fn new(stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static, target_ip: Option<IpAddr>) -> Self {
+    pub fn new(stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static) -> Self {
         Self {
             stream: Box::new(stream),
-            target_ip,
         }
     }
 }
@@ -145,8 +140,6 @@ impl JmuxProxy {
     /// Tries a custom target connection before falling back to direct TCP.
     ///
     /// Return `Ok(None)` when the target should use the default direct connection.
-    /// Return the concrete peer IP in `ConnectedTarget` to enable traffic auditing.
-    /// Connector errors do not emit `ConnectFailure` because they do not prove that a concrete address was attempted.
     #[must_use]
     pub fn with_target_connector<C, F>(mut self, connector: C) -> Self
     where
@@ -400,11 +393,9 @@ enum InternalMessage {
         channel: Box<JmuxChannelCtx>,
         stream: ErasedTargetStream,
     },
-    StreamResolutionFailed {
+    TargetConnectionFailed {
         id: LocalChannelId,
         distant_id: DistantChannelId,
-        reason_code: ReasonCode,
-        description: String,
     },
     AbnormalTermination {
         id: LocalChannelId,
@@ -706,15 +697,14 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         .spawn(channel_span)
                         .detach();
                     }
-                    InternalMessage::StreamResolutionFailed {
-                        id,
-                        distant_id,
-                        reason_code,
-                        description,
-                    } => {
+                    InternalMessage::TargetConnectionFailed { id, distant_id } => {
                         jmux_ctx.id_allocator.free(id);
                         msg_to_send_tx
-                            .send(Message::open_failure(distant_id, reason_code, description))
+                            .send(Message::open_failure(
+                                distant_id,
+                                ReasonCode::GENERAL_FAILURE,
+                                "target connection failed",
+                            ))
                             .await
                             .context("couldn't send OPEN FAILURE message through mpsc channel")?;
                     }
@@ -824,6 +814,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             channel,
                             destination_url: msg.destination_url,
                             internal_msg_tx: internal_msg_tx.clone(),
+                            msg_to_send_tx: msg_to_send_tx.clone(),
                             traffic_callback: traffic_callback.clone(),
                             target_connector: target_connector.clone(),
                         }
@@ -1189,6 +1180,8 @@ impl DataWriterTask {
 
                     bytes_tx.fetch_add(data.len() as u64, Ordering::SeqCst);
                 }
+
+                let _ = writer.shutdown().await;
             }
             .instrument(span),
         );
@@ -1203,6 +1196,7 @@ struct StreamResolverTask {
     channel: JmuxChannelCtx,
     destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
+    msg_to_send_tx: MessageSender,
     traffic_callback: Option<TrafficCallback>,
     target_connector: Option<TargetConnector>,
 }
@@ -1223,28 +1217,12 @@ impl StreamResolverTask {
         ChildTask(handle)
     }
 
-    async fn report_failure(
-        internal_msg_tx: &InternalMessageSender,
-        channel: &JmuxChannelCtx,
-        reason_code: ReasonCode,
-        description: String,
-    ) -> anyhow::Result<()> {
-        internal_msg_tx
-            .send(InternalMessage::StreamResolutionFailed {
-                id: channel.local_id,
-                distant_id: channel.distant_id,
-                reason_code,
-                description,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("couldn't report stream resolution failure through internal mpsc channel"))
-    }
-
     async fn run(self) -> anyhow::Result<()> {
         let Self {
             mut channel,
             destination_url,
             internal_msg_tx,
+            msg_to_send_tx,
             traffic_callback,
             target_connector,
         } = self;
@@ -1257,8 +1235,7 @@ impl StreamResolverTask {
             "tcp" => {
                 if let Some(connector) = target_connector {
                     match connector(destination_url.clone()).await {
-                        Ok(Some(ConnectedTarget { stream, target_ip })) => {
-                            channel.target_ip = target_ip;
+                        Ok(Some(ConnectedTarget { stream })) => {
                             channel.connect_at = SystemTime::now();
 
                             internal_msg_tx
@@ -1275,13 +1252,17 @@ impl StreamResolverTask {
                         }
                         Ok(None) => {}
                         Err(error) => {
-                            Self::report_failure(
-                                &internal_msg_tx,
-                                &channel,
-                                ReasonCode::GENERAL_FAILURE,
-                                "target connection failed".to_owned(),
-                            )
-                            .await?;
+                            internal_msg_tx
+                                .send(InternalMessage::TargetConnectionFailed {
+                                    id: channel.local_id,
+                                    distant_id: channel.distant_id,
+                                })
+                                .await
+                                .map_err(|_| {
+                                    anyhow::anyhow!(
+                                        "couldn't report target connection failure through internal mpsc channel"
+                                    )
+                                })?;
 
                             return Err(error.context(format!("couldn't connect to {host}:{port}")));
                         }
@@ -1294,13 +1275,14 @@ impl StreamResolverTask {
                     Err(error) => {
                         debug!(?error, "DNS resolution failed");
                         // No event emission for DNS failures - cannot determine target IP.
-                        Self::report_failure(
-                            &internal_msg_tx,
-                            &channel,
-                            ReasonCode::from(error.kind()),
-                            error.to_string(),
-                        )
-                        .await?;
+                        msg_to_send_tx
+                            .send(Message::open_failure(
+                                channel.distant_id,
+                                ReasonCode::from(error.kind()),
+                                error.to_string(),
+                            ))
+                            .await
+                            .context("couldn't send OPEN FAILURE message through mpsc channel")?;
                         anyhow::bail!("couldn't resolve {host}:{port}: {error}");
                     }
                 };
@@ -1354,36 +1336,21 @@ impl StreamResolverTask {
                         });
                     }
 
-                    Self::report_failure(
-                        &internal_msg_tx,
-                        &channel,
-                        ReasonCode::from(error.kind()),
-                        error.to_string(),
-                    )
-                    .await?;
+                    msg_to_send_tx
+                        .send(Message::open_failure(
+                            channel.distant_id,
+                            ReasonCode::from(error.kind()),
+                            error.to_string(),
+                        ))
+                        .await
+                        .context("couldn't send OPEN FAILURE message through mpsc channel")?;
 
                     anyhow::bail!("couldn't open TCP stream to {host}:{port}: {error}");
                 } else {
-                    Self::report_failure(
-                        &internal_msg_tx,
-                        &channel,
-                        ReasonCode::GENERAL_FAILURE,
-                        "no addresses resolved".to_owned(),
-                    )
-                    .await?;
                     anyhow::bail!("no addresses resolved for {host}:{port}");
                 }
             }
-            _ => {
-                Self::report_failure(
-                    &internal_msg_tx,
-                    &channel,
-                    ReasonCode::GENERAL_FAILURE,
-                    format!("unsupported scheme: {scheme}"),
-                )
-                .await?;
-                anyhow::bail!("unsupported scheme: {scheme}")
-            }
+            _ => anyhow::bail!("unsupported scheme: {scheme}"),
         }
     }
 }

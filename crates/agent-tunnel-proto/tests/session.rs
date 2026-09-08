@@ -1,5 +1,3 @@
-use std::net::{Ipv4Addr, SocketAddr};
-
 use agent_tunnel_proto::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE, ProtoError, SessionStream};
 use uuid::Uuid;
 
@@ -19,20 +17,6 @@ async fn roundtrip_connect_request() {
 #[tokio::test]
 async fn roundtrip_connect_response_success() {
     let msg = ConnectResponse::success();
-
-    let mut buf = Vec::new();
-    let mut stream = SessionStream::new(&mut buf, &[][..]);
-    stream.send_response(&msg).await.expect("send should succeed");
-
-    let mut stream = SessionStream::new(tokio::io::sink(), buf.as_slice());
-    let decoded = stream.recv_response().await.expect("recv should succeed");
-    assert_eq!(msg, decoded);
-}
-
-#[tokio::test]
-async fn roundtrip_connect_response_success_with_target() {
-    let target_addr = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 10), 3389));
-    let msg = ConnectResponse::success_with_target(target_addr);
 
     let mut buf = Vec::new();
     let mut stream = SessionStream::new(&mut buf, &[][..]);
@@ -123,19 +107,6 @@ async fn decode_rejects_unknown_connect_response_tag() {
     // Valid header shape (tag + 2B version) but tag 0xFF is not assigned.
     let err = recv_response_payload(&[0xFF, 0x00, 0x01]).await;
     assert!(matches!(err, ProtoError::UnknownTag { tag: 0xFF }), "got {err:?}");
-}
-
-#[tokio::test]
-async fn decode_rejects_invalid_success_target_address() {
-    let payload = &[0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, b'b', b'a', b'd'];
-    let err = recv_response_payload(payload).await;
-    assert!(matches!(
-        err,
-        ProtoError::InvalidField {
-            field: "target_addr",
-            ..
-        }
-    ));
 }
 
 #[tokio::test]

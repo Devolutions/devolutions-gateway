@@ -3,7 +3,7 @@
 //! Consumed by the upstream connection paths (forwarding, RDP clean path,
 //! generic client) to ensure consistent routing behavior and error messages.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use agent_tunnel_proto::DomainName;
@@ -86,17 +86,16 @@ pub async fn resolve_route(
 
 /// Attempt to route a connection via the agent tunnel.
 ///
-/// Returns `Ok(Some((stream, agent, target_addr)))` when routed through an agent.
-/// `target_addr` is `None` when the agent sends the legacy success response.
-/// Returns `Ok(None)` when the caller should use a direct connection.
-/// Returns `Err` when the requested agent is unavailable or all matching agents fail.
+/// Returns `Ok(Some(stream))` if routed through an agent, `Ok(None)` if the caller
+/// should fall through to direct connect, or `Err` if an explicit agent was specified
+/// but not found (or all candidates failed).
 pub async fn try_route(
     handle: Option<&AgentTunnelHandle>,
     explicit_agent_id: Option<Uuid>,
     target: &RouteTarget,
     session_id: Uuid,
     target_addr: &str,
-) -> Result<Option<(TunnelStream, Arc<AgentPeer>, Option<SocketAddr>)>> {
+) -> Result<Option<(TunnelStream, Arc<AgentPeer>)>> {
     let Some(handle) = handle else {
         // An explicit `jet_agent_id` claim means the token requires routing via that
         // specific agent; silently falling back to a direct connect would bypass the
@@ -123,8 +122,7 @@ pub async fn try_route(
 
 /// Try connecting to target through agent candidates (try-fail-retry).
 ///
-/// Returns the connected stream, the agent that succeeded, and its reported target address.
-/// The address is `None` when the agent sends the legacy success response.
+/// Returns the connected `TunnelStream` and the agent that succeeded.
 ///
 /// Callers must handle `RoutingDecision::ExplicitAgentNotFound` and
 /// `RoutingDecision::Direct` before calling this function.
@@ -133,7 +131,7 @@ pub async fn route_and_connect(
     candidates: &[Arc<AgentPeer>],
     session_id: Uuid,
     target: &str,
-) -> Result<(TunnelStream, Arc<AgentPeer>, Option<SocketAddr>)> {
+) -> Result<(TunnelStream, Arc<AgentPeer>)> {
     if candidates.is_empty() {
         return Err(anyhow!("route_and_connect called with empty candidates"));
     }
@@ -149,14 +147,14 @@ pub async fn route_and_connect(
         );
 
         match handle.connect_via_agent(agent.agent_id, session_id, target).await {
-            Ok((stream, target_addr)) => {
+            Ok(stream) => {
                 info!(
                     agent_id = %agent.agent_id,
                     agent_name = %agent.name,
                     %target,
                     "Agent tunnel connection established"
                 );
-                return Ok((stream, Arc::clone(agent), target_addr));
+                return Ok((stream, Arc::clone(agent)));
             }
             Err(error) => {
                 warn!(

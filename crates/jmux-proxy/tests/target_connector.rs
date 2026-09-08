@@ -1,13 +1,11 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
-use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use jmux_proto::{BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use jmux_proxy::{ConnectedTarget, DestinationUrl, EventOutcome, JmuxConfig, JmuxProxy, TrafficEvent};
+use jmux_proxy::{ConnectedTarget, DestinationUrl, JmuxConfig, JmuxProxy};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -36,13 +34,10 @@ async fn receive_message(reader: &mut (impl AsyncRead + Unpin)) -> Message {
 }
 
 #[tokio::test]
-async fn connected_target_ip_is_used_for_audit() {
+async fn connector_success_opens_channel() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<TrafficEvent>();
-    let target_ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
         .with_target_connector(move |destination| async move {
@@ -51,10 +46,7 @@ async fn connected_target_ip_is_used_for_audit() {
             tokio::spawn(async move {
                 target_peer.shutdown().await.expect("close target stream");
             });
-            Ok(Some(ConnectedTarget::new(target_stream, Some(target_ip))))
-        })
-        .with_outgoing_traffic_event_callback(move |event| {
-            event_tx.send(event).expect("capture traffic event");
+            Ok(Some(ConnectedTarget::new(target_stream)))
         });
     let proxy_task = tokio::spawn(proxy.run());
 
@@ -78,15 +70,6 @@ async fn connected_target_ip_is_used_for_audit() {
     assert!(matches!(receive_message(&mut peer_reader).await, Message::Close(_)));
     send_message(&mut peer_writer, Message::close(local_id)).await;
 
-    let event = timeout(TEST_TIMEOUT, event_rx.recv())
-        .await
-        .expect("traffic event timed out")
-        .expect("traffic event channel closed");
-    assert_eq!(event.outcome, EventOutcome::NormalTermination);
-    assert_eq!(event.target_host, "agent.example");
-    assert_eq!(event.target_ip, target_ip);
-    assert_eq!(event.target_port, 443);
-
     proxy_task.abort();
 }
 
@@ -95,8 +78,6 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<TrafficEvent>();
-
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
         .with_target_connector(|destination| async move {
@@ -104,9 +85,6 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
                 anyhow::bail!("{}", "agent error ".repeat(8192));
             }
             Ok(None)
-        })
-        .with_outgoing_traffic_event_callback(move |event| {
-            event_tx.send(event).expect("capture traffic event");
         });
     let proxy_task = tokio::spawn(proxy.run());
 
@@ -125,8 +103,6 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
     };
     assert_eq!(open_failure.reason_code, ReasonCode::GENERAL_FAILURE);
     assert_eq!(open_failure.description, "target connection failed");
-    assert!(timeout(Duration::from_millis(100), event_rx.recv()).await.is_err());
-
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind direct target");

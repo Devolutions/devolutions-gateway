@@ -778,7 +778,7 @@ async fn run_session_proxy(
         info!(target = %selected_target, "TCP connection established");
 
         session
-            .send_response(&ConnectResponse::success_with_target(selected_target))
+            .send_response(&ConnectResponse::success())
             .await
             .context("send ConnectResponse")?;
         info!("Sent ConnectResponse::Success");
