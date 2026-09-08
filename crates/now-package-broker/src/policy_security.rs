@@ -1,7 +1,9 @@
 //! Admin-only-writable file security validation.
 //!
-//! Shared by two trust boundaries in the package broker:
-//! - The policy file, which is the entire authorization control for the broker.
+//! Shared by four trust boundaries in the package broker:
+//! - Legacy policy files loaded from the Agent directory.
+//! - The dedicated managed-policy directory and its files.
+//! - Authenticated pipe-client executables.
 //! - Package-manager executables resolved for elevated/machine-scope execution
 //!   (e.g. `winget.exe`, `choco.exe`).
 //!
@@ -15,10 +17,11 @@
 //! a trusted principal and that its DACL does not grant write access to any other
 //! principal. Callers fail closed when this check fails.
 //!
-//! For the policy file, the trusted principals are SYSTEM, `LOCAL SERVICE`, and the
-//! built-in Administrators group. For executables, `LOCAL SERVICE` is not trusted, but
-//! `NT SERVICE\TrustedInstaller` is, since Windows-protected binaries (`System32`,
-//! `Program Files`, `WindowsApps`) are owned by and writable by that service.
+//! The legacy Agent-directory loader accepts SYSTEM, `LOCAL SERVICE`, and built-in
+//! Administrators because that shared directory grants `LOCAL SERVICE` write access.
+//! The managed policy store accepts only SYSTEM and built-in Administrators.
+//! Executable checks also accept `NT SERVICE\TrustedInstaller` for Windows-protected
+//! binaries under locations such as `System32`, `Program Files`, and `WindowsApps`.
 //!
 //! For elevated executables the verification additionally defends against
 //! time-of-check/time-of-use races: the file is opened without write or delete sharing
@@ -28,16 +31,19 @@
 //! retargeting of the originally supplied name), and every ancestor directory of that
 //! path is checked so untrusted principals cannot swap path components either.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::mem::size_of;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
-use std::os::windows::fs::OpenOptionsExt as _;
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use sha2::{Digest as _, Sha256};
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::security::acl::{Acl, InheritableAcl, InheritableAclKind};
+use win_api_wrappers::security::attributes::{SecurityAttributes, SecurityAttributesInit};
 use windows::Win32::Foundation::{
     ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
 };
@@ -108,13 +114,13 @@ const TRUSTED_INSTALLER_SID: &str = "S-1-5-80-956008885-3418522649-1831038044-18
 enum TrustedWriters {
     /// SYSTEM, `LOCAL SERVICE`, and the built-in Administrators group (policy file).
     AdminOnly,
+    /// SYSTEM and built-in Administrators only for the managed policy store.
+    ManagedPolicy,
     /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`
     /// (Windows-protected executables). `LOCAL SERVICE` is deliberately not trusted here:
     /// it is a low-privilege shared service identity, and accepting it for elevated
     /// executables would open a privilege-escalation path.
     AdminOrTrustedInstaller,
-    /// Policy-path ancestors may be controlled by the policy writers or TrustedInstaller.
-    PolicyAncestor,
 }
 
 // ACE type constants from winnt.h (the Win32_System_SystemServices feature is not enabled).
@@ -179,25 +185,28 @@ pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
     verify_handle_security(file, "policy file", TrustedWriters::AdminOnly, WRITE_ACCESS_MASK)
 }
 
+/// Verify the stricter managed-store policy-file ACL.
+pub(crate) fn verify_managed_policy_file_security(file: &File) -> anyhow::Result<()> {
+    verify_handle_security(file, "policy file", TrustedWriters::ManagedPolicy, WRITE_ACCESS_MASK)
+}
+
 /// Verify that the directory hosting a managed policy is not writable by untrusted principals.
 pub(crate) fn verify_policy_directory_security(directory: &File) -> anyhow::Result<()> {
     verify_handle_security(
         directory,
         "policy directory",
-        TrustedWriters::AdminOnly,
+        TrustedWriters::ManagedPolicy,
         PARENT_DIRECTORY_TAMPER_MASK,
     )
 }
 
-/// Verify every lexical ancestor of a managed policy path.
-pub(crate) fn verify_policy_path_ancestors(path: &Path) -> anyhow::Result<()> {
-    let subject = format!("policy file '{}'", path.display());
-    verify_directory_chain(
-        path.parent(),
-        &subject,
-        TrustedWriters::AdminOnly,
-        TrustedWriters::PolicyAncestor,
-        true,
+/// Verify the relaxed tamper policy used for an already-open policy ancestor.
+pub(crate) fn verify_policy_ancestor_directory_security(dir: &File, subject: &str) -> anyhow::Result<()> {
+    verify_handle_security(
+        dir,
+        subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        DIRECTORY_TAMPER_MASK,
     )
 }
 
@@ -218,10 +227,93 @@ pub(crate) fn verify_policy_file_path(file: &File, path: &Path) -> anyhow::Resul
 
 /// Compare Windows paths using the operating system's ordinal case folding.
 pub(crate) fn windows_paths_equal(left: &Path, right: &Path) -> bool {
-    let left: Vec<u16> = left.as_os_str().encode_wide().collect();
-    let right: Vec<u16> = right.as_os_str().encode_wide().collect();
+    os_strings_match_case_insensitive(left.as_os_str(), right.as_os_str())
+}
+
+pub(crate) fn paths_match_case_insensitive(left: &Path, right: &Path) -> bool {
+    windows_paths_equal(left, right)
+}
+
+pub(crate) fn os_strings_match_case_insensitive(left: &OsStr, right: &OsStr) -> bool {
+    let left: Vec<u16> = left.encode_wide().collect();
+    let right: Vec<u16> = right.encode_wide().collect();
     // SAFETY: Both slices contain valid, initialized UTF-16 code units.
     unsafe { CompareStringOrdinal(&left, &right, true) == CSTR_EQUAL }
+}
+
+/// Verify every policy-directory ancestor without following reparses and summarize its security state.
+pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    let mut current = dir.parent();
+
+    while let Some(ancestor) = current {
+        let dir_subject = format!("{subject} ancestor directory '{}'", ancestor.display());
+        let handle = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(ancestor)
+            .with_context(|| format!("failed to open {dir_subject}"))?;
+
+        if is_reparse_point(&handle).with_context(|| format!("failed to inspect {dir_subject}"))? {
+            bail!("{dir_subject} is a reparse point");
+        }
+        let attributes = handle
+            .metadata()
+            .with_context(|| format!("failed to query metadata for {dir_subject}"))?
+            .file_attributes();
+        if attributes & windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            bail!("{dir_subject} is not a directory");
+        }
+
+        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
+        if !windows_paths_equal(&resolved, ancestor) {
+            bail!(
+                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
+                resolved.display()
+            );
+        }
+        verify_policy_ancestor_directory_security(&handle, &dir_subject)?;
+        let security_digest =
+            security_state_digest(&handle).with_context(|| format!("failed to digest {dir_subject} security"))?;
+        hasher.update(resolved.as_os_str().to_string_lossy().to_lowercase().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(security_digest);
+        current = ancestor.parent();
+    }
+
+    Ok(hasher.finalize().into())
+}
+
+/// Open and retain every existing lexical component in a policy directory chain.
+pub(crate) fn retain_policy_no_reparse_directory_chain(dir: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
+    let mut components: Vec<&Path> = dir.ancestors().filter(|path| !path.as_os_str().is_empty()).collect();
+    components.reverse();
+    let mut handles = Vec::with_capacity(components.len());
+
+    for component in components {
+        let component_subject = format!("{subject} component '{}'", component.display());
+        let handle = OpenOptions::new()
+            .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL).0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(component)
+            .with_context(|| format!("failed to open {component_subject}"))?;
+
+        if is_reparse_point(&handle).with_context(|| format!("failed to inspect {component_subject}"))? {
+            bail!("{component_subject} is a reparse point");
+        }
+        let attributes = handle
+            .metadata()
+            .with_context(|| format!("failed to query metadata for {component_subject}"))?
+            .file_attributes();
+        if attributes & windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            bail!("{component_subject} is not a directory");
+        }
+        handles.push(handle);
+    }
+
+    Ok(handles)
 }
 
 /// Digest verified owner and DACL state for opaque policy-store fingerprints.
@@ -269,10 +361,112 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
             // SAFETY: GetAce returned a complete ACE beginning with ACE_HEADER.
             let size = usize::from(unsafe { (*ace.cast::<ACE_HEADER>()).AceSize });
             // SAFETY: AceSize bounds the complete ACE within the validated ACL.
-            hasher.update(unsafe { std::slice::from_raw_parts(ace.cast::<u8>(), size) });
+            update_ace_digest(&mut hasher, unsafe {
+                std::slice::from_raw_parts(ace.cast::<u8>(), size)
+            });
         }
     }
     Ok(hasher.finalize().into())
+}
+
+fn update_ace_digest(hasher: &mut Sha256, ace_bytes: &[u8]) {
+    hasher.update(ace_bytes.len().to_le_bytes());
+    hasher.update(ace_bytes);
+}
+
+fn admin_only_acl(inheritance: windows::Win32::Security::ACE_FLAGS) -> anyhow::Result<Acl> {
+    use win_api_wrappers::security::acl::{ExplicitAccess, Trustee};
+    use windows::Win32::Security::Authorization::GRANT_ACCESS;
+
+    let system = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("resolve Administrators SID")?;
+
+    Acl::new()
+        .context("initialize ACL")?
+        .set_entries(&[
+            ExplicitAccess {
+                access_permissions: GENERIC_ALL.0,
+                access_mode: GRANT_ACCESS,
+                inheritance,
+                trustee: Trustee::Sid(system),
+            },
+            ExplicitAccess {
+                access_permissions: GENERIC_ALL.0,
+                access_mode: GRANT_ACCESS,
+                inheritance,
+                trustee: Trustee::Sid(admins),
+            },
+        ])
+        .context("build admin-only ACL")
+}
+
+pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyhow::Result<SecurityAttributes> {
+    use windows::Win32::Security::{CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE};
+
+    let inheritance = if inherit_to_children {
+        CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE
+    } else {
+        NO_INHERITANCE
+    };
+    let owner = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    let acl = admin_only_acl(inheritance)?;
+
+    Ok(SecurityAttributesInit {
+        owner: Some(owner),
+        dacl: Some(InheritableAcl {
+            kind: InheritableAclKind::Protected,
+            acl,
+        }),
+        ..Default::default()
+    }
+    .init())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
+    pub(crate) volume_serial: u64,
+    pub(crate) file_id: [u8; 16],
+}
+
+pub(crate) fn file_identity(file: &File) -> anyhow::Result<FileIdentity> {
+    use windows::Win32::Storage::FileSystem::{FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_ID_INFO::default();
+    let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
+    // SAFETY: `file` is open and the output buffer has the exact required size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileIdInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    }
+    .context("GetFileInformationByHandleEx(FileIdInfo) failed")?;
+
+    Ok(FileIdentity {
+        volume_serial: info.VolumeSerialNumber,
+        file_id: info.FileId.Identifier,
+    })
+}
+
+pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
+    use windows::Win32::Storage::FileSystem::{FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_STANDARD_INFO::default();
+    let info_size = u32::try_from(size_of::<FILE_STANDARD_INFO>()).expect("FILE_STANDARD_INFO size fits in u32");
+    // SAFETY: `file` is open and the output buffer has the exact required size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileStandardInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    }
+    .context("GetFileInformationByHandleEx(FileStandardInfo) failed")?;
+
+    Ok(info.NumberOfLinks)
 }
 
 /// A package-manager executable that was verified for elevated execution.
@@ -401,7 +595,6 @@ pub(crate) fn verify_elevated_executable_security(
         &subject,
         TrustedWriters::AdminOrTrustedInstaller,
         TrustedWriters::AdminOrTrustedInstaller,
-        false,
     )?;
 
     Ok(Some(VerifiedExecutable {
@@ -635,7 +828,6 @@ fn verify_directory_chain(
     subject: &str,
     first_writers: TrustedWriters,
     ancestor_writers: TrustedWriters,
-    reject_reparse: bool,
 ) -> anyhow::Result<()> {
     let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
     let mut trusted_writers = first_writers;
@@ -651,9 +843,6 @@ fn verify_directory_chain(
             .with_context(|| format!("failed to open {dir_subject}"))?;
 
         let is_reparse = is_reparse_point(&handle).with_context(|| format!("failed to inspect {dir_subject}"))?;
-        if reject_reparse && is_reparse {
-            bail!("{dir_subject} is a reparse point");
-        }
         let reparse_mask = if is_reparse { REPARSE_POINT_TAMPER_MASK } else { 0 };
         verify_handle_security(&handle, &dir_subject, trusted_writers, tamper_mask | reparse_mask)?;
 
@@ -681,7 +870,7 @@ fn is_reparse_point(file: &File) -> anyhow::Result<bool> {
 }
 
 /// Resolve the normalized final path of an open file from its handle.
-fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
+pub(crate) fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
     let handle = HANDLE(file.as_raw_handle());
     match final_path_name(handle, FILE_NAME_NORMALIZED) {
         Ok(path) => Ok(final_path_from_wide(&path, false)),
@@ -892,7 +1081,7 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
     // write access for `LOCAL SERVICE`, so it must be trusted for the policy file.
     // It is a low-privilege shared service identity, however, so it is not trusted for
     // elevated executables, where accepting it would open a privilege-escalation path.
-    if trusted_writers != TrustedWriters::AdminOrTrustedInstaller
+    if trusted_writers == TrustedWriters::AdminOnly
         // SAFETY: Per function contract, `sid` points to a valid SID.
         && unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool()
     {
@@ -904,7 +1093,10 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
         return true;
     }
 
-    if trusted_writers == TrustedWriters::AdminOnly {
+    if matches!(
+        trusted_writers,
+        TrustedWriters::AdminOnly | TrustedWriters::ManagedPolicy
+    ) {
         return false;
     }
 
@@ -988,6 +1180,32 @@ mod tests {
         assert!(windows_paths_equal(&resolved, &executable));
     }
 
+    #[test]
+    fn ace_digest_includes_callback_application_data() {
+        let mut left = Sha256::new();
+        let mut right = Sha256::new();
+        update_ace_digest(&mut left, &[1, 2, 3, 4]);
+        update_ace_digest(&mut right, &[1, 2, 3, 5]);
+
+        assert_ne!(left.finalize(), right.finalize());
+    }
+
+    #[test]
+    fn admin_only_security_attributes_use_a_protected_dacl() {
+        let attributes = admin_only_security_attributes(false).expect("build admin-only security attributes");
+        // SAFETY: `attributes` owns a live SECURITY_ATTRIBUTES and security descriptor.
+        let raw = unsafe { &*attributes.as_ptr() };
+        // SAFETY: lpSecurityDescriptor points to the descriptor retained by `attributes`.
+        let descriptor = unsafe {
+            &*raw
+                .lpSecurityDescriptor
+                .cast::<windows::Win32::Security::SECURITY_DESCRIPTOR>()
+        };
+
+        assert!(descriptor.Control.contains(windows::Win32::Security::SE_DACL_PROTECTED));
+        assert!(descriptor.Control.contains(windows::Win32::Security::SE_DACL_PRESENT));
+    }
+
     /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
     struct SddlDescriptor {
         _descriptor: OwnedSecurityDescriptor,
@@ -1055,6 +1273,19 @@ mod tests {
             self.verify_with_mask(WRITE_ACCESS_MASK)
         }
 
+        fn verify_as_managed_policy(&self, mask: u32) -> anyhow::Result<()> {
+            // SAFETY: `owner` and `dacl` point into the owned security descriptor.
+            unsafe {
+                verify_owner_and_dacl(
+                    "managed policy",
+                    self.owner,
+                    self.dacl,
+                    TrustedWriters::ManagedPolicy,
+                    mask,
+                )
+            }
+        }
+
         fn verify_with_mask(&self, mask: u32) -> anyhow::Result<()> {
             // SAFETY: `owner` and `dacl` point into the owned security descriptor, which outlives
             // this call.
@@ -1089,6 +1320,16 @@ mod tests {
         // LOCAL SERVICE, so the policy-file check must accept it.
         let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
         sd.verify().expect("LOCAL SERVICE write access must be accepted");
+    }
+
+    #[test]
+    fn local_service_write_ace_is_rejected_for_managed_policy_storage() {
+        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
+        let error = sd.verify_as_managed_policy(WRITE_ACCESS_MASK).unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1411,7 +1652,7 @@ mod tests {
                 "policy ancestor",
                 sd.owner,
                 sd.dacl,
-                TrustedWriters::PolicyAncestor,
+                TrustedWriters::AdminOrTrustedInstaller,
                 DIRECTORY_TAMPER_MASK,
             )
         }
@@ -1546,8 +1787,58 @@ mod tests {
         let link = temp.path().join("link");
         std::os::windows::fs::symlink_dir(&target, &link).unwrap();
 
-        let error = verify_policy_path_ancestors(&link.join("policy.json")).unwrap_err();
+        let error = retain_policy_no_reparse_directory_chain(&link, "configured policy directory").unwrap_err();
         assert!(error.to_string().contains("reparse point"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn chained_policy_reparse_destinations_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let trusted_outer = temp.path().join("trusted-outer");
+        let user_controlled = temp.path().join("user-controlled");
+        let trusted_final = user_controlled.join("trusted-final");
+        std::fs::create_dir(&trusted_outer).unwrap();
+        std::fs::create_dir(&user_controlled).unwrap();
+        std::fs::create_dir(&trusted_final).unwrap();
+
+        let intermediate = trusted_outer.join("intermediate");
+        std::os::windows::fs::symlink_dir(&user_controlled, &intermediate).unwrap();
+        let configured = temp.path().join("configured");
+        std::os::windows::fs::symlink_dir(&trusted_outer, &configured).unwrap();
+
+        let escaped = configured.join("intermediate").join("trusted-final");
+        let error = retain_policy_no_reparse_directory_chain(&escaped, "configured policy directory").unwrap_err();
+        assert!(
+            error.to_string().contains("reparse point") || error.to_string().contains("unexpected location"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn retained_policy_directory_chain_blocks_component_retargeting() {
+        let temp = tempfile::tempdir().unwrap();
+        let ancestor = temp.path().join("ancestor");
+        let directory = ancestor.join("policy");
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let handles = retain_policy_no_reparse_directory_chain(&directory, "configured policy directory").unwrap();
+        let moved = temp.path().join("retargeted");
+        assert!(std::fs::rename(&ancestor, &moved).is_err());
+
+        drop(handles);
+        std::fs::rename(&ancestor, &moved).expect("component can move after guards are dropped");
+    }
+
+    #[test]
+    fn retained_policy_directory_handles_support_security_queries() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("policy");
+        std::fs::create_dir(&directory).unwrap();
+
+        let handles = retain_policy_no_reparse_directory_chain(&directory, "configured policy directory").unwrap();
+        for handle in &handles {
+            security_state_digest(handle).expect("retained directory handle includes READ_CONTROL");
+        }
     }
 
     #[test]
