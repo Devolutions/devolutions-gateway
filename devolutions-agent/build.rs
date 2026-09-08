@@ -3,6 +3,9 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     win::embed_version_rc();
+
+    #[cfg(target_os = "windows")]
+    win::embed_devolutions_agent_mc();
 }
 
 fn generate_psu_agent_proto() {
@@ -99,5 +102,89 @@ END"#,
         );
 
         version_rc
+    }
+
+    pub(super) fn embed_devolutions_agent_mc() {
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        let profile = env::var("PROFILE").unwrap_or_default();
+        if !matches!(profile.as_str(), "release" | "production") {
+            return;
+        }
+
+        let mc_exe = find_mc().unwrap_or_else(|| {
+            panic!(
+                "mc.exe is required to embed the Devolutions Agent Event Log catalog; \
+                 use a Visual Studio developer shell or set WindowsSdkVerBinPath or WindowsSdkDir"
+            )
+        });
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+        let catalog = manifest_dir.join("devolutions-agent.mc");
+        println!("cargo:rerun-if-changed={}", catalog.display());
+
+        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+        let status = Command::new(mc_exe)
+            .current_dir(&out_dir)
+            .args(["-um", "-h", ".", "-r", "."])
+            .arg(catalog.canonicalize().expect("canonicalize Agent message catalog"))
+            .status()
+            .expect("run mc.exe");
+        assert!(status.success(), "mc.exe failed with status {status}");
+
+        let resource = out_dir.join("devolutions-agent.rc");
+        assert!(resource.is_file(), "mc.exe did not generate {}", resource.display());
+        embed_resource::compile(resource, embed_resource::NONE)
+            .manifest_required()
+            .expect("BUG: failed to embed devolutions-agent.rc");
+    }
+
+    fn find_mc() -> Option<std::path::PathBuf> {
+        if let Ok(sdk_bin) = env::var("WindowsSdkVerBinPath") {
+            let sdk_bin = std::path::Path::new(&sdk_bin);
+            for candidate in [sdk_bin.join("mc.exe"), sdk_bin.join("x64").join("mc.exe")] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        if let Some(candidate) = env::var_os("PATH").and_then(|path| {
+            env::split_paths(&path)
+                .map(|directory| directory.join("mc.exe"))
+                .find(|path| path.is_file())
+        }) {
+            return Some(candidate);
+        }
+
+        let bin_dir = std::path::PathBuf::from(env::var_os("WindowsSdkDir")?).join("bin");
+        let direct = bin_dir.join("x64").join("mc.exe");
+        if direct.is_file() {
+            return Some(direct);
+        }
+
+        let mut versions: Vec<_> = fs::read_dir(bin_dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        versions.sort_by_key(|path| {
+            std::cmp::Reverse(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| {
+                        name.split('.')
+                            .map(str::parse::<u32>)
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok()
+                    })
+                    .unwrap_or_default(),
+            )
+        });
+        versions
+            .into_iter()
+            .map(|directory| directory.join("x64").join("mc.exe"))
+            .find(|path| path.is_file())
     }
 }
