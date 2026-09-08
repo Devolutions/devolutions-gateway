@@ -1175,11 +1175,7 @@ public static class PackageBrokerPolicyActions
     {
         try
         {
-            using PinnedPath temporary = PinPathWithoutReparse(
-                path,
-                leafIsDirectory: false,
-                allowMissingLeaf: true,
-                leafAccess: WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+            using PinnedPath temporary = PinTemporaryForCleanup(path, allowMissing: true);
             if (temporary.Leaf == null)
             {
                 return;
@@ -1200,6 +1196,13 @@ public static class PackageBrokerPolicyActions
             session.Log($"failed to remove package broker policy migration temporary file {path}: {error}");
         }
     }
+
+    internal static PinnedPath PinTemporaryForCleanup(string path, bool allowMissing) =>
+        PinPathWithoutReparse(
+            path,
+            leafIsDirectory: false,
+            allowMissingLeaf: allowMissing,
+            leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
 
     internal static bool TryDeleteLegacyPolicySource(
         Action<string> log,
