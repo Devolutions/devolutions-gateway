@@ -313,9 +313,8 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal("legacy", File.ReadAllText(source));
         Assert.Equal("external", File.ReadAllText(destination));
 
-        using (PackageBrokerPolicyActions.PinnedPath pinned = PinFile(
-            temporary,
-            WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES))
+        using (PackageBrokerPolicyActions.PinnedPath pinned =
+            PackageBrokerPolicyActions.PinTemporaryForCleanup(temporary, allowMissing: false))
         {
             Assert.True(
                 PackageBrokerPolicyActions.DeleteFileIfIdentityAndDigestMatch(
@@ -325,6 +324,41 @@ public sealed class PackageBrokerInstallerTests
         }
         Assert.False(File.Exists(temporary));
         Assert.Equal("external", File.ReadAllText(destination));
+    }
+
+    [Fact]
+    public void TemporaryCleanupHandleSupportsDigestBindingAndPreservesMutation()
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "migration.tmp");
+        File.WriteAllText(path, "migrated");
+        string identity;
+        string digest;
+        using (PackageBrokerPolicyActions.PinnedPath original = PinFile(path, WinAPI.GENERIC_READ))
+        {
+            identity = PackageBrokerPolicyActions.FileIdentity(original.Leaf);
+            digest = PackageBrokerPolicyActions.FileContentDigest(original.Leaf);
+        }
+
+        using (PackageBrokerPolicyActions.PinnedPath cleanup =
+            PackageBrokerPolicyActions.PinTemporaryForCleanup(path, allowMissing: false))
+        {
+            Assert.True(
+                PackageBrokerPolicyActions.FileIdentityAndDigestMatch(
+                    cleanup.Leaf,
+                    identity,
+                    digest));
+        }
+
+        File.WriteAllText(path, "mutated");
+        using PackageBrokerPolicyActions.PinnedPath mutated =
+            PackageBrokerPolicyActions.PinTemporaryForCleanup(path, allowMissing: false);
+        Assert.False(
+            PackageBrokerPolicyActions.FileIdentityAndDigestMatch(
+                mutated.Leaf,
+                identity,
+                digest));
+        Assert.True(File.Exists(path));
     }
 
     [Fact]
