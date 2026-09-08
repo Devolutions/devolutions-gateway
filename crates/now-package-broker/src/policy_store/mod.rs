@@ -78,7 +78,12 @@ impl PolicyStorage for FilePolicyStorage {
             .hosting_dir
             .as_ref()
             .expect("writable observations retain the verified hosting directory");
-        windows::atomic_create(hosting_dir, &observation.canonical_path, bytes)?;
+        windows::atomic_create(
+            hosting_dir,
+            &observation.fingerprint,
+            &observation.canonical_path,
+            bytes,
+        )?;
         self.authoritative_reobserve(configured_path, bytes)
     }
 
@@ -127,6 +132,9 @@ impl FilePolicyStorage {
         Ok(PersistedPolicy {
             policy,
             fingerprint: observation.fingerprint,
+            write_capability: observation.write_capability,
+            read_only_reason: observation.read_only_reason,
+            canonical_path: observation.canonical_path,
         })
     }
 }
@@ -489,9 +497,9 @@ impl PolicyStore {
             state: PolicyManagementState::Active,
             policy: Some(Arc::new(persisted.policy.clone())),
             invalid_diagnostics: None,
-            write_capability: observation.write_capability,
-            read_only_reason: observation.read_only_reason,
-            configured_path: observation.canonical_path,
+            write_capability: persisted.write_capability,
+            read_only_reason: persisted.read_only_reason,
+            configured_path: persisted.canonical_path,
             store_token: token,
             fingerprint: persisted.fingerprint,
         });
@@ -664,6 +672,7 @@ struct TestStorage {
     fail_concurrent_check: std::sync::atomic::AtomicBool,
     fail_target_retention: std::sync::atomic::AtomicBool,
     race_before_persist: parking_lot::Mutex<Option<PolicyDocument>>,
+    post_persist_capability: parking_lot::Mutex<Option<(PolicyWriteCapability, Option<PolicyReadOnlyReason>)>>,
 }
 
 #[cfg(test)]
@@ -675,6 +684,7 @@ impl TestStorage {
             fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
+            post_persist_capability: parking_lot::Mutex::new(None),
         }
     }
 
@@ -685,6 +695,7 @@ impl TestStorage {
             fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
+            post_persist_capability: parking_lot::Mutex::new(None),
         }
     }
 
@@ -770,10 +781,18 @@ impl TestStorage {
         next.policy = Some(policy.clone());
         next.invalid_diagnostics = None;
         next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 1);
+        if let Some((capability, reason)) = self.post_persist_capability.lock().take() {
+            next.write_capability = capability;
+            next.read_only_reason = reason;
+            next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 2);
+        }
         *self.observation.lock() = clone_observation(&next);
         Ok(PersistedPolicy {
             policy,
             fingerprint: next.fingerprint,
+            write_capability: next.write_capability,
+            read_only_reason: next.read_only_reason,
+            canonical_path: next.canonical_path,
         })
     }
 }
@@ -1024,6 +1043,31 @@ mod storage_tests {
                 .metadata
                 .revision,
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn replacement_returns_authoritative_post_write_capability() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        *storage.post_persist_capability.lock() =
+            Some((PolicyWriteCapability::ReadOnly, Some(PolicyReadOnlyReason::UnsafePath)));
+
+        let success = store.replace(request).await.expect("policy replacement succeeds");
+
+        assert_eq!(success.management.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(
+            success.management.read_only_reason,
+            Some(PolicyReadOnlyReason::UnsafePath)
+        );
+        assert_eq!(
+            store.management_snapshot().write_capability,
+            PolicyWriteCapability::ReadOnly
         );
     }
 
