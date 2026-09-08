@@ -31,12 +31,12 @@ use windows::Win32::Storage::FileSystem::{
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_DISPOSITION_INFO_EX_FLAGS,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE,
-    FILE_SHARE_NONE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo,
-    FileRenameInfoEx, GetVolumeInformationW, GetVolumePathNameW, READ_CONTROL, SetFileInformationByHandle,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_NONE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo, FileRenameInfoEx, GetVolumeInformationW,
+    GetVolumePathNameW, READ_CONTROL, SetFileInformationByHandle,
 };
 #[cfg(test)]
-use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, MOVEFILE_REPLACE_EXISTING, MoveFileExW};
 
 use crate::policy_security::{self, FileIdentity};
 use crate::policy_store::validation;
@@ -63,38 +63,9 @@ unsafe extern "system" {
     ) -> NTSTATUS;
 }
 
-/// Default dedicated directory hosting the policy file: `%PROGRAMDATA%\Devolutions\PackageBroker`.
-///
-/// Deliberately a top-level sibling of `%PROGRAMDATA%\Devolutions\Agent`, not a
-/// subdirectory of it: `Agent` is shared with unrelated Agent features and its own
-/// ancestor-security check must tolerate whatever grants those features require there,
-/// which can never be proven as strict as the dedicated policy directory itself needs
-/// its *own* ancestor chain to be (see [`policy_security::verify_policy_ancestor_chain`]).
-/// A directory nested under `Agent` would inherit `Agent` as an ancestor and could never
-/// honestly advertise [`PolicyWriteCapability::Writable`]. This dedicated root is created
-/// and secured by this crate alone (both by the Agent installer at install time and, as
-/// a fallback/self-heal, by this function's own caller at runtime), so it never has to
-/// depend on -- or touch -- the shared `Agent` directory's ACL at all.
-pub(super) fn default_policy_dir() -> PathBuf {
-    let program_data = std::env::var_os("PROGRAMDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    program_data.join("Devolutions").join("PackageBroker")
-}
-
-fn legacy_default_policy_path() -> PathBuf {
-    let program_data = std::env::var_os("PROGRAMDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    program_data.join("Devolutions").join("Agent").join(POLICY_FILE_NAME)
-}
-
 /// Return the managed and legacy default paths in arbitration order.
 pub(super) fn default_policy_paths() -> [PathBuf; 2] {
-    [
-        default_policy_dir().join(POLICY_FILE_NAME),
-        legacy_default_policy_path(),
-    ]
+    crate::policy_loader::default_policy_candidates()
 }
 
 pub(super) fn select_default_policy_path(managed: PathBuf, legacy: PathBuf) -> PathBuf {
@@ -274,16 +245,22 @@ struct AtomicityProbeKey {
     security_digest: [u8; 32],
 }
 
-/// Caches successful filesystem atomic-replace probes by directory identity and security digest.
-/// Failed probes are retried on every observation.
+#[derive(Clone)]
+struct CachedAtomicityProbe {
+    key: AtomicityProbeKey,
+    result: ProbeResult,
+}
+
+/// Caches filesystem atomic-replace probes by directory identity and security digest.
+/// Directory replacement or ACL changes invalidate both successful and failed results.
 pub(super) struct AtomicityProbeCache {
-    cached_success: std::sync::Mutex<Option<AtomicityProbeKey>>,
+    cached: std::sync::Mutex<Option<CachedAtomicityProbe>>,
 }
 
 impl AtomicityProbeCache {
     pub(super) fn new() -> Self {
         Self {
-            cached_success: std::sync::Mutex::new(None),
+            cached: std::sync::Mutex::new(None),
         }
     }
 
@@ -296,10 +273,12 @@ impl AtomicityProbeCache {
             identity: dir_identity,
             security_digest: dir_security_digest,
         };
-        let mut cached_success = self.cached_success.lock().expect("atomicity probe cache lock poisoned");
+        let mut cached = self.cached.lock().expect("atomicity probe cache lock poisoned");
 
-        if cached_success.as_ref() == Some(&key) {
-            return Ok(());
+        if let Some(cached) = cached.as_ref()
+            && cached.key == key
+        {
+            return cached.result.clone();
         }
 
         let result = probe_write_capability(dir).map_err(|error| {
@@ -310,11 +289,10 @@ impl AtomicityProbeCache {
             };
             (reason, format!("{error:#}"))
         });
-        if result.is_ok() {
-            *cached_success = Some(key);
-        } else {
-            *cached_success = None;
-        }
+        *cached = Some(CachedAtomicityProbe {
+            key,
+            result: result.clone(),
+        });
         result
     }
 }
@@ -389,10 +367,8 @@ impl VerifiedHostingDirectory {
         self.identity
     }
 
-    /// Build a synthetic instance for `FakePolicyStorage`
-    /// (`crate::policy_store::tests::FakePolicyStorage`), which models the hosting
-    /// directory purely with generation counters and has no real Windows directory
-    /// handle to hold.
+    /// Build a synthetic instance for the parent module's `TestStorage`.
+    /// It models the hosting directory with generation counters and has no Windows handle.
     #[cfg(test)]
     pub(super) fn for_fake_storage(canonical_path: PathBuf, identity: FileIdentity, security_digest: [u8; 32]) -> Self {
         Self {
@@ -621,7 +597,7 @@ const ATOMIC_REPLACE_CAPABLE_FILESYSTEMS: &[&str] = &["NTFS", "ReFS"];
 /// Verifies that `dir` supports the handle-based tombstone and create-new publication semantics required by [`atomic_replace`].
 ///
 /// First, it conservatively classifies the filesystem because some filesystems and filter drivers silently use non-atomic copy-then-delete renames.
-/// It then runs a nondestructive probe of the exact rename primitives against uniquely named disposable files.
+/// It then runs a nondestructive probe with fixed create-new names so failed attempts remain bounded.
 fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     let filesystem = volume_filesystem_name(dir).context("query volume filesystem")?;
     if !ATOMIC_REPLACE_CAPABLE_FILESYSTEMS
@@ -632,10 +608,9 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     }
 
     let dir_handle = open_directory_no_reparse(dir)?;
-    let probe_id = uuid::Uuid::new_v4();
-    let source_path = dir.join(format!(".package-broker-write-probe-{probe_id}-a.tmp"));
-    let target_path = dir.join(format!(".package-broker-write-probe-{probe_id}-b.tmp"));
-    let tombstone_path = dir.join(format!(".package-broker-write-probe-{probe_id}-old.tmp"));
+    let source_path = dir.join(".package-broker-write-probe-a.tmp");
+    let target_path = dir.join(".package-broker-write-probe-b.tmp");
+    let tombstone_path = dir.join(".package-broker-write-probe-old.tmp");
     let source = create_probe_file(&source_path, b"probe-source")?;
     let target = match create_probe_file(&target_path, b"probe-target") {
         Ok(target) => target,
@@ -843,7 +818,7 @@ impl DiskFingerprint {
 
 #[cfg(test)]
 impl DiskFingerprint {
-    /// Build a synthetic fingerprint for the in-memory `FakePolicyStorage` test double,
+    /// Build a synthetic fingerprint for the in-memory `TestStorage` test double,
     /// which has no real Windows file handles to derive identity from.
     ///
     /// `target_generation` and `parent_generation` stand in for [`FileIdentity`]: bump
@@ -1184,8 +1159,9 @@ fn observe_impl(
     let leaf_name = configured_path
         .file_name()
         .expect("shape validation already required a named leaf file");
+    let [_, legacy_default_path] = default_policy_paths();
     let legacy_default = matches!(source, PolicyConfigurationSource::DefaultPath)
-        && policy_security::windows_paths_equal(configured_path, &legacy_default_policy_path());
+        && policy_security::windows_paths_equal(configured_path, &legacy_default_path);
 
     let secured = match (source, legacy_default) {
         (PolicyConfigurationSource::DefaultPath, true) => verify_legacy_default_directory_secure(dir),
@@ -1353,6 +1329,8 @@ fn observe_impl(
 
     // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
     // verified directory identity and security digest, never repeated on every observation.
+    // The installer successor migrates eligible legacy files before service startup.
+    // Until managed state appears, preserve legacy enforcement but never write through the legacy directory.
     let (base_write_capability, base_read_only_reason) = if legacy_default {
         (
             PolicyWriteCapability::ReadOnly,
@@ -2730,7 +2708,13 @@ mod tests {
         std::fs::write(&legacy, b"legacy").unwrap();
         assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), legacy);
 
-        std::fs::create_dir(managed.parent().unwrap()).unwrap();
+        let selected = select_default_policy_path_with(managed.clone(), legacy.clone(), || {
+            std::fs::create_dir(managed.parent().unwrap()).unwrap();
+            std::fs::write(&managed, b"raced-managed").unwrap();
+        });
+        assert_eq!(selected, managed, "managed policy created during arbitration must win");
+        std::fs::remove_file(&managed).unwrap();
+
         let marker = managed
             .parent()
             .unwrap()
@@ -3282,15 +3266,20 @@ mod tests {
     }
 
     #[test]
-    fn failed_atomicity_probe_is_not_cached() {
+    fn failed_atomicity_probe_is_cached_until_directory_state_changes() {
         let dir = temp_dir();
         let missing = dir.path().join("missing");
         let cache = AtomicityProbeCache::new();
 
-        let result = cache.get_or_probe(&missing, test_identity(1), test_security_digest(1));
+        let first = cache.get_or_probe(&missing, test_identity(1), test_security_digest(1));
+        assert!(first.is_err());
+        std::fs::create_dir(&missing).unwrap();
 
-        assert!(result.is_err());
-        assert!(cache.cached_success.lock().unwrap().is_none());
+        let cached = cache.get_or_probe(&missing, test_identity(1), test_security_digest(1));
+        assert!(cached.is_err(), "unchanged directory state must reuse the failed probe");
+        cache
+            .get_or_probe(&missing, test_identity(2), test_security_digest(1))
+            .expect("changed directory identity must trigger a fresh probe");
     }
 
     #[test]
@@ -3362,7 +3351,7 @@ mod tests {
     //
     // The Agent service runs as LocalSystem in production, so setting a newly created
     // object's owner to SYSTEM is unprivileged there; a non-elevated developer/CI shell
-    // cannot assign an owner it does not itself hold a enabling privilege for. Mirrors the
+    // cannot assign an owner it does not itself hold an enabling privilege for. Mirrors the
     // existing `winget_app_exec_alias_passes_elevated_verification` pattern: attempt the
     // real operation, and require the failure (when one occurs) to be exactly the
     // anticipated privilege limitation rather than silently skipping the test.

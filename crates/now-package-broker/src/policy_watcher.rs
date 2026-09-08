@@ -32,6 +32,17 @@ fn affects_watched_paths(event: &notify::Event, paths: &[PathBuf]) -> bool {
     let legacy = &paths[1];
     let managed_dir = managed.parent().expect("managed default policy has a parent");
     event.paths.iter().any(|event_path| {
+        if event_path
+            .parent()
+            .is_some_and(|parent| crate::policy_security::windows_paths_equal(parent, managed_dir))
+            && event_path.file_name().is_some_and(|name| {
+                name.to_string_lossy()
+                    .to_ascii_lowercase()
+                    .starts_with(".package-broker-write-probe-")
+            })
+        {
+            return false;
+        }
         crate::policy_security::windows_paths_equal(event_path, managed)
             || crate::policy_security::windows_paths_equal(event_path, legacy)
             || crate::policy_security::windows_paths_equal(event_path, managed_dir)
@@ -298,6 +309,10 @@ mod tests {
         assert!(affects_watched_paths(&event(legacy), &paths));
         assert!(affects_watched_paths(
             &event(managed.with_file_name(".package-broker-policy.json.txn-id.marker")),
+            &paths
+        ));
+        assert!(!affects_watched_paths(
+            &event(managed.with_file_name(".package-broker-write-probe-a.tmp")),
             &paths
         ));
         assert!(affects_watched_paths(
