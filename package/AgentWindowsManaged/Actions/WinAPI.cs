@@ -9,6 +9,7 @@ internal static class WinAPI
 {
     internal static uint CREATE_ALWAYS = 2;
     internal const int ERROR_ALREADY_EXISTS = 183;
+    internal const int ERROR_FILE_EXISTS = 80;
     internal const int ERROR_FILE_NOT_FOUND = 2;
     internal const int ERROR_INSUFFICIENT_BUFFER = 122;
     internal const int ERROR_PATH_NOT_FOUND = 3;
