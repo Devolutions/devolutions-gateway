@@ -35,12 +35,14 @@ trait PolicyStorage: Send + Sync {
     }
     fn create(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure>;
     fn replace(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
@@ -70,6 +72,7 @@ impl PolicyStorage for FilePolicyStorage {
 
     fn create(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
@@ -84,11 +87,14 @@ impl PolicyStorage for FilePolicyStorage {
             &observation.canonical_path,
             bytes,
         )?;
+        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
+            .map_err(WriteFailure::PostPublication)?;
         self.authoritative_reobserve(configured_path, bytes)
     }
 
     fn replace(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
@@ -104,6 +110,8 @@ impl PolicyStorage for FilePolicyStorage {
             &observation.canonical_path,
             bytes,
         )?;
+        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
+            .map_err(WriteFailure::PostPublication)?;
         self.authoritative_reobserve(configured_path, bytes)
     }
 }
@@ -436,9 +444,11 @@ impl PolicyStore {
             .map_err(|_| error_response(ErrorCode::InternalError, "failed to serialize the committed policy"))?;
 
         let persisted = if request.operation == PolicyReplacementOperation::Create {
-            self.storage.create(&write_configured_path, &observation, &bytes)
+            self.storage
+                .create(self.source, &write_configured_path, &observation, &bytes)
         } else {
-            self.storage.replace(&write_configured_path, &mut observation, &bytes)
+            self.storage
+                .replace(self.source, &write_configured_path, &mut observation, &bytes)
         };
         let persisted = match persisted {
             Ok(persisted) => persisted,
@@ -731,6 +741,7 @@ impl PolicyStorage for TestStorage {
 
     fn create(
         &self,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
@@ -741,6 +752,7 @@ impl PolicyStorage for TestStorage {
 
     fn replace(
         &self,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
@@ -899,6 +911,7 @@ mod storage_tests {
 
         fn create(
             &self,
+            _source: PolicyConfigurationSource,
             _configured_path: &Path,
             _observation: &Observation,
             _bytes: &[u8],
@@ -908,6 +921,7 @@ mod storage_tests {
 
         fn replace(
             &self,
+            _source: PolicyConfigurationSource,
             _configured_path: &Path,
             _observation: &mut Observation,
             _bytes: &[u8],
