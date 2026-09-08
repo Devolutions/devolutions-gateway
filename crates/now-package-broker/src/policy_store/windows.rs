@@ -97,17 +97,34 @@ pub(super) fn default_policy_path() -> PathBuf {
 /// call) and independent of JSON-vs-other-format content sniffing: the extension alone
 /// decides, so a legacy `.yaml`/`.yml` (or extensionless) configured path is rejected
 /// up front rather than discovered only when its content fails to parse as JSON.
-pub(super) fn validate_configured_path_shape(path: &Path) -> Result<(), String> {
+#[derive(Debug)]
+enum ConfiguredPathError {
+    UnsafeShape(String),
+    UnsupportedFormat(String),
+}
+
+impl std::fmt::Display for ConfiguredPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsafeShape(message) | Self::UnsupportedFormat(message) => f.write_str(message),
+        }
+    }
+}
+
+fn validate_configured_path_shape(path: &Path) -> Result<(), ConfiguredPathError> {
     if !path.is_absolute() {
-        return Err(format!("configured policy path must be absolute: {}", path.display()));
+        return Err(ConfiguredPathError::UnsafeShape(format!(
+            "configured policy path must be absolute: {}",
+            path.display()
+        )));
     }
 
     let raw = path.as_os_str().to_string_lossy();
     if raw.ends_with('\\') || raw.ends_with('/') {
-        return Err(format!(
+        return Err(ConfiguredPathError::UnsafeShape(format!(
             "configured policy path must not end with a path separator: {}",
             path.display()
-        ));
+        )));
     }
 
     // Detected on the *raw* configured string, not via `path.components()`: per
@@ -116,31 +133,34 @@ pub(super) fn validate_configured_path_shape(path: &Path) -> Result<(), String> 
     // `Component::CurDir` at all, so a components-based check would never catch it.
     for segment in raw.split(['\\', '/']) {
         if segment == "." {
-            return Err(format!(
+            return Err(ConfiguredPathError::UnsafeShape(format!(
                 "configured policy path must not contain a '.' component: {}",
                 path.display()
-            ));
+            )));
         }
         if segment == ".." {
-            return Err(format!(
+            return Err(ConfiguredPathError::UnsafeShape(format!(
                 "configured policy path must not contain a '..' component: {}",
                 path.display()
-            ));
+            )));
         }
     }
 
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return Err(format!("configured policy path must name a file: {}", path.display()));
+        return Err(ConfiguredPathError::UnsafeShape(format!(
+            "configured policy path must name a file: {}",
+            path.display()
+        )));
     };
 
     let has_json_extension = Path::new(file_name)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
     if !has_json_extension {
-        return Err(format!(
+        return Err(ConfiguredPathError::UnsupportedFormat(format!(
             "configured policy path must name a '.json' file (case-insensitive), got '{file_name}'; \
              the package broker no longer supports any other format"
-        ));
+        )));
     }
 
     Ok(())
@@ -997,12 +1017,22 @@ fn observe_impl(
             path = %configured_path.display(), reason = %diagnostic,
             "Configured policy path has an unsupported shape or extension"
         );
+        let (failure, read_only_reason) = match diagnostic {
+            ConfiguredPathError::UnsafeShape(_) => (
+                validation::DiskFailureReason::InsecureStorage,
+                PolicyReadOnlyReason::UnsafePath,
+            ),
+            ConfiguredPathError::UnsupportedFormat(_) => (
+                validation::DiskFailureReason::UnsupportedFormat,
+                PolicyReadOnlyReason::UnsupportedFormat,
+            ),
+        };
         return invalid_observation(
             configured_path,
-            validation::DiskFailureReason::UnsupportedFormat,
+            failure,
             InvalidContext::default(),
-            PolicyWriteCapability::ReadOnly,
-            Some(PolicyReadOnlyReason::UnsupportedFormat),
+            PolicyWriteCapability::Unsupported,
+            Some(read_only_reason),
         );
     }
 
@@ -3146,49 +3176,49 @@ mod tests {
     #[test]
     fn relative_path_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"relative\policy.json")).unwrap_err();
-        assert!(error.contains("absolute"), "{error}");
+        assert!(error.to_string().contains("absolute"), "{error}");
     }
 
     #[test]
     fn trailing_separator_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\Devolutions\")).unwrap_err();
-        assert!(error.contains("separator"), "{error}");
+        assert!(error.to_string().contains("separator"), "{error}");
     }
 
     #[test]
     fn dot_component_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\.\policy.json")).unwrap_err();
-        assert!(error.contains("'.'"), "{error}");
+        assert!(error.to_string().contains("'.'"), "{error}");
     }
 
     #[test]
     fn dotdot_component_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\..\policy.json")).unwrap_err();
-        assert!(error.contains("'..'"), "{error}");
+        assert!(error.to_string().contains("'..'"), "{error}");
     }
 
     #[test]
     fn yaml_extension_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\Devolutions\policy.yaml")).unwrap_err();
-        assert!(error.contains(".json"), "{error}");
+        assert!(error.to_string().contains(".json"), "{error}");
     }
 
     #[test]
     fn yml_extension_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\Devolutions\policy.yml")).unwrap_err();
-        assert!(error.contains(".json"), "{error}");
+        assert!(error.to_string().contains(".json"), "{error}");
     }
 
     #[test]
     fn extensionless_path_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\Devolutions\policy")).unwrap_err();
-        assert!(error.contains(".json"), "{error}");
+        assert!(error.to_string().contains(".json"), "{error}");
     }
 
     #[test]
     fn other_extension_is_rejected() {
         let error = validate_configured_path_shape(Path::new(r"C:\ProgramData\Devolutions\policy.txt")).unwrap_err();
-        assert!(error.contains(".json"), "{error}");
+        assert!(error.to_string().contains(".json"), "{error}");
     }
 
     #[test]
@@ -3207,7 +3237,7 @@ mod tests {
     /// reported through the *real* `observe` with the shared contract's dedicated
     /// [`PolicyReadOnlyReason::UnsupportedFormat`], and the file must never even be
     /// opened, whatever it (if anything) actually contains at that path.
-    fn assert_unsupported_format_is_reported_invalid_and_read_only_end_to_end(file_name: &str) {
+    fn assert_unsupported_format_is_reported_invalid_end_to_end(file_name: &str) {
         let dir = temp_dir();
         let path = dir.path().join(file_name);
         // If shape validation were ever skipped, this well-formed JSON content would
@@ -3219,7 +3249,7 @@ mod tests {
         let observation = observe(PolicyConfigurationSource::ConfiguredPath, &path, &probe_cache);
 
         assert_eq!(observation.state, PolicyManagementState::Invalid);
-        assert_eq!(observation.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(observation.write_capability, PolicyWriteCapability::Unsupported);
         assert_eq!(
             observation.read_only_reason,
             Some(PolicyReadOnlyReason::UnsupportedFormat)
@@ -3228,23 +3258,23 @@ mod tests {
     }
 
     #[test]
-    fn yaml_extension_is_reported_invalid_and_read_only_end_to_end() {
-        assert_unsupported_format_is_reported_invalid_and_read_only_end_to_end("policy.yaml");
+    fn yaml_extension_is_reported_invalid_end_to_end() {
+        assert_unsupported_format_is_reported_invalid_end_to_end("policy.yaml");
     }
 
     #[test]
-    fn yml_extension_is_reported_invalid_and_read_only_end_to_end() {
-        assert_unsupported_format_is_reported_invalid_and_read_only_end_to_end("policy.yml");
+    fn yml_extension_is_reported_invalid_end_to_end() {
+        assert_unsupported_format_is_reported_invalid_end_to_end("policy.yml");
     }
 
     #[test]
-    fn extensionless_path_is_reported_invalid_and_read_only_end_to_end() {
-        assert_unsupported_format_is_reported_invalid_and_read_only_end_to_end("policy");
+    fn extensionless_path_is_reported_invalid_end_to_end() {
+        assert_unsupported_format_is_reported_invalid_end_to_end("policy");
     }
 
     #[test]
-    fn other_extension_is_reported_invalid_and_read_only_end_to_end() {
-        assert_unsupported_format_is_reported_invalid_and_read_only_end_to_end("policy.txt");
+    fn other_extension_is_reported_invalid_end_to_end() {
+        assert_unsupported_format_is_reported_invalid_end_to_end("policy.txt");
     }
 
     // ─── Strict policy ancestor walk: reparse rejection (item 16) ─────────────
