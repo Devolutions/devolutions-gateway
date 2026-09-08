@@ -111,8 +111,7 @@ fn create_watcher(
 }
 
 struct WatcherSet {
-    watchers: Vec<RecommendedWatcher>,
-    directories: Vec<PathBuf>,
+    _watchers: Vec<RecommendedWatcher>,
 }
 
 fn build_watcher_set(
@@ -120,15 +119,11 @@ fn build_watcher_set(
     changes: &tokio::sync::mpsc::Sender<tokio::time::Instant>,
     failures: &tokio::sync::mpsc::UnboundedSender<WatcherFailure>,
 ) -> Result<WatcherSet, (WatcherFailure, PathBuf, notify::Error)> {
-    let mut set = WatcherSet {
-        watchers: Vec::new(),
-        directories: Vec::new(),
-    };
+    let mut set = WatcherSet { _watchers: Vec::new() };
     for dir in watch_directories(paths) {
         let watcher = create_watcher(&dir, Arc::clone(paths), changes.clone(), failures.clone())
             .map_err(|(failure, error)| (failure, dir.clone(), error))?;
-        set.directories.push(dir);
-        set.watchers.push(watcher);
+        set._watchers.push(watcher);
     }
     Ok(set)
 }
