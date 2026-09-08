@@ -1082,7 +1082,7 @@ fn open_policy_file(path: &Path, retain_for_write: bool) -> std::io::Result<Open
 
     OpenOptions::new()
         .read(true)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+        .share_mode(FILE_SHARE_READ.0)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
         .open(path)
         .map(|file| OpenedPolicyFile {
@@ -2849,6 +2849,32 @@ mod tests {
         let fallback_observation = open_policy_file(&path, true).unwrap();
         assert!(!fallback_observation.retained_for_write);
         assert_eq!(read_file_from_start(&reader).unwrap(), b"observed");
+    }
+
+    #[test]
+    fn ordinary_observation_waits_for_preexisting_writer_or_deleter() {
+        let dir = temp_dir();
+        let path = dir.path().join("policy.json");
+        std::fs::write(&path, b"observed").unwrap();
+        let writer = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .open(&path)
+            .unwrap();
+
+        assert!(open_policy_file(&path, false).is_err());
+        drop(writer);
+        assert!(open_policy_file(&path, false).is_ok());
+
+        let deleter = OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ.0 | DELETE.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .open(&path)
+            .unwrap();
+        assert!(open_policy_file(&path, false).is_err());
+        drop(deleter);
+        assert!(open_policy_file(&path, false).is_ok());
     }
 
     #[test]
