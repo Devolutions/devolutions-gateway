@@ -134,6 +134,41 @@ public sealed class PackageBrokerInstallerTests
     }
 
     [Theory]
+    [InlineData(@"\\server\share\policy.json")]
+    [InlineData(@"\policy.json")]
+    [InlineData(@"C:policy.json")]
+    [InlineData(@"\\?\UNC\server\share\policy.json")]
+    [InlineData(@"\??\UNC\server\share\policy.json")]
+    [InlineData(@"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\policy.json")]
+    [InlineData(@"\\.\C:\policy.json")]
+    [InlineData(@"\Device\HarddiskVolume1\policy.json")]
+    [InlineData(@"C:\policy.json:stream")]
+    [InlineData(@"C:\folder\..\policy.json")]
+    [InlineData(@"C:\folder\\policy.json")]
+    [InlineData(@"C:\policy.yaml")]
+    public void ConfiguredPolicyPathRejectsUnsafeOrRemoteShapesBeforeProbe(string path)
+    {
+        Assert.False(
+            PackageBrokerPolicyActions.TryValidateConfiguredLocalPolicyPath(
+                path,
+                out string diagnostic));
+        Assert.False(string.IsNullOrWhiteSpace(diagnostic));
+    }
+
+    [Fact]
+    public void ConfiguredPolicyPathAcceptsLocalVolumeGuid()
+    {
+        string volumeRoot = GetSystemVolumeGuidRoot();
+        string path = $"{volumeRoot}Devolutions\\PackageBroker\\policy.json";
+
+        Assert.True(
+            PackageBrokerPolicyActions.TryValidateConfiguredLocalPolicyPath(
+                path,
+                out string diagnostic),
+            diagnostic);
+    }
+
+    [Theory]
     [InlineData("""{"PackageBroker":{"PolicyPath":"C:\\policy.json",},}""")]
     [InlineData("""{"PackageBroker":{/*comment*/"PolicyPath":"C:\\policy.json"}}""")]
     [InlineData("""{'PackageBroker':{'PolicyPath':'C:\\policy.json'}}""")]
@@ -495,6 +530,24 @@ public sealed class PackageBrokerInstallerTests
         });
         process.WaitForExit();
         Assert.Equal(0, process.ExitCode);
+    }
+
+    private static string GetSystemVolumeGuidRoot()
+    {
+        using Process process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "mountvol.exe",
+            Arguments = @"C:\ /L",
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        });
+        string output = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        Assert.StartsWith(@"\\?\Volume{", output, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(@"\", output);
+        return output;
     }
 
     [Fact]

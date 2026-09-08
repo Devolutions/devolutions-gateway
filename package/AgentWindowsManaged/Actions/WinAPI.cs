@@ -37,6 +37,9 @@ internal static class WinAPI
 
     internal const uint GENERIC_READ = 0x80000000;
     internal static uint GENERIC_WRITE = 0x40000000;
+    internal const uint DRIVE_NO_ROOT_DIR = 1;
+    internal const uint DRIVE_REMOTE = 4;
+    internal const uint DRIVE_UNKNOWN = 0;
     internal const uint OPEN_EXISTING = 3;
     internal const uint READ_CONTROL = 0x00020000;
 
@@ -305,6 +308,9 @@ internal static class WinAPI
     internal static extern bool GetFileInformationByHandle(
         SafeFileHandle hFile,
         out ByHandleFileInformation lpFileInformation);
+
+    [DllImport("kernel32", EntryPoint = "GetDriveTypeW", CharSet = CharSet.Unicode)]
+    internal static extern uint GetDriveType([MarshalAs(UnmanagedType.LPWStr)] string rootPathName);
 
     [DllImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
