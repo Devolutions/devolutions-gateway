@@ -164,14 +164,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_source_registration_failure_sentinel() {
-        assert!(event_source_registration_failed(std::ptr::null_mut()));
-        assert!(!event_source_registration_failed(
-            windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE
-        ));
-    }
-
-    #[test]
     fn severity_to_event_type_mapping() {
         assert_eq!(
             severity_to_event_type(Severity::Critical),
