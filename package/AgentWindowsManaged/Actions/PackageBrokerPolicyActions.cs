@@ -220,81 +220,89 @@ public static class PackageBrokerPolicyActions
     }
 
     [CustomAction]
-    public static ActionResult CommitLegacyPackageBrokerPolicyMigration(Session session)
-    {
-        string marker = MigrationMarkerPath(session);
-        string sourcePath = LegacyPolicyPath;
+    public static ActionResult CommitLegacyPackageBrokerPolicyMigration(Session session) =>
+        RunBestEffortCommit(
+            session.Log,
+            () => CommitLegacyPackageBrokerPolicyMigrationCore(session));
 
+    internal static ActionResult RunBestEffortCommit(Action<string> log, Action commit)
+    {
         try
         {
-            using PinnedPath markerPath = PinPathWithoutReparse(
-                marker,
-                leafIsDirectory: false,
-                allowMissingLeaf: true,
-                leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
-            if (markerPath.Leaf == null)
-            {
-                return ActionResult.Success;
-            }
-
-            VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
-            MigrationRecord record = ReadMigrationMarker(markerPath.Leaf);
-
-            bool sourceChanged;
-            bool removeSource;
-            using (PinnedPath source = PinPathWithoutReparse(
-                sourcePath,
-                leafIsDirectory: false,
-                allowMissingLeaf: true,
-                leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
-            {
-                sourceChanged =
-                    source.Leaf == null ||
-                    !FileIdentityAndDigestMatch(source.Leaf, record.SourceIdentity, record.SourceDigest);
-                removeSource = !sourceChanged;
-                if (removeSource &&
-                    IsLegacyPackageBrokerPolicyExplicitlyConfigured(
-                        sourcePath,
-                        source.Leaf,
-                        out string configuredDiagnostic))
-                {
-                    session.Log(
-                        $"preserving the configured legacy package broker policy during commit: {configuredDiagnostic}");
-                    removeSource = false;
-                }
-                if (removeSource &&
-                    !TryVerifyLegacyPolicySourceSecurity(
-                        SecurityFromHandle(source.Leaf, isDirectory: false),
-                        out string sourceSecurityDiagnostic))
-                {
-                    session.Log(
-                        $"preserving the legacy package broker policy during commit: {sourceSecurityDiagnostic}");
-                    removeSource = false;
-                }
-            }
-
-            VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
-            DeleteFileByHandle(markerPath.Leaf);
-
-            if (!removeSource)
-            {
-                if (sourceChanged)
-                {
-                    session.Log(
-                        "legacy package broker policy changed after migration; preserving the current source");
-                }
-                return ActionResult.Success;
-            }
-
-            TryDeleteLegacyPolicySource(session, sourcePath, record);
-
-            return ActionResult.Success;
+            commit();
         }
         catch (Exception error)
         {
-            session.Log($"failed to commit legacy package broker policy migration: {error}");
-            return ActionResult.Failure;
+            log($"failed to commit legacy package broker policy migration: {error}");
         }
+
+        return ActionResult.Success;
+    }
+
+    private static void CommitLegacyPackageBrokerPolicyMigrationCore(Session session)
+    {
+        string marker = MigrationMarkerPath(session);
+        string sourcePath = LegacyPolicyPath;
+        using PinnedPath markerPath = PinPathWithoutReparse(
+            marker,
+            leafIsDirectory: false,
+            allowMissingLeaf: true,
+            leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+        if (markerPath.Leaf == null)
+        {
+            return;
+        }
+
+        VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
+        MigrationRecord record = ReadMigrationMarker(markerPath.Leaf);
+
+        bool sourceChanged;
+        bool removeSource;
+        using (PinnedPath source = PinPathWithoutReparse(
+            sourcePath,
+            leafIsDirectory: false,
+            allowMissingLeaf: true,
+            leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
+        {
+            sourceChanged =
+                source.Leaf == null ||
+                !FileIdentityAndDigestMatch(source.Leaf, record.SourceIdentity, record.SourceDigest);
+            removeSource = !sourceChanged;
+            if (removeSource &&
+                IsLegacyPackageBrokerPolicyExplicitlyConfigured(
+                    sourcePath,
+                    source.Leaf,
+                    out string configuredDiagnostic))
+            {
+                session.Log(
+                    $"preserving the configured legacy package broker policy during commit: {configuredDiagnostic}");
+                removeSource = false;
+            }
+            if (removeSource &&
+                !TryVerifyLegacyPolicySourceSecurity(
+                    SecurityFromHandle(source.Leaf, isDirectory: false),
+                    out string sourceSecurityDiagnostic))
+            {
+                session.Log(
+                    $"preserving the legacy package broker policy during commit: {sourceSecurityDiagnostic}");
+                removeSource = false;
+            }
+        }
+
+        VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
+        DeleteFileByHandle(markerPath.Leaf);
+
+        if (!removeSource)
+        {
+            if (sourceChanged)
+            {
+                session.Log(
+                    "legacy package broker policy changed after migration; preserving the current source");
+            }
+            return;
+        }
+
+        TryDeleteLegacyPolicySource(session, sourcePath, record);
     }
 
     internal static void EnsureSecureDirectoryTree(string programData, string target)

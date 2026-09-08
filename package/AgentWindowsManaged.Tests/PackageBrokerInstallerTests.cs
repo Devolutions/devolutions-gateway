@@ -1,5 +1,6 @@
 using DevolutionsAgent;
 using DevolutionsAgent.Actions;
+using Microsoft.Deployment.WindowsInstaller;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -389,7 +390,7 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal(Return.ignore, rollback.Return);
         Assert.Equal(Return.check, ensure.Return);
         Assert.Equal(Return.check, migrate.Return);
-        Assert.Equal(Return.check, commit.Return);
+        Assert.Equal(Return.ignore, commit.Return);
         Assert.Equal(When.Before, rollback.When);
         Assert.Equal(When.After, migrate.When);
         Assert.Equal(When.After, commit.When);
@@ -399,6 +400,22 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal(migrate.Id, commit.Step.ToString());
         Assert.Equal(Condition.NOT_BeingRemoved.ToString(), ensure.Condition.ToString());
         Assert.Equal(Condition.NOT_BeingRemoved.ToString(), migrate.Condition.ToString());
+    }
+
+    [Theory]
+    [InlineData("marker inspection")]
+    [InlineData("marker deletion")]
+    [InlineData("source cleanup")]
+    public void CommitCleanupFailuresRemainSuccessful(string stage)
+    {
+        string diagnostic = null;
+
+        ActionResult result = PackageBrokerPolicyActions.RunBestEffortCommit(
+            message => diagnostic = message,
+            () => throw new IOException(stage));
+
+        Assert.Equal(ActionResult.Success, result);
+        Assert.Contains(stage, diagnostic);
     }
 
     [Theory]
