@@ -426,11 +426,8 @@ internal class Program
 
     private static void Project_UIInitialized(SetupEventArgs e)
     {
-        e.Session.Set(GatewayProperties.userTempPath, Path.GetTempPath());
-
         Guid installId = Guid.NewGuid();
         e.Session.Set(GatewayProperties.installId, installId);
-        Wizard.Globals["installId"] = installId.ToString();
 
         string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
         {

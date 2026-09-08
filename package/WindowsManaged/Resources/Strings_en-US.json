@@ -177,10 +177,6 @@
           "text": "View Log"
         },
         {
-          "id": "ViewErrorsButton",
-          "text": "View configuration issues"
-        },
-        {
           "id": "ValidateButton",
           "text": "Validate"
         }

@@ -177,10 +177,6 @@
           "text": "Protokoll anzeigen"
         },
         {
-          "id": "ViewErrorsButton",
-          "text": "Konfigurationsprobleme anzeigen"
-        },
-        {
           "id": "ValidateButton",
           "text": "Überprüfen"
         }

@@ -79,10 +79,6 @@
           "text": "Afficher le journal"
         },
         {
-          "id": "ViewErrorsButton",
-          "text": "Afficher les problèmes de configuration"
-        },
-        {
           "id": "ValidateButton",
           "text": "Valider"
         }

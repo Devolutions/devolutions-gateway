@@ -1332,34 +1332,6 @@ namespace DevolutionsGateway.Properties
         }
 
  
-        internal static readonly WixProperty<String> userTempPath = new()
-        {
-            Id = "P.USERTEMPPATH",
-            Default = "",
-            Name = "UserTempPath",
-            Secure = true,
-            Hidden = false,
-            Public = true,
-            Encode = false,
-        };
-
-        public String UserTempPath
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(userTempPath.Id);
-                return WixProperties.GetPropertyValue<String>(stringValue);
-            }
-            set 
-            { 
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(userTempPath, value); 
-                }
-            }
-        }
-
- 
         internal static readonly WixProperty<UInt32> netFx45Version = new()
         {
             Id = "P.NetFx45Version",
@@ -1664,7 +1636,6 @@ namespace DevolutionsGateway.Properties
             installId,
  
  
-            userTempPath,
  
  
             netFx45Version,

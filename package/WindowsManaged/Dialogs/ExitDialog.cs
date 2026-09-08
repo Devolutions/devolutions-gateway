@@ -4,14 +4,11 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using DevolutionsGateway.Resources;
 
 namespace WixSharpSetup.Dialogs;
 
 public partial class ExitDialog : GatewayDialog
 {
-    private string warningsFile = null;
-
     public ExitDialog()
     {
         InitializeComponent();
@@ -34,16 +31,6 @@ public partial class ExitDialog : GatewayDialog
             title.Text = "[FatalErrorTitle]";
             description.Text = Shell.CustomErrorDescription ?? "[FatalErrorDescription1]";
             this.Localize();
-        }
-
-        if (Guid.TryParse(Wizard.Globals["installId"], out Guid installId))
-        {
-            this.warningsFile = Path.Combine(Path.GetTempPath(), $"{installId}.{Includes.ERROR_REPORT_FILENAME}");
-
-            if (File.Exists(this.warningsFile))
-            {
-                this.ViewErrorsButton.Visible = true;
-            }
         }
 
         base.OnLoad(sender, e);
@@ -84,17 +71,6 @@ public partial class ExitDialog : GatewayDialog
         {
             //Catch all, we don't want the installer to crash in an
             //attempt to view the log.
-        }
-    }
-
-    private void ViewErrorsButton_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-    {
-        try
-        {
-            Process.Start(this.warningsFile);
-        }
-        catch
-        {
         }
     }
 }

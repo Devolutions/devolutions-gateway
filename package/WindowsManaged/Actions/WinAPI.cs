@@ -18,19 +18,9 @@ internal static class WinAPI
     
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
 
-    internal const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
-
     internal static uint FILE_SHARE_READ = 0x00000001;
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
-
-    internal static uint FILE_SHARE_DELETE = 0x00000004;
-
-    internal const uint OPEN_EXISTING = 3;
-
-    internal static uint LOGON32_LOGON_SERVICE = 5;
-
-    internal static uint LOGON32_PROVIDER_DEFAULT = 0;
 
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
 
@@ -73,48 +63,6 @@ internal static class WinAPI
     internal const uint GENERIC_WRITE = 0x40000000;
 
     internal const uint GENERIC_READ = 0x80000000;
-
-    /* Standard access rights */
-
-    internal const uint DELETE = 0x00010000;
-
-    internal const uint READ_CONTROL = 0x00020000;
-
-    internal const uint SYNCHRONIZE = 0x00100000;
-
-    internal const uint WRITE_DAC = 0x00040000;
-
-    internal const uint WRITE_OWNER = 0x00080000;
-
-    /* File access rights */
-
-    internal const uint FILE_ADD_FILE = 2;
-
-    internal const uint FILE_ADD_SUBDIRECTORY = 4;
-
-    internal const uint FILE_APPEND_DATA = 4;
-
-    internal const uint FILE_CREATE_PIPE_INSTANCE = 4;
-
-    internal const uint FILE_DELETE_CHILD = 64;
-
-    internal const uint FILE_EXECUTE = 32;
-
-    internal const uint FILE_LIST_DIRECTORY = 1;
-
-    internal const uint FILE_READ_ATTRIBUTES = 128;
-
-    internal const uint FILE_READ_DATA = 1;
-
-    internal const uint FILE_READ_EA = 8;
-
-    internal const uint FILE_TRAVERSE = 32;
-
-    internal const uint FILE_WRITE_ATTRIBUTES = 256;
-
-    internal const uint FILE_WRITE_DATA = 2;
-
-    internal const uint FILE_WRITE_EA = 16;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct QUERY_SERVICE_CONFIG
@@ -300,12 +248,6 @@ internal static class WinAPI
         string lpFileName
     );
 
-    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern bool DuplicateToken(
-        IntPtr token, 
-        uint impersonationLevel, 
-        ref IntPtr DuplicateTokenHandle);
-
     [DllImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
@@ -330,15 +272,6 @@ internal static class WinAPI
     
     [DllImport("kernel32", SetLastError = true)]
     internal static extern IntPtr LocalFree(IntPtr hMem);
-
-    [DllImport("advapi32", EntryPoint = "LogonUserW", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern bool LogonUser(
-        string username, 
-        string domain,
-        string password, 
-        uint logonType,
-        uint logonProvider,
-        out IntPtr phToken);
 
     [DllImport("kernel32", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
