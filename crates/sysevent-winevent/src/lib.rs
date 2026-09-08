@@ -141,10 +141,6 @@ impl Drop for WinEvent {
     }
 }
 
-fn event_source_registration_failed(handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
-    handle.is_null()
-}
-
 fn severity_to_event_type(severity: Severity) -> u16 {
     match severity {
         Severity::Critical => EventLog::EVENTLOG_ERROR_TYPE,
