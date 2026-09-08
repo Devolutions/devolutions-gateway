@@ -921,9 +921,18 @@ public static class PackageBrokerPolicyActions
 
     internal static void VerifySecurityDescriptor(FileSystemSecurity actual, string expectedSddl)
     {
+        if (!actual.AreAccessRulesProtected)
+        {
+            throw new InvalidOperationException("new directory DACL inheritance is not protected");
+        }
+
+        const AccessControlSections sections =
+            AccessControlSections.Owner |
+            AccessControlSections.Group |
+            AccessControlSections.Access;
         RawSecurityDescriptor expected = new(expectedSddl);
-        string expectedCanonical = expected.GetSddlForm(AccessControlSections.All);
-        string actualCanonical = actual.GetSecurityDescriptorSddlForm(AccessControlSections.All);
+        string expectedCanonical = expected.GetSddlForm(sections);
+        string actualCanonical = actual.GetSecurityDescriptorSddlForm(sections);
         if (!string.Equals(actualCanonical, expectedCanonical, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("new directory security does not match its creation descriptor");
