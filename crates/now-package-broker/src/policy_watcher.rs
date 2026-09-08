@@ -328,6 +328,10 @@ mod tests {
             &event(managed.with_file_name(".package-broker-policy.json.txn-id.marker")),
             &paths
         ));
+        assert!(affects_watched_paths(
+            &event(managed.with_file_name(".package-broker-managed-authority")),
+            &paths
+        ));
         assert!(!affects_watched_paths(
             &event(managed.with_file_name(".package-broker-write-probe-a.tmp")),
             &paths
