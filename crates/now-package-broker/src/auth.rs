@@ -42,6 +42,13 @@ struct ProcessInstanceIdentity {
     creation_time: SystemTime,
 }
 
+#[derive(Clone, Copy)]
+enum ExecutableSecurityMode {
+    Enforce,
+    #[cfg(test)]
+    Skip,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct PipeClient {
     process_id: u32,
@@ -67,10 +74,7 @@ impl PipeClient {
     /// This unauthenticated capture blocks on process and local-filesystem work, so callers
     /// must keep it off the accept loop and bound it with a connection permit.
     /// Account-name resolution remains deferred because it may contact a domain controller.
-    pub(crate) fn from_connected_pipe(
-        server: &NamedPipeServer,
-        skip_signature_validation: bool,
-    ) -> anyhow::Result<Self> {
+    pub(crate) fn from_connected_pipe(server: &NamedPipeServer) -> anyhow::Result<Self> {
         let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
         let process = Arc::new(
             Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
@@ -78,11 +82,7 @@ impl PipeClient {
         );
         Self::ensure_process_active(process_id, &process)?;
         let process_instance = process_instance_identity(process_id, &process)?;
-        let client = Self::from_process(
-            process_instance,
-            Arc::clone(&process),
-            !signature_validation_skipped(skip_signature_validation),
-        )?;
+        let client = Self::from_process(process_instance, Arc::clone(&process), ExecutableSecurityMode::Enforce)?;
         let confirmed_process_id =
             connected_pipe_client_process_id(server).context("failed to confirm pipe client process id")?;
         if confirmed_process_id != process_id {
@@ -112,7 +112,11 @@ impl PipeClient {
             Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
                 .with_context(|| format!("failed to open pipe client process {process_id}"))?,
         );
-        Self::from_process(process_instance_identity(process_id, &process)?, process, false)
+        Self::from_process(
+            process_instance_identity(process_id, &process)?,
+            process,
+            ExecutableSecurityMode::Skip,
+        )
     }
 
     #[cfg(test)]
@@ -121,13 +125,17 @@ impl PipeClient {
             Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
                 .with_context(|| format!("failed to open pipe client process {process_id}"))?,
         );
-        Self::from_process(process_instance_identity(process_id, &process)?, process, true)
+        Self::from_process(
+            process_instance_identity(process_id, &process)?,
+            process,
+            ExecutableSecurityMode::Enforce,
+        )
     }
 
     fn from_process(
         process_instance: ProcessInstanceIdentity,
         process: Arc<Process>,
-        enforce_executable_security: bool,
+        executable_security_mode: ExecutableSecurityMode,
     ) -> anyhow::Result<Self> {
         let process_id = process_instance.process_id;
         let token = process
@@ -151,8 +159,8 @@ impl PipeClient {
         process.verify_image_file_mapping(&executable_file).with_context(|| {
             format!("pipe client process {process_id} mapped executable file does not match its image")
         })?;
-        let executable_security = enforce_executable_security
-            .then(|| {
+        let executable_security = match executable_security_mode {
+            ExecutableSecurityMode::Enforce => Some(Arc::new(
                 crate::policy_security::verify_retained_executable_security(
                     &executable_file,
                     "package broker pipe client executable",
@@ -162,10 +170,11 @@ impl PipeClient {
                         "pipe client process {process_id} executable '{}' failed trusted-writer security validation",
                         executable_path.display()
                     )
-                })
-            })
-            .transpose()?
-            .map(Arc::new);
+                })?,
+            )),
+            #[cfg(test)]
+            ExecutableSecurityMode::Skip => None,
+        };
         let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
@@ -1010,6 +1019,16 @@ mod tests {
     #[cfg(feature = "dev-skip-broker-signature")]
     mod dev_build {
         use super::*;
+
+        #[test]
+        fn signature_bypass_does_not_disable_trusted_writer_security() {
+            let error = PipeClient::from_process_id_with_security(std::process::id())
+                .expect_err("the user-writable test executable path must be rejected");
+            assert!(
+                error.to_string().contains("trusted-writer security validation"),
+                "unexpected security error: {error:#}"
+            );
+        }
 
         #[test]
         fn signature_validation_is_skipped_only_when_requested() {
