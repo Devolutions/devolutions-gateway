@@ -2711,8 +2711,8 @@ fn verify_recovery_final(
         .context("transaction final replacement is not a policy document")?;
     let validation = validation::validate_committed_policy(&policy);
     ensure!(
-        validation.is_valid && validation.findings.is_empty(),
-        "transaction final replacement failed strict committed-policy validation"
+        validation.is_valid,
+        "transaction final replacement failed committed-policy validation"
     );
     Ok(RecoveryFinalState::PublishedReplacement)
 }
@@ -2966,18 +2966,22 @@ mod tests {
         tempfile::tempdir().expect("create temp dir")
     }
 
-    fn valid_committed_policy_bytes() -> Vec<u8> {
+    fn committed_policy_bytes(default_decision: &str) -> Vec<u8> {
         let draft: now_policy::PolicyDraftDocument = serde_json::from_value(serde_json::json!({
             "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
             "PolicyVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "recovery-test", "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": default_decision, "RulePrecedence": "PriorityThenDeny" },
             "Rules": []
         }))
         .unwrap();
         let policy = draft.into_policy_document(1, chrono::Utc::now()).unwrap();
         serde_json::to_vec(&policy).unwrap()
+    }
+
+    fn valid_committed_policy_bytes() -> Vec<u8> {
+        committed_policy_bytes("Deny")
     }
 
     #[test]
@@ -3708,6 +3712,60 @@ mod tests {
             Err(_) => return,
         };
         let bytes = valid_committed_policy_bytes();
+        prepared.write_all(&bytes).unwrap();
+        prepared.sync_all().unwrap();
+        let marker = TransactionMarker {
+            id: uuid::Uuid::new_v4(),
+            final_leaf: "policy.json".to_owned(),
+            old_identity: test_identity(1),
+            old_content_digest: sha256_digest(b"verified-old"),
+            old_security_digest: test_security_digest(1),
+            new_identity: policy_security::file_identity(&prepared).unwrap(),
+            new_content_digest: sha256_digest(&bytes),
+            new_security_digest: policy_security::security_state_digest(&prepared).unwrap(),
+        };
+        rename_file_handle(&prepared, &dir_file, final_path.file_name().unwrap()).unwrap();
+        let marker_file = open_deletable_test_file(&marker_path, b"marker");
+        let old_file = open_deletable_test_file(&old_path, b"verified-old");
+
+        recover_verified_transaction_with_evidence(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            &marker,
+            marker_file,
+            Some(old_file),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), bytes);
+        assert!(!old_path.exists());
+        assert!(!marker_path.exists());
+    }
+
+    #[test]
+    fn recovery_accepts_exact_warning_bearing_replacement() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let prepared_path = dir.path().join("prepared");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let mut prepared = match create_secure_transaction_file(&prepared_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        let bytes = committed_policy_bytes("Allow");
+        let policy: PolicyDocument = serde_json::from_slice(&bytes).unwrap();
+        let validation = validation::validate_committed_policy(&policy);
+        assert!(validation.is_valid);
+        assert!(
+            !validation.findings.is_empty(),
+            "test policy must exercise warning recovery"
+        );
         prepared.write_all(&bytes).unwrap();
         prepared.sync_all().unwrap();
         let marker = TransactionMarker {
