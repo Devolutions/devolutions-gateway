@@ -22,6 +22,10 @@ namespace DevolutionsAgent.Actions;
 
 public static class PackageBrokerPolicyActions
 {
+    // Generic access bits may survive ACL conversion without expansion to specific rights.
+    private const FileSystemRights GenericWrite = (FileSystemRights)0x40000000;
+    private const FileSystemRights GenericAll = (FileSystemRights)0x10000000;
+
     private static string ProgramDataDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "Devolutions",
@@ -851,8 +855,8 @@ public static class PackageBrokerPolicyActions
             FileSystemRights.DeleteSubdirectoriesAndFiles |
             FileSystemRights.ChangePermissions |
             FileSystemRights.TakeOwnership |
-            (FileSystemRights)0x40000000 |
-            (FileSystemRights)0x10000000;
+            GenericWrite |
+            GenericAll;
         VerifyTrustedOwnerAndNoUnsafeGrants(
             security,
             unsafeRights,
@@ -867,7 +871,7 @@ public static class PackageBrokerPolicyActions
             FileSystemRights.DeleteSubdirectoriesAndFiles |
             FileSystemRights.ChangePermissions |
             FileSystemRights.TakeOwnership |
-            (FileSystemRights)0x10000000;
+            GenericAll;
         VerifyTrustedOwnerAndNoUnsafeGrants(
             security,
             tamperRights,
@@ -1127,7 +1131,7 @@ public static class PackageBrokerPolicyActions
             throw new Win32Exception(error, "failed to query pinned path security descriptor size");
         }
 
-        byte[] descriptor = new byte[requiredSize];
+        byte[] descriptor = AllocateSecurityDescriptorBuffer(requiredSize);
         if (!WinAPI.GetKernelObjectSecurity(
             handle,
             information,
@@ -1158,12 +1162,44 @@ public static class PackageBrokerPolicyActions
         foreach (string extension in new[] { "yaml", "yml" })
         {
             string legacyYaml = Path.Combine(ProgramDataDirectory, $"package-broker-policy.{extension}");
-            if (File.Exists(legacyYaml))
+            if (TryProbePinnedOrdinaryFile(legacyYaml, out string diagnostic))
             {
                 session.Log(
                     $"legacy YAML package broker policy remains untouched at {legacyYaml}; " +
                     $"validate and migrate it manually to strict JSON at {destination}");
             }
+            else if (diagnostic != null)
+            {
+                session.Log(diagnostic);
+            }
+        }
+    }
+
+    internal static byte[] AllocateSecurityDescriptorBuffer(uint requiredSize) =>
+        new byte[checked((int)requiredSize)];
+
+    internal static bool TryProbePinnedOrdinaryFile(string path, out string diagnostic)
+    {
+        diagnostic = null;
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            diagnostic = $"refusing to inspect remote legacy policy path {path}";
+            return false;
+        }
+
+        try
+        {
+            using PinnedPath pinned = PinPathWithoutReparse(
+                path,
+                leafIsDirectory: false,
+                allowMissingLeaf: true,
+                leafAccess: WinAPI.FILE_READ_ATTRIBUTES);
+            return pinned.Leaf != null;
+        }
+        catch (Exception error)
+        {
+            diagnostic = $"could not safely inspect legacy policy path {path}: {error.Message}";
+            return false;
         }
     }
 

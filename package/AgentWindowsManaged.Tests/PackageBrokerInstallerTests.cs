@@ -389,6 +389,66 @@ public sealed class PackageBrokerInstallerTests
     }
 
     [Fact]
+    public void SecurityDescriptorAllocationUsesCheckedLength()
+    {
+        Assert.Equal(256, PackageBrokerPolicyActions.AllocateSecurityDescriptorBuffer(256).Length);
+        Assert.Throws<OverflowException>(
+            () => PackageBrokerPolicyActions.AllocateSecurityDescriptorBuffer(uint.MaxValue));
+    }
+
+    [Fact]
+    public void LegacyYamlProbeDistinguishesFileMissingAndDirectory()
+    {
+        using TempDirectory temp = new();
+        string file = Path.Combine(temp.Path, "policy.yaml");
+        string missing = Path.Combine(temp.Path, "missing.yaml");
+        string directory = Directory.CreateDirectory(Path.Combine(temp.Path, "directory.yaml")).FullName;
+        File.WriteAllText(file, "not read");
+
+        Assert.True(PackageBrokerPolicyActions.TryProbePinnedOrdinaryFile(file, out string fileDiagnostic));
+        Assert.Null(fileDiagnostic);
+        Assert.False(PackageBrokerPolicyActions.TryProbePinnedOrdinaryFile(missing, out string missingDiagnostic));
+        Assert.Null(missingDiagnostic);
+        Assert.False(PackageBrokerPolicyActions.TryProbePinnedOrdinaryFile(directory, out string directoryDiagnostic));
+        Assert.Contains("could not safely inspect", directoryDiagnostic);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LegacyYamlProbeRejectsJunctionWithoutFollowingTarget(bool dangling)
+    {
+        using TempDirectory temp = new();
+        string target = Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName;
+        string sentinel = Path.Combine(target, "sentinel");
+        File.WriteAllText(sentinel, "untouched");
+        string link = Path.Combine(temp.Path, "policy.yaml");
+        CreateDirectoryJunction(link, target);
+        if (dangling)
+        {
+            File.Delete(sentinel);
+            Directory.Delete(target);
+        }
+
+        Assert.False(PackageBrokerPolicyActions.TryProbePinnedOrdinaryFile(link, out string diagnostic));
+        Assert.Contains("could not safely inspect", diagnostic);
+        if (!dangling)
+        {
+            Assert.Equal("untouched", File.ReadAllText(sentinel));
+        }
+        Directory.Delete(link);
+    }
+
+    [Fact]
+    public void LegacyYamlProbeRejectsRemotePathBeforeAccess()
+    {
+        string remote = $@"\\127.0.0.1\missing-{Guid.NewGuid():N}\policy.yaml";
+
+        Assert.False(PackageBrokerPolicyActions.TryProbePinnedOrdinaryFile(remote, out string diagnostic));
+        Assert.Contains("refusing to inspect remote", diagnostic);
+    }
+
+    [Fact]
     public void HardLinkedFileIsRejected()
     {
         using TempDirectory temp = new();
@@ -409,15 +469,7 @@ public sealed class PackageBrokerInstallerTests
         using TempDirectory temp = new();
         string target = Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName;
         string link = Path.Combine(temp.Path, "link");
-        using Process process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
-            CreateNoWindow = true,
-            UseShellExecute = false,
-        });
-        process.WaitForExit();
-        Assert.Equal(0, process.ExitCode);
+        CreateDirectoryJunction(link, target);
 
         Assert.Throws<InvalidOperationException>(() =>
         {
@@ -430,6 +482,19 @@ public sealed class PackageBrokerInstallerTests
         });
         Assert.Empty(Directory.EnumerateFileSystemEntries(target));
         Directory.Delete(link);
+    }
+
+    private static void CreateDirectoryJunction(string link, string target)
+    {
+        using Process process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
+            CreateNoWindow = true,
+            UseShellExecute = false,
+        });
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 
     [Fact]
