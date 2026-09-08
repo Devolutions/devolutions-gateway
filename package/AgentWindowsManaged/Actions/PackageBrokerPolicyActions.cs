@@ -521,9 +521,8 @@ public static class PackageBrokerPolicyActions
             }
 
             configuredPath = token.Value<string>();
-            if (!Path.IsPathRooted(configuredPath))
+            if (!TryValidateConfiguredLocalPolicyPath(configuredPath, out diagnostic))
             {
-                diagnostic = "PackageBroker.PolicyPath is not absolute";
                 return false;
             }
             return true;
@@ -535,6 +534,70 @@ public static class PackageBrokerPolicyActions
             diagnostic = $"configuration could not be parsed safely: {error.Message}";
             return false;
         }
+    }
+
+    internal static bool TryValidateConfiguredLocalPolicyPath(string path, out string diagnostic)
+    {
+        diagnostic = null;
+        string root;
+        string relative;
+        const string volumePrefix = @"\\?\Volume{";
+        if (path.StartsWith(volumePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            int volumeEnd = path.IndexOf(@"}\", volumePrefix.Length, StringComparison.Ordinal);
+            if (volumeEnd < 0 ||
+                !Guid.TryParseExact(
+                    path.Substring(volumePrefix.Length, volumeEnd - volumePrefix.Length),
+                    "D",
+                    out _))
+            {
+                diagnostic = "PackageBroker.PolicyPath has an invalid local volume GUID";
+                return false;
+            }
+            root = path.Substring(0, volumeEnd + 2);
+            relative = path.Substring(volumeEnd + 2);
+        }
+        else
+        {
+            if (path.Length < 3 ||
+                !char.IsLetter(path[0]) ||
+                path[1] != ':' ||
+                path[2] != '\\')
+            {
+                diagnostic = "PackageBroker.PolicyPath is not a fully qualified local path";
+                return false;
+            }
+            root = path.Substring(0, 3);
+            relative = path.Substring(3);
+        }
+
+        if (string.IsNullOrEmpty(relative) ||
+            relative.EndsWith(@"\", StringComparison.Ordinal) ||
+            relative.Contains('/') ||
+            relative.Contains(':') ||
+            relative.Split('\\').Any(component =>
+                string.IsNullOrEmpty(component) ||
+                component == "." ||
+                component == ".."))
+        {
+            diagnostic = "PackageBroker.PolicyPath has an unsafe local path shape";
+            return false;
+        }
+        if (!string.Equals(Path.GetExtension(relative), ".json", StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostic = "PackageBroker.PolicyPath must name a JSON file";
+            return false;
+        }
+
+        uint driveType = WinAPI.GetDriveType(root);
+        if (driveType == WinAPI.DRIVE_UNKNOWN ||
+            driveType == WinAPI.DRIVE_NO_ROOT_DIR ||
+            driveType == WinAPI.DRIVE_REMOTE)
+        {
+            diagnostic = "PackageBroker.PolicyPath does not use an available local volume";
+            return false;
+        }
+        return true;
     }
 
     internal static bool ContainsNonStrictJsonSyntax(string json)
