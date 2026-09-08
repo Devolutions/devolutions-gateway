@@ -121,6 +121,18 @@ internal static class AgentActions
         Features.PEDM_FEATURE.BeingInstall(),
         Sequence.InstallExecuteSequence);
 
+    private static readonly ElevatedManagedAction ensureProgramDataPackageBrokerDirectory = new(
+        new Id($"CA.{nameof(ensureProgramDataPackageBrokerDirectory)}"),
+        PackageBrokerPolicyActions.EnsureProgramDataPackageBrokerDirectory,
+        Return.check,
+        When.After, new Step(createProgramDataDirectory.Id),
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
     /// <summary>
     /// Set or reset the ACL on %ProgramData%\Devolutions\Agent
     /// </summary>
@@ -149,6 +161,45 @@ internal static class AgentActions
     {
         Execute = Execute.deferred,
         Impersonate = false,
+    };
+
+    private static readonly ElevatedManagedAction migrateLegacyPackageBrokerPolicy = new(
+        new Id($"CA.{nameof(migrateLegacyPackageBrokerPolicy)}"),
+        PackageBrokerPolicyActions.MigrateLegacyPackageBrokerPolicy,
+        Return.check,
+        When.After, new Step(ensureProgramDataPackageBrokerDirectory.Id),
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
+    };
+
+    private static readonly ElevatedManagedAction rollbackLegacyPackageBrokerPolicyMigration = new(
+        new Id($"CA.{nameof(rollbackLegacyPackageBrokerPolicyMigration)}"),
+        PackageBrokerPolicyActions.RollbackLegacyPackageBrokerPolicyMigration,
+        Return.ignore,
+        When.Before, new Step(migrateLegacyPackageBrokerPolicy.Id),
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.rollback,
+        Impersonate = false,
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
+    };
+
+    private static readonly ElevatedManagedAction commitLegacyPackageBrokerPolicyMigration = new(
+        new Id($"CA.{nameof(commitLegacyPackageBrokerPolicyMigration)}"),
+        PackageBrokerPolicyActions.CommitLegacyPackageBrokerPolicyMigration,
+        Return.check,
+        When.After, new Step(migrateLegacyPackageBrokerPolicy.Id),
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.commit,
+        Impersonate = false,
+        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
     };
 
     private static readonly ElevatedManagedAction cleanAgentConfigIfNeeded = new(
@@ -499,6 +550,10 @@ internal static class AgentActions
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
+        ensureProgramDataPackageBrokerDirectory,
+        rollbackLegacyPackageBrokerPolicyMigration,
+        migrateLegacyPackageBrokerPolicy,
+        commitLegacyPackageBrokerPolicyMigration,
         initAgentConfigIfNeeded,
         registerExplorerCommand,
         registerExplorerCommandRollback,
