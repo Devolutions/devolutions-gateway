@@ -814,6 +814,24 @@ impl DiskFingerprint {
             _ => None,
         }
     }
+
+    fn ancestor_security_digest(&self) -> Option<[u8; 32]> {
+        match self {
+            Self::Active {
+                ancestor_security_digest,
+                ..
+            }
+            | Self::Missing {
+                ancestor_security_digest: Some(ancestor_security_digest),
+                ..
+            }
+            | Self::Invalid {
+                ancestor_security_digest: Some(ancestor_security_digest),
+                ..
+            } => Some(*ancestor_security_digest),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1770,6 +1788,9 @@ pub(super) fn random_store_token() -> PolicyStoreToken {
 pub(super) struct PersistedPolicy {
     pub policy: PolicyDocument,
     pub fingerprint: DiskFingerprint,
+    pub write_capability: PolicyWriteCapability,
+    pub read_only_reason: Option<PolicyReadOnlyReason>,
+    pub canonical_path: PathBuf,
 }
 
 /// A write failure classified by whether publication occurred or a concurrent change won.
@@ -1813,27 +1834,22 @@ fn verify_replacement_evidence(
     observed_target: &RetainedPolicyFile,
     expected_fingerprint: &DiskFingerprint,
 ) -> anyhow::Result<()> {
+    verify_directory_evidence(hosting_dir, expected_fingerprint)?;
+    observed_target
+        .verify_matches(expected_fingerprint)
+        .context("observed policy changed before conditional publication")
+}
+
+fn verify_directory_evidence(
+    hosting_dir: &VerifiedHostingDirectory,
+    expected_fingerprint: &DiskFingerprint,
+) -> anyhow::Result<()> {
     hosting_dir
         .verify_unchanged()
         .context("hosting directory changed after policy observation")?;
-    observed_target
-        .verify_matches(expected_fingerprint)
-        .context("observed policy changed before conditional publication")?;
-    let expected_ancestor_security = match expected_fingerprint {
-        DiskFingerprint::Active {
-            ancestor_security_digest,
-            ..
-        }
-        | DiskFingerprint::Invalid {
-            ancestor_security_digest: Some(ancestor_security_digest),
-            ..
-        } => *ancestor_security_digest,
-        _ => {
-            return Err(anyhow::anyhow!(
-                "replacement observation has no ancestor security fingerprint"
-            ));
-        }
-    };
+    let expected_ancestor_security = expected_fingerprint
+        .ancestor_security_digest()
+        .context("write observation has no ancestor security fingerprint")?;
     let current_ancestor_security =
         policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
             .context("policy directory ancestor security changed after token validation")?;
@@ -2568,15 +2584,13 @@ fn read_file_from_start(file: &File) -> anyhow::Result<Vec<u8>> {
 /// than ever silently overwriting a file it never actually observed as absent.
 pub(super) fn atomic_create(
     hosting_dir: &VerifiedHostingDirectory,
+    expected_fingerprint: &DiskFingerprint,
     final_path: &Path,
     bytes: &[u8],
 ) -> Result<PersistedPolicy, WriteFailure> {
     use std::io::Write as _;
 
-    hosting_dir
-        .verify_unchanged()
-        .context("hosting directory changed after policy observation")
-        .map_err(WriteFailure::PrePublication)?;
+    verify_directory_evidence(hosting_dir, expected_fingerprint).map_err(WriteFailure::ConcurrentChange)?;
     let dir_handle = hosting_dir
         .handle
         .as_ref()
@@ -2600,18 +2614,43 @@ pub(super) fn atomic_create(
             "temporary policy cleanup also failed",
         ));
     }
-    if let Err(error) = rename_file_handle(
-        &temp_file,
-        dir_handle,
-        final_path.file_name().expect("policy path has leaf"),
-    ) {
-        return Err(prepublication_failure_after_cleanup(
-            &temp_file,
-            anyhow::Error::new(error).context("failed to atomically create policy file"),
-            "temporary policy cleanup also failed",
-        ));
+    if let Err(failure) = publish_created_file(&temp_file, dir_handle, final_path, || {
+        verify_directory_evidence(hosting_dir, expected_fingerprint)
+    }) {
+        let cleanup_error = delete_file_handle(&temp_file).err();
+        return Err(match (failure, cleanup_error) {
+            (WriteFailure::ConcurrentChange(error), Some(cleanup_error)) => WriteFailure::ConcurrentChange(
+                error.context(format!("temporary policy cleanup also failed: {cleanup_error:#}")),
+            ),
+            (WriteFailure::PrePublication(error), Some(cleanup_error)) => WriteFailure::PrePublication(
+                error.context(format!("temporary policy cleanup also failed: {cleanup_error:#}")),
+            ),
+            (WriteFailure::PostPublication(error), Some(cleanup_error)) => WriteFailure::PostPublication(
+                error.context(format!("temporary policy cleanup also failed: {cleanup_error:#}")),
+            ),
+            (failure, _) => failure,
+        });
     }
     verify_persisted_handle(hosting_dir, &temp_file, final_path, bytes).map_err(WriteFailure::PostPublication)
+}
+
+fn publish_created_file(
+    temp_file: &File,
+    dir_handle: &File,
+    final_path: &Path,
+    verify_before_publish: impl FnOnce() -> anyhow::Result<()>,
+) -> Result<(), WriteFailure> {
+    verify_before_publish()
+        .context("policy directory evidence changed before create publication")
+        .map_err(WriteFailure::ConcurrentChange)?;
+    rename_file_handle(
+        temp_file,
+        dir_handle,
+        final_path.file_name().expect("policy path has leaf"),
+    )
+    .map_err(|error| {
+        WriteFailure::PrePublication(anyhow::Error::new(error).context("failed to atomically create policy file"))
+    })
 }
 
 /// Verify the published handle, directory, ancestor chain, exact bytes, and parsed policy.
@@ -2674,6 +2713,9 @@ fn verify_persisted_handle(
             dir_security_digest,
             ancestor_security_digest,
         },
+        write_capability: PolicyWriteCapability::Writable,
+        read_only_reason: None,
+        canonical_path: final_path.to_owned(),
     })
 }
 
@@ -2756,6 +2798,23 @@ mod tests {
     }
 
     #[test]
+    fn create_evidence_change_never_publishes_the_temporary_file() {
+        let dir = temp_dir();
+        let temporary = dir.path().join("temporary.tmp");
+        let final_path = dir.path().join("policy.json");
+        let temporary_file = open_deletable_test_file(&temporary, b"new");
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+
+        let result = publish_created_file(&temporary_file, &dir_file, &final_path, || {
+            anyhow::bail!("simulated ancestor ACL change")
+        });
+
+        assert!(matches!(result, Err(WriteFailure::ConcurrentChange(_))));
+        assert!(!final_path.exists());
+        assert_eq!(std::fs::read(&temporary).unwrap(), b"new");
+    }
+
+    #[test]
     fn relative_handle_rename_uses_retained_directory_root() {
         let dir = temp_dir();
         let source = dir.path().join("source.tmp");
@@ -2767,6 +2826,28 @@ mod tests {
 
         assert!(!source.exists());
         assert_eq!(std::fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
+    fn retained_custom_directory_handle_supports_create_and_replace_renames() {
+        let dir = temp_dir();
+        let mut handles =
+            policy_security::retain_policy_no_reparse_directory_chain(dir.path(), "custom policy directory").unwrap();
+        let dir_handle = handles.pop().expect("retained custom directory handle");
+        let first_path = dir.path().join("first.tmp");
+        let replacement_path = dir.path().join("replacement.tmp");
+        let final_path = dir.path().join("policy.json");
+        let tombstone_path = dir.path().join("policy.old");
+        let first = open_deletable_test_file(&first_path, b"first");
+        let replacement = open_deletable_test_file(&replacement_path, b"replacement");
+
+        rename_file_handle(&first, &dir_handle, final_path.file_name().unwrap()).unwrap();
+        rename_file_handle(&replacement, &dir_handle, final_path.file_name().unwrap()).unwrap_err();
+        rename_file_handle(&first, &dir_handle, tombstone_path.file_name().unwrap()).unwrap();
+        rename_file_handle(&replacement, &dir_handle, final_path.file_name().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"replacement");
+        assert_eq!(std::fs::read(&tombstone_path).unwrap(), b"first");
     }
 
     #[test]
