@@ -38,7 +38,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use sha2::{Digest as _, Sha256};
-use windows::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
+};
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
@@ -50,8 +52,8 @@ use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
-    FileAttributeTagInfo, GetFileInformationByHandleEx, GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC,
-    WRITE_OWNER,
+    FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -79,6 +81,8 @@ const DIRECTORY_TAMPER_MASK: u32 = FILE_DELETE_CHILD.0 /* delete or rename child
 
 /// Additional rights that allow retargeting an ancestor that is itself a reparse point.
 const REPARSE_POINT_TAMPER_MASK: u32 = FILE_WRITE_DATA.0 | GENERIC_WRITE.0;
+const VOLUME_GUID_FINAL_PATH_FLAGS: GETFINALPATHNAMEBYHANDLE_FLAGS =
+    GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_GUID.0);
 
 /// Access rights on the directory hosting a verified executable that allow tampering with
 /// its execution. On top of [`DIRECTORY_TAMPER_MASK`], create rights are rejected: a
@@ -679,14 +683,30 @@ fn is_reparse_point(file: &File) -> anyhow::Result<bool> {
 /// Resolve the normalized final path of an open file from its handle.
 fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
     let handle = HANDLE(file.as_raw_handle());
+    match final_path_name(handle, FILE_NAME_NORMALIZED) {
+        Ok(path) => Ok(final_path_from_wide(&path, false)),
+        Err(error) if should_retry_final_path_with_volume_guid(&error) => {
+            let path = final_path_name(handle, VOLUME_GUID_FINAL_PATH_FLAGS)
+                .context("GetFinalPathNameByHandleW failed for volume GUID path")?;
+            Ok(final_path_from_wide(&path, true))
+        }
+        Err(error) => Err(error).context("GetFinalPathNameByHandleW failed"),
+    }
+}
+
+fn should_retry_final_path_with_volume_guid(error: &windows::core::Error) -> bool {
+    error.code() == ERROR_PATH_NOT_FOUND.to_hresult()
+}
+
+fn final_path_name(handle: HANDLE, flags: GETFINALPATHNAMEBYHANDLE_FLAGS) -> windows::core::Result<Vec<u16>> {
     let mut buffer = vec![0u16; 512];
 
     loop {
         // SAFETY: `handle` is a valid open file handle and `buffer` is a live mutable slice.
-        let len = unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, FILE_NAME_NORMALIZED) };
+        let len = unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, flags) };
 
         if len == 0 {
-            return Err(windows::core::Error::from_win32()).context("GetFinalPathNameByHandleW failed");
+            return Err(windows::core::Error::from_win32());
         }
 
         let len = usize::try_from(len).expect("u32 fits in usize on Windows");
@@ -695,10 +715,18 @@ fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
         // otherwise it is the required buffer size (including the null terminator).
         if len < buffer.len() {
             buffer.truncate(len);
-            return Ok(dos_path_from_wide(&buffer));
+            return Ok(buffer);
         }
 
         buffer.resize(len, 0);
+    }
+}
+
+fn final_path_from_wide(wide: &[u16], preserve_verbatim_prefix: bool) -> PathBuf {
+    if preserve_verbatim_prefix {
+        PathBuf::from(OsString::from_wide(wide))
+    } else {
+        dos_path_from_wide(wide)
     }
 }
 
@@ -927,6 +955,38 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn final_path_retries_only_when_dos_volume_resolution_is_unavailable() {
+        let path_not_found = windows::core::Error::from_hresult(ERROR_PATH_NOT_FOUND.to_hresult());
+        let access_denied =
+            windows::core::Error::from_hresult(windows::Win32::Foundation::ERROR_ACCESS_DENIED.to_hresult());
+
+        assert!(should_retry_final_path_with_volume_guid(&path_not_found));
+        assert!(!should_retry_final_path_with_volume_guid(&access_denied));
+        assert_eq!(VOLUME_GUID_FINAL_PATH_FLAGS.0, 1);
+    }
+
+    #[test]
+    fn volume_guid_final_path_preserves_verbatim_prefix_and_root() {
+        let raw = r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\Program Files\Client\client.exe";
+        let wide: Vec<u16> = raw.encode_utf16().collect();
+        let path = final_path_from_wide(&wide, true);
+        let root = Path::new(r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\");
+
+        assert_eq!(path, Path::new(raw));
+        assert!(path.starts_with(root));
+        assert_eq!(path.ancestors().last(), Some(root));
+    }
+
+    #[test]
+    fn final_path_resolves_current_executable_on_mounted_volume() {
+        let executable = std::env::current_exe().expect("current executable");
+        let file = File::open(&executable).expect("open current executable");
+        let resolved = final_path_from_handle(&file).expect("resolve current executable path");
+
+        assert!(windows_paths_equal(&resolved, &executable));
+    }
 
     /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
     struct SddlDescriptor {
