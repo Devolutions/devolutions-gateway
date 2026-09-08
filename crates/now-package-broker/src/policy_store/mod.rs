@@ -293,7 +293,7 @@ impl PolicyStore {
     pub(crate) fn watched_paths(&self) -> Vec<PathBuf> {
         match &self.default_paths {
             Some(paths) => paths.to_vec(),
-            None => vec![self.configured_path.clone()],
+            None => vec![self.snapshot().configured_path.clone()],
         }
     }
 
@@ -673,6 +673,7 @@ struct TestStorage {
     fail_target_retention: std::sync::atomic::AtomicBool,
     race_before_persist: parking_lot::Mutex<Option<PolicyDocument>>,
     post_persist_capability: parking_lot::Mutex<Option<(PolicyWriteCapability, Option<PolicyReadOnlyReason>)>>,
+    persisted_configured_paths: parking_lot::Mutex<Vec<PathBuf>>,
 }
 
 #[cfg(test)]
@@ -685,6 +686,7 @@ impl TestStorage {
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
+            persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
@@ -696,6 +698,7 @@ impl TestStorage {
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
+            persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
@@ -728,19 +731,21 @@ impl PolicyStorage for TestStorage {
 
     fn create(
         &self,
-        _configured_path: &Path,
+        configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
+        self.persisted_configured_paths.lock().push(configured_path.to_owned());
         self.persist(observation, bytes)
     }
 
     fn replace(
         &self,
-        _configured_path: &Path,
+        configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
+        self.persisted_configured_paths.lock().push(configured_path.to_owned());
         let retained = observation
             .retained_target
             .take()
@@ -1069,6 +1074,35 @@ mod storage_tests {
             store.management_snapshot().write_capability,
             PolicyWriteCapability::ReadOnly
         );
+    }
+
+    #[tokio::test]
+    async fn custom_watcher_uses_canonical_path_but_writes_reobserve_configured_path() {
+        let configured = PathBuf::from(r"C:\RUNNER~1\AppData\Local\Temp\policy.json");
+        let canonical = PathBuf::from(r"C:\actions\runneradmin\AppData\Local\Temp\policy.json");
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        storage.observation.lock().canonical_path = canonical.clone();
+        let store = PolicyStore::load_with_storage(
+            Some(configured.clone()),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+
+        assert_eq!(store.watched_paths().as_slice(), std::slice::from_ref(&canonical));
+        let success = store.replace(update_request(&store)).await.expect("replace policy");
+        assert_eq!(&*storage.persisted_configured_paths.lock(), &[configured]);
+        assert_eq!(store.watched_paths(), [canonical]);
+
+        let post_write_token = success.management.store_token;
+        let reloaded = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(reloaded.store_token, post_write_token);
+
+        let replacement_canonical = PathBuf::from(r"C:\actions\runneradmin\AppData\Local\Temp\replacement\policy.json");
+        storage.set_disk_state(Some(policy("current", 2)), false, 9);
+        storage.observation.lock().canonical_path = replacement_canonical.clone();
+        let replaced = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_ne!(replaced.store_token, post_write_token);
+        assert_eq!(store.watched_paths(), [replacement_canonical]);
     }
 
     #[tokio::test]

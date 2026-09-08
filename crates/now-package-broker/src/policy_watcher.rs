@@ -86,7 +86,7 @@ fn watch_directories(paths: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 enum WatcherCommand {
-    Refresh,
+    Refresh(Arc<[PathBuf]>),
     Stop,
 }
 
@@ -128,8 +128,14 @@ fn build_watcher_set(
     Ok(set)
 }
 
-fn replace_watcher_set<T, E>(active: &mut T, replacement: Result<T, E>) -> Result<(), E> {
+fn replace_watcher_set<T, E>(
+    active: &mut T,
+    active_paths: &mut Arc<[PathBuf]>,
+    replacement_paths: Arc<[PathBuf]>,
+    replacement: Result<T, E>,
+) -> Result<(), E> {
     *active = replacement?;
+    *active_paths = replacement_paths;
     Ok(())
 }
 
@@ -182,14 +188,14 @@ impl PolicyWatcher {
         ready: tokio::sync::oneshot::Sender<Result<(), WatcherFailure>>,
     ) {
         let store = self.0;
-        let paths: Arc<[PathBuf]> = store.watched_paths().into();
+        let initial_paths: Arc<[PathBuf]> = store.watched_paths().into();
 
         let (change_tx, mut changes) = tokio::sync::mpsc::channel(1);
         let (failure_tx, mut failures) = tokio::sync::mpsc::unbounded_channel();
         let (watcher_command_tx, watcher_command_rx) = std::sync::mpsc::channel();
 
         let _watcher_handle = tokio::task::spawn_blocking(move || {
-            let mut watchers = match build_watcher_set(&paths, &change_tx, &failure_tx) {
+            let mut watchers = match build_watcher_set(&initial_paths, &change_tx, &failure_tx) {
                 Ok(watchers) => watchers,
                 Err((failure, dir, error)) => {
                     error!(%error, path = %dir.display(), "Failed to watch policy directory");
@@ -197,13 +203,16 @@ impl PolicyWatcher {
                     return;
                 }
             };
+            let mut active_paths = initial_paths;
 
             let _ = ready.send(Ok(()));
             while let Ok(command) = watcher_command_rx.recv() {
                 match command {
-                    WatcherCommand::Refresh => {
+                    WatcherCommand::Refresh(paths) => {
                         let replacement = build_watcher_set(&paths, &change_tx, &failure_tx);
-                        if let Err((_failure, dir, error)) = replace_watcher_set(&mut watchers, replacement) {
+                        if let Err((_failure, dir, error)) =
+                            replace_watcher_set(&mut watchers, &mut active_paths, paths, replacement)
+                        {
                             error!(%error, path = %dir.display(), "Failed to extend policy directory monitoring");
                         }
                     }
@@ -224,13 +233,13 @@ impl PolicyWatcher {
                 failure = failures.recv() => break Some(failure.unwrap_or(WatcherFailure::ChannelClosed)),
                 _ = fallback_poll.tick() => {
                     _ = store.reload_from_disk(ReloadCause::ExternalChange).await;
-                    let _ = watcher_command_tx.send(WatcherCommand::Refresh);
+                    let _ = watcher_command_tx.send(WatcherCommand::Refresh(store.watched_paths().into()));
                 }
                 Some(changed_at) = changes.recv() => {
                     match debounce_change(&mut changes, &mut failures, &shutdown, changed_at + debounce).await {
                         Ok(true) => {
                             _ = store.reload_from_disk(ReloadCause::ExternalChange).await;
-                            let _ = watcher_command_tx.send(WatcherCommand::Refresh);
+                            let _ = watcher_command_tx.send(WatcherCommand::Refresh(store.watched_paths().into()));
                         }
                         Ok(false) => break None,
                         Err(failure) => break Some(failure),
@@ -306,6 +315,17 @@ mod tests {
     }
 
     #[test]
+    fn custom_event_filter_uses_the_verified_canonical_path() {
+        let configured = PathBuf::from(r"C:\RUNNER~1\AppData\Local\Temp\policy.json");
+        let canonical = PathBuf::from(r"C:\actions\runneradmin\AppData\Local\Temp\policy.json");
+        let paths = vec![canonical.clone()];
+        let event = notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(canonical);
+
+        assert!(affects_watched_paths(&event, &paths));
+        assert!(!affects_watched_paths(&event, &[configured]));
+    }
+
+    #[test]
     fn default_transition_filter_tracks_both_policies_and_managed_state() {
         let managed = PathBuf::from(r"C:\ProgramData\Devolutions\PackageBroker\package-broker-policy.json");
         let legacy = PathBuf::from(r"C:\ProgramData\Devolutions\Agent\package-broker-policy.json");
@@ -368,15 +388,29 @@ mod tests {
     #[test]
     fn failed_refresh_keeps_the_active_watcher_set() {
         let mut active = vec!["common", "legacy", "managed"];
+        let mut active_paths: Arc<[PathBuf]> = vec![PathBuf::from("old")].into();
+        let replacement_paths: Arc<[PathBuf]> = vec![PathBuf::from("new")].into();
 
-        let result = replace_watcher_set(&mut active, Err::<Vec<&str>, _>("registration failed"));
+        let result = replace_watcher_set(
+            &mut active,
+            &mut active_paths,
+            Arc::clone(&replacement_paths),
+            Err::<Vec<&str>, _>("registration failed"),
+        );
 
         assert_eq!(result, Err("registration failed"));
         assert_eq!(active, ["common", "legacy", "managed"]);
+        assert_eq!(&*active_paths, &[PathBuf::from("old")]);
 
-        replace_watcher_set(&mut active, Ok::<_, &str>(vec!["replacement"]))
-            .expect("complete replacement set swaps successfully");
+        replace_watcher_set(
+            &mut active,
+            &mut active_paths,
+            Arc::clone(&replacement_paths),
+            Ok::<_, &str>(vec!["replacement"]),
+        )
+        .expect("complete replacement set swaps successfully");
         assert_eq!(active, ["replacement"]);
+        assert_eq!(&*active_paths, &*replacement_paths);
     }
 
     #[tokio::test]
