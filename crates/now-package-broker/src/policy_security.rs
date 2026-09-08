@@ -57,9 +57,9 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
-    FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
-    READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
+    FILE_WRITE_EA, FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -304,7 +304,7 @@ pub(crate) fn retain_policy_no_reparse_directory_chain(dir: &Path, subject: &str
     for component in components {
         let component_subject = format!("{subject} component '{}'", component.display());
         let handle = OpenOptions::new()
-            .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL).0)
+            .access_mode((FILE_READ_ATTRIBUTES | FILE_TRAVERSE | READ_CONTROL).0)
             .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
             .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
             .open(component)
