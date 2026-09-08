@@ -72,6 +72,7 @@ public static class PackageBrokerPolicyActions
             $".package-broker-policy.migration-{Guid.NewGuid():N}.tmp");
         string marker = MigrationMarkerPath(session);
         bool migrationStarted = false;
+        MigrationRecord? migrationRecord = null;
 
         try
         {
@@ -120,7 +121,6 @@ public static class PackageBrokerPolicyActions
             }
 
             SetFileSecurity(temporary, Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL);
-            MigrationRecord record;
             using (PinnedPath temporaryPath = PinPathWithoutReparse(
                 temporary,
                 leafIsDirectory: false,
@@ -128,15 +128,24 @@ public static class PackageBrokerPolicyActions
                 leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL))
             {
                 VerifyPackageBrokerSecurity(SecurityFromHandle(temporaryPath.Leaf, isDirectory: false));
-                record = new MigrationRecord(
+                migrationRecord = new MigrationRecord(
                     sourceIdentity,
                     sourceDigest,
                     FileIdentity(temporaryPath.Leaf),
                     FileContentDigest(temporaryPath.Leaf));
             }
 
-            WriteMigrationMarker(marker, record);
-            File.Move(temporary, destination);
+            MigrationRecord record = migrationRecord.Value;
+            using PinnedPath markerPath = WriteMigrationMarker(marker, record);
+            if (MoveFileNoReplace(temporary, destination) == NoReplaceMoveResult.DestinationExists)
+            {
+                VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
+                DeleteFileByHandle(markerPath.Leaf);
+                session.Log(
+                    $"package broker policy appeared at {destination} during migration; " +
+                    "the external destination and legacy source were preserved");
+                return ActionResult.Success;
+            }
 
             using PinnedPath migratedPath = PinPathWithoutReparse(
                 destination,
@@ -168,7 +177,11 @@ public static class PackageBrokerPolicyActions
         }
         finally
         {
-            TryDeleteTemporaryFile(session, temporary);
+            TryDeleteTemporaryFile(
+                session,
+                temporary,
+                migrationRecord?.DestinationIdentity,
+                migrationRecord?.DestinationDigest);
         }
     }
 
@@ -710,7 +723,23 @@ public static class PackageBrokerPolicyActions
             ProgramDataPackageBrokerDirectory,
             $".legacy-policy-migration-{session.Get(AgentProperties.installId)}.marker");
 
-    private static void WriteMigrationMarker(string marker, MigrationRecord record)
+    internal static NoReplaceMoveResult MoveFileNoReplace(string source, string destination)
+    {
+        if (WinAPI.MoveFileEx(source, destination, 0))
+        {
+            return NoReplaceMoveResult.Moved;
+        }
+
+        int error = Marshal.GetLastWin32Error();
+        if (error == WinAPI.ERROR_FILE_EXISTS || error == WinAPI.ERROR_ALREADY_EXISTS)
+        {
+            return NoReplaceMoveResult.DestinationExists;
+        }
+
+        throw new Win32Exception(error, $"failed to move {source} to {destination} without replacement");
+    }
+
+    private static PinnedPath WriteMigrationMarker(string marker, MigrationRecord record)
     {
         using (FileStream markerFile = new(marker, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
         {
@@ -720,13 +749,22 @@ public static class PackageBrokerPolicyActions
         }
 
         SetFileSecurity(marker, Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL);
-        using PinnedPath markerPath = PinPathWithoutReparse(
+        PinnedPath markerPath = PinPathWithoutReparse(
             marker,
             leafIsDirectory: false,
             allowMissingLeaf: false,
-            leafAccess: WinAPI.GENERIC_READ | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
-        VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
-        _ = ReadMigrationMarker(markerPath.Leaf);
+            leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
+        try
+        {
+            VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
+            _ = ReadMigrationMarker(markerPath.Leaf);
+            return markerPath;
+        }
+        catch
+        {
+            markerPath.Dispose();
+            throw;
+        }
     }
 
     private static MigrationRecord ReadMigrationMarker(SafeFileHandle marker)
@@ -1129,7 +1167,11 @@ public static class PackageBrokerPolicyActions
         }
     }
 
-    private static void TryDeleteTemporaryFile(Session session, string path)
+    private static void TryDeleteTemporaryFile(
+        Session session,
+        string path,
+        string expectedIdentity,
+        string expectedDigest)
     {
         try
         {
@@ -1144,6 +1186,13 @@ public static class PackageBrokerPolicyActions
             }
 
             VerifyPackageBrokerSecurity(SecurityFromHandle(temporary.Leaf, isDirectory: false));
+            if (expectedIdentity != null &&
+                !FileIdentityAndDigestMatch(temporary.Leaf, expectedIdentity, expectedDigest))
+            {
+                session.Log(
+                    $"package broker policy migration temporary path {path} was replaced; preserving the current file");
+                return;
+            }
             DeleteFileByHandle(temporary.Leaf);
         }
         catch (Exception error)
@@ -1248,5 +1297,11 @@ public static class PackageBrokerPolicyActions
                 ["DestinationIdentity"] = DestinationIdentity,
                 ["DestinationDigest"] = DestinationDigest,
             }.ToString(Formatting.None, Array.Empty<JsonConverter>());
+    }
+
+    internal enum NoReplaceMoveResult
+    {
+        Moved,
+        DestinationExists,
     }
 }

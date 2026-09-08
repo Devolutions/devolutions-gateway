@@ -2,6 +2,7 @@ using DevolutionsAgent;
 using DevolutionsAgent.Actions;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -286,6 +287,71 @@ public sealed class PackageBrokerInstallerTests
                 record));
         Assert.True(File.Exists(path));
         Assert.Contains("preserving both copies", diagnostic);
+    }
+
+    [Fact]
+    public void NoReplaceMovePreservesCollisionAndCleansOnlyBoundTemporary()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "legacy.json");
+        string temporary = Path.Combine(temp.Path, "migration.tmp");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        File.WriteAllText(source, "legacy");
+        File.WriteAllText(temporary, "migrated");
+        File.WriteAllText(destination, "external");
+        string temporaryIdentity;
+        string temporaryDigest;
+        using (PackageBrokerPolicyActions.PinnedPath pinned = PinFile(temporary, WinAPI.GENERIC_READ))
+        {
+            temporaryIdentity = PackageBrokerPolicyActions.FileIdentity(pinned.Leaf);
+            temporaryDigest = PackageBrokerPolicyActions.FileContentDigest(pinned.Leaf);
+        }
+
+        Assert.Equal(
+            PackageBrokerPolicyActions.NoReplaceMoveResult.DestinationExists,
+            PackageBrokerPolicyActions.MoveFileNoReplace(temporary, destination));
+        Assert.Equal("legacy", File.ReadAllText(source));
+        Assert.Equal("external", File.ReadAllText(destination));
+
+        using (PackageBrokerPolicyActions.PinnedPath pinned = PinFile(
+            temporary,
+            WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES))
+        {
+            Assert.True(
+                PackageBrokerPolicyActions.DeleteFileIfIdentityAndDigestMatch(
+                    pinned.Leaf,
+                    temporaryIdentity,
+                    temporaryDigest));
+        }
+        Assert.False(File.Exists(temporary));
+        Assert.Equal("external", File.ReadAllText(destination));
+    }
+
+    [Fact]
+    public void NoReplaceMovePublishesWhenDestinationIsMissing()
+    {
+        using TempDirectory temp = new();
+        string temporary = Path.Combine(temp.Path, "migration.tmp");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        File.WriteAllText(temporary, "migrated");
+
+        Assert.Equal(
+            PackageBrokerPolicyActions.NoReplaceMoveResult.Moved,
+            PackageBrokerPolicyActions.MoveFileNoReplace(temporary, destination));
+        Assert.False(File.Exists(temporary));
+        Assert.Equal("migrated", File.ReadAllText(destination));
+    }
+
+    [Fact]
+    public void NoReplaceMovePropagatesUnrelatedErrors()
+    {
+        using TempDirectory temp = new();
+        string missing = Path.Combine(temp.Path, "missing.tmp");
+        string destination = Path.Combine(temp.Path, "managed.json");
+
+        Assert.Throws<Win32Exception>(
+            () => PackageBrokerPolicyActions.MoveFileNoReplace(missing, destination));
+        Assert.False(File.Exists(destination));
     }
 
     [Fact]
