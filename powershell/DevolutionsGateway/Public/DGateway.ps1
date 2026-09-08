@@ -1263,11 +1263,28 @@ function Get-DGatewayPackage {
 }
 
 function Install-DGatewayPackage {
+    <#
+    .SYNOPSIS
+    Downloads and installs (or upgrades) the Devolutions Gateway package.
+
+    .PARAMETER ServiceAccount
+    Windows only. The account the Gateway service logs on as, in 'DOMAIN\Name' or '.\Name' form,
+    such as a group managed service account ('CONTOSO\gateway$') or the virtual account
+    'NT SERVICE\DevolutionsGateway'. Defaults to the account of the existing service on upgrade,
+    and to 'NT AUTHORITY\NetworkService' on a first install.
+
+    .PARAMETER ServiceCredential
+    Windows only. Credential of a service account that logs on with a password. The user name is
+    used as the service account when -ServiceAccount is not specified. Passwordless accounts
+    (NETWORK SERVICE, virtual accounts, managed service accounts) do not need it.
+    #>
     [CmdletBinding()]
     param(
         [string] $RequiredVersion,
         [switch] $Quiet,
-        [switch] $Force
+        [switch] $Force,
+        [string] $ServiceAccount,
+        [PSCredential] $ServiceCredential
     )
 
     $Version = Get-DGatewayVersion 'PSModule'
@@ -1311,6 +1328,20 @@ function Install-DGatewayPackage {
             '/norestart',
             '/log', "`"$InstallLogFile`""
         )
+
+        if ($ServiceCredential -and -Not $ServiceAccount) {
+            $ServiceAccount = $ServiceCredential.UserName
+        }
+
+        if ($ServiceAccount) {
+            $MsiArgs += "P.SERVICEACCOUNT=`"$ServiceAccount`""
+        }
+
+        if ($ServiceCredential) {
+            # The password is masked in the MSI log (hidden property), but it is visible in the
+            # msiexec command line for the duration of the install.
+            $MsiArgs += "P.SERVICEPASSWORD=`"$($ServiceCredential.GetNetworkCredential().Password)`""
+        }
 
         Start-Process 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow
 
