@@ -1410,40 +1410,7 @@ fn observe_impl(
                     (PolicyWriteCapability::ReadOnly, PolicyReadOnlyReason::UnsafePath)
                 }
             };
-            // An insecure/unverifiable directory must never be trusted to host a policy
-            // -- but that alone does not mean there *is* a policy to distrust. If no
-            // leaf exists there at all, the correct state is Missing (nothing to
-            // activate or reject), not Invalid (which implies some untrusted content is
-            // actually present); capability is ReadOnly/Unsupported either way, since
-            // Create/Repair both still require a directory that passes verification.
-            // This is a best-effort existence probe only (on the literal configured
-            // path, since the directory itself could not be canonically verified): it
-            // never trusts, reads, or reports the leaf's content.
-            return match std::fs::metadata(configured_path) {
-                Err(io_error) if io_error.kind() == std::io::ErrorKind::NotFound => DiskObservation {
-                    state: PolicyManagementState::Missing,
-                    policy: None,
-                    invalid_diagnostics: None,
-                    fingerprint: DiskFingerprint::Missing {
-                        path: configured_path.to_owned(),
-                        parent: None,
-                        dir_security_digest: None,
-                        ancestor_security_digest: None,
-                    },
-                    write_capability,
-                    read_only_reason: Some(read_only_reason),
-                    canonical_path: configured_path.to_owned(),
-                    hosting_dir: None,
-                    retained_target: None,
-                },
-                _ => invalid_observation(
-                    configured_path,
-                    validation::DiskFailureReason::Unreadable,
-                    InvalidContext::default(),
-                    write_capability,
-                    Some(read_only_reason),
-                ),
-            };
+            return observe_leaf_under_unverifiable_directory(configured_path, write_capability, read_only_reason);
         }
     };
     let canonical_path = canonical_dir.join(leaf_name);
@@ -1973,6 +1940,40 @@ fn observation_from_parts(
         canonical_path: path.to_owned(),
         hosting_dir,
         retained_target,
+    }
+}
+
+fn observe_leaf_under_unverifiable_directory(
+    configured_path: &Path,
+    write_capability: PolicyWriteCapability,
+    read_only_reason: PolicyReadOnlyReason,
+) -> DiskObservation {
+    // Do not follow the leaf: a dangling reparse point is an existing unsafe entry, not
+    // an absent policy. Errors remain invalid because the directory could not be trusted.
+    match std::fs::symlink_metadata(configured_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => DiskObservation {
+            state: PolicyManagementState::Missing,
+            policy: None,
+            invalid_diagnostics: None,
+            fingerprint: DiskFingerprint::Missing {
+                path: configured_path.to_owned(),
+                parent: None,
+                dir_security_digest: None,
+                ancestor_security_digest: None,
+            },
+            write_capability,
+            read_only_reason: Some(read_only_reason),
+            canonical_path: configured_path.to_owned(),
+            hosting_dir: None,
+            retained_target: None,
+        },
+        Ok(_) | Err(_) => invalid_observation(
+            configured_path,
+            validation::DiskFailureReason::Unreadable,
+            InvalidContext::default(),
+            write_capability,
+            Some(read_only_reason),
+        ),
     }
 }
 
@@ -4798,6 +4799,57 @@ mod tests {
         let error = verify_policy_leaf_type_if_present(&link).unwrap_err();
 
         assert!(format!("{error:#}").contains("reparse point"));
+    }
+
+    #[test]
+    fn unverifiable_directory_classifies_dangling_reparse_as_invalid() {
+        let dir = temp_dir();
+        let link = dir.path().join("policy.json");
+        create_directory_junction(&link, &dir.path().join("missing-target"));
+
+        let observation = observe_leaf_under_unverifiable_directory(
+            &link,
+            PolicyWriteCapability::ReadOnly,
+            PolicyReadOnlyReason::UnsafePath,
+        );
+
+        assert_eq!(observation.state, PolicyManagementState::Invalid);
+        assert_eq!(observation.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(observation.read_only_reason, Some(PolicyReadOnlyReason::UnsafePath));
+    }
+
+    #[test]
+    fn unverifiable_directory_classifies_existing_file_as_invalid() {
+        let dir = temp_dir();
+        let path = dir.path().join("policy.json");
+        std::fs::write(&path, b"untrusted").unwrap();
+
+        let observation = observe_leaf_under_unverifiable_directory(
+            &path,
+            PolicyWriteCapability::ReadOnly,
+            PolicyReadOnlyReason::UnsafePath,
+        );
+
+        assert_eq!(observation.state, PolicyManagementState::Invalid);
+        assert_eq!(observation.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(observation.read_only_reason, Some(PolicyReadOnlyReason::UnsafePath));
+    }
+
+    #[test]
+    fn unverifiable_directory_classifies_true_absence_as_missing_but_read_only() {
+        let dir = temp_dir();
+        let path = dir.path().join("missing-policy.json");
+
+        let observation = observe_leaf_under_unverifiable_directory(
+            &path,
+            PolicyWriteCapability::ReadOnly,
+            PolicyReadOnlyReason::UnsafePath,
+        );
+
+        assert_eq!(observation.state, PolicyManagementState::Missing);
+        assert_eq!(observation.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(observation.read_only_reason, Some(PolicyReadOnlyReason::UnsafePath));
+        assert!(observation.hosting_dir.is_none());
     }
 
     #[test]
