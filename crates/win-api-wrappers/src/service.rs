@@ -17,6 +17,8 @@ use crate::utils::WideString;
 pub enum ServiceError {
     #[error(transparent)]
     WinAPI(#[from] windows::core::Error),
+    #[error("service configuration contains an invalid UTF-16 string")]
+    InvalidString(#[from] std::string::FromUtf16Error),
 }
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
@@ -82,7 +84,9 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn startup_mode(&self) -> ServiceResult<ServiceStartupMode> {
+    /// Query the service configuration into an aligned buffer holding a `QUERY_SERVICE_CONFIGW`
+    /// structure (and the strings it points to).
+    fn query_config(&self) -> ServiceResult<RawBuffer> {
         let mut cbbufsize = 0u32;
         let mut pcbbytesneeded = 0u32;
 
@@ -127,8 +131,14 @@ impl Service {
             )?
         };
 
-        // SAFETY: `QueryServiceConfigW` succeeded, thus `lpserviceconfig` is valid and contains
-        // a QUERY_SERVICE_CONFIGW structure.
+        Ok(buffer)
+    }
+
+    pub fn startup_mode(&self) -> ServiceResult<ServiceStartupMode> {
+        let buffer = self.query_config()?;
+
+        // SAFETY: `query_config` succeeded, thus the buffer is valid and contains a
+        // QUERY_SERVICE_CONFIGW structure.
         let config = unsafe { buffer.as_ref_cast::<QUERY_SERVICE_CONFIGW>() };
 
         match config.dwStartType {
@@ -139,6 +149,28 @@ impl Service {
             SERVICE_DISABLED => Ok(ServiceStartupMode::Disabled),
             _ => panic!("WinAPI returned invalid service startup mode"),
         }
+    }
+
+    /// The account the service logs on as (`lpServiceStartName`), e.g. `NT AUTHORITY\NetworkService`
+    /// or `DOMAIN\name$`.
+    ///
+    /// Returns `None` when the service control manager reports no account, which means LocalSystem.
+    pub fn account_name(&self) -> ServiceResult<Option<String>> {
+        let buffer = self.query_config()?;
+
+        // SAFETY: `query_config` succeeded, thus the buffer is valid and contains a
+        // QUERY_SERVICE_CONFIGW structure.
+        let config = unsafe { buffer.as_ref_cast::<QUERY_SERVICE_CONFIGW>() };
+
+        if config.lpServiceStartName.is_null() {
+            return Ok(None);
+        }
+
+        // SAFETY: `lpServiceStartName` points to a null-terminated UTF-16 string stored inside
+        // `buffer`, which is alive for the duration of this call.
+        let name = unsafe { config.lpServiceStartName.to_string()? };
+
+        Ok(Some(name))
     }
 
     pub fn is_running(&self) -> ServiceResult<bool> {

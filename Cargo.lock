@@ -1780,6 +1780,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "widestring 1.2.1",
  "win-api-wrappers",
  "windows 0.61.3",
  "x509-parser",

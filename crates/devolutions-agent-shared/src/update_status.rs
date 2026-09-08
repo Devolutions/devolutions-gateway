@@ -30,8 +30,8 @@ use crate::{
 /// internal `agent.json` configuration format.
 ///
 /// Unlike [`crate::UpdateManifest`] (`update.json`), this file is **read-only** for
-/// the Gateway service: its DACL grants NETWORK SERVICE read access but **no write
-/// access**.  The agent is the sole writer.
+/// the Gateway service: its DACL grants the Gateway service account read access but **no
+/// write access**.  The agent is the sole writer.
 ///
 /// Note: if the agent itself is being updated, `update_status.json` will be
 /// automatically refreshed when the agent restarts after the update completes.
@@ -181,7 +181,7 @@ mod tests {
     fn v2_stub_serialise_roundtrip() {
         let stub = UpdateStatus::StatusV2(UpdateStatusV2::default());
         let serialized = serde_json::to_string(&stub).unwrap();
-        assert_eq!(serialized, r#"{"VersionMajor":2,"VersionMinor":1}"#);
+        assert_eq!(serialized, r#"{"VersionMajor":2,"VersionMinor":2}"#);
         let back = UpdateStatus::parse(serialized.as_bytes()).unwrap();
         assert!(matches!(back, UpdateStatus::StatusV2(_)));
     }

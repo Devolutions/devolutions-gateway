@@ -58,6 +58,10 @@ pub(crate) enum UpdaterError {
     QueryServiceState { product: Product, source: anyhow::Error },
     #[error("failed to start service for `{product}`")]
     StartService { product: Product, source: anyhow::Error },
+    #[error(
+        "`{product}` service account `{account}` logs on with a password that an unattended upgrade cannot supply; update manually with P.SERVICEPASSWORD or switch to a passwordless account"
+    )]
+    ServiceAccountRequiresPassword { product: Product, account: String },
     #[error("agent updater shim not found at expected path: `{path}`")]
     AgentUpdaterShimNotFound { path: Utf8PathBuf },
     #[error("failed to launch agent updater shim")]

@@ -94,13 +94,19 @@ pub struct ProductUpdateInfo {
 pub struct InstalledProductUpdateInfo {
     /// Currently installed version of the product.
     pub version: VersionSpecification,
+    /// Why the last attempt to update this product failed, if it did.
+    ///
+    /// Cleared once a later update of the product succeeds. Absent when no update has been
+    /// attempted since the agent started. Added in format version 2.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_update_error: Option<String>,
 }
 
 /// Minor version of the V2 manifest format written by the current build of the agent.
 ///
 /// Increment this value when adding new fields to [`UpdateManifestV2`] or making other
 /// backwards-compatible changes that the gateway should be aware of.
-pub const UPDATE_MANIFEST_V2_MINOR_VERSION: u32 = 1;
+pub const UPDATE_MANIFEST_V2_MINOR_VERSION: u32 = 2;
 
 pub fn default_schedule_window_start() -> u32 {
     7_200
@@ -461,7 +467,7 @@ mod tests {
     fn v2_stub_serialise_roundtrip() {
         let stub = UpdateManifest::ManifestV2(UpdateManifestV2::default());
         let serialized = serde_json::to_string(&stub).unwrap();
-        assert_eq!(serialized, r#"{"VersionMajor":2,"VersionMinor":1}"#);
+        assert_eq!(serialized, r#"{"VersionMajor":2,"VersionMinor":2}"#);
         let back = UpdateManifest::parse(serialized.as_bytes()).unwrap();
         assert!(matches!(back, UpdateManifest::ManifestV2(_)));
     }

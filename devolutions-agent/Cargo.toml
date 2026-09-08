@@ -93,6 +93,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }
+widestring = "1.2"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"

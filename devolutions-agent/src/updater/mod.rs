@@ -7,6 +7,7 @@ mod product;
 mod product_actions;
 mod productinfo;
 mod security;
+mod service_account;
 
 /// Schedule a file for deletion on the next system reboot (best-effort).
 ///
@@ -43,6 +44,7 @@ pub(crate) use self::product::Product;
 use self::product_actions::{ProductUpdateActions, build_product_actions};
 use self::productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use self::security::set_file_dacl;
+use self::service_account::{GatewayServiceAccount, NETWORK_SERVICE_SID};
 use crate::config::ConfHandle;
 use crate::config::dto::UpdaterSchedule;
 use crate::updater::productinfo::ProductInfoDb;
@@ -170,13 +172,23 @@ impl Task for UpdaterTask {
             let conf_data = conf.get_conf();
             conf_data.updater.schedule.clone()
         };
-        let update_file_path = init_update_json().await?;
+        // The update channel files must be accessible to whatever account the Gateway service
+        // runs as. Re-resolved periodically so that a change of account is picked up.
+        let mut gateway_access_sid = resolve_gateway_access_sid().unwrap_or_else(|error| {
+            warn!(%error, "Failed to resolve the Gateway service account; granting update files to NETWORK SERVICE");
+            NETWORK_SERVICE_SID.to_owned()
+        });
+
+        let update_file_path = init_update_json(&gateway_access_sid).await?;
 
         let mut current_schedule: Option<UpdateSchedule> = initial_schedule.map(UpdateSchedule::from);
 
+        // Why the last update attempt of each product failed, published through update_status.json.
+        let mut last_update_errors: HashMap<UpdateProductKey, String> = HashMap::new();
+
         // Write update_status.json with the current schedule and installed product versions.
         // The gateway reads this file for GET /jet/update/schedule and GET /jet/update.
-        init_update_status_json(current_schedule.as_ref()).await?;
+        init_update_status_json(current_schedule.as_ref(), &gateway_access_sid).await?;
 
         // Unconditional status refresh: fires 30 s after start (catches self-update where the
         // agent is re-launched before the MSI finishes writing to the registry), then every 5
@@ -234,7 +246,8 @@ impl Task for UpdaterTask {
                     // a lot of noise in logs.
                     trace!("Refreshing update_status.json (periodic status check)");
 
-                    refresh_update_status_json(current_schedule.as_ref()).await;
+                    refresh_update_files_permissions(&mut gateway_access_sid, &update_file_path);
+                    refresh_update_status_json(current_schedule.as_ref(), &last_update_errors).await;
                     status_refresh.as_mut().reset(tokio::time::Instant::now() + STATUS_REFRESH_INTERVAL);
                 }
                 _ = auto_update_sleep => {
@@ -280,9 +293,9 @@ impl Task for UpdaterTask {
 
                     if scheduled_products.is_empty() {
                         info!("Agent scheduled auto-update: no products configured, skipping");
-                    } else if run_product_updates(&scheduled_products, &conf, shutdown_signal.clone()).await {
+                    } else if run_product_updates(&scheduled_products, &conf, shutdown_signal.clone(), &mut last_update_errors).await {
                         // Update status needs updating.
-                        refresh_update_status_json(current_schedule.as_ref()).await;
+                        refresh_update_status_json(current_schedule.as_ref(), &last_update_errors).await;
                     }
                 }
                 _ = file_change_notification.notified() => {
@@ -326,12 +339,12 @@ impl Task for UpdaterTask {
                         info!("update.json has no Products field, skipping update check");
                     } else {
                         status_needs_update |=
-                            run_product_updates(&products_map, &conf, shutdown_signal.clone()).await;
+                            run_product_updates(&products_map, &conf, shutdown_signal.clone(), &mut last_update_errors).await;
                     }
 
                     // Refresh status after we applied all changes from the manifest.
                     if status_needs_update {
-                        refresh_update_status_json(current_schedule.as_ref()).await;
+                        refresh_update_status_json(current_schedule.as_ref(), &last_update_errors).await;
                     }
                 }
                 _ = shutdown_signal.wait() => {
@@ -350,11 +363,15 @@ impl Task for UpdaterTask {
 /// sorts them so the Agent update runs last (its MSI stops the agent service, which would
 /// abort any subsequent product update), then installs each one.
 ///
+/// `last_update_errors` records why the last attempt for each product failed; a successful
+/// update clears the entry.
+///
 /// Returns `true` when `update_status.json` should be refreshed after this call.
 async fn run_product_updates(
     products_map: &HashMap<UpdateProductKey, ProductUpdateInfo>,
     conf: &ConfHandle,
     shutdown_signal: ShutdownSignal,
+    last_update_errors: &mut HashMap<UpdateProductKey, String>,
 ) -> bool {
     let mut update_orders: Vec<(Product, UpdateOrder)> = vec![];
 
@@ -383,6 +400,7 @@ async fn run_product_updates(
 
     let mut agent_updated = false;
     let mut update_successful = false;
+    let mut status_needs_refresh = false;
 
     for (product, order) in update_orders {
         match update_product(conf.clone(), product, order, shutdown_signal.clone()).await {
@@ -391,16 +409,19 @@ async fn run_product_updates(
                     agent_updated = true;
                 }
 
+                last_update_errors.remove(&product.as_update_product_key());
                 update_successful = true;
             }
             Err(error) => {
-                error!(%product, %error, "Failed to update product");
+                error!(%product, error = format!("{error:#}"), "Failed to update product");
+                last_update_errors.insert(product.as_update_product_key(), format!("{error:#}"));
+                status_needs_refresh = true;
             }
         }
     }
 
     // If the agent was successfully updated a restart is imminent; status refreshes on next start.
-    update_successful && !agent_updated
+    (update_successful || status_needs_refresh) && !agent_updated
 }
 
 async fn update_product(
@@ -429,6 +450,9 @@ async fn update_product(
             (product == Product::Agent).then_some(d.product_code)
         }),
     };
+
+    // Bail out before downloading anything when the product cannot be updated unattended.
+    ctx.actions.check_update_supported()?;
 
     validate_download_url(&ctx, &order.package_url)?;
 
@@ -697,15 +721,20 @@ async fn check_for_updates(
 ///
 /// Products that are not installed or whose version cannot be detected are silently
 /// omitted from the returned map.
-fn collect_installed_products() -> HashMap<UpdateProductKey, InstalledProductUpdateInfo> {
+fn collect_installed_products(
+    last_update_errors: &HashMap<UpdateProductKey, String>,
+) -> HashMap<UpdateProductKey, InstalledProductUpdateInfo> {
     let mut products = HashMap::new();
     for &product in PRODUCTS {
+        let key = product.as_update_product_key();
         match detect::get_installed_product_version(product) {
             Ok(Some(version)) => {
+                let last_update_error = last_update_errors.get(&key).cloned();
                 products.insert(
-                    product.as_update_product_key(),
+                    key,
                     InstalledProductUpdateInfo {
                         version: VersionSpecification::Specific(version),
+                        last_update_error,
                     },
                 );
             }
@@ -722,13 +751,13 @@ fn collect_installed_products() -> HashMap<UpdateProductKey, InstalledProductUpd
 
 /// Create `update_status.json` at startup, populate it with the current schedule and
 /// installed product versions, and apply the DACL that restricts the Gateway service
-/// to read-only access.
-async fn init_update_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::Result<()> {
+/// account (`gateway_sid`) to read-only access.
+async fn init_update_status_json(schedule: Option<&UpdateSchedule>, gateway_sid: &str) -> anyhow::Result<()> {
     let status_file_path = get_update_status_file_path();
 
     let status = UpdateStatus::StatusV2(UpdateStatusV2 {
         schedule: schedule.cloned(),
-        products: collect_installed_products(),
+        products: collect_installed_products(&HashMap::new()),
         ..UpdateStatusV2::default()
     });
 
@@ -737,7 +766,7 @@ async fn init_update_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::R
         .await
         .context("failed to write update_status.json")?;
 
-    match set_file_dacl(&status_file_path, security::UPDATE_STATUS_JSON_DACL) {
+    match set_file_dacl(&status_file_path, &security::update_status_json_dacl(gateway_sid)) {
         Ok(_) => {
             info!("Created `update_status.json` and set permissions successfully");
         }
@@ -762,12 +791,15 @@ async fn init_update_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::R
 /// refreshed when the agent restarts after the update completes.
 ///
 /// Errors are logged but treated as non-fatal so a failed write never aborts the updater.
-async fn refresh_update_status_json(schedule: Option<&UpdateSchedule>) {
+async fn refresh_update_status_json(
+    schedule: Option<&UpdateSchedule>,
+    last_update_errors: &HashMap<UpdateProductKey, String>,
+) {
     let status_file_path = get_update_status_file_path();
 
     let status = UpdateStatus::StatusV2(UpdateStatusV2 {
         schedule: schedule.cloned(),
-        products: collect_installed_products(),
+        products: collect_installed_products(last_update_errors),
         ..UpdateStatusV2::default()
     });
 
@@ -783,7 +815,54 @@ async fn refresh_update_status_json(schedule: Option<&UpdateSchedule>) {
     }
 }
 
-async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
+/// Resolve the string SID the update channel files must grant access to: the account the
+/// Gateway service logs on as, or NETWORK SERVICE when the Gateway is not installed.
+fn resolve_gateway_access_sid() -> anyhow::Result<String> {
+    match GatewayServiceAccount::query()? {
+        Some(account) => {
+            debug!(account = %account.name, sid = %account.sid, "Resolved the Gateway service account");
+            Ok(account.sid)
+        }
+        None => Ok(NETWORK_SERVICE_SID.to_owned()),
+    }
+}
+
+/// Re-apply the update channel file permissions when the Gateway service account changed.
+///
+/// Resolution failures are ignored so that a transient problem (e.g. an unreachable domain)
+/// never downgrades the permissions of a working deployment.
+fn refresh_update_files_permissions(applied_sid: &mut String, update_file_path: &Utf8Path) {
+    let sid = match resolve_gateway_access_sid() {
+        Ok(sid) => sid,
+        Err(error) => {
+            debug!(%error, "Failed to resolve the Gateway service account; keeping the current update file permissions");
+            return;
+        }
+    };
+
+    if sid == *applied_sid {
+        return;
+    }
+
+    info!(previous = %applied_sid, current = %sid, "Gateway service account changed; updating update file permissions");
+
+    let results = [
+        set_file_dacl(update_file_path, &security::update_json_dacl(&sid)),
+        set_file_dacl(&get_update_status_file_path(), &security::update_status_json_dacl(&sid)),
+    ];
+
+    for result in results {
+        if let Err(error) = result {
+            error!(%error, "Failed to update the update file permissions");
+            return;
+        }
+    }
+
+    *applied_sid = sid;
+}
+
+/// Create `update.json` and grant the Gateway service account (`gateway_sid`) write access to it.
+async fn init_update_json(gateway_sid: &str) -> anyhow::Result<Utf8PathBuf> {
     let update_file_path = get_updater_file_path();
 
     // update.json is the gateway->agent command channel.
@@ -800,7 +879,7 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
         .context("failed to write default update.json file")?;
 
     // Set permissions for update.json file:
-    match set_file_dacl(&update_file_path, security::UPDATE_JSON_DACL) {
+    match set_file_dacl(&update_file_path, &security::update_json_dacl(gateway_sid)) {
         Ok(_) => {
             info!("Created new `update.json` and set permissions successfully");
         }

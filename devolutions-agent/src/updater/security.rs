@@ -10,23 +10,30 @@ use crate::updater::UpdaterError;
 /// Group: SYSTEM
 /// Access:
 /// - SYSTEM: Full control
-/// - NETWORK SERVICE: Write, Read (Allow Devolutions Gateway service to update the file)
+/// - Gateway service account: Write, Read (allow the Devolutions Gateway service to update the file)
 /// - Administrators: Full control
 /// - Users: Read
-pub(crate) const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A;;FA;;;BA)(A;;FR;;;BU)";
+///
+/// `gateway_sid` is the string SID of the account the Devolutions Gateway service logs on as
+/// (`S-1-5-20`, NETWORK SERVICE, by default).
+pub(crate) fn update_json_dacl(gateway_sid: &str) -> String {
+    format!("D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;{gateway_sid})(A;;FA;;;BA)(A;;FR;;;BU)")
+}
 
 /// DACL for the update_status.json file:
 /// Owner: SYSTEM
 /// Group: SYSTEM
 /// Access:
-/// - SYSTEM:          Full control
-/// - NETWORK SERVICE: Read (allows Devolutions Gateway running as NT AUTHORITY\NetworkService to serve GET endpoints)
-/// - Administrators:  Full control
-/// - Users:           Read
+/// - SYSTEM:                  Full control
+/// - Gateway service account: Read (allows the Devolutions Gateway service to serve GET endpoints)
+/// - Administrators:          Full control
+/// - Users:                   Read
 ///
-/// Unlike `UPDATE_JSON_DACL`, NETWORK SERVICE does not receive write access — the agent is
-/// the sole writer of this file.
-pub(crate) const UPDATE_STATUS_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;FR;;;NS)(A;;FA;;;BA)(A;;FR;;;BU)";
+/// Unlike [`update_json_dacl`], the Gateway service account does not receive write access — the
+/// agent is the sole writer of this file.
+pub(crate) fn update_status_json_dacl(gateway_sid: &str) -> String {
+    format!("D:PAI(A;;FA;;;SY)(A;;FR;;;{gateway_sid})(A;;FA;;;BA)(A;;FR;;;BU)")
+}
 
 /// Set DACL (Discretionary Access Control List) on a specified file.
 pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
@@ -114,4 +121,33 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
     info!("Changed DACL on `{file_path}` to `{acl}`");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NETWORK_SERVICE: &str = "S-1-5-20";
+
+    #[test]
+    fn network_service_dacls_match_the_historical_constants() {
+        assert_eq!(
+            update_json_dacl(NETWORK_SERVICE),
+            "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;S-1-5-20)(A;;FA;;;BA)(A;;FR;;;BU)"
+        );
+        assert_eq!(
+            update_status_json_dacl(NETWORK_SERVICE),
+            "D:PAI(A;;FA;;;SY)(A;;FR;;;S-1-5-20)(A;;FA;;;BA)(A;;FR;;;BU)"
+        );
+    }
+
+    #[test]
+    fn custom_account_replaces_only_the_gateway_entry() {
+        let sid = "S-1-5-21-1111111111-2222222222-3333333333-1105";
+        let dacl = update_json_dacl(sid);
+        assert!(dacl.contains(&format!("(A;;0x1201bf;;;{sid})")));
+        assert!(!dacl.contains("S-1-5-20"));
+        assert!(dacl.starts_with("D:PAI(A;;FA;;;SY)"));
+        assert!(dacl.ends_with("(A;;FA;;;BA)(A;;FR;;;BU)"));
+    }
 }

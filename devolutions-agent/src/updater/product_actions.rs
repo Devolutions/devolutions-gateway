@@ -1,8 +1,7 @@
 use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
 
+use crate::updater::service_account::{GATEWAY_SERVICE_NAME, GatewayServiceAccount};
 use crate::updater::{Product, UpdaterError};
-
-const GATEWAY_SERVICE_NAME: &str = "DevolutionsGateway";
 
 // Hub Service installs up to 3 separate Windows services (depending on selected features)
 // Service Name -> MSI Feature mapping for ADDLOCAL parameter:
@@ -17,6 +16,11 @@ const HUB_SERVICE_NAMES: &[&str] = &[
 
 /// Additional actions that need to be performed during product update process
 pub(crate) trait ProductUpdateActions {
+    /// Verify that the product can be updated unattended at all. Runs before anything is downloaded.
+    fn check_update_supported(&self) -> Result<(), UpdaterError> {
+        Ok(())
+    }
+
     fn pre_update(&mut self) -> Result<(), UpdaterError>;
     fn get_msiexec_install_params(&self) -> Vec<String>;
     fn post_update(&mut self) -> Result<(), UpdaterError>;
@@ -139,6 +143,27 @@ impl ServiceUpdateActions {
 }
 
 impl ProductUpdateActions for ServiceUpdateActions {
+    fn check_update_supported(&self) -> Result<(), UpdaterError> {
+        if self.product != Product::Gateway {
+            return Ok(());
+        }
+
+        // The Gateway MSI recreates the service on upgrade and preserves the existing account,
+        // but it cannot recover a password from the service control manager. The installer
+        // fails safe in that case; detect it up front instead of downloading the package.
+        match GatewayServiceAccount::query() {
+            Ok(Some(account)) if !account.is_passwordless() => Err(UpdaterError::ServiceAccountRequiresPassword {
+                product: self.product,
+                account: account.name,
+            }),
+            Ok(_) => Ok(()),
+            Err(error) => {
+                warn!(%error, "Failed to query the Gateway service account; attempting the update anyway");
+                Ok(())
+            }
+        }
+    }
+
     fn pre_update(&mut self) -> Result<(), UpdaterError> {
         self.pre_update_impl()
             .map_err(|source| UpdaterError::QueryServiceState {
