@@ -40,6 +40,9 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
+sysevent = { path = "../sysevent" }
+sysevent-codes = { path = "../sysevent-codes" }
+sysevent-winevent = { path = "../sysevent-winevent" }
 tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
 tokio-util = "0.7"
 tower-service = "0.3"
