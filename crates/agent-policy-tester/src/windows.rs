@@ -122,6 +122,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     unavailable_policy_and_method_restrictions(&agent_path).await?;
     complete_snapshots_across_reload(&agent_path).await?;
     redirected_policy_paths_fail_closed(&agent_path).await?;
+    management_write_tokens_survive_watcher_reload(&agent_path).await?;
 
     Ok(())
 }
@@ -197,6 +198,17 @@ fn empty_policy() -> Value {
     policy["Metadata"]["Revision"] = json!(1);
     policy["Rules"] = json!([]);
     policy
+}
+
+fn policy_draft(id: &str, publisher: &str) -> Value {
+    json!({
+        "$schema": "https://devolutions.net/schemas/now-policy-draft.schema.1.0.json",
+        "PolicyVersion": "1.0.0",
+        "PolicyType": "PackageBrokerPolicy",
+        "Metadata": { "Id": id, "Publisher": publisher },
+        "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+        "Rules": []
+    })
 }
 
 fn create_data_dir() -> anyhow::Result<tempfile::TempDir> {
@@ -341,6 +353,116 @@ async fn redirected_policy_paths_fail_closed(agent_path: &Path) -> anyhow::Resul
     assert_redirected_policy_rejected(agent_path, data_dir, redirected).await
 }
 
+async fn policy_management(agent: &AgentHarness) -> anyhow::Result<Value> {
+    let response = request(&agent.pipe_name, "GET", "/v1/policy/management").await?;
+    ensure!(
+        response.status == 200,
+        "GET /v1/policy/management returned HTTP {}",
+        response.status
+    );
+    Ok(response.json()?["Management"].clone())
+}
+
+async fn replace_policy(
+    agent: &AgentHarness,
+    operation: &str,
+    expected_store_token: Value,
+    draft: Value,
+) -> anyhow::Result<Value> {
+    let validation_request = json!({
+        "RequestKind": "PolicyValidationRequest",
+        "RequestVersion": "1.0",
+        "Draft": draft
+    });
+    let validation_response = request_with_body(
+        &agent.pipe_name,
+        "POST",
+        "/v1/policy/validate",
+        Some("application/json"),
+        &serde_json::to_vec(&validation_request)?,
+    )
+    .await?;
+    ensure!(
+        validation_response.status == 200,
+        "POST /v1/policy/validate returned HTTP {}",
+        validation_response.status
+    );
+    let validation = validation_response.json()?["Validation"].clone();
+    ensure!(validation["IsValid"] == true, "policy validation failed");
+    let replacement_request = json!({
+        "RequestKind": "PolicyReplacementRequest",
+        "RequestVersion": "1.0",
+        "ExpectedStoreToken": expected_store_token,
+        "Operation": operation,
+        "ConflictHandling": "Reject",
+        "WarningsAcknowledged": true,
+        "Draft": validation["CanonicalDraft"],
+        "ValidationReceipt": validation["ValidationReceipt"]
+    });
+    let response = request_with_body(
+        &agent.pipe_name,
+        "PUT",
+        "/v1/policy",
+        Some("application/json"),
+        &serde_json::to_vec(&replacement_request)?,
+    )
+    .await?;
+    ensure!(response.status == 200, "{operation} returned HTTP {}", response.status);
+    response.json()
+}
+
+async fn management_write_tokens_survive_watcher_reload(agent_path: &Path) -> anyhow::Result<()> {
+    for verbatim in [false, true] {
+        let data_dir = create_data_dir()?;
+        let policy_path = data_dir.path().join("policy.json");
+        let policy_path = if verbatim {
+            PathBuf::from(format!(r"\\?\{}", policy_path.display()))
+        } else {
+            policy_path
+        };
+        let pipe_name = format!(
+            r"\\.\pipe\Devolutions.Now.PackageBroker.tests.{}.{}",
+            std::process::id(),
+            fastrand::u64(..)
+        );
+        let agent = AgentHarness::start_with_path(agent_path, data_dir, pipe_name, policy_path).await?;
+        let initial = policy_management(&agent).await?;
+        ensure!(initial["State"] == "Missing");
+        ensure!(initial["WriteCapability"] == "Writable");
+
+        let created = replace_policy(
+            &agent,
+            "Create",
+            initial["StoreToken"].clone(),
+            policy_draft("tests.managed-write", "Test"),
+        )
+        .await?;
+        ensure!(created["Policy"]["Metadata"]["Revision"] == 1);
+        let created_token = created["Management"]["StoreToken"].clone();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        ensure!(
+            policy_management(&agent).await?["StoreToken"] == created_token,
+            "watcher reload rotated the Create token (verbatim={verbatim})"
+        );
+
+        let updated = replace_policy(
+            &agent,
+            "Update",
+            created_token,
+            policy_draft("tests.managed-write", "Updated Test"),
+        )
+        .await?;
+        ensure!(updated["Policy"]["Metadata"]["Revision"] == 2);
+        let updated_token = updated["Management"]["StoreToken"].clone();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        ensure!(
+            policy_management(&agent).await?["StoreToken"] == updated_token,
+            "watcher reload rotated the Update token (verbatim={verbatim})"
+        );
+    }
+    Ok(())
+}
+
 async fn unavailable_policy_and_method_restrictions(agent_path: &Path) -> anyhow::Result<()> {
     let agent = AgentHarness::start(agent_path, None).await?;
 
@@ -427,6 +549,7 @@ async fn unavailable_policy_and_method_restrictions(agent_path: &Path) -> anyhow
 async fn complete_snapshots_across_reload(agent_path: &Path) -> anyhow::Result<()> {
     let empty = empty_policy();
     let agent = AgentHarness::start(agent_path, Some(&empty)).await?;
+    let initial_token = policy_management(&agent).await?["StoreToken"].clone();
 
     let initial = request(&agent.pipe_name, "GET", "/v1/policy").await?;
     ensure!(initial.status == 200, "active policy returned HTTP {}", initial.status);
@@ -480,6 +603,10 @@ async fn complete_snapshots_across_reload(agent_path: &Path) -> anyhow::Result<(
         ensure!(Instant::now() < deadline, "agent did not reload the policy");
         tokio::task::yield_now().await;
     }
+    ensure!(
+        policy_management(&agent).await?["StoreToken"] != initial_token,
+        "external policy replacement did not rotate the store token"
+    );
 
     replace
         .await

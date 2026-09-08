@@ -63,8 +63,18 @@ enum WriteFailure {
 
 trait PolicyStorage: Send + Sync {
     fn observe(&self, source: PolicyConfigurationSource, path: &Path) -> Observation;
-    fn create(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure>;
-    fn replace(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure>;
+    fn create(
+        &self,
+        configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure>;
+    fn replace(
+        &self,
+        configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure>;
 }
 
 struct FilePolicyStorage;
@@ -74,12 +84,22 @@ impl PolicyStorage for FilePolicyStorage {
         observe_file(source, path)
     }
 
-    fn create(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
-        publish_file(observation, bytes, false)
+    fn create(
+        &self,
+        configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure> {
+        publish_file(configured_path, observation, bytes, false)
     }
 
-    fn replace(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
-        publish_file(observation, bytes, true)
+    fn replace(
+        &self,
+        configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure> {
+        publish_file(configured_path, observation, bytes, true)
     }
 }
 
@@ -300,9 +320,9 @@ impl PolicyStore {
             .map_err(|_| error_response(ErrorCode::InternalError, "failed to serialize the committed policy"))?;
 
         let persisted = if request.operation == PolicyReplacementOperation::Create {
-            self.storage.create(&observation, &bytes)
+            self.storage.create(&self.configured_path, &observation, &bytes)
         } else {
-            self.storage.replace(&observation, &bytes)
+            self.storage.replace(&self.configured_path, &observation, &bytes)
         };
         let persisted = match persisted {
             Ok(persisted) => persisted,
@@ -743,7 +763,12 @@ fn observe_file(_source: PolicyConfigurationSource, configured_path: &Path) -> O
     }
 }
 
-fn publish_file(observation: &Observation, bytes: &[u8], replace: bool) -> Result<PersistedPolicy, WriteFailure> {
+fn publish_file(
+    configured_path: &Path,
+    observation: &Observation,
+    bytes: &[u8],
+    replace: bool,
+) -> Result<PersistedPolicy, WriteFailure> {
     let path = &observation.configured_path;
     let parent = path
         .parent()
@@ -780,7 +805,7 @@ fn publish_file(observation: &Observation, bytes: &[u8], replace: bool) -> Resul
     }
 
     let reloaded = (|| {
-        let reloaded = observe_file(PolicyConfigurationSource::ConfiguredPath, path);
+        let reloaded = observe_file(PolicyConfigurationSource::ConfiguredPath, configured_path);
         let policy = reloaded
             .policy
             .clone()
@@ -976,11 +1001,21 @@ impl PolicyStorage for TestStorage {
         clone_observation(&self.observation.lock())
     }
 
-    fn create(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
+    fn create(
+        &self,
+        _configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure> {
         self.persist(observation, bytes)
     }
 
-    fn replace(&self, observation: &Observation, bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
+    fn replace(
+        &self,
+        _configured_path: &Path,
+        observation: &Observation,
+        bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure> {
         self.persist(observation, bytes)
     }
 }
