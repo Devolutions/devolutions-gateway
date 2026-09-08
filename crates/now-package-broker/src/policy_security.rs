@@ -50,9 +50,9 @@ use windows::Win32::Foundation::{
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, INHERIT_ONLY_ACE, IsWellKnownSid,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid, WinLocalServiceSid,
-    WinLocalSystemSid,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetLengthSid, INHERIT_ONLY_ACE,
+    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid,
+    WinLocalServiceSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
@@ -350,20 +350,20 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
         bail!("failed to read policy security state: error {}", status.0);
     }
 
-    let mut hasher = Sha256::new();
-    if owner.0.is_null() {
-        hasher.update(b"no-owner");
+    let owner_bytes = if owner.0.is_null() {
+        None
     } else {
         // SAFETY: The owner SID points into the live security descriptor.
-        let owner = unsafe { sid_to_string(owner) };
-        hasher.update(owner.as_bytes());
-    }
-    if dacl.is_null() {
-        hasher.update(b"null-dacl");
+        let length = usize::try_from(unsafe { GetLengthSid(owner) }).expect("SID length fits usize");
+        // SAFETY: GetLengthSid returned the complete size of the SID in the live descriptor.
+        Some(unsafe { std::slice::from_raw_parts(owner.0.cast::<u8>(), length) })
+    };
+    let ace_bytes = if dacl.is_null() {
+        None
     } else {
         // SAFETY: The DACL points into the live security descriptor.
         let ace_count = u32::from(unsafe { (*dacl).AceCount });
-        hasher.update(ace_count.to_le_bytes());
+        let mut entries = Vec::with_capacity(usize::try_from(ace_count).expect("ACE count fits usize"));
         for index in 0..ace_count {
             let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
             // SAFETY: The index is within the DACL's reported ACE count.
@@ -371,17 +371,47 @@ pub(crate) fn security_state_digest(file: &File) -> anyhow::Result<[u8; 32]> {
             // SAFETY: GetAce returned a complete ACE beginning with ACE_HEADER.
             let size = usize::from(unsafe { (*ace.cast::<ACE_HEADER>()).AceSize });
             // SAFETY: AceSize bounds the complete ACE within the validated ACL.
-            update_ace_digest(&mut hasher, unsafe {
-                std::slice::from_raw_parts(ace.cast::<u8>(), size)
-            });
+            entries.push(unsafe { std::slice::from_raw_parts(ace.cast::<u8>(), size) });
         }
-    }
-    Ok(hasher.finalize().into())
+        Some(entries)
+    };
+    Ok(canonical_security_digest(owner_bytes, ace_bytes.as_deref()))
 }
 
-fn update_ace_digest(hasher: &mut Sha256, ace_bytes: &[u8]) {
-    hasher.update(ace_bytes.len().to_le_bytes());
-    hasher.update(ace_bytes);
+fn canonical_security_digest(owner: Option<&[u8]>, dacl: Option<&[&[u8]]>) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"devolutions-policy-security-digest-v1\0");
+    update_optional_bytes(&mut hasher, owner);
+    match dacl {
+        Some(entries) => {
+            hasher.update([1]);
+            hasher.update(u32::try_from(entries.len()).expect("ACE count fits u32").to_le_bytes());
+            for entry in entries {
+                update_fixed_width_bytes(&mut hasher, entry);
+            }
+        }
+        None => hasher.update([0]),
+    }
+    hasher.finalize().into()
+}
+
+fn update_optional_bytes(hasher: &mut Sha256, bytes: Option<&[u8]>) {
+    match bytes {
+        Some(bytes) => {
+            hasher.update([1]);
+            update_fixed_width_bytes(hasher, bytes);
+        }
+        None => hasher.update([0]),
+    }
+}
+
+fn update_fixed_width_bytes(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update(
+        u32::try_from(bytes.len())
+            .expect("security component length fits u32")
+            .to_le_bytes(),
+    );
+    hasher.update(bytes);
 }
 
 fn admin_only_acl(inheritance: windows::Win32::Security::ACE_FLAGS) -> anyhow::Result<Acl> {
@@ -1192,12 +1222,37 @@ mod tests {
 
     #[test]
     fn ace_digest_includes_callback_application_data() {
-        let mut left = Sha256::new();
-        let mut right = Sha256::new();
-        update_ace_digest(&mut left, &[1, 2, 3, 4]);
-        update_ace_digest(&mut right, &[1, 2, 3, 5]);
+        let left_entry: &[u8] = &[1, 2, 3, 4];
+        let right_entry: &[u8] = &[1, 2, 3, 5];
+        let left = canonical_security_digest(Some(&[1, 2]), Some(&[left_entry]));
+        let right = canonical_security_digest(Some(&[1, 2]), Some(&[right_entry]));
 
-        assert_ne!(left.finalize(), right.finalize());
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn security_digest_uses_fixed_width_golden_encoding() {
+        let owner: &[u8] = &[1, 1, 0, 0, 0, 0, 0, 5];
+        let first: &[u8] = &[0, 0, 8, 0, 1, 0, 0, 0];
+        let second: &[u8] = &[9, 0, 12, 0, 2, 0, 0, 0, 7, 8, 9, 10];
+        let digest = canonical_security_digest(Some(owner), Some(&[first, second]));
+
+        assert_eq!(
+            hex::encode(digest),
+            "af334410d4d80b647c235e0f3e550c9cc0598127282068cf78ca142b00f09154"
+        );
+
+        let native_32 = [u32::try_from(first.len()).unwrap().to_le_bytes().as_slice(), first].concat();
+        let native_64 = [u64::try_from(first.len()).unwrap().to_le_bytes().as_slice(), first].concat();
+        assert_ne!(
+            native_32, native_64,
+            "legacy native-width streams differ across architectures"
+        );
+        assert_eq!(
+            canonical_security_digest(Some(owner), Some(&[first, second])),
+            digest,
+            "canonical digest is independent of native pointer width"
+        );
     }
 
     #[test]
