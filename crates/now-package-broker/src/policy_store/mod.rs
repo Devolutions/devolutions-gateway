@@ -31,7 +31,7 @@ use windows::core::PCWSTR;
 
 use crate::policy_security;
 mod receipt;
-pub mod validation;
+mod validation;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ReloadCause {
