@@ -2,7 +2,8 @@
 //!
 //! Loads policy documents from the configured directory.
 //! Supports JSON (`.json`) policies.
-//! Default location: `%PROGRAMDATA%/Devolutions/Agent/`
+//! Managed policies use `%PROGRAMDATA%/Devolutions/PackageBroker/`.
+//! `%PROGRAMDATA%/Devolutions/Agent/` remains the legacy compatibility location.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -13,14 +14,28 @@ use tracing::info;
 
 use crate::policy_security;
 
-/// Default policy directory.
+fn program_data_dir() -> PathBuf {
+    std::env::var_os("PROGRAMDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+}
+
+/// Directory used by the managed policy store.
+///
+/// This sibling of `Agent` avoids inheriting that shared directory's broader service ACL.
+pub fn managed_default_policy_dir() -> PathBuf {
+    program_data_dir().join("Devolutions").join("PackageBroker")
+}
+
+/// Legacy policy directory retained for upgrade compatibility.
+pub fn legacy_default_policy_dir() -> PathBuf {
+    program_data_dir().join("Devolutions").join("Agent")
+}
+
+/// Legacy alias retained for callers that explicitly need the pre-managed location.
+#[deprecated(note = "use legacy_default_policy_dir; PolicyStore owns managed/legacy arbitration")]
 pub fn default_policy_dir() -> PathBuf {
-    if cfg!(windows) {
-        let program_data = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_owned());
-        PathBuf::from(program_data).join("Devolutions").join("Agent")
-    } else {
-        PathBuf::from("/etc/devolutions-agent")
-    }
+    legacy_default_policy_dir()
 }
 
 /// Base name for the policy file (without extension).
@@ -78,11 +93,11 @@ fn deserialize_policy(content: &str, path: &Path) -> anyhow::Result<PolicyDocume
     parse_policy_json(content).map_err(|e| anyhow::anyhow!("invalid JSON policy at {}: {e}", path.display()))
 }
 
-/// Find the policy file in the default location.
+/// Find the policy file in the legacy compatibility location.
 ///
 /// Looks for `package-broker-policy.json`.
-pub fn find_default_policy() -> anyhow::Result<PathBuf> {
-    let dir = default_policy_dir();
+pub fn find_legacy_default_policy() -> anyhow::Result<PathBuf> {
+    let dir = legacy_default_policy_dir();
     if let Some(path) = find_default_policy_in(&dir) {
         return Ok(path);
     }
@@ -93,14 +108,29 @@ pub fn find_default_policy() -> anyhow::Result<PathBuf> {
     )
 }
 
+/// Legacy alias retained for callers that explicitly need the pre-managed location.
+#[deprecated(note = "use find_legacy_default_policy; PolicyStore owns managed/legacy arbitration")]
+pub fn find_default_policy() -> anyhow::Result<PathBuf> {
+    find_legacy_default_policy()
+}
+
 fn find_default_policy_in(dir: &Path) -> Option<PathBuf> {
     let path = dir.join(format!("{POLICY_FILE_BASE}.json"));
     path.exists().then_some(path)
 }
 
-/// Candidate default policy path used when no default policy file exists yet.
+/// Return managed and legacy policy candidates in arbitration order.
+pub fn default_policy_candidates() -> [PathBuf; 2] {
+    [
+        managed_default_policy_dir().join(format!("{POLICY_FILE_BASE}.json")),
+        legacy_default_policy_dir().join(format!("{POLICY_FILE_BASE}.json")),
+    ]
+}
+
+/// Legacy alias retained for callers that explicitly need the pre-managed location.
+#[deprecated(note = "use default_policy_candidates; PolicyStore owns managed/legacy arbitration")]
 pub fn default_policy_candidate() -> PathBuf {
-    default_policy_dir().join(format!("{POLICY_FILE_BASE}.json"))
+    legacy_default_policy_dir().join(format!("{POLICY_FILE_BASE}.json"))
 }
 
 #[cfg(test)]
@@ -144,5 +174,34 @@ mod tests {
         let json_path = dir.path().join("package-broker-policy.json");
         std::fs::write(&json_path, "{}").expect("write JSON policy");
         assert_eq!(find_default_policy_in(dir.path()), Some(json_path));
+    }
+
+    #[test]
+    fn managed_and_legacy_default_candidates_are_explicit() {
+        let [managed, legacy] = default_policy_candidates();
+
+        assert_eq!(
+            managed.file_name().expect("managed candidate has a leaf"),
+            "package-broker-policy.json"
+        );
+        assert_eq!(
+            legacy.file_name().expect("legacy candidate has a leaf"),
+            "package-broker-policy.json"
+        );
+        assert_eq!(
+            managed
+                .parent()
+                .and_then(Path::file_name)
+                .expect("managed candidate has a parent"),
+            "PackageBroker"
+        );
+        assert_eq!(
+            legacy
+                .parent()
+                .and_then(Path::file_name)
+                .expect("legacy candidate has a parent"),
+            "Agent"
+        );
+        assert_ne!(managed, legacy);
     }
 }
