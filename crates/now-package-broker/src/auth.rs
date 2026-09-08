@@ -222,6 +222,10 @@ impl PipeClient {
         &self.user_sid
     }
 
+    pub(crate) fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
     pub(crate) fn is_elevated_administrator(&self) -> bool {
         self.is_elevated && self.is_administrator
     }

@@ -6,6 +6,8 @@
 //! The broker is only functional on Windows; on other platforms this crate is empty.
 
 #[cfg(windows)]
+mod audit;
+#[cfg(windows)]
 mod auth;
 #[cfg(windows)]
 pub mod command_builder;

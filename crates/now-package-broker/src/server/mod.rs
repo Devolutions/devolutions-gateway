@@ -1,6 +1,7 @@
 //! Runtime implementation of the shared NOW package broker server facade.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -43,6 +44,7 @@ use responses::{
 
 tokio::task_local! {
     static POLICY_MANAGEMENT_AUTHENTICATED: ();
+    static POLICY_WRITE_AUDIT: crate::audit::WriteAudit;
 }
 
 /// How long a per-user manager availability probe stays fresh before it is re-run.
@@ -121,6 +123,10 @@ async fn authenticate_policy_management(
     request: Request,
     next: Next,
 ) -> Response {
+    let write_audit = matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy")).then(|| {
+        let configured_path = PathBuf::from(state.policy_store.management_snapshot().configured_path);
+        crate::audit::WriteAudit::begin(client.user_sid(), client.executable_path(), &configured_path)
+    });
     let protected = matches!(
         (request.method(), request.uri().path()),
         (&Method::GET, "/v1/policy/management")
@@ -130,6 +136,9 @@ async fn authenticate_policy_management(
     );
     if protected {
         if let Err(error) = client.validate_connection(state.skip_signature_validation) {
+            if let Some(audit) = write_audit {
+                audit.denied(crate::audit::DenialReason::AuthenticationFailed);
+            }
             warn!(error = format!("{error:#}"), "Rejected policy management request");
             return (
                 StatusCode::UNAUTHORIZED,
@@ -140,7 +149,12 @@ async fn authenticate_policy_management(
             )
                 .into_response();
         }
-        return POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request)).await;
+        let authenticated = POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request));
+        return if let Some(audit) = write_audit {
+            POLICY_WRITE_AUDIT.scope(audit, authenticated).await
+        } else {
+            authenticated.await
+        };
     }
     next.run(request).await
 }
@@ -209,7 +223,11 @@ impl PackageBrokerServer for BrokerConnection {
         request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
         require_policy_management_authentication()?;
+        let audit = POLICY_WRITE_AUDIT
+            .try_with(Clone::clone)
+            .map_err(|_| error_response(ErrorCode::InternalError, "policy write audit context is unavailable"))?;
         if !self.client.is_elevated_administrator() {
+            audit.denied(crate::audit::DenialReason::AdministratorRequired);
             return Err(error_response(
                 ErrorCode::AdministratorRequired,
                 "policy replacement requires an elevated Administrator",
@@ -217,7 +235,7 @@ impl PackageBrokerServer for BrokerConnection {
         }
         self.state
             .policy_store
-            .replace(request)
+            .replace_audited(request, audit)
             .await
             .map(|success| PolicyReplacementResponse {
                 response_kind: now_policy_api::PolicyReplacementResponseKind,
