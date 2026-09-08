@@ -25,7 +25,7 @@ pub enum PolicyState {
     Unavailable { reason: String },
 }
 
-/// Watches a policy file (JSON or YAML) and sends updates via a channel.
+/// Watches a JSON policy file and sends updates via a channel.
 ///
 /// On startup, attempts to load the policy. If it fails, starts in `Unavailable` state.
 /// When the file is modified, reloads it. If reload fails, transitions to `Unavailable`.

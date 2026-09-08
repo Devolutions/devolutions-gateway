@@ -45,13 +45,7 @@ fn load_json_file(path: &Path) -> serde_json::Value {
 
 fn load_policy(path: &Path) -> PolicyDocument {
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    match ext {
-        "yaml" | "yml" => serde_yaml::from_str(&content)
-            .unwrap_or_else(|e| panic!("failed to deserialize YAML policy {}: {e}", path.display())),
-        _ => serde_json::from_str(&content)
-            .unwrap_or_else(|e| panic!("failed to deserialize policy {}: {e}", path.display())),
-    }
+    serde_json::from_str(&content).unwrap_or_else(|e| panic!("failed to deserialize policy {}: {e}", path.display()))
 }
 
 fn load_request(path: &Path) -> PackageRequest {
