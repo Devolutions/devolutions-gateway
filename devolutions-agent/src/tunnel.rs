@@ -756,7 +756,7 @@ async fn run_session_proxy(
 
         // Whatever went wrong has to travel back as a ConnectResponse::Error — returning
         // early instead drops the stream and the Gateway just sees an unexplained EOF.
-        let (tcp_stream, selected_target) = match connect_result {
+        let (mut tcp_stream, selected_target) = match connect_result {
             Ok(connected) => connected,
             Err(error) => {
                 let reason = format!("{error:#}");
@@ -783,20 +783,10 @@ async fn run_session_proxy(
             .context("send ConnectResponse")?;
         info!("Sent ConnectResponse::Success");
 
-        let (mut send, mut recv) = session.into_inner();
-        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-        // Use join! (not select!) to wait for BOTH directions to finish.
-        // select! would cancel in-flight data when one direction closes first.
-        let (r1, r2) = tokio::join!(
-            tokio::io::copy(&mut recv, &mut tcp_write),
-            tokio::io::copy(&mut tcp_read, &mut send),
-        );
-        r1.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
-        r2.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
-
-        // Gracefully finish the QUIC send stream (signals EOF to peer).
-        let _ = send.finish();
+        let (send, recv) = session.into_inner();
+        tokio::io::copy_bidirectional(&mut tokio::io::join(recv, send), &mut tcp_stream)
+            .await
+            .context("proxy session traffic")?;
 
         Ok(())
     }
