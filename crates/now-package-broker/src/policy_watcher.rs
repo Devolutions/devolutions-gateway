@@ -329,7 +329,7 @@ mod tests {
             &paths
         ));
         assert!(affects_watched_paths(
-            &event(managed.with_file_name(".package-broker-managed-authority")),
+            &event(managed.with_file_name(".package-broker-managed-authority.v1")),
             &paths
         ));
         assert!(!affects_watched_paths(

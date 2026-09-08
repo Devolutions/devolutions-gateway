@@ -48,8 +48,7 @@ use crate::policy_store::validation;
 
 /// Base file name for the policy file (a fixed name inside its dedicated directory).
 pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
-const MANAGED_AUTHORITY_MARKER_NAME: &str = ".package-broker-managed-authority";
-const MANAGED_AUTHORITY_MARKER_CONTENT: &[u8] = b"Devolutions Package Broker managed policy authority v1\n";
+const MANAGED_AUTHORITY_MARKER_NAME: &str = ".package-broker-managed-authority.v1";
 const FILE_SYNCHRONIZE: u32 = 0x0010_0000;
 const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
 const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
@@ -173,66 +172,66 @@ fn managed_default_has_state(managed: &Path) -> bool {
     false
 }
 
-fn verify_managed_authority_marker_if_present(dir_path: &Path) -> anyhow::Result<bool> {
+fn open_verified_managed_authority_marker(dir_path: &Path) -> anyhow::Result<Option<File>> {
     let path = dir_path.join(MANAGED_AUTHORITY_MARKER_NAME);
     match std::fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).context("failed to inspect managed authority marker"),
         Ok(_) => {}
     }
 
     let file = open_transaction_file(&path).context("failed to open managed authority marker")?;
-    policy_security::verify_policy_file_path(&file, &path).context("managed authority marker path is invalid")?;
+    verify_managed_authority_file(&file, &path)?;
+    Ok(Some(file))
+}
+
+#[cfg(test)]
+fn verify_managed_authority_marker_if_present(dir_path: &Path) -> anyhow::Result<bool> {
+    open_verified_managed_authority_marker(dir_path).map(|marker| marker.is_some())
+}
+
+fn verify_managed_authority_file(file: &File, path: &Path) -> anyhow::Result<()> {
+    policy_security::verify_policy_file_path(file, path).context("managed authority marker path is invalid")?;
     ensure!(
-        policy_security::file_link_count(&file)? == 1,
+        policy_security::file_link_count(file)? == 1,
         "managed authority marker has multiple hard links"
     );
-    policy_security::verify_managed_policy_file_security(&file)
+    policy_security::verify_managed_policy_file_security(file)
         .context("managed authority marker security is invalid")?;
-    _ = policy_security::file_identity(&file).context("failed to identify managed authority marker")?;
-    _ = policy_security::security_state_digest(&file)
+    _ = policy_security::file_identity(file).context("failed to identify managed authority marker")?;
+    _ = policy_security::security_state_digest(file)
         .context("failed to summarize managed authority marker security")?;
-    ensure!(
-        read_file_from_start(&file)? == MANAGED_AUTHORITY_MARKER_CONTENT,
-        "managed authority marker content is invalid"
-    );
-    Ok(true)
+    ensure!(file.metadata()?.len() == 0, "managed authority marker is not empty");
+    Ok(())
 }
 
 fn ensure_managed_authority_marker(dir: &File, dir_path: &Path) -> anyhow::Result<()> {
-    if verify_managed_authority_marker_if_present(dir_path)? {
+    if open_verified_managed_authority_marker(dir_path)?.is_some() {
         return Ok(());
     }
 
     let path = dir_path.join(MANAGED_AUTHORITY_MARKER_NAME);
-    let mut marker = match create_secure_transaction_file(&path) {
+    let marker = match create_secure_transaction_file(&path) {
         Ok(marker) => marker,
         Err(create_error) => {
-            return match verify_managed_authority_marker_if_present(dir_path) {
-                Ok(true) => Ok(()),
-                Ok(false) => Err(create_error).context("failed to create managed authority marker"),
+            return match open_verified_managed_authority_marker(dir_path) {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) => Err(create_error).context("failed to create managed authority marker"),
                 Err(verify_error) => Err(verify_error).context(format!(
                     "managed authority marker creation also failed: {create_error:#}"
                 )),
             };
         }
     };
-    use std::io::Write as _;
     marker
-        .write_all(MANAGED_AUTHORITY_MARKER_CONTENT)
-        .and_then(|()| marker.sync_all())
+        .sync_all()
         .context("failed to persist managed authority marker")?;
-    verify_transaction_file_path(&marker, &path)?;
-    policy_security::verify_managed_policy_file_security(&marker)
-        .context("new managed authority marker security is invalid")?;
+    verify_managed_authority_file(&marker, &path)?;
     let identity =
         policy_security::file_identity(&marker).context("failed to identify new managed authority marker")?;
-    _ = policy_security::security_state_digest(&marker)
-        .context("failed to summarize new managed authority marker security")?;
     drop(marker);
     verify_probe_directory_entry(dir, OsStr::new(MANAGED_AUTHORITY_MARKER_NAME), identity)
-        .context("managed authority marker directory entry is invalid")?;
-    Ok(())
+        .context("managed authority marker directory entry is invalid")
 }
 
 /// Validate the *shape* of a configured policy path before ever touching disk: it must
@@ -1580,8 +1579,8 @@ fn observe_impl(
             }
         };
     let authority_marker_present = if managed_default {
-        match verify_managed_authority_marker_if_present(&canonical_dir) {
-            Ok(present) => present,
+        match open_verified_managed_authority_marker(&canonical_dir) {
+            Ok(marker) => marker.is_some(),
             Err(error) => {
                 tracing::error!(
                     path = %canonical_dir.display(),
@@ -3533,6 +3532,13 @@ mod tests {
         ensure_published_managed_authority(PolicyConfigurationSource::DefaultPath, &managed, &hosting).unwrap();
 
         assert!(verify_managed_authority_marker_if_present(hosting.canonical_path()).unwrap());
+        assert_eq!(
+            std::fs::metadata(hosting.canonical_path().join(MANAGED_AUTHORITY_MARKER_NAME))
+                .unwrap()
+                .len(),
+            0,
+            "the marker must be complete at atomic creation"
+        );
     }
 
     #[test]
@@ -3577,6 +3583,24 @@ mod tests {
         create_directory_junction(&marker, &root.path().join("missing-target"));
 
         assert!(verify_managed_authority_marker_if_present(root.path()).is_err());
+    }
+
+    #[test]
+    fn hard_link_managed_authority_marker_fails_closed_and_is_preserved() {
+        let root = temp_dir();
+        let original = root.path().join("original");
+        let marker = root.path().join(MANAGED_AUTHORITY_MARKER_NAME);
+        let Ok(original_file) = create_secure_transaction_file(&original) else {
+            return;
+        };
+        original_file.sync_all().unwrap();
+        drop(original_file);
+        std::fs::hard_link(&original, &marker).unwrap();
+        let dir = open_directory_no_reparse(root.path()).unwrap();
+
+        assert!(ensure_managed_authority_marker(&dir, root.path()).is_err());
+        assert!(marker.exists());
+        assert!(original.exists());
     }
 
     fn open_deletable_test_file(path: &Path, content: &[u8]) -> File {
