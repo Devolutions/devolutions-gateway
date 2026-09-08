@@ -380,6 +380,242 @@ pub fn recording_storage_low(remaining_bytes: u64, threshold_bytes: u64) -> Entr
         .field("threshold_bytes", threshold_bytes)
 }
 
+// 8000-8099 **Package Broker / Policy Management**
+
+/// A policy write was received before any authorization check.
+pub const POLICY_WRITE_ATTEMPTED: u32 = 8000;
+/// A policy write was denied by caller authorization.
+pub const POLICY_WRITE_DENIED: u32 = 8001;
+/// A Create operation failed.
+pub const POLICY_CREATE_FAILED: u32 = 8002;
+/// A Create operation succeeded.
+pub const POLICY_CREATE_SUCCEEDED: u32 = 8003;
+/// An Update, Repair, or ReplaceIdentity operation failed.
+pub const POLICY_CHANGE_FAILED: u32 = 8004;
+/// An Update, Repair, or ReplaceIdentity operation succeeded.
+pub const POLICY_CHANGE_SUCCEEDED: u32 = 8005;
+/// An external policy change became active.
+pub const POLICY_EXTERNAL_CHANGE_APPLIED: u32 = 8010;
+/// An external policy change left the policy unavailable.
+pub const POLICY_EXTERNAL_CHANGE_REJECTED: u32 = 8011;
+
+pub fn policy_write_attempted(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+) -> Entry {
+    Entry::new("Policy management write attempted")
+        .event_code(POLICY_WRITE_ATTEMPTED)
+        .severity(Severity::Info)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+}
+
+pub fn policy_write_denied(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    reason: impl ToString,
+) -> Entry {
+    Entry::new("Policy management write denied")
+        .event_code(POLICY_WRITE_DENIED)
+        .severity(Severity::Warning)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+        .field("reason", reason)
+}
+
+pub fn policy_create_failed(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    operation: impl ToString,
+    outcome: impl ToString,
+    reason: impl ToString,
+) -> Entry {
+    policy_write_failed(
+        POLICY_CREATE_FAILED,
+        "Policy creation failed",
+        actor_sid,
+        actor_exe,
+        intent,
+        path,
+        operation,
+        outcome,
+        reason,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the audit event records both policy identities and the operation outcome"
+)]
+pub fn policy_create_succeeded(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    path: impl AsRef<Path>,
+    old_id: impl ToString,
+    old_revision: impl ToString,
+    new_id: impl ToString,
+    new_revision: u32,
+    intent: impl ToString,
+    operation: impl ToString,
+    outcome: impl ToString,
+) -> Entry {
+    policy_write_succeeded(
+        POLICY_CREATE_SUCCEEDED,
+        "Policy creation succeeded",
+        actor_sid,
+        actor_exe,
+        path,
+        old_id,
+        old_revision,
+        new_id,
+        new_revision,
+        intent,
+        operation,
+        outcome,
+    )
+}
+
+pub fn policy_change_failed(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    operation: impl ToString,
+    outcome: impl ToString,
+    reason: impl ToString,
+) -> Entry {
+    policy_write_failed(
+        POLICY_CHANGE_FAILED,
+        "Policy change failed",
+        actor_sid,
+        actor_exe,
+        intent,
+        path,
+        operation,
+        outcome,
+        reason,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the audit event records both policy identities and the operation outcome"
+)]
+pub fn policy_change_succeeded(
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    path: impl AsRef<Path>,
+    old_id: impl ToString,
+    old_revision: impl ToString,
+    new_id: impl ToString,
+    new_revision: u32,
+    intent: impl ToString,
+    operation: impl ToString,
+    outcome: impl ToString,
+) -> Entry {
+    policy_write_succeeded(
+        POLICY_CHANGE_SUCCEEDED,
+        "Policy change succeeded",
+        actor_sid,
+        actor_exe,
+        path,
+        old_id,
+        old_revision,
+        new_id,
+        new_revision,
+        intent,
+        operation,
+        outcome,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared builder keeps the four outcome events field-compatible"
+)]
+fn policy_write_failed(
+    event_code: u32,
+    message: &'static str,
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    intent: impl ToString,
+    path: impl AsRef<Path>,
+    operation: impl ToString,
+    outcome: impl ToString,
+    reason: impl ToString,
+) -> Entry {
+    Entry::new(message)
+        .event_code(event_code)
+        .severity(Severity::Error)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("intent", intent)
+        .field("path", path.as_ref().display())
+        .field("operation", operation)
+        .field("outcome", outcome)
+        .field("reason", reason)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared builder keeps the four outcome events field-compatible"
+)]
+fn policy_write_succeeded(
+    event_code: u32,
+    message: &'static str,
+    actor_sid: impl ToString,
+    actor_exe: impl ToString,
+    path: impl AsRef<Path>,
+    old_id: impl ToString,
+    old_revision: impl ToString,
+    new_id: impl ToString,
+    new_revision: u32,
+    intent: impl ToString,
+    operation: impl ToString,
+    outcome: impl ToString,
+) -> Entry {
+    Entry::new(message)
+        .event_code(event_code)
+        .severity(Severity::Info)
+        .field("actor_sid", actor_sid)
+        .field("actor_exe", actor_exe)
+        .field("path", path.as_ref().display())
+        .field("old_id", old_id)
+        .field("old_revision", old_revision)
+        .field("new_id", new_id)
+        .field("new_revision", new_revision)
+        .field("intent", intent)
+        .field("operation", operation)
+        .field("outcome", outcome)
+}
+
+pub fn policy_external_change_applied(path: impl AsRef<Path>, new_id: impl ToString, new_revision: u32) -> Entry {
+    Entry::new("External policy change applied")
+        .event_code(POLICY_EXTERNAL_CHANGE_APPLIED)
+        .severity(Severity::Notice)
+        .field("path", path.as_ref().display())
+        .field("new_id", new_id)
+        .field("new_revision", new_revision)
+}
+
+pub fn policy_external_change_rejected(path: impl AsRef<Path>, reason: impl ToString) -> Entry {
+    Entry::new("External policy change rejected")
+        .event_code(POLICY_EXTERNAL_CHANGE_REJECTED)
+        .severity(Severity::Warning)
+        .field("path", path.as_ref().display())
+        .field("reason", reason)
+}
+
 // 9000-9099 **Diagnostics**
 
 pub const DEBUG_OPTIONS_ENABLED: u32 = 9001;
@@ -398,4 +634,108 @@ pub fn xmf_not_found(path: impl AsRef<Path>, error: impl std::fmt::Display) -> E
         .severity(Severity::Warning)
         .field("path", path.as_ref().display())
         .field("error_chain", format!("{error:#}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_audit_entries_preserve_catalog_field_order() {
+        const WRITE: &[&str] = &["actor_sid", "actor_exe", "intent", "path"];
+        const DENIED: &[&str] = &["actor_sid", "actor_exe", "intent", "path", "reason"];
+        const FAILED: &[&str] = &[
+            "actor_sid",
+            "actor_exe",
+            "intent",
+            "path",
+            "operation",
+            "outcome",
+            "reason",
+        ];
+        const SUCCEEDED: &[&str] = &[
+            "actor_sid",
+            "actor_exe",
+            "path",
+            "old_id",
+            "old_revision",
+            "new_id",
+            "new_revision",
+            "intent",
+            "operation",
+            "outcome",
+        ];
+        let entries = [
+            (
+                policy_write_attempted("sid", "exe", "intent", "path"),
+                POLICY_WRITE_ATTEMPTED,
+                Severity::Info,
+                WRITE,
+            ),
+            (
+                policy_write_denied("sid", "exe", "intent", "path", "reason"),
+                POLICY_WRITE_DENIED,
+                Severity::Warning,
+                DENIED,
+            ),
+            (
+                policy_create_failed("sid", "exe", "intent", "path", "create", "failed", "reason"),
+                POLICY_CREATE_FAILED,
+                Severity::Error,
+                FAILED,
+            ),
+            (
+                policy_create_succeeded(
+                    "sid", "exe", "path", "old", "1", "new", 2, "intent", "create", "applied",
+                ),
+                POLICY_CREATE_SUCCEEDED,
+                Severity::Info,
+                SUCCEEDED,
+            ),
+            (
+                policy_change_failed("sid", "exe", "intent", "path", "update", "stale_conflict", "reason"),
+                POLICY_CHANGE_FAILED,
+                Severity::Error,
+                FAILED,
+            ),
+            (
+                policy_change_succeeded(
+                    "sid",
+                    "exe",
+                    "path",
+                    "old",
+                    "1",
+                    "new",
+                    2,
+                    "intent",
+                    "update",
+                    "confirmed_overwrite",
+                ),
+                POLICY_CHANGE_SUCCEEDED,
+                Severity::Info,
+                SUCCEEDED,
+            ),
+            (
+                policy_external_change_applied("path", "new", 2),
+                POLICY_EXTERNAL_CHANGE_APPLIED,
+                Severity::Notice,
+                &["path", "new_id", "new_revision"],
+            ),
+            (
+                policy_external_change_rejected("path", "invalid"),
+                POLICY_EXTERNAL_CHANGE_REJECTED,
+                Severity::Warning,
+                &["path", "reason"],
+            ),
+        ];
+
+        for (entry, code, severity, expected_fields) in entries {
+            assert_eq!(entry.event_code, Some(code));
+            assert_eq!(entry.severity, severity);
+            assert_eq!(
+                entry.fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+                expected_fields
+            );
+        }
+    }
 }
