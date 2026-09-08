@@ -1947,7 +1947,7 @@ impl TransactionMarker {
 
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
-            "Version": 2,
+            "Version": 3,
             "TransactionId": self.id.to_string(),
             "FinalLeaf": self.final_leaf,
             "OldVolumeSerial": self.old_identity.volume_serial,
@@ -1967,7 +1967,7 @@ impl TransactionMarker {
         let object = value.as_object().context("transaction marker must be an object")?;
         ensure!(object.len() == 11, "transaction marker contains unexpected fields");
         ensure!(
-            object.get("Version").and_then(serde_json::Value::as_u64) == Some(2),
+            object.get("Version").and_then(serde_json::Value::as_u64) == Some(3),
             "unsupported transaction marker"
         );
         let text = |name: &str| -> anyhow::Result<&str> {
@@ -3827,8 +3827,11 @@ mod tests {
         legacy["Version"] = 1.into();
         assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&legacy).unwrap()).is_err());
 
+        legacy["Version"] = 2.into();
+        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&legacy).unwrap()).is_err());
+
         let mut missing_identity = legacy;
-        missing_identity["Version"] = 2.into();
+        missing_identity["Version"] = 3.into();
         missing_identity.as_object_mut().unwrap().remove("NewFileId");
         assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&missing_identity).unwrap()).is_err());
     }
