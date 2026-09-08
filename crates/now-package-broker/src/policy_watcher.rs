@@ -128,14 +128,8 @@ fn build_watcher_set(
     Ok(set)
 }
 
-fn replace_watcher_set<T, E>(
-    active: &mut T,
-    active_paths: &mut Arc<[PathBuf]>,
-    replacement_paths: Arc<[PathBuf]>,
-    replacement: Result<T, E>,
-) -> Result<(), E> {
+fn replace_watcher_set<T, E>(active: &mut T, replacement: Result<T, E>) -> Result<(), E> {
     *active = replacement?;
-    *active_paths = replacement_paths;
     Ok(())
 }
 
@@ -203,16 +197,12 @@ impl PolicyWatcher {
                     return;
                 }
             };
-            let mut active_paths = initial_paths;
-
             let _ = ready.send(Ok(()));
             while let Ok(command) = watcher_command_rx.recv() {
                 match command {
                     WatcherCommand::Refresh(paths) => {
                         let replacement = build_watcher_set(&paths, &change_tx, &failure_tx);
-                        if let Err((_failure, dir, error)) =
-                            replace_watcher_set(&mut watchers, &mut active_paths, paths, replacement)
-                        {
+                        if let Err((_failure, dir, error)) = replace_watcher_set(&mut watchers, replacement) {
                             error!(%error, path = %dir.display(), "Failed to extend policy directory monitoring");
                         }
                     }
@@ -388,29 +378,15 @@ mod tests {
     #[test]
     fn failed_refresh_keeps_the_active_watcher_set() {
         let mut active = vec!["common", "legacy", "managed"];
-        let mut active_paths: Arc<[PathBuf]> = vec![PathBuf::from("old")].into();
-        let replacement_paths: Arc<[PathBuf]> = vec![PathBuf::from("new")].into();
 
-        let result = replace_watcher_set(
-            &mut active,
-            &mut active_paths,
-            Arc::clone(&replacement_paths),
-            Err::<Vec<&str>, _>("registration failed"),
-        );
+        let result = replace_watcher_set(&mut active, Err::<Vec<&str>, _>("registration failed"));
 
         assert_eq!(result, Err("registration failed"));
         assert_eq!(active, ["common", "legacy", "managed"]);
-        assert_eq!(&*active_paths, &[PathBuf::from("old")]);
 
-        replace_watcher_set(
-            &mut active,
-            &mut active_paths,
-            Arc::clone(&replacement_paths),
-            Ok::<_, &str>(vec!["replacement"]),
-        )
-        .expect("complete replacement set swaps successfully");
+        replace_watcher_set(&mut active, Ok::<_, &str>(vec!["replacement"]))
+            .expect("complete replacement set swaps successfully");
         assert_eq!(active, ["replacement"]);
-        assert_eq!(&*active_paths, &*replacement_paths);
     }
 
     #[tokio::test]
