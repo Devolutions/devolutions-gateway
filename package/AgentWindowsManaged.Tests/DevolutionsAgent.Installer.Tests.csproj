@@ -16,17 +16,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AgentWindowsManaged\DevolutionsAgent.csproj" Targets="Compile;GetTargetPath" />
+    <ProjectReference Include="..\AgentWindowsManaged\DevolutionsAgent.csproj" Targets="CoreBuild;GetTargetPath" />
   </ItemGroup>
-
-  <Target Name="PrepareInstallerReference" BeforeTargets="ResolveProjectReferences">
-    <MSBuild
-      Projects="..\AgentWindowsManaged\DevolutionsAgent.csproj"
-      Targets="Compile"
-      Properties="Configuration=$(Configuration)" />
-    <MakeDir Directories="..\AgentWindowsManaged\bin\$(Configuration)\net48" />
-    <Copy
-      SourceFiles="..\AgentWindowsManaged\obj\$(Configuration)\net48\DevolutionsAgent.exe"
-      DestinationFiles="..\AgentWindowsManaged\bin\$(Configuration)\net48\DevolutionsAgent.exe" />
-  </Target>
 </Project>

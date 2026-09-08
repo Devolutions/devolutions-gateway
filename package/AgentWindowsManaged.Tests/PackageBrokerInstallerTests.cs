@@ -267,6 +267,30 @@ public sealed class PackageBrokerInstallerTests
     }
 
     [Fact]
+    public void SecurityDescriptorComparisonIgnoresAuditRules()
+    {
+        const string expected = "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+        DirectorySecurity actual =
+            DirectorySecurity($"{expected}S:(AU;SA;FA;;;WD)");
+
+        PackageBrokerPolicyActions.VerifySecurityDescriptor(actual, expected);
+    }
+
+    [Theory]
+    [InlineData("O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")]
+    [InlineData("O:SYG:SYD:P(A;OICI;FA;;;SY)")]
+    [InlineData("O:SYG:SYD:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")]
+    public void SecurityDescriptorComparisonRejectsOwnerDaclOrProtectionChanges(string actualSddl)
+    {
+        const string expected = "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+        Assert.Throws<InvalidOperationException>(
+            () => PackageBrokerPolicyActions.VerifySecurityDescriptor(
+                DirectorySecurity(actualSddl),
+                expected));
+    }
+
+    [Fact]
     public void MigrationActionsUseDeferredRollbackCommitSequence()
     {
         ManagedAction ensure = ActionFor(nameof(PackageBrokerPolicyActions.EnsureProgramDataPackageBrokerDirectory));
