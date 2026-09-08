@@ -249,7 +249,7 @@ impl PolicyStore {
         }
     }
 
-    fn observe_storage(&self, retain_for_write: bool) -> Observation {
+    fn observe_storage(&self, retain_for_write: bool) -> (PathBuf, Observation) {
         let path = self.observation_path();
         let observation = if retain_for_write {
             self.storage.observe_for_write(self.source, &path)
@@ -257,12 +257,12 @@ impl PolicyStore {
             self.storage.observe(self.source, &path)
         };
         let Some([managed, legacy]) = &self.default_paths else {
-            return observation;
+            return (path, observation);
         };
         if self.default_managed_selected.load(std::sync::atomic::Ordering::Acquire)
             || crate::policy_security::windows_paths_equal(&path, managed)
         {
-            return observation;
+            return (path, observation);
         }
 
         let final_path = windows::select_default_policy_path(managed.clone(), legacy.clone());
@@ -270,12 +270,15 @@ impl PolicyStore {
             self.default_managed_selected
                 .store(true, std::sync::atomic::Ordering::Release);
             if retain_for_write {
-                self.storage.observe_for_write(self.source, &final_path)
+                (
+                    final_path.clone(),
+                    self.storage.observe_for_write(self.source, &final_path),
+                )
             } else {
-                self.storage.observe(self.source, &final_path)
+                (final_path.clone(), self.storage.observe(self.source, &final_path))
             }
         } else {
-            observation
+            (path, observation)
         }
     }
 
@@ -303,7 +306,7 @@ impl PolicyStore {
         if *monitoring != Monitoring::Available {
             return self.management_snapshot();
         }
-        let observation = self.observe_storage(false);
+        let (_, observation) = self.observe_storage(false);
         let management = self.publish_observation(observation);
         tracing::info!(?cause, state = ?management.state, "Reloaded package broker policy");
         management
@@ -314,7 +317,8 @@ impl PolicyStore {
         if *monitoring != Monitoring::Initializing {
             return self.management_snapshot();
         }
-        let management = self.publish_observation(self.observe_storage(false));
+        let (_, observation) = self.observe_storage(false);
+        let management = self.publish_observation(observation);
         *monitoring = Monitoring::Available;
         management
     }
@@ -352,7 +356,7 @@ impl PolicyStore {
             ));
         }
         let previous = self.snapshot();
-        let mut observation = self.observe_storage(true);
+        let (write_configured_path, mut observation) = self.observe_storage(true);
         let fresh_token = token_for(&previous, &observation.fingerprint);
 
         // Both conflict modes require this exact token.
@@ -424,15 +428,15 @@ impl PolicyStore {
             .map_err(|_| error_response(ErrorCode::InternalError, "failed to serialize the committed policy"))?;
 
         let persisted = if request.operation == PolicyReplacementOperation::Create {
-            self.storage.create(&self.configured_path, &observation, &bytes)
+            self.storage.create(&write_configured_path, &observation, &bytes)
         } else {
-            self.storage.replace(&self.configured_path, &mut observation, &bytes)
+            self.storage.replace(&write_configured_path, &mut observation, &bytes)
         };
         let persisted = match persisted {
             Ok(persisted) => persisted,
             Err(WriteFailure::PrePublication(error)) => {
                 tracing::warn!(error = format!("{error:#}"), "Policy persistence failed");
-                let current = self.observe_storage(false);
+                let (_, current) = self.observe_storage(false);
                 if current.fingerprint != observation.fingerprint {
                     let management = self.publish_observation(current);
                     return Err(error_with_management(
@@ -451,7 +455,7 @@ impl PolicyStore {
                     error = format!("{error:#}"),
                     "Conditional policy publication observed a concurrent storage change"
                 );
-                let current = self.observe_storage(false);
+                let (_, current) = self.observe_storage(false);
                 if current.fingerprint == observation.fingerprint {
                     return Err(error_response(
                         ErrorCode::PolicyPersistenceFailed,
@@ -470,7 +474,7 @@ impl PolicyStore {
                     error = format!("{error:#}"),
                     "Published policy failed authoritative reload"
                 );
-                let current = self.observe_storage(false);
+                let (_, current) = self.observe_storage(false);
                 let management = self.publish_observation(current);
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
@@ -869,11 +873,21 @@ mod storage_tests {
             observation
         }
 
-        fn create(&self, _observation: &Observation, _bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
+        fn create(
+            &self,
+            _configured_path: &Path,
+            _observation: &Observation,
+            _bytes: &[u8],
+        ) -> Result<PersistedPolicy, WriteFailure> {
             unreachable!("default transition tests do not write")
         }
 
-        fn replace(&self, _observation: &mut Observation, _bytes: &[u8]) -> Result<PersistedPolicy, WriteFailure> {
+        fn replace(
+            &self,
+            _configured_path: &Path,
+            _observation: &mut Observation,
+            _bytes: &[u8],
+        ) -> Result<PersistedPolicy, WriteFailure> {
             unreachable!("default transition tests do not write")
         }
     }
