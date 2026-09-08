@@ -7,7 +7,7 @@ use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/7";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/8";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -622,7 +622,7 @@ fn check_version_range(index: usize, rule: &PolicyRule, findings: &mut Findings)
             &base,
             "version range must specify MinVersion or MaxVersion",
         ));
-    } else if let (Some(min), Some(max)) = (min, max)
+    } else if let (Some(min), Some(max)) = (min.as_ref(), max.as_ref())
         && min > max
     {
         findings.push(rule_finding(
@@ -632,6 +632,22 @@ fn check_version_range(index: usize, rule: &PolicyRule, findings: &mut Findings)
             &base,
             "MinVersion is greater than MaxVersion",
         ));
+    } else if !range.include_prerelease
+        && let Some(max) = max
+        && let Some(mut first_stable) =
+            min.or_else(|| range.min_version.is_none().then(|| semver::Version::new(0, 0, 0)))
+    {
+        first_stable.pre = semver::Prerelease::EMPTY;
+        first_stable.build = semver::BuildMetadata::EMPTY;
+        if max < first_stable {
+            findings.push(rule_finding(
+                rule,
+                PolicyFindingSeverity::Error,
+                PolicyFindingCode::EmptyVersionRange,
+                &base,
+                "version range contains no stable version",
+            ));
+        }
     }
 }
 fn parse_version_bound(
@@ -1093,6 +1109,46 @@ mod tests {
             &validate_draft(&raw),
             PolicyFindingCode::ContradictoryConstraints
         ));
+    }
+
+    #[test]
+    fn prerelease_exclusion_rejects_ranges_without_stable_versions() {
+        for (min, max, include_prerelease, expected_valid) in [
+            (Some("1.0.0-alpha"), Some("1.0.0-beta"), false, false),
+            (Some("1.0.0-alpha"), Some("1.0.0-beta"), true, true),
+            (Some("1.0.0-alpha"), Some("1.0.0"), false, true),
+            (None, Some("0.0.0-alpha"), false, false),
+            (None, Some("0.0.0"), false, true),
+            (Some("1.0.0"), Some("2.0.0-alpha"), false, true),
+        ] {
+            let mut raw = draft();
+            let mut range = json!({ "IncludePrerelease": include_prerelease });
+            if let Some(min) = min {
+                range["MinVersion"] = json!(min);
+            }
+            if let Some(max) = max {
+                range["MaxVersion"] = json!(max);
+            }
+            raw["Rules"] = json!([rule("range", json!({ "VersionRange": range }))]);
+            let result = validate_draft(&raw);
+            assert_eq!(
+                result.is_valid, expected_valid,
+                "{min:?}..{max:?}, prerelease={include_prerelease}"
+            );
+            assert_eq!(result.validator_version, VALIDATOR_VERSION);
+            if expected_valid {
+                assert!(result.canonical_draft.is_some());
+            } else {
+                assert!(result.canonical_draft.is_none());
+                assert!(result.validation_receipt.is_none());
+                let finding = result
+                    .findings
+                    .iter()
+                    .find(|finding| finding.code == PolicyFindingCode::EmptyVersionRange)
+                    .expect("empty range finding");
+                assert_eq!(finding.path, "/Rules/0/Match/VersionRange");
+            }
+        }
     }
 
     #[test]
