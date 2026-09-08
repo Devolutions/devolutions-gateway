@@ -251,21 +251,16 @@ pub(crate) fn os_strings_match_case_insensitive(left: &OsStr, right: &OsStr) -> 
     unsafe { CompareStringOrdinal(&left, &right, true) == CSTR_EQUAL }
 }
 
-/// Verify every policy-directory ancestor without following reparses and summarize its security state.
-pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow::Result<[u8; 32]> {
-    let mut hasher = Sha256::new();
-    let mut current = dir.parent();
+/// Verify and summarize retained policy ancestors in root-to-leaf order.
+///
+/// Ordered file identities define the path without encoding path text.
+/// This avoids case normalization and preserves ill-formed UTF-16 path semantics.
+pub(crate) fn verified_policy_ancestor_digest(handles: &[File], subject: &str) -> anyhow::Result<[u8; 32]> {
+    let mut levels = Vec::with_capacity(handles.len());
 
-    while let Some(ancestor) = current {
-        let dir_subject = format!("{subject} ancestor directory '{}'", ancestor.display());
-        let handle = OpenOptions::new()
-            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
-            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
-            .open(ancestor)
-            .with_context(|| format!("failed to open {dir_subject}"))?;
-
-        if is_reparse_point(&handle).with_context(|| format!("failed to inspect {dir_subject}"))? {
+    for (index, handle) in handles.iter().enumerate() {
+        let dir_subject = format!("{subject} ancestor level {index}");
+        if is_reparse_point(handle).with_context(|| format!("failed to inspect {dir_subject}"))? {
             bail!("{dir_subject} is a reparse point");
         }
         let attributes = handle
@@ -275,24 +270,41 @@ pub(crate) fn verify_policy_ancestor_chain(dir: &Path, subject: &str) -> anyhow:
         if attributes & windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
             bail!("{dir_subject} is not a directory");
         }
-
-        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
-        if !windows_paths_equal(&resolved, ancestor) {
-            bail!(
-                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
-                resolved.display()
-            );
-        }
-        verify_policy_ancestor_directory_security(&handle, &dir_subject)?;
+        verify_policy_ancestor_directory_security(handle, &dir_subject)?;
         let security_digest =
-            security_state_digest(&handle).with_context(|| format!("failed to digest {dir_subject} security"))?;
-        hasher.update(resolved.as_os_str().to_string_lossy().to_lowercase().as_bytes());
-        hasher.update(b"\0");
-        hasher.update(security_digest);
-        current = ancestor.parent();
+            security_state_digest(handle).with_context(|| format!("failed to digest {dir_subject} security"))?;
+        levels.push((
+            file_identity(handle).with_context(|| format!("failed to identify {dir_subject}"))?,
+            security_digest,
+        ));
     }
 
-    Ok(hasher.finalize().into())
+    Ok(canonical_ancestor_digest(&levels))
+}
+
+fn canonical_ancestor_digest(levels: &[(FileIdentity, [u8; 32])]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"devolutions-policy-ancestor-digest-v2\0");
+    hasher.update(
+        u32::try_from(levels.len())
+            .expect("ancestor count fits u32")
+            .to_le_bytes(),
+    );
+    for &(identity, security_digest) in levels {
+        update_ancestor_level_digest(&mut hasher, identity, security_digest);
+    }
+    hasher.finalize().into()
+}
+
+fn update_ancestor_level_digest(hasher: &mut Sha256, identity: FileIdentity, security_digest: [u8; 32]) {
+    hasher.update(identity.volume_serial.to_le_bytes());
+    hasher.update(identity.file_id);
+    hasher.update(security_digest);
+}
+
+#[cfg(test)]
+pub(crate) fn test_ancestor_digest(identity: FileIdentity, security_digest: [u8; 32]) -> [u8; 32] {
+    canonical_ancestor_digest(&[(identity, security_digest)])
 }
 
 /// Open and retain every existing lexical component in a policy directory chain.
@@ -1252,6 +1264,79 @@ mod tests {
             canonical_security_digest(Some(owner), Some(&[first, second])),
             digest,
             "canonical digest is independent of native pointer width"
+        );
+    }
+
+    #[test]
+    fn ancestor_digest_changes_when_object_identity_changes_at_same_path_and_acl() {
+        let security = [7; 32];
+        let first = FileIdentity {
+            volume_serial: 1,
+            file_id: [1; 16],
+        };
+        let second = FileIdentity {
+            volume_serial: 1,
+            file_id: [2; 16],
+        };
+        let digest = |identity| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"devolutions-policy-ancestor-digest-v2\0");
+            hasher.update(1u32.to_le_bytes());
+            update_ancestor_level_digest(&mut hasher, identity, security);
+            <[u8; 32]>::from(hasher.finalize())
+        };
+
+        assert_ne!(digest(first), digest(second));
+    }
+
+    #[test]
+    fn ancestor_digest_binds_root_to_leaf_order() {
+        let root = FileIdentity {
+            volume_serial: 1,
+            file_id: [1; 16],
+        };
+        let leaf = FileIdentity {
+            volume_serial: 1,
+            file_id: [2; 16],
+        };
+        let security = [7; 32];
+
+        assert_ne!(
+            canonical_ancestor_digest(&[(root, security), (leaf, security)]),
+            canonical_ancestor_digest(&[(leaf, security), (root, security)])
+        );
+    }
+
+    #[test]
+    fn ancestor_digest_is_path_text_independent_without_lossy_collapse() {
+        let upper = Path::new(r"C:\DÉVOLUTIONS");
+        let lower = Path::new(r"c:\dévolutions");
+        assert!(windows_paths_equal(upper, lower));
+        let identity = FileIdentity {
+            volume_serial: 1,
+            file_id: [1; 16],
+        };
+        let digest = canonical_ancestor_digest(&[(identity, [7; 32])]);
+        assert_eq!(digest, canonical_ancestor_digest(&[(identity, [7; 32])]));
+
+        let first = OsString::from_wide(&[0xD800]);
+        let second = OsString::from_wide(&[0xD801]);
+        assert_eq!(first.to_string_lossy(), second.to_string_lossy());
+        assert_ne!(
+            canonical_ancestor_digest(&[(
+                FileIdentity {
+                    volume_serial: 1,
+                    file_id: [1; 16],
+                },
+                [7; 32],
+            )]),
+            canonical_ancestor_digest(&[(
+                FileIdentity {
+                    volume_serial: 1,
+                    file_id: [2; 16],
+                },
+                [7; 32],
+            )])
         );
     }
 

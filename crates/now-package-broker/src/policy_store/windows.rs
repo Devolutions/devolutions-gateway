@@ -330,8 +330,8 @@ fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
 ///
 /// Fails closed on any ambiguity: missing path, wrong object type, or reparse point.
 ///
-/// This only verifies `path` itself; callers additionally verify the ancestor chain with
-/// [`policy_security::verify_policy_ancestor_chain`], so an untrusted principal further
+/// This only verifies `path` itself; callers additionally verify retained ancestors with
+/// [`policy_security::verified_policy_ancestor_digest`], so an untrusted principal further
 /// up the tree (e.g. on the shared `%ProgramData%\Devolutions\Agent` parent, where the
 /// installer grants `LOCAL SERVICE` write access for unrelated Agent features) cannot
 /// delete or replace this directory out from under an already-verified identity check.
@@ -365,7 +365,7 @@ fn verify_directory_handle_type(handle: &File, subject: &str) -> anyhow::Result<
 /// Test storage models the same checks with identity and security generations.
 pub(super) struct VerifiedHostingDirectory {
     handle: Option<File>,
-    _ancestor_handles: Vec<File>,
+    ancestor_handles: Vec<File>,
     canonical_path: PathBuf,
     identity: FileIdentity,
     security_digest: [u8; 32],
@@ -389,7 +389,7 @@ impl VerifiedHostingDirectory {
     pub(super) fn for_fake_storage(canonical_path: PathBuf, identity: FileIdentity, security_digest: [u8; 32]) -> Self {
         Self {
             handle: None,
-            _ancestor_handles: Vec::new(),
+            ancestor_handles: Vec::new(),
             canonical_path,
             identity,
             security_digest,
@@ -418,6 +418,10 @@ impl VerifiedHostingDirectory {
             "hosting directory security changed while its handle was held open"
         );
         Ok(current_security)
+    }
+
+    fn ancestor_digest(&self) -> anyhow::Result<[u8; 32]> {
+        policy_security::verified_policy_ancestor_digest(&self.ancestor_handles, "policy directory")
     }
 }
 
@@ -464,7 +468,6 @@ fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(File, PathBuf
         "ProgramData resolved to an unexpected location"
     );
     policy_security::verify_policy_ancestor_directory_security(&program_data_handle, "ProgramData directory")?;
-    policy_security::verify_policy_ancestor_chain(&canonical_program_data, "ProgramData directory")?;
 
     let vendor_handle = ensure_secure_directory_component(
         &program_data_handle,
@@ -487,7 +490,8 @@ fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(File, PathBuf
     ancestor_handles.push(program_data_handle);
     ancestor_handles.push(vendor_handle);
     let final_path = policy_security::final_path_from_handle(&handle)?;
-    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(&final_path, "policy directory")?;
+    let ancestor_security_digest =
+        policy_security::verified_policy_ancestor_digest(&ancestor_handles, "policy directory")?;
 
     Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
 }
@@ -571,7 +575,8 @@ fn verify_custom_directory_secure(dir: &Path) -> anyhow::Result<(File, PathBuf, 
         .context("configured policy directory chain is empty")?;
     let final_path = policy_security::final_path_from_handle(&handle)?;
     policy_security::verify_policy_directory_security(&handle)?;
-    let ancestor_security_digest = policy_security::verify_policy_ancestor_chain(&final_path, "policy directory")?;
+    let ancestor_security_digest =
+        policy_security::verified_policy_ancestor_digest(&ancestor_handles, "policy directory")?;
     Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
 }
 
@@ -584,7 +589,7 @@ fn verify_legacy_default_directory_secure(dir: &Path) -> anyhow::Result<(File, P
     let final_path = policy_security::final_path_from_handle(&handle)?;
     policy_security::verify_legacy_policy_directory_security(&handle)?;
     let ancestor_security_digest =
-        policy_security::verify_policy_ancestor_chain(&final_path, "legacy policy directory")?;
+        policy_security::verified_policy_ancestor_digest(&ancestor_handles, "legacy policy directory")?;
     Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
 }
 
@@ -1064,6 +1069,29 @@ struct OpenedPolicyFile {
     retained_for_write: bool,
 }
 
+fn verify_policy_leaf_type_if_present(path: &Path) -> anyhow::Result<()> {
+    let file = match OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).with_context(|| format!("failed to inspect policy leaf {}", path.display())),
+    };
+    let attributes = file.metadata()?.file_attributes();
+    ensure!(
+        attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0,
+        "policy leaf is a reparse point"
+    );
+    ensure!(
+        attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0,
+        "policy leaf is a directory"
+    );
+    Ok(())
+}
+
 fn open_policy_file(path: &Path, retain_for_write: bool) -> std::io::Result<OpenedPolicyFile> {
     if retain_for_write {
         match OpenOptions::new()
@@ -1314,7 +1342,7 @@ fn observe_impl(
         }
     };
     let ancestor_security_digest =
-        match policy_security::verify_policy_ancestor_chain(&canonical_dir, "policy directory") {
+        match policy_security::verified_policy_ancestor_digest(&ancestor_handles, "policy directory") {
             Ok(digest) => digest,
             Err(error) => {
                 tracing::warn!(
@@ -1385,7 +1413,7 @@ fn observe_impl(
 
     let hosting_dir = (base_write_capability == PolicyWriteCapability::Writable).then_some(VerifiedHostingDirectory {
         handle: Some(dir_handle),
-        _ancestor_handles: ancestor_handles,
+        ancestor_handles,
         canonical_path: canonical_dir.clone(),
         identity: parent,
         security_digest: dir_security_digest,
@@ -1398,9 +1426,37 @@ fn observe_impl(
         ..Default::default()
     };
 
+    if let Err(error) = verify_policy_leaf_type_if_present(&canonical_path) {
+        tracing::warn!(
+            path = %canonical_path.display(),
+            error = %format!("{error:#}"),
+            "Configured policy leaf has an unsafe type"
+        );
+        return invalid_observation(
+            &canonical_path,
+            validation::DiskFailureReason::InsecureStorage,
+            invalid_ctx,
+            PolicyWriteCapability::ReadOnly,
+            Some(PolicyReadOnlyReason::UnsafePath),
+        );
+    }
     let opened = match open_policy_file(&canonical_path, retain_target && !legacy_default) {
         Ok(opened) => opened,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Err(error) = verify_policy_leaf_type_if_present(&canonical_path) {
+                tracing::warn!(
+                    path = %canonical_path.display(),
+                    error = %format!("{error:#}"),
+                    "Configured policy leaf became unsafe while opening"
+                );
+                return invalid_observation(
+                    &canonical_path,
+                    validation::DiskFailureReason::InsecureStorage,
+                    invalid_ctx,
+                    PolicyWriteCapability::ReadOnly,
+                    Some(PolicyReadOnlyReason::UnsafePath),
+                );
+            }
             return DiskObservation {
                 state: PolicyManagementState::Missing,
                 policy: None,
@@ -1866,9 +1922,9 @@ fn verify_directory_evidence(
     let expected_ancestor_security = expected_fingerprint
         .ancestor_security_digest()
         .context("write observation has no ancestor security fingerprint")?;
-    let current_ancestor_security =
-        policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
-            .context("policy directory ancestor security changed after token validation")?;
+    let current_ancestor_security = hosting_dir
+        .ancestor_digest()
+        .context("policy directory ancestor security changed after token validation")?;
     if current_ancestor_security != expected_ancestor_security {
         return Err(anyhow::anyhow!(
             "policy directory ancestor security changed after token validation"
@@ -2895,9 +2951,9 @@ fn verify_persisted_handle(
         .verify_unchanged()
         .context("held policy directory changed during replacement")?;
     let parent = hosting_dir.identity();
-    let ancestor_security_digest =
-        policy_security::verify_policy_ancestor_chain(hosting_dir.canonical_path(), "policy directory")
-            .context("policy directory ancestor chain failed verification immediately after writing")?;
+    let ancestor_security_digest = hosting_dir
+        .ancestor_digest()
+        .context("policy directory ancestor chain failed verification immediately after writing")?;
     let resolved =
         policy_security::final_path_from_handle(final_file).context("failed to resolve persisted policy handle")?;
     ensure!(
@@ -4014,6 +4070,23 @@ mod tests {
     }
 
     #[test]
+    fn active_fingerprint_rotates_on_same_acl_ancestor_replacement() {
+        let security = test_security_digest(1);
+        let before_ancestor = policy_security::test_ancestor_digest(test_identity(1), security);
+        let after_ancestor = policy_security::test_ancestor_digest(test_identity(2), security);
+        let fingerprint = |ancestor_security_digest| DiskFingerprint::Active {
+            parent: test_identity(10),
+            target: test_identity(11),
+            content_digest: sha256_digest(b"same bytes"),
+            security_digest: security,
+            dir_security_digest: security,
+            ancestor_security_digest,
+        };
+
+        assert_ne!(fingerprint(before_ancestor), fingerprint(after_ancestor));
+    }
+
+    #[test]
     fn active_fingerprint_rotates_on_hosting_directory_acl_change() {
         let before = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 1);
         let after = DiskFingerprint::test_active(b"same bytes", 1, 1, 1, 2);
@@ -4203,7 +4276,8 @@ mod tests {
         let candidate_dir = junction.join("policy-dir");
         std::fs::create_dir(&candidate_dir).unwrap();
 
-        let error = policy_security::verify_policy_ancestor_chain(&candidate_dir, "policy directory").unwrap_err();
+        let error =
+            policy_security::retain_policy_no_reparse_directory_chain(&candidate_dir, "policy directory").unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("reparse point"), "unexpected error: {message}");
     }
@@ -4327,6 +4401,30 @@ mod tests {
             .open(&alias)
             .unwrap();
         assert_eq!(policy_security::file_link_count(&handle).unwrap(), 2);
+    }
+
+    #[test]
+    fn dangling_reparse_leaf_is_unsafe_not_missing() {
+        let dir = temp_dir();
+        let link = dir.path().join("policy.json");
+        if std::os::windows::fs::symlink_file(dir.path().join("missing.json"), &link).is_err() {
+            return;
+        }
+
+        let error = verify_policy_leaf_type_if_present(&link).unwrap_err();
+
+        assert!(format!("{error:#}").contains("reparse point"));
+    }
+
+    #[test]
+    fn directory_leaf_is_unsafe_not_missing() {
+        let dir = temp_dir();
+        let leaf = dir.path().join("policy.json");
+        std::fs::create_dir(&leaf).unwrap();
+
+        let error = verify_policy_leaf_type_if_present(&leaf).unwrap_err();
+
+        assert!(format!("{error:#}").contains("directory"));
     }
 
     #[test]
