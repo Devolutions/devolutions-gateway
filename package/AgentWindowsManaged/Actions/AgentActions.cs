@@ -192,7 +192,7 @@ internal static class AgentActions
     private static readonly ElevatedManagedAction commitLegacyPackageBrokerPolicyMigration = new(
         new Id($"CA.{nameof(commitLegacyPackageBrokerPolicyMigration)}"),
         PackageBrokerPolicyActions.CommitLegacyPackageBrokerPolicyMigration,
-        Return.check,
+        Return.ignore,
         When.After, new Step(migrateLegacyPackageBrokerPolicy.Id),
         Condition.NOT_BeingRemoved,
         Sequence.InstallExecuteSequence)
