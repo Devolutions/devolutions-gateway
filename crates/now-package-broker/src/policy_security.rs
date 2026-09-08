@@ -200,6 +200,16 @@ pub(crate) fn verify_policy_directory_security(directory: &File) -> anyhow::Resu
     )
 }
 
+/// Verify the legacy Agent policy directory without granting it managed-store write capability.
+pub(crate) fn verify_legacy_policy_directory_security(directory: &File) -> anyhow::Result<()> {
+    verify_handle_security(
+        directory,
+        "legacy policy directory",
+        TrustedWriters::AdminOnly,
+        PARENT_DIRECTORY_TAMPER_MASK,
+    )
+}
+
 /// Verify the relaxed tamper policy used for an already-open policy ancestor.
 pub(crate) fn verify_policy_ancestor_directory_security(dir: &File, subject: &str) -> anyhow::Result<()> {
     verify_handle_security(
@@ -1326,6 +1336,21 @@ mod tests {
     fn local_service_write_ace_is_rejected_for_managed_policy_storage() {
         let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
         let error = sd.verify_as_managed_policy(WRITE_ACCESS_MASK).unwrap_err();
+        assert!(
+            error.to_string().contains("grants write access"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn shared_create_rights_are_rejected_during_managed_directory_bootstrap() {
+        let shared = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;BU)");
+        shared
+            .verify_with_mask(DIRECTORY_TAMPER_MASK)
+            .expect("create-only rights are safe after a child is pinned");
+        let error = shared
+            .verify_as_managed_policy(PARENT_DIRECTORY_TAMPER_MASK)
+            .unwrap_err();
         assert!(
             error.to_string().contains("grants write access"),
             "unexpected error: {error}"

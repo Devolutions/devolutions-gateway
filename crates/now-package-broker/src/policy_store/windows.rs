@@ -82,9 +82,100 @@ pub(super) fn default_policy_dir() -> PathBuf {
     program_data.join("Devolutions").join("PackageBroker")
 }
 
-/// Default policy file path inside [`default_policy_dir`].
-pub(super) fn default_policy_path() -> PathBuf {
-    default_policy_dir().join(POLICY_FILE_NAME)
+fn legacy_default_policy_path() -> PathBuf {
+    let program_data = std::env::var_os("PROGRAMDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    program_data.join("Devolutions").join("Agent").join(POLICY_FILE_NAME)
+}
+
+/// Return the managed and legacy default paths in arbitration order.
+pub(super) fn default_policy_paths() -> [PathBuf; 2] {
+    [
+        default_policy_dir().join(POLICY_FILE_NAME),
+        legacy_default_policy_path(),
+    ]
+}
+
+pub(super) fn select_default_policy_path(managed: PathBuf, legacy: PathBuf) -> PathBuf {
+    select_default_policy_path_with(managed, legacy, || {})
+}
+
+fn select_default_policy_path_with(
+    managed: PathBuf,
+    legacy: PathBuf,
+    before_final_managed_check: impl FnOnce(),
+) -> PathBuf {
+    if managed_default_has_state(&managed) {
+        return managed;
+    }
+    match std::fs::symlink_metadata(&legacy) {
+        Ok(_) => {
+            before_final_managed_check();
+            if managed_default_has_state(&managed) {
+                managed
+            } else {
+                legacy
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => managed,
+        Err(_) => legacy,
+    }
+}
+
+fn managed_default_has_state(managed: &Path) -> bool {
+    match std::fs::symlink_metadata(managed) {
+        Ok(_) => return true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+    let Some(dir) = managed.parent() else {
+        return true;
+    };
+    let Some(final_leaf) = managed.file_name().and_then(OsStr::to_str) else {
+        return true;
+    };
+    let transaction_prefix = OsString::from(format!(".{final_leaf}.txn-"));
+    let create_prefix = OsString::from(format!(".{final_leaf}.tmp-"));
+
+    let mut handles = match policy_security::retain_policy_no_reparse_directory_chain(dir, "managed policy directory") {
+        Ok(handles) => handles,
+        Err(error)
+            if error
+                .root_cause()
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return false;
+        }
+        Err(_) => return true,
+    };
+    let Some(dir_handle) = handles.pop() else {
+        return true;
+    };
+    if policy_security::verify_policy_directory_security(&dir_handle).is_err() {
+        return true;
+    }
+    let canonical_dir = match policy_security::final_path_from_handle(&dir_handle) {
+        Ok(path) => path,
+        Err(_) => return true,
+    };
+    let entries = match std::fs::read_dir(canonical_dir) {
+        Ok(entries) => entries,
+        Err(_) => return true,
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return true;
+        };
+        let name = entry.file_name();
+        if reserved_name_remainder(&name, &transaction_prefix).map_or(true, |remainder| remainder.is_some())
+            || reserved_name_remainder(&name, &create_prefix).map_or(true, |remainder| remainder.is_some())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Validate the *shape* of a configured policy path before ever touching disk: it must
@@ -170,6 +261,13 @@ fn validate_configured_path_shape(path: &Path) -> Result<(), ConfiguredPathError
 /// the advisory reason it would map to if unwritable.
 type ProbeResult = Result<(), (PolicyReadOnlyReason, String)>;
 
+fn probe_failure_capability(reason: PolicyReadOnlyReason) -> PolicyWriteCapability {
+    match reason {
+        PolicyReadOnlyReason::UnsupportedFileSystem => PolicyWriteCapability::Unsupported,
+        _ => PolicyWriteCapability::ReadOnly,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct AtomicityProbeKey {
     identity: FileIdentity,
@@ -245,26 +343,27 @@ fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
 /// delete or replace this directory out from under an already-verified identity check.
 fn open_and_verify_directory_identity(path: &Path) -> anyhow::Result<(File, PathBuf)> {
     let handle = open_directory_no_reparse(path)?;
-
-    let attributes = handle
-        .metadata()
-        .with_context(|| format!("failed to query metadata for {}", path.display()))?
-        .file_attributes();
-
-    if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
-        bail!(
-            "{} is a reparse point (symlink/junction); the policy directory must be a real directory",
-            path.display()
-        );
-    }
-    if attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-        bail!("{} is not a directory", path.display());
-    }
-
+    verify_directory_handle_type(&handle, &path.display().to_string())?;
     let final_path = policy_security::final_path_from_handle(&handle)
         .with_context(|| format!("failed to resolve {}", path.display()))?;
 
     Ok((handle, final_path))
+}
+
+fn verify_directory_handle_type(handle: &File, subject: &str) -> anyhow::Result<()> {
+    let attributes = handle
+        .metadata()
+        .with_context(|| format!("failed to query metadata for {subject}"))?
+        .file_attributes();
+
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        bail!("{subject} is a reparse point (symlink/junction); the policy directory must be a real directory");
+    }
+    if attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+        bail!("{subject} is not a directory");
+    }
+
+    Ok(())
 }
 
 /// Holds the verified hosting directory and its lexical ancestors through publication.
@@ -387,7 +486,11 @@ fn ensure_default_directory_secured(dir: &Path) -> anyhow::Result<(File, PathBuf
         leaf_name,
         &security_attributes,
         DirectorySecurityRole::DedicatedPolicy,
-        |_| Ok(()),
+        |_| {
+            verify_directory_handle_type(&vendor_handle, "shared policy ancestor directory")?;
+            policy_security::verify_policy_directory_security(&vendor_handle)
+                .context("shared policy ancestor grants unsafe create rights during bootstrap")
+        },
     )?;
     ancestor_handles.push(program_data_handle);
     ancestor_handles.push(vendor_handle);
@@ -480,6 +583,19 @@ fn verify_custom_directory_secure(dir: &Path) -> anyhow::Result<(File, PathBuf, 
     Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
 }
 
+fn verify_legacy_default_directory_secure(dir: &Path) -> anyhow::Result<(File, PathBuf, [u8; 32], Vec<File>)> {
+    let mut ancestor_handles =
+        policy_security::retain_policy_no_reparse_directory_chain(dir, "legacy policy directory")?;
+    let handle = ancestor_handles
+        .pop()
+        .context("legacy policy directory chain is empty")?;
+    let final_path = policy_security::final_path_from_handle(&handle)?;
+    policy_security::verify_legacy_policy_directory_security(&handle)?;
+    let ancestor_security_digest =
+        policy_security::verify_policy_ancestor_chain(&final_path, "legacy policy directory")?;
+    Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
+}
+
 /// Marker error indicating [`probe_write_capability`] failed because the hosting
 /// filesystem is not known to support the atomic same-directory replacement semantics
 /// `atomic_replace` depends on (as opposed to an ACL/quota/permission problem).
@@ -515,77 +631,105 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
         return Err(UnsupportedFilesystem(filesystem).into());
     }
 
+    let dir_handle = open_directory_no_reparse(dir)?;
     let probe_id = uuid::Uuid::new_v4();
     let source_path = dir.join(format!(".package-broker-write-probe-{probe_id}-a.tmp"));
     let target_path = dir.join(format!(".package-broker-write-probe-{probe_id}-b.tmp"));
     let tombstone_path = dir.join(format!(".package-broker-write-probe-{probe_id}-old.tmp"));
-
+    let source = create_probe_file(&source_path, b"probe-source")?;
+    let target = match create_probe_file(&target_path, b"probe-target") {
+        Ok(target) => target,
+        Err(error) => {
+            return match cleanup_probe_file(source, &source_path, "write-capability probe source") {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => {
+                    Err(error.context(format!("probe source cleanup also failed: {cleanup_error:#}")))
+                }
+            };
+        }
+    };
+    let mut target_tombstoned = false;
+    let mut source_published = false;
+    let mut target_deleted = false;
     let probe_result = (|| -> anyhow::Result<()> {
-        std::fs::write(&source_path, b"probe-source").context("create write-capability probe source file")?;
-        std::fs::write(&target_path, b"probe-target").context("create write-capability probe target file")?;
-        let dir_handle = open_directory_no_reparse(dir)?;
-        let source = open_transaction_file(&source_path)?;
-        let target = open_transaction_file(&target_path)?;
         rename_file_handle(
             &target,
             &dir_handle,
             tombstone_path.file_name().expect("probe path has leaf"),
         )
         .context("probe target-to-tombstone handle rename")?;
+        target_tombstoned = true;
         rename_file_handle(
             &source,
             &dir_handle,
             target_path.file_name().expect("probe path has leaf"),
         )
         .context("probe create-new handle publication")?;
+        source_published = true;
         let replaced = std::fs::read(&target_path).context("read write-capability probe result")?;
         ensure!(
             replaced == b"probe-source",
             "atomic replacement did not take effect on this filesystem"
         );
         delete_file_handle(&target).context("probe POSIX tombstone unlink")?;
-        drop(target);
-        ensure!(
-            !tombstone_path.exists(),
-            "POSIX tombstone unlink did not remove the directory entry"
-        );
-        drop(source);
+        target_deleted = true;
         Ok(())
     })();
 
-    // Cleanup is mandatory, not best-effort (item 28): both paths are always attempted
-    // regardless of the probe's own outcome or each other, and any leftover probe file
-    // -- other than one that was never actually created (tolerated only as `NotFound`)
-    // -- itself disqualifies this directory from `Writable`, aggregated into the overall
-    // result rather than silently logged and ignored. A probe that leaves a stray file
-    // behind in the configured policy directory is not actually side-effect-free,
-    // whatever its rename result reported.
-    let source_cleanup = cleanup_probe_file(&source_path);
-    let target_cleanup = cleanup_probe_file(&target_path);
-    let tombstone_cleanup = cleanup_probe_file(&tombstone_path);
+    let source_cleanup_path = if source_published { &target_path } else { &source_path };
+    let source_cleanup = cleanup_probe_file(source, source_cleanup_path, "write-capability probe source");
+    let target_cleanup = if target_deleted {
+        drop(target);
+        ensure_path_absent(&tombstone_path, "write-capability probe target")
+    } else {
+        let target_cleanup_path = if target_tombstoned {
+            &tombstone_path
+        } else {
+            &target_path
+        };
+        cleanup_probe_file(target, target_cleanup_path, "write-capability probe target")
+    };
 
-    probe_result
-        .and(source_cleanup)
-        .and(target_cleanup)
-        .and(tombstone_cleanup)
+    probe_result.and(source_cleanup).and(target_cleanup)
 }
 
-/// Remove a write-capability probe file, tolerating only the file already being absent
-/// (the expected outcome for `source_path` after a successful replace, which consumes
-/// it). Any other failure (permission denied, sharing violation, ...) means a stray
-/// probe file was left behind in the configured policy directory, which must itself
-/// disqualify the directory from `Writable` (item 28): the specific OS error is only
-/// ever traced, and the returned error is a single sanitized, aggregated message never
-/// exposed through the management API.
-fn cleanup_probe_file(path: &Path) -> anyhow::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
+fn cleanup_probe_file(file: File, path: &Path, subject: &str) -> anyhow::Result<()> {
+    let cleanup = delete_file_handle(&file).with_context(|| format!("failed to remove {subject}"));
+    drop(file);
+    cleanup.and_then(|()| ensure_path_absent(path, subject))
+}
+
+fn ensure_path_absent(path: &Path, subject: &str) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            tracing::warn!(path = %path.display(), %error, "Failed to remove write-capability probe file");
-            bail!("failed to remove a write-capability probe file left behind in the policy directory")
-        }
+        Ok(_) => bail!("{subject} cleanup did not remove the directory entry"),
+        Err(error) => Err(error).with_context(|| format!("failed to verify {subject} cleanup")),
     }
+}
+
+fn create_probe_file(path: &Path, bytes: &[u8]) -> anyhow::Result<File> {
+    use std::io::Write as _;
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .access_mode(GENERIC_READ.0 | GENERIC_WRITE.0 | DELETE.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH).0)
+        .open(path)
+        .with_context(|| format!("failed to create write-capability probe {}", path.display()))?;
+    if let Err(error) = file
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("failed to persist write-capability probe {}", path.display()))
+    {
+        return match delete_file_handle(&file) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(error.context(format!("probe cleanup also failed: {cleanup_error:#}"))),
+        };
+    }
+    Ok(file)
 }
 
 /// Classify the filesystem hosting `dir` (e.g. `"NTFS"`, `"ReFS"`, `"FAT32"`).
@@ -1040,10 +1184,13 @@ fn observe_impl(
     let leaf_name = configured_path
         .file_name()
         .expect("shape validation already required a named leaf file");
+    let legacy_default = matches!(source, PolicyConfigurationSource::DefaultPath)
+        && policy_security::windows_paths_equal(configured_path, &legacy_default_policy_path());
 
-    let secured = match source {
-        PolicyConfigurationSource::DefaultPath => ensure_default_directory_secured(dir),
-        PolicyConfigurationSource::ConfiguredPath => verify_custom_directory_secure(dir),
+    let secured = match (source, legacy_default) {
+        (PolicyConfigurationSource::DefaultPath, true) => verify_legacy_default_directory_secure(dir),
+        (PolicyConfigurationSource::DefaultPath, false) => ensure_default_directory_secured(dir),
+        (PolicyConfigurationSource::ConfiguredPath, _) => verify_custom_directory_secure(dir),
     };
 
     let (dir_handle, canonical_dir, _, ancestor_handles) = match secured {
@@ -1116,7 +1263,12 @@ fn observe_impl(
         }
     };
 
-    if let Err(error) = policy_security::verify_policy_directory_security(&dir_handle) {
+    let directory_security = if legacy_default {
+        policy_security::verify_legacy_policy_directory_security(&dir_handle)
+    } else {
+        policy_security::verify_policy_directory_security(&dir_handle)
+    };
+    if let Err(error) = directory_security {
         tracing::warn!(
             path = %canonical_dir.display(), error = %format!("{error:#}"),
             "Held policy directory failed security verification"
@@ -1173,8 +1325,12 @@ fn observe_impl(
             }
         };
 
-    let recovery = recover_create_temporary_files(&canonical_dir)
-        .and_then(|()| recover_interrupted_transaction(&dir_handle, &canonical_dir, leaf_name));
+    let recovery = if legacy_default {
+        Ok(())
+    } else {
+        recover_create_temporary_files(&canonical_dir)
+            .and_then(|()| recover_interrupted_transaction(&dir_handle, &canonical_dir, leaf_name))
+    };
     if let Err(error) = recovery {
         tracing::error!(
             path = %canonical_dir.display(),
@@ -1197,7 +1353,12 @@ fn observe_impl(
 
     // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
     // verified directory identity and security digest, never repeated on every observation.
-    let (base_write_capability, base_read_only_reason) =
+    let (base_write_capability, base_read_only_reason) = if legacy_default {
+        (
+            PolicyWriteCapability::ReadOnly,
+            Some(PolicyReadOnlyReason::InsufficientPermissions),
+        )
+    } else {
         match probe_cache.get_or_probe(&canonical_dir, parent, dir_security_digest) {
             Ok(()) => (PolicyWriteCapability::Writable, None),
             Err((reason, diagnostic)) => {
@@ -1205,9 +1366,10 @@ fn observe_impl(
                     path = %canonical_dir.display(), %diagnostic,
                     "Policy directory is not writable through the management API"
                 );
-                (PolicyWriteCapability::ReadOnly, Some(reason))
+                (probe_failure_capability(reason), Some(reason))
             }
-        };
+        }
+    };
 
     let hosting_dir = (base_write_capability == PolicyWriteCapability::Writable).then_some(VerifiedHostingDirectory {
         handle: Some(dir_handle),
@@ -1224,7 +1386,7 @@ fn observe_impl(
         ..Default::default()
     };
 
-    let opened = match open_policy_file(&canonical_path, retain_target) {
+    let opened = match open_policy_file(&canonical_path, retain_target && !legacy_default) {
         Ok(opened) => opened,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return DiskObservation {
@@ -1394,7 +1556,12 @@ fn observe_impl(
         ..invalid_ctx
     };
 
-    if let Err(security_error) = policy_security::verify_managed_policy_file_security(&file) {
+    let file_security = if legacy_default {
+        policy_security::verify_policy_file_security(&file)
+    } else {
+        policy_security::verify_managed_policy_file_security(&file)
+    };
+    if let Err(security_error) = file_security {
         // Fail closed without ever reading content past a failed security check, exactly
         // like the legacy loader: an insecurely-stored file is never trusted, whatever it
         // contains. Forced ReadOnly regardless of the directory's own writable capability
@@ -2551,6 +2718,35 @@ mod tests {
         tempfile::tempdir().expect("create temp dir")
     }
 
+    #[test]
+    fn default_path_prefers_managed_then_legacy_then_new_location() {
+        let dir = temp_dir();
+        let managed = dir.path().join("PackageBroker").join(POLICY_FILE_NAME);
+        let legacy = dir.path().join("Agent").join(POLICY_FILE_NAME);
+
+        assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), managed);
+
+        std::fs::create_dir(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, b"legacy").unwrap();
+        assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), legacy);
+
+        std::fs::create_dir(managed.parent().unwrap()).unwrap();
+        let marker = managed
+            .parent()
+            .unwrap()
+            .join(format!(".{POLICY_FILE_NAME}.txn-{}.marker", uuid::Uuid::new_v4()));
+        std::fs::write(&marker, b"interrupted").unwrap();
+        assert_eq!(
+            select_default_policy_path(managed.clone(), legacy.clone()),
+            managed,
+            "an interrupted managed transaction must never fall back to legacy policy"
+        );
+
+        std::fs::remove_file(marker).unwrap();
+        std::fs::write(&managed, b"managed").unwrap();
+        assert_eq!(select_default_policy_path(managed.clone(), legacy), managed);
+    }
+
     fn open_deletable_test_file(path: &Path, content: &[u8]) -> File {
         std::fs::write(path, content).unwrap();
         OpenOptions::new()
@@ -3069,6 +3265,18 @@ mod tests {
 
         assert!(result.is_err());
         assert!(cache.cached_success.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn unsupported_filesystem_uses_unsupported_capability() {
+        assert_eq!(
+            probe_failure_capability(PolicyReadOnlyReason::UnsupportedFileSystem),
+            PolicyWriteCapability::Unsupported
+        );
+        assert_eq!(
+            probe_failure_capability(PolicyReadOnlyReason::InsufficientPermissions),
+            PolicyWriteCapability::ReadOnly
+        );
     }
 
     // ─── DiskFingerprint rotation/stability semantics ─────────────────────────
@@ -3611,31 +3819,14 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    // ─── Mandatory probe cleanup (item 28) ─────────────────────────────────────
-
     #[test]
-    fn cleanup_probe_file_tolerates_an_already_absent_file() {
+    fn probe_file_creation_never_truncates_an_existing_path() {
         let dir = temp_dir();
-        let path = dir.path().join("never-created.tmp");
-        cleanup_probe_file(&path).expect("removing an already-absent file must be tolerated");
-    }
+        let path = dir.path().join("probe.tmp");
+        std::fs::write(&path, b"external").unwrap();
 
-    #[test]
-    fn cleanup_probe_file_fails_when_removal_is_blocked() {
-        let dir = temp_dir();
-        let path = dir.path().join("locked.tmp");
-        std::fs::write(&path, b"content").unwrap();
-
-        // Hold the file open without FILE_SHARE_DELETE so the removal attempt below
-        // fails with something other than NotFound.
-        let _locked = OpenOptions::new()
-            .read(true)
-            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
-            .open(&path)
-            .unwrap();
-
-        let error = cleanup_probe_file(&path).unwrap_err();
+        let error = create_probe_file(&path, b"probe").unwrap_err();
         assert!(!format!("{error:#}").is_empty());
-        assert!(path.exists(), "the file must still be present after a failed cleanup");
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
     }
 }
