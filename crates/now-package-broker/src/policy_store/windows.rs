@@ -25,18 +25,21 @@ use now_policy_api::{
 };
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::str::{U16CStrExt as _, U16CString};
-use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, NTSTATUS};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER,
+    ERROR_NOT_SUPPORTED, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HANDLE, NTSTATUS, WIN32_ERROR,
+};
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_DISPOSITION_INFO_EX_FLAGS,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_NONE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo, FileRenameInfoEx, GetVolumeInformationW,
-    GetVolumePathNameW, READ_CONTROL, SetFileInformationByHandle,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE,
+    FILE_SHARE_NONE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo,
+    FileRenameInfoEx, GetVolumeInformationW, GetVolumePathNameW, READ_CONTROL, SetFileInformationByHandle,
 };
 #[cfg(test)]
-use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
 
 use crate::policy_security::{self, FileIdentity};
 use crate::policy_store::validation;
@@ -297,7 +300,9 @@ impl AtomicityProbeCache {
         }
 
         let result = probe_write_capability(dir).map_err(|error| {
-            let reason = if error.downcast_ref::<UnsupportedFilesystem>().is_some() {
+            let reason = if error.downcast_ref::<UnsupportedFilesystem>().is_some()
+                || error.downcast_ref::<UnsupportedAtomicSemantics>().is_some()
+            {
                 PolicyReadOnlyReason::UnsupportedFileSystem
             } else {
                 PolicyReadOnlyReason::InsufficientPermissions
@@ -611,6 +616,17 @@ impl std::fmt::Display for UnsupportedFilesystem {
 
 impl std::error::Error for UnsupportedFilesystem {}
 
+#[derive(Debug)]
+struct UnsupportedAtomicSemantics(String);
+
+impl std::fmt::Display for UnsupportedAtomicSemantics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UnsupportedAtomicSemantics {}
+
 /// Filesystem names known to support atomic same-directory handle renames.
 /// Conservative by design: an unrecognized filesystem is treated as unsupported.
 const ATOMIC_REPLACE_CAPABLE_FILESYSTEMS: &[&str] = &["NTFS", "ReFS"];
@@ -632,8 +648,8 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     let source_path = dir.join(".package-broker-write-probe-a.tmp");
     let target_path = dir.join(".package-broker-write-probe-b.tmp");
     let tombstone_path = dir.join(".package-broker-write-probe-old.tmp");
-    let source = create_probe_file(&source_path, b"probe-source")?;
-    let target = match create_probe_file(&target_path, b"probe-target") {
+    let source = create_probe_file(&source_path, b"probe-source", false)?;
+    let target = match create_probe_file(&target_path, b"probe-target", true) {
         Ok(target) => target,
         Err(error) => {
             return match cleanup_probe_file(source, &source_path, "write-capability probe source") {
@@ -648,6 +664,7 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     let mut source_published = false;
     let mut target_deleted = false;
     let probe_result = (|| -> anyhow::Result<()> {
+        verify_no_replace_collision(&source, &target, &dir_handle, &source_path, &target_path)?;
         rename_file_handle(
             &target,
             &dir_handle,
@@ -689,6 +706,59 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     probe_result.and(source_cleanup).and(target_cleanup)
 }
 
+fn verify_no_replace_collision(
+    source: &File,
+    target: &File,
+    dir: &File,
+    source_path: &Path,
+    target_path: &Path,
+) -> anyhow::Result<()> {
+    let check = (|| -> anyhow::Result<()> {
+        let source_identity = policy_security::file_identity(source)?;
+        let target_identity = policy_security::file_identity(target)?;
+        let source_content = read_file_from_start(source)?;
+        let target_content = read_file_from_start(target)?;
+
+        match rename_file_handle(source, dir, target_path.file_name().expect("probe target has a leaf")) {
+            Err(error) if error.is_collision() => {}
+            Err(error) if error.is_unsupported() => {
+                return Err(UnsupportedAtomicSemantics(format!("no-replace collision is unsupported: {error}")).into());
+            }
+            Err(error) if error.is_permission_failure() => {
+                return Err(anyhow::Error::new(error).context("no-replace collision was blocked by permissions"));
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context("no-replace collision returned an unexpected status"));
+            }
+            Ok(()) => bail!("no-replace rename unexpectedly replaced an occupied destination"),
+        }
+        verify_transaction_file_path(source, source_path)?;
+        verify_transaction_file_path(target, target_path)?;
+        ensure!(
+            policy_security::file_identity(source)? == source_identity
+                && policy_security::file_identity(target)? == target_identity,
+            "no-replace collision changed a retained probe identity"
+        );
+        ensure!(
+            read_file_from_start(source)? == source_content && read_file_from_start(target)? == target_content,
+            "no-replace collision changed retained probe content"
+        );
+        Ok(())
+    })();
+
+    check.map_err(|error| {
+        if error
+            .downcast_ref::<RenameFailure>()
+            .is_some_and(RenameFailure::is_permission_failure)
+            || error.downcast_ref::<UnsupportedAtomicSemantics>().is_some()
+        {
+            error
+        } else {
+            UnsupportedAtomicSemantics(format!("filesystem failed no-replace collision semantics: {error:#}")).into()
+        }
+    })
+}
+
 fn cleanup_probe_file(file: File, path: &Path, subject: &str) -> anyhow::Result<()> {
     let cleanup = delete_file_handle(&file).with_context(|| format!("failed to remove {subject}"));
     drop(file);
@@ -703,7 +773,7 @@ fn ensure_path_absent(path: &Path, subject: &str) -> anyhow::Result<()> {
     }
 }
 
-fn create_probe_file(path: &Path, bytes: &[u8]) -> anyhow::Result<File> {
+fn create_probe_file(path: &Path, bytes: &[u8], allow_delete_share: bool) -> anyhow::Result<File> {
     use std::io::Write as _;
 
     let mut file = OpenOptions::new()
@@ -711,7 +781,14 @@ fn create_probe_file(path: &Path, bytes: &[u8]) -> anyhow::Result<File> {
         .write(true)
         .create_new(true)
         .access_mode(GENERIC_READ.0 | GENERIC_WRITE.0 | DELETE.0 | READ_CONTROL.0)
-        .share_mode(FILE_SHARE_READ.0)
+        .share_mode(
+            if allow_delete_share {
+                FILE_SHARE_READ | FILE_SHARE_DELETE
+            } else {
+                FILE_SHARE_READ
+            }
+            .0,
+        )
         .custom_flags((FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH).0)
         .open(path)
         .with_context(|| format!("failed to create write-capability probe {}", path.display()))?;
@@ -2301,16 +2378,113 @@ fn open_transaction_file(path: &Path) -> anyhow::Result<File> {
         .with_context(|| format!("failed to open transaction remnant {}", path.display()))
 }
 
-fn rename_file_handle(file: &File, root: &File, new_name: &OsStr) -> std::io::Result<()> {
-    let information = RenameInformation::new(HANDLE(root.as_raw_handle()), new_name);
-    match set_file_rename_information(file, &information) {
-        Ok(()) => Ok(()),
-        Err(win32_error) => nt_set_file_rename_information(file, &information).map_err(|nt_error| {
-            std::io::Error::other(format!(
-                "handle-relative rename failed through Win32 ({win32_error}) and NT ({nt_error})"
-            ))
-        }),
+#[derive(Debug)]
+enum RenameFailure {
+    Win32(std::io::Error),
+    Native { win32: std::io::Error, status: NTSTATUS },
+}
+
+impl RenameFailure {
+    const STATUS_OBJECT_NAME_COLLISION: u32 = 0xC000_0035;
+    const STATUS_ACCESS_DENIED: u32 = 0xC000_0022;
+    const STATUS_SHARING_VIOLATION: u32 = 0xC000_0043;
+    const STATUS_INVALID_INFO_CLASS: u32 = 0xC000_0003;
+    const STATUS_INVALID_PARAMETER: u32 = 0xC000_000D;
+    const STATUS_INVALID_DEVICE_REQUEST: u32 = 0xC000_0010;
+    const STATUS_NOT_SUPPORTED: u32 = 0xC000_00BB;
+
+    fn is_collision(&self) -> bool {
+        match self {
+            Self::Win32(error) => win32_error_is(error, &[ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS]),
+            Self::Native { status, .. } => status.0.cast_unsigned() == Self::STATUS_OBJECT_NAME_COLLISION,
+        }
     }
+
+    fn is_permission_failure(&self) -> bool {
+        match self {
+            Self::Win32(error) => win32_error_is(error, &[ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION]),
+            Self::Native { status, .. } => {
+                matches!(
+                    status.0.cast_unsigned(),
+                    Self::STATUS_ACCESS_DENIED | Self::STATUS_SHARING_VIOLATION
+                )
+            }
+        }
+    }
+
+    fn is_unsupported(&self) -> bool {
+        match self {
+            Self::Win32(error) => win32_error_is(
+                error,
+                &[ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, ERROR_INVALID_PARAMETER],
+            ),
+            Self::Native { status, .. } => matches!(
+                status.0.cast_unsigned(),
+                Self::STATUS_INVALID_INFO_CLASS
+                    | Self::STATUS_INVALID_PARAMETER
+                    | Self::STATUS_INVALID_DEVICE_REQUEST
+                    | Self::STATUS_NOT_SUPPORTED
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for RenameFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Win32(error) => write!(f, "handle-relative rename failed through Win32: {error}"),
+            Self::Native { win32, status } => write!(
+                f,
+                "handle-relative rename failed through Win32 ({win32}) and NT ({:#010X})",
+                status.0.cast_unsigned()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RenameFailure {}
+
+fn win32_error_is(error: &std::io::Error, codes: &[WIN32_ERROR]) -> bool {
+    let Some(raw) = error.raw_os_error() else {
+        return false;
+    };
+
+    codes.iter().any(|code| {
+        raw == code.0.cast_signed()
+            // windows-rs converts its Error to io::Error with the HRESULT as raw_os_error.
+            || raw == code.to_hresult().0
+    })
+}
+
+fn rename_with_fallback(
+    preferred: impl FnOnce() -> std::io::Result<()>,
+    fallback: impl FnOnce() -> Result<(), NTSTATUS>,
+) -> Result<(), RenameFailure> {
+    match preferred() {
+        Ok(()) => Ok(()),
+        Err(error)
+            if win32_error_is(
+                &error,
+                &[
+                    ERROR_FILE_EXISTS,
+                    ERROR_ALREADY_EXISTS,
+                    ERROR_ACCESS_DENIED,
+                    ERROR_SHARING_VIOLATION,
+                ],
+            ) =>
+        {
+            Err(RenameFailure::Win32(error))
+        }
+        Err(win32) => fallback().map_err(|status| RenameFailure::Native { win32, status }),
+    }
+}
+
+fn rename_file_handle(file: &File, root: &File, new_name: &OsStr) -> Result<(), RenameFailure> {
+    let information = RenameInformation::new(HANDLE(root.as_raw_handle()), new_name);
+    rename_with_fallback(
+        || set_file_rename_information(file, &information),
+        || nt_set_file_rename_information(file, &information),
+    )
 }
 
 struct RenameInformation {
@@ -2378,14 +2552,14 @@ fn set_file_rename_information(file: &File, information: &RenameInformation) -> 
     }
 }
 
-fn nt_set_file_rename_information(file: &File, information: &RenameInformation) -> std::io::Result<()> {
+fn nt_set_file_rename_information(file: &File, information: &RenameInformation) -> Result<(), NTSTATUS> {
     let mut io_status = IoStatusBlock {
         status_or_pointer: 0,
         information: 0,
     };
 
     // SAFETY: `information` contains a valid variable-length FILE_RENAME_INFORMATION_EX buffer.
-    unsafe {
+    let status = unsafe {
         NtSetInformationFile(
             HANDLE(file.as_raw_handle()),
             &mut io_status,
@@ -2393,9 +2567,8 @@ fn nt_set_file_rename_information(file: &File, information: &RenameInformation) 
             information.length,
             FILE_RENAME_INFORMATION_EX_CLASS,
         )
-        .ok()
-        .map_err(std::io::Error::from)
-    }
+    };
+    if status.0 >= 0 { Ok(()) } else { Err(status) }
 }
 
 fn delete_file_handle(file: &File) -> anyhow::Result<()> {
@@ -3976,6 +4149,84 @@ mod tests {
     }
 
     #[test]
+    fn occupied_no_replace_probe_preserves_both_retained_files() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let source_path = dir.path().join("source.tmp");
+        let target_path = dir.path().join("target.tmp");
+        let source = create_probe_file(&source_path, b"source", false).unwrap();
+        let target = create_probe_file(&target_path, b"target", true).unwrap();
+        let source_identity = policy_security::file_identity(&source).unwrap();
+        let target_identity = policy_security::file_identity(&target).unwrap();
+
+        verify_no_replace_collision(&source, &target, &dir_file, &source_path, &target_path).unwrap();
+
+        assert_eq!(policy_security::file_identity(&source).unwrap(), source_identity);
+        assert_eq!(policy_security::file_identity(&target).unwrap(), target_identity);
+        assert_eq!(std::fs::read(&source_path).unwrap(), b"source");
+        assert_eq!(std::fs::read(&target_path).unwrap(), b"target");
+        cleanup_probe_file(source, &source_path, "source").unwrap();
+        cleanup_probe_file(target, &target_path, "target").unwrap();
+    }
+
+    fn windows_io_error(code: WIN32_ERROR) -> std::io::Error {
+        windows::core::Error::from_hresult(code.to_hresult()).into()
+    }
+
+    #[test]
+    fn preferred_collision_is_accepted_without_native_fallback() {
+        for code in [ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS] {
+            let fallback_called = std::cell::Cell::new(false);
+            let error = rename_with_fallback(
+                || Err(windows_io_error(code)),
+                || {
+                    fallback_called.set(true);
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+
+            assert!(error.is_collision());
+            assert!(!fallback_called.get());
+        }
+    }
+
+    #[test]
+    fn rename_status_classification_rejects_permission_and_unsupported_failures() {
+        for code in [ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION] {
+            let error = rename_with_fallback(
+                || Err(windows_io_error(code)),
+                || panic!("permission failures must not invoke the native fallback"),
+            )
+            .unwrap_err();
+            assert!(error.is_permission_failure());
+            assert!(!error.is_collision());
+        }
+
+        for code in [ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED] {
+            let fallback_called = std::cell::Cell::new(false);
+            let unsupported = rename_with_fallback(
+                || Err(windows_io_error(code)),
+                || {
+                    fallback_called.set(true);
+                    Err(NTSTATUS(RenameFailure::STATUS_NOT_SUPPORTED.cast_signed()))
+                },
+            )
+            .unwrap_err();
+            assert!(unsupported.is_unsupported());
+            assert!(!unsupported.is_collision());
+            assert!(fallback_called.get());
+        }
+
+        let native_collision = rename_with_fallback(
+            || Err(windows_io_error(ERROR_INVALID_FUNCTION)),
+            || Err(NTSTATUS(RenameFailure::STATUS_OBJECT_NAME_COLLISION.cast_signed())),
+        )
+        .unwrap_err();
+        assert!(native_collision.is_collision());
+    }
+
+    #[test]
     fn failed_atomicity_probe_is_cached_until_directory_state_changes() {
         let dir = temp_dir();
         let missing = dir.path().join("missing");
@@ -4625,7 +4876,7 @@ mod tests {
         let path = dir.path().join("probe.tmp");
         std::fs::write(&path, b"external").unwrap();
 
-        let error = create_probe_file(&path, b"probe").unwrap_err();
+        let error = create_probe_file(&path, b"probe", false).unwrap_err();
         assert!(!format!("{error:#}").is_empty());
         assert_eq!(std::fs::read(&path).unwrap(), b"external");
     }
