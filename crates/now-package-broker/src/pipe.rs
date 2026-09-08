@@ -76,21 +76,23 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                             let serve = async move {
                                 // Keep blocking unauthenticated capture off the accept loop and
                                 // retain the connection slot until the work actually completes.
-                                let skip_signature_validation = state.skip_signature_validation;
                                 let capture = spawn_bounded_capture(permit, move || {
-                                let client = PipeClient::from_connected_pipe(&server, skip_signature_validation);
-                                (server, client)
+                                    let client = PipeClient::from_connected_pipe(&server);
+                                    (server, client)
                                 });
                                 let (_permit, server, client) = match capture.await {
-                                Ok((permit, (server, Ok(client)))) => (permit, server, client),
-                                Ok((_permit, (_server, Err(error)))) => {
-                                    warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                                    return;
-                                }
-                                Err(error) => {
-                                    error!(error = format!("{error:#}"), "Named pipe client identity capture task failed");
-                                    return;
-                                }
+                                    Ok((permit, (server, Ok(client)))) => (permit, server, client),
+                                    Ok((_permit, (_server, Err(error)))) => {
+                                        warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                                        return;
+                                    }
+                                    Err(error) => {
+                                        error!(
+                                            error = format!("{error:#}"),
+                                            "Named pipe client identity capture task failed"
+                                        );
+                                        return;
+                                    }
                                 };
 
                                 info!("Client connected to named pipe");
