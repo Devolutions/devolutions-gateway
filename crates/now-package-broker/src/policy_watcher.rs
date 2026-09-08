@@ -31,6 +31,7 @@ fn affects_watched_paths(event: &notify::Event, paths: &[PathBuf]) -> bool {
     let managed = &paths[0];
     let legacy = &paths[1];
     let managed_dir = managed.parent().expect("managed default policy has a parent");
+    let legacy_dir = legacy.parent().expect("legacy default policy has a parent");
     event.paths.iter().any(|event_path| {
         if event_path
             .parent()
@@ -46,6 +47,7 @@ fn affects_watched_paths(event: &notify::Event, paths: &[PathBuf]) -> bool {
         crate::policy_security::windows_paths_equal(event_path, managed)
             || crate::policy_security::windows_paths_equal(event_path, legacy)
             || crate::policy_security::windows_paths_equal(event_path, managed_dir)
+            || crate::policy_security::windows_paths_equal(event_path, legacy_dir)
             || event_path
                 .parent()
                 .is_some_and(|parent| crate::policy_security::windows_paths_equal(parent, managed_dir))
@@ -108,6 +110,34 @@ fn create_watcher(
     Ok(watcher)
 }
 
+struct WatcherSet {
+    watchers: Vec<RecommendedWatcher>,
+    directories: Vec<PathBuf>,
+}
+
+fn build_watcher_set(
+    paths: &Arc<[PathBuf]>,
+    changes: &tokio::sync::mpsc::Sender<tokio::time::Instant>,
+    failures: &tokio::sync::mpsc::UnboundedSender<WatcherFailure>,
+) -> Result<WatcherSet, (WatcherFailure, PathBuf, notify::Error)> {
+    let mut set = WatcherSet {
+        watchers: Vec::new(),
+        directories: Vec::new(),
+    };
+    for dir in watch_directories(paths) {
+        let watcher = create_watcher(&dir, Arc::clone(paths), changes.clone(), failures.clone())
+            .map_err(|(failure, error)| (failure, dir.clone(), error))?;
+        set.directories.push(dir);
+        set.watchers.push(watcher);
+    }
+    Ok(set)
+}
+
+fn replace_watcher_set<T, E>(active: &mut T, replacement: Result<T, E>) -> Result<(), E> {
+    *active = replacement?;
+    Ok(())
+}
+
 async fn debounce_change(
     changes: &mut tokio::sync::mpsc::Receiver<tokio::time::Instant>,
     failures: &mut tokio::sync::mpsc::UnboundedReceiver<WatcherFailure>,
@@ -164,40 +194,22 @@ impl PolicyWatcher {
         let (watcher_command_tx, watcher_command_rx) = std::sync::mpsc::channel();
 
         let _watcher_handle = tokio::task::spawn_blocking(move || {
-            let mut watchers = Vec::new();
-            let mut watched_directories = Vec::<PathBuf>::new();
-            let register = |watchers: &mut Vec<RecommendedWatcher>, watched_directories: &mut Vec<PathBuf>| {
-                for dir in watch_directories(&paths) {
-                    if watched_directories
-                        .iter()
-                        .any(|watched| crate::policy_security::windows_paths_equal(watched, &dir))
-                    {
-                        continue;
-                    }
-                    let watcher = create_watcher(&dir, Arc::clone(&paths), change_tx.clone(), failure_tx.clone())
-                        .map_err(|(failure, error)| (failure, dir.clone(), error))?;
-                    watched_directories.push(dir);
-                    watchers.push(watcher);
+            let mut watchers = match build_watcher_set(&paths, &change_tx, &failure_tx) {
+                Ok(watchers) => watchers,
+                Err((failure, dir, error)) => {
+                    error!(%error, path = %dir.display(), "Failed to watch policy directory");
+                    let _ = ready.send(Err(failure));
+                    return;
                 }
-                Ok::<(), (WatcherFailure, PathBuf, notify::Error)>(())
             };
-
-            if let Err((failure, dir, error)) = register(&mut watchers, &mut watched_directories) {
-                error!(%error, path = %dir.display(), "Failed to watch policy directory");
-                let _ = ready.send(Err(failure));
-                return;
-            }
 
             let _ = ready.send(Ok(()));
             while let Ok(command) = watcher_command_rx.recv() {
                 match command {
                     WatcherCommand::Refresh => {
-                        watchers.clear();
-                        watched_directories.clear();
-                        if let Err((failure, dir, error)) = register(&mut watchers, &mut watched_directories) {
+                        let replacement = build_watcher_set(&paths, &change_tx, &failure_tx);
+                        if let Err((_failure, dir, error)) = replace_watcher_set(&mut watchers, replacement) {
                             error!(%error, path = %dir.display(), "Failed to extend policy directory monitoring");
-                            let _ = failure_tx.send(failure);
-                            return;
                         }
                     }
                     WatcherCommand::Stop => return,
@@ -319,6 +331,10 @@ mod tests {
             &event(PathBuf::from(r"C:\ProgramData\Devolutions\PackageBroker")),
             &paths
         ));
+        assert!(affects_watched_paths(
+            &event(PathBuf::from(r"C:\ProgramData\Devolutions\Agent")),
+            &paths
+        ));
         assert!(!affects_watched_paths(
             &event(PathBuf::from(r"C:\ProgramData\Devolutions\Agent\unrelated.json")),
             &paths
@@ -352,6 +368,20 @@ mod tests {
         assert!(directories.iter().any(|path| path == &common));
         assert!(directories.iter().any(|path| path == &managed_dir));
         assert!(directories.iter().any(|path| path == &legacy_dir));
+    }
+
+    #[test]
+    fn failed_refresh_keeps_the_active_watcher_set() {
+        let mut active = vec!["common", "legacy", "managed"];
+
+        let result = replace_watcher_set(&mut active, Err::<Vec<&str>, _>("registration failed"));
+
+        assert_eq!(result, Err("registration failed"));
+        assert_eq!(active, ["common", "legacy", "managed"]);
+
+        replace_watcher_set(&mut active, Ok::<_, &str>(vec!["replacement"]))
+            .expect("complete replacement set swaps successfully");
+        assert_eq!(active, ["replacement"]);
     }
 
     #[tokio::test]

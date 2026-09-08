@@ -2029,7 +2029,15 @@ fn conditional_replace(
     let paths =
         TransactionPaths::new(hosting_dir.canonical_path(), final_path).map_err(WriteFailure::PrePublication)?;
 
-    let mut temp_file = create_secure_transaction_file(&paths.new).map_err(WriteFailure::PrePublication)?;
+    let mut marker_file =
+        create_secure_transaction_file(&paths.marker_staging).map_err(WriteFailure::PrePublication)?;
+    let mut temp_file = match create_secure_transaction_file(&paths.new) {
+        Ok(file) => file,
+        Err(error) => {
+            let error = cleanup_transaction_files(error, &[(&marker_file, "marker staging cleanup also failed")]);
+            return Err(WriteFailure::PrePublication(error));
+        }
+    };
     if let Err(error) = temp_file
         .write_all(bytes)
         .and_then(|()| temp_file.sync_all())
@@ -2039,28 +2047,30 @@ fn conditional_replace(
                 .context("replacement policy temporary file failed security verification")
         })
     {
-        return Err(prepublication_failure_after_cleanup(
-            &temp_file,
+        let error = cleanup_transaction_files(
             error,
-            "temporary replacement cleanup also failed",
-        ));
+            &[
+                (&temp_file, "temporary replacement cleanup also failed"),
+                (&marker_file, "marker staging cleanup also failed"),
+            ],
+        );
+        return Err(WriteFailure::PrePublication(error));
     }
     let marker =
         match TransactionMarker::from_observation(paths.id, final_path, expected_fingerprint, &temp_file, bytes) {
             Ok(marker) => marker,
             Err(error) => {
-                let error = cleanup_transaction_files(error, &[(&temp_file, "replacement policy cleanup also failed")]);
+                let error = cleanup_transaction_files(
+                    error,
+                    &[
+                        (&temp_file, "replacement policy cleanup also failed"),
+                        (&marker_file, "marker staging cleanup also failed"),
+                    ],
+                );
                 return Err(WriteFailure::ConcurrentChange(error));
             }
         };
 
-    let mut marker_file = match create_secure_transaction_file(&paths.marker_staging) {
-        Ok(file) => file,
-        Err(error) => {
-            let error = cleanup_transaction_files(error, &[(&temp_file, "replacement policy cleanup also failed")]);
-            return Err(WriteFailure::PrePublication(error));
-        }
-    };
     if let Err(error) = marker_file
         .write_all(&marker.to_bytes())
         .and_then(|()| marker_file.sync_all())
@@ -2441,7 +2451,7 @@ fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsS
     };
     if let Some(marker_staging_path) = marker_staging_path {
         ensure!(
-            marker_path.is_none() && old_path.is_none() && new_path.is_none(),
+            marker_path.is_none() && old_path.is_none(),
             "incomplete marker staging is mixed with published transaction remnants"
         );
         let marker_staging = open_transaction_file(&marker_staging_path)?;
@@ -2449,7 +2459,25 @@ fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsS
         policy_security::verify_managed_policy_file_security(&marker_staging)
             .context("transaction marker staging security is invalid")?;
         let final_path = dir_path.join(final_leaf);
-        return recover_marker_staging(&final_path, marker_staging);
+        let new_file = if let Some(new_path) = new_path {
+            let file = open_transaction_file(&new_path)?;
+            verify_orphan_transaction_file(&file, &new_path)?;
+            Some(file)
+        } else {
+            None
+        };
+        return recover_marker_staging(&final_path, marker_staging, new_file);
+    }
+    if marker_path.is_none() && old_path.is_none() {
+        let new_path = new_path.context("interrupted policy transaction has no durable state")?;
+        let new_file = open_transaction_file(&new_path)?;
+        verify_orphan_transaction_file(&new_file, &new_path)?;
+        let final_file = open_optional_final_policy(&dir_path.join(final_leaf))?
+            .context("orphan replacement has no original final")?;
+        verify_safe_existing_policy(&final_file, &dir_path.join(final_leaf))?;
+        delete_file_handle(&new_file).context("failed to retire orphan replacement")?;
+        drop(new_file);
+        return Ok(());
     }
     let marker_path = marker_path.context("interrupted policy transaction has no marker")?;
     let paths = TransactionPaths {
@@ -2506,12 +2534,55 @@ fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsS
     )
 }
 
-fn recover_marker_staging(final_path: &Path, marker_staging: File) -> anyhow::Result<()> {
-    let final_guard = open_optional_final_guard(final_path)?
+fn recover_marker_staging(final_path: &Path, marker_staging: File, new_file: Option<File>) -> anyhow::Result<()> {
+    let final_guard = open_optional_final_policy(final_path)?
         .context("incomplete marker staging exists but the original policy is absent")?;
+    let marker_bytes = read_file_from_start(&marker_staging)?;
+    if let Ok(marker) = TransactionMarker::from_bytes(&marker_bytes) {
+        verify_transaction_file_state(
+            &final_guard,
+            marker.old_identity,
+            marker.old_content_digest,
+            marker.old_security_digest,
+        )
+        .context("original policy changed during marker preparation")?;
+        if let Some(new_file) = &new_file {
+            verify_transaction_file_state(
+                new_file,
+                marker.new_identity,
+                marker.new_content_digest,
+                marker.new_security_digest,
+            )
+            .context("prepared replacement changed during marker preparation")?;
+        }
+    } else {
+        verify_safe_existing_policy(&final_guard, final_path)?;
+    }
+    if let Some(new_file) = new_file {
+        delete_file_handle(&new_file).context("failed to retire pre-marker replacement")?;
+        drop(new_file);
+    }
     delete_file_handle(&marker_staging).context("failed to retire incomplete transaction marker staging")?;
     drop(marker_staging);
     drop(final_guard);
+    Ok(())
+}
+
+fn verify_orphan_transaction_file(file: &File, expected_path: &Path) -> anyhow::Result<()> {
+    verify_transaction_file_path(file, expected_path)?;
+    policy_security::verify_policy_file_path(file, expected_path)?;
+    policy_security::verify_managed_policy_file_security(file)?;
+    Ok(())
+}
+
+fn verify_safe_existing_policy(file: &File, expected_path: &Path) -> anyhow::Result<()> {
+    verify_orphan_transaction_file(file, expected_path)?;
+    let policy = serde_json::from_slice::<PolicyDocument>(&read_file_from_start(file)?)
+        .context("existing final is not a policy document")?;
+    ensure!(
+        validation::validate_committed_policy(&policy).is_valid,
+        "existing final failed semantic validation"
+    );
     Ok(())
 }
 
@@ -3337,15 +3408,24 @@ mod tests {
 
     #[test]
     fn recovery_discards_incomplete_marker_staging_only_when_final_is_present() {
+        use std::io::Write as _;
+
         let dir = temp_dir();
         let final_path = dir.path().join("policy.json");
         let staging_path = dir.path().join("marker.prepare");
-        std::fs::write(&final_path, b"original").unwrap();
+        let mut final_file = match create_secure_transaction_file(&final_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        let original = valid_committed_policy_bytes();
+        final_file.write_all(&original).unwrap();
+        final_file.sync_all().unwrap();
+        drop(final_file);
         let staging = open_deletable_test_file(&staging_path, b"partial marker");
 
-        recover_marker_staging(&final_path, staging).unwrap();
+        recover_marker_staging(&final_path, staging, None).unwrap();
 
-        assert_eq!(std::fs::read(&final_path).unwrap(), b"original");
+        assert_eq!(std::fs::read(&final_path).unwrap(), original);
         assert!(!staging_path.exists());
     }
 
@@ -3356,10 +3436,88 @@ mod tests {
         let staging_path = dir.path().join("marker.prepare");
         let staging = open_deletable_test_file(&staging_path, b"partial marker");
 
-        recover_marker_staging(&final_path, staging).unwrap_err();
+        recover_marker_staging(&final_path, staging, None).unwrap_err();
 
         assert_eq!(std::fs::read(&staging_path).unwrap(), b"partial marker");
         assert!(staging_path.exists());
+    }
+
+    #[test]
+    fn recovery_retires_pre_marker_replacement_when_original_is_safe() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let original = valid_committed_policy_bytes();
+        let mut final_file = match create_secure_transaction_file(&final_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        final_file.write_all(&original).unwrap();
+        final_file.sync_all().unwrap();
+        drop(final_file);
+        let mut replacement = create_secure_transaction_file(&paths.new).unwrap();
+        replacement.write_all(b"partial replacement").unwrap();
+        replacement.sync_all().unwrap();
+        drop(replacement);
+
+        recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), original);
+        assert!(!paths.new.exists());
+    }
+
+    #[test]
+    fn recovery_retires_marker_staging_and_replacement_when_original_is_safe() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let original = valid_committed_policy_bytes();
+        let mut final_file = match create_secure_transaction_file(&final_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        final_file.write_all(&original).unwrap();
+        final_file.sync_all().unwrap();
+        drop(final_file);
+        let marker_staging = create_secure_transaction_file(&paths.marker_staging).unwrap();
+        drop(marker_staging);
+        let replacement = create_secure_transaction_file(&paths.new).unwrap();
+        drop(replacement);
+
+        recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), original);
+        assert!(!paths.marker_staging.exists());
+        assert!(!paths.new.exists());
+    }
+
+    #[test]
+    fn recovery_preserves_untrusted_pre_marker_collision() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+        let mut final_file = match create_secure_transaction_file(&final_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        final_file.write_all(&valid_committed_policy_bytes()).unwrap();
+        final_file.sync_all().unwrap();
+        drop(final_file);
+        std::fs::write(&paths.new, b"external collision").unwrap();
+
+        recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap_err();
+
+        assert_eq!(std::fs::read(&paths.new).unwrap(), b"external collision");
+        assert!(final_path.exists());
     }
 
     #[test]
