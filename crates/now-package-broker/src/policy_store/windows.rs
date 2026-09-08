@@ -1286,13 +1286,10 @@ pub(super) struct DiskObservation {
     pub fingerprint: DiskFingerprint,
     pub write_capability: PolicyWriteCapability,
     pub read_only_reason: Option<PolicyReadOnlyReason>,
-    /// Canonical resolved path (parent resolved from a verified handle, joined with the
-    /// exact configured `.json` leaf name; see item 22), or the best-effort literal
-    /// configured path when it could not be canonicalized at all (an unsupported shape,
-    /// or a directory/ancestor chain that failed verification before any handle could be
-    /// resolved). `PolicyStore` stores/displays/uses only this value from here on --
-    /// never re-deriving it from the original configuration string -- for observation,
-    /// the watcher, the store token, audit, and writes.
+    /// Canonical path formed from the verified parent handle and exact configured `.json` leaf name; see item 22.
+    /// Falls back to the literal configured path when the path cannot be canonicalized.
+    /// Trusted target access, publication, display, and watching use this path as applicable.
+    /// `PolicyStore` retains the original configured path for authoritative re-observation and security-chain validation.
     pub canonical_path: PathBuf,
     /// The hosting directory verified during this observation.
     /// Writable observations keep it alive through publication and postverification.
