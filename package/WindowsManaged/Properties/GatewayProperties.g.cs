@@ -884,6 +884,93 @@ namespace DevolutionsGateway.Properties
         }
 
  
+        internal static readonly WixProperty<String> serviceAccount = new()
+        {
+            Id = "P.SERVICEACCOUNT",
+            Default = "",
+            Name = "ServiceAccount",
+            Secure = true,
+            Hidden = false,
+            Public = true,
+            Encode = false,
+        };
+
+        /// <summary>The account the service logs on as (DOMAIN\Name). Defaults to the account of any existing service, or NETWORK SERVICE</summary>
+        public String ServiceAccount
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(serviceAccount.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(serviceAccount, value); 
+                }
+            }
+        }
+
+ 
+        internal static readonly WixProperty<String> servicePassword = new()
+        {
+            Id = "P.SERVICEPASSWORD",
+            Default = "",
+            Name = "ServicePassword",
+            Secure = true,
+            Hidden = true,
+            Public = true,
+            Encode = false,
+        };
+
+        /// <summary>The password of the service account; only required for regular user accounts</summary>
+        public String ServicePassword
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(servicePassword.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(servicePassword, value); 
+                }
+            }
+        }
+
+ 
+        internal static readonly WixProperty<String> serviceAccountSid = new()
+        {
+            Id = "P.ServiceAccountSid",
+            Default = "",
+            Name = "ServiceAccountSid",
+            Secure = false,
+            Hidden = true,
+            Public = false,
+            Encode = false,
+        };
+
+        /// <summary>A helper holding the resolved SID of `ServiceAccount`</summary>
+        public String ServiceAccountSid
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(serviceAccountSid.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(serviceAccountSid, value); 
+                }
+            }
+        }
+
+ 
         internal static readonly WixProperty<String> tcpListenerHost = new()
         {
             Id = "P.TCPLISTENERHOST",
@@ -1588,6 +1675,9 @@ namespace DevolutionsGateway.Properties
  
  
             serviceStart,
+            serviceAccount,
+            servicePassword,
+            serviceAccountSid,
  
  
             tcpListenerHost,

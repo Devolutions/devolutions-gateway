@@ -288,6 +288,9 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("PowerShellPath", "", hidden: true, secure: false, isPublic: false),
     new PropertyDefinition<string>("NoStartService", "", id: "dgw.no_start_service"),
     new PropertyDefinition<ServiceStartMode>("ServiceStart", ServiceStartMode.Manual),
+    new PropertyDefinition<string>("ServiceAccount", "", comment: "The account the service logs on as (DOMAIN\\Name). Defaults to the account of any existing service, or NETWORK SERVICE"),
+    new PropertyDefinition<string>("ServicePassword", "", hidden: true, comment: "The password of the service account; only required for regular user accounts"),
+    new PropertyDefinition<string>("ServiceAccountSid", "", hidden: true, secure: false, isPublic: false, comment: "A helper holding the resolved SID of `ServiceAccount`"),
 
     new PropertyDefinition<string>("TcpListenerHost", "0.0.0.0"),
     new PropertyDefinition<uint>("TcpListenerPort", 8181),

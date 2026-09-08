@@ -78,6 +78,36 @@ byte[] pickyBytes = e.Session.GetEmbeddedData("DevolutionsPicky.dll");
 System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "DevolutionsPicky.dll"),pickyBytes);
 ```
 
+## Command line properties
+
+Public properties can be passed to `msiexec` to drive unattended installs and upgrades, for example:
+
+```
+msiexec /i DevolutionsGateway.msi /qn P.SERVICEACCOUNT="CONTOSO\gateway$"
+```
+
+### Service account
+
+By default the service runs as `NT AUTHORITY\NetworkService`. The installer UI does not expose this; use the properties below.
+
+| Property | Description |
+| --- | --- |
+| `P.SERVICEACCOUNT` | The account the service logs on as, in `DOMAIN\Name` or `.\Name` form. On upgrade, defaults to the account of the existing service. |
+| `P.SERVICEPASSWORD` | The password of the service account. Only required for regular user accounts. Never written to the MSI log. |
+
+Supported accounts:
+
+- `NT AUTHORITY\NetworkService` (default), passwordless.
+- `NT SERVICE\DevolutionsGateway`, the virtual account of the service, passwordless.
+- Standalone and group managed service accounts (`DOMAIN\Name$`), passwordless. The host must be allowed to retrieve the managed password.
+- Regular local or domain user accounts, which require `P.SERVICEPASSWORD`.
+
+`LocalSystem` and `NT AUTHORITY\LocalService` are rejected.
+
+The installer grants the account the *Log on as a service* right and read/write access to `%ProgramData%\Devolutions\Gateway`. When a system store certificate is selected, it also grants read access to the private key.
+
+Upgrades and repairs preserve the existing account. A passwordless account upgrades without any extra parameters, which is what the Devolutions Agent relies on for automatic updates. An upgrade recreates the service, so an account that requires a password must have `P.SERVICEPASSWORD` supplied again or the installer fails before touching the existing installation. Automatic updates through the Devolutions Agent are therefore not available with password-based accounts.
+
 ## Compatibility
 
 The custom UI targets .NET Framework 4.5.1; which is available out-of-the-box on Windows. The provides compatiblity with Windows 8.1 and Windows Server 2012 R2, but it's an additional download on Windows 8 / Windows Server 2012.

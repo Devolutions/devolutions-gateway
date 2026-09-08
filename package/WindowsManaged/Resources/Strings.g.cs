@@ -713,7 +713,7 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string CertificateIsSelfSigned = "CertificateIsSelfSigned";		
 		/// <summary>
-		/// The Network Service account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.
+		/// The {0} account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.
 		/// </summary>
 		public const string PrivateKeyPermissionWillBeGranted = "PrivateKeyPermissionWillBeGranted";		
 		/// <summary>

@@ -106,6 +106,33 @@ internal static class GatewayActions
         Sequence.InstallExecuteSequence);
 
     /// <summary>
+    /// Read the logon account of any existing Devolutions Gateway service into the `ServiceAccount` property
+    /// </summary>
+    /// <remarks>
+    /// Runs before the account is validated so that upgrades preserve a custom service account. Skipped when
+    /// `P.SERVICEACCOUNT` is explicitly set on the command line.
+    /// </remarks>
+    private static readonly ManagedAction queryGatewayServiceAccount = new(
+        CustomActions.QueryGatewayServiceAccount,
+        Return.ignore,
+        When.After, new Step(getInstallDirFromRegistry.Id),
+        new Condition(GatewayProperties.serviceAccount.Id, string.Empty),
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
+    /// Resolve and validate the service account, failing the install early if it is unusable
+    /// </summary>
+    /// <remarks>
+    /// Scheduled before anything is changed on the system. Not run on uninstall.
+    /// </remarks>
+    private static readonly ManagedAction validateServiceAccount = new(
+        CustomActions.ValidateServiceAccount,
+        Return.check,
+        When.After, new Step(queryGatewayServiceAccount.Id),
+        new Condition("NOT (REMOVE=\"ALL\")"),
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
     /// Query the start mode of any existing Devolutions Gateway service and read it into the `ServiceStart` property
     /// </summary>
     private static readonly ElevatedManagedAction queryGatewayStartupType = new(
@@ -149,6 +176,7 @@ internal static class GatewayActions
     {
         Execute = Execute.deferred,
         Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid }),
     };
 
     /// <summary>
@@ -164,6 +192,7 @@ internal static class GatewayActions
     {
         Execute = Execute.deferred,
         Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid }),
     };
 
     private static readonly ElevatedManagedAction cleanGatewayConfigIfNeeded = new(
@@ -225,6 +254,22 @@ internal static class GatewayActions
         Sequence.InstallExecuteSequence)
     {
         UsesProperties = UseProperties(new[] { GatewayProperties.serviceStart })
+    };
+
+    /// <summary>
+    /// Grant the service account the "Log on as a service" right once the service exists
+    /// </summary>
+    private static readonly ElevatedManagedAction configureServiceAccount = new(
+        new Id($"CA.{nameof(configureServiceAccount)}"),
+        CustomActions.ConfigureServiceAccount,
+        Return.ignore,
+        When.After, Step.InstallServices,
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid }),
     };
 
     /// <summary>
@@ -369,10 +414,10 @@ internal static class GatewayActions
     );
 
     /// <summary>
-    /// Grant NETWORK SERVICE Read permission on the selected system store certificate's private key
+    /// Grant the service account Read permission on the selected system store certificate's private key
     /// </summary>
     /// <remarks>
-    /// The Gateway service runs as NETWORK SERVICE and needs Read access on the private key file.
+    /// The Gateway service needs Read access on the private key file.
     /// Best effort: failures are logged but do not fail the install. Only fires when a system-store
     /// certificate is selected and the gateway is not auto-generating one.
     /// </remarks>
@@ -400,6 +445,7 @@ internal static class GatewayActions
             GatewayProperties.certificateName,
             GatewayProperties.configureWebApp,
             GatewayProperties.generateCertificate,
+            GatewayProperties.serviceAccountSid,
         }),
     };
 
@@ -520,6 +566,8 @@ internal static class GatewayActions
         checkPowerShellVersion,
         getPowerShellPath,
         getInstallDirFromRegistry,
+        queryGatewayServiceAccount,
+        validateServiceAccount,
         setArpInstallLocation,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
@@ -529,6 +577,7 @@ internal static class GatewayActions
         initGatewayConfigIfNeeded,
         queryGatewayStartupType,
         setGatewayStartupType,
+        configureServiceAccount,
         startGatewayIfNeeded,
         restartGateway,
         rollbackConfig,

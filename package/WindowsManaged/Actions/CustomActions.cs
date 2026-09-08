@@ -612,6 +612,149 @@ namespace DevolutionsGateway.Actions
             return ActionResult.Success;
         }
 
+        /// <summary>
+        /// Read the logon account of any existing Devolutions Gateway service into the `GatewayServiceAccount` property,
+        /// so that upgrades preserve a custom service account unless one is explicitly specified.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult QueryGatewayServiceAccount(Session session)
+        {
+            try
+            {
+                using ServiceManager sm = new(WinAPI.SC_MANAGER_CONNECT, LogDelegate.WithSession(session));
+
+                if (!Service.TryOpen(sm, Includes.SERVICE_NAME, WinAPI.SERVICE_QUERY_CONFIG, out Service service, LogDelegate.WithSession(session)))
+                {
+                    session.Log("no existing service found; the service account defaults to NETWORK SERVICE");
+                    return ActionResult.Success;
+                }
+
+                using (service)
+                {
+                    string accountName = service.GetAccountName();
+
+                    if (!string.IsNullOrWhiteSpace(accountName))
+                    {
+                        session.Set(GatewayProperties.serviceAccount, accountName);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to query the existing service account: {e}");
+            }
+
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Resolve and validate the `GatewayServiceAccount` property, and record its SID in `ServiceAccountSid`
+        /// for the deferred actions that set permissions.
+        /// </summary>
+        /// <remarks>
+        /// Runs before anything is changed on the system so that a failure leaves an existing installation intact.
+        /// A password is only required when the service is (re)created, i.e. on a first install or an upgrade.
+        /// On maintenance installs the existing service password is preserved by the service control manager.
+        /// </remarks>
+        [CustomAction]
+        public static ActionResult ValidateServiceAccount(Session session)
+        {
+            ActionResult Fail(string msg)
+            {
+                session.Log(msg);
+                using Record record = new(0) { FormatString = msg };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            string accountName = session.Get(GatewayProperties.serviceAccount);
+
+            if (!GatewayServiceAccount.TryResolve(accountName, Includes.SERVICE_NAME, out GatewayServiceAccount account, out string error))
+            {
+                return Fail(error);
+            }
+
+            session.Log($"service account {account.Name} ({account.Sid}) is of kind {account.Kind}");
+            session.Set(GatewayProperties.serviceAccount, account.Name);
+            session.Set(GatewayProperties.serviceAccountSid, account.Sid.Value);
+
+            string password = session.Get(GatewayProperties.servicePassword);
+            bool serviceWillBeCreated = string.IsNullOrEmpty(session["Installed"]);
+
+            if (account.RequiresPassword)
+            {
+                if (string.IsNullOrEmpty(password))
+                {
+                    if (serviceWillBeCreated)
+                    {
+                        return Fail($"The service account '{account.Name}' requires a password. Specify it with the {GatewayProperties.servicePassword.Id} property, or use a passwordless account such as a group managed service account.");
+                    }
+
+                    session.Log("no password supplied; the existing service password is preserved");
+                }
+                else if (!account.TryValidatePassword(password, out error))
+                {
+                    return Fail(error);
+                }
+            }
+            else if (!string.IsNullOrEmpty(password))
+            {
+                session.Log($"ignoring the password supplied for the passwordless account {account.Name}");
+                session.Set(GatewayProperties.servicePassword, string.Empty);
+            }
+
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Grant the service account the rights it needs to run the service. NETWORK SERVICE has them implicitly.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult ConfigureServiceAccount(Session session)
+        {
+            SecurityIdentifier serviceAccount = GetServiceAccountSid(session);
+
+            if (serviceAccount.IsWellKnown(WellKnownSidType.NetworkServiceSid))
+            {
+                return ActionResult.Success;
+            }
+
+            try
+            {
+                AccountRights.Grant(serviceAccount, AccountRights.LogonAsService);
+                session.Log($"granted {AccountRights.LogonAsService} to service account {serviceAccount}");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to grant {AccountRights.LogonAsService} to service account {serviceAccount}; the service may fail to start: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        /// <summary>
+        /// The SID recorded by <see cref="ValidateServiceAccount"/>, or NETWORK SERVICE when it did not run (e.g. uninstall)
+        /// </summary>
+        private static SecurityIdentifier GetServiceAccountSid(Session session)
+        {
+            string sid = session.Get(GatewayProperties.serviceAccountSid);
+
+            if (string.IsNullOrWhiteSpace(sid))
+            {
+                return GatewayServiceAccount.NetworkServiceSid;
+            }
+
+            try
+            {
+                return new SecurityIdentifier(sid);
+            }
+            catch (Exception e)
+            {
+                session.Log($"invalid service account SID '{sid}', falling back to NETWORK SERVICE: {e.Message}");
+                return GatewayServiceAccount.NetworkServiceSid;
+            }
+        }
+
         [CustomAction]
         public static ActionResult RestartGateway(Session session)
         {
@@ -726,9 +869,9 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SetFileSecurity(session, ProgramDataDirectory, Includes.ProgramDataSddl(GetServiceAccountSid(session)));
 
-                // Files created before NetworkService was granted access to the program data directory
+                // Files created before the service account was granted access to the program data directory
                 // don't retroactively inherit the new ACE
                 // We fix this by removing access rule protection on the files
                 // and then reapplying the ACL
@@ -804,19 +947,21 @@ namespace DevolutionsGateway.Actions
                     X509Certificate2 certificate = selection.Selected;
                     session.Log($"selected certificate {certificate.Thumbprint} (NotAfter={certificate.NotAfter:o}) for subject {subjectName}");
 
-                    if (PrivateKeyPermissions.HasNetworkServiceReadPermission(certificate))
+                    SecurityIdentifier serviceAccount = GetServiceAccountSid(session);
+
+                    if (PrivateKeyPermissions.HasReadPermission(certificate, serviceAccount))
                     {
-                        session.Log("NETWORK SERVICE already has Read access to the certificate's private key");
+                        session.Log($"service account {serviceAccount} already has Read access to the certificate's private key");
                         return ActionResult.Success;
                     }
 
-                    if (PrivateKeyPermissions.TryGrantNetworkServiceReadPermission(certificate, out Exception grantError))
+                    if (PrivateKeyPermissions.TryGrantReadPermission(certificate, serviceAccount, out Exception grantError))
                     {
-                        session.Log("granted NETWORK SERVICE Read access to the certificate's private key");
+                        session.Log($"granted service account {serviceAccount} Read access to the certificate's private key");
                         return ActionResult.Success;
                     }
 
-                    session.Log($"failed to grant NETWORK SERVICE Read access to the certificate's private key: {grantError}");
+                    session.Log($"failed to grant service account {serviceAccount} Read access to the certificate's private key: {grantError}");
                 }
                 finally
                 {
@@ -836,7 +981,7 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, DefaultUsersFile), Includes.USERS_FILE_SDDL);
+                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, DefaultUsersFile), Includes.UsersFileSddl(GetServiceAccountSid(session)));
                 return ActionResult.Success;
             }
             catch (Exception e)

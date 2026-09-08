@@ -456,11 +456,27 @@ public partial class CertificateDialog : GatewayDialog
         }
     }
 
+    /// <summary>
+    /// The account the service will log on as, from the `P.SERVICEACCOUNT` property (NETWORK SERVICE by default)
+    /// </summary>
+    private GatewayServiceAccount ConfiguredServiceAccount
+    {
+        get
+        {
+            GatewayProperties properties = new(this.Runtime.Session);
+
+            return GatewayServiceAccount.TryResolve(properties.ServiceAccount, Includes.SERVICE_NAME, out GatewayServiceAccount account, out _)
+                ? account
+                : GatewayServiceAccount.NetworkService;
+        }
+    }
+
     private ValidationOutcome ValidateSystemCertificate(out string[] errors)
     {
         bool valid = this.SelectedCertificate.Verify();
         CertificateIssues issues = CertificateChain.CheckCertificate(this.SelectedCertificate);
-        bool keyRead = PrivateKeyPermissions.HasNetworkServiceReadPermission(this.SelectedCertificate);
+        GatewayServiceAccount serviceAccount = this.ConfiguredServiceAccount;
+        bool keyRead = PrivateKeyPermissions.HasReadPermission(this.SelectedCertificate, serviceAccount.Sid);
 
         if (valid && issues == CertificateIssues.None)
         {
@@ -470,7 +486,7 @@ public partial class CertificateDialog : GatewayDialog
                 return ValidationOutcome.Ok;
             }
 
-            errors = [I18n(Strings.PrivateKeyPermissionWillBeGranted)];
+            errors = [string.Format(I18n(Strings.PrivateKeyPermissionWillBeGranted), serviceAccount.Name)];
             return ValidationOutcome.KeyAccessOnly;
         }
 

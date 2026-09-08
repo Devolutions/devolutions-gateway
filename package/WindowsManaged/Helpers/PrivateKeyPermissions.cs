@@ -11,27 +11,27 @@ namespace DevolutionsGateway.Helpers
     internal static class PrivateKeyPermissions
     {
         /// <summary>
-        /// Returns true if the NETWORK SERVICE account has an explicit Allow rule granting Read
+        /// Returns true if <paramref name="account"/> has an explicit Allow rule granting Read
         /// permission on the certificate's private key file. Returns false if the key file cannot
         /// be located, the ACL cannot be read, or no such Allow rule is present.
         /// </summary>
         /// <remarks>
         /// This is an approximation of effective access — it does not honor:
         /// <list type="bullet">
-        ///   <item>Explicit Deny rules on the NETWORK SERVICE SID (which would override an Allow
+        ///   <item>Explicit Deny rules on the account SID (which would override an Allow
         ///   and block read access).</item>
-        ///   <item>Permissions granted via group membership (NETWORK SERVICE is a member of
-        ///   Authenticated Users and Users; if either group has Read on this file, NETWORK SERVICE
+        ///   <item>Permissions granted via group membership (service accounts are members of
+        ///   Authenticated Users and Users; if either group has Read on this file, the account
         ///   effectively does too — but this method returns false).</item>
         /// </list>
         /// Acceptable for the use case this helper serves: cert key files in
         /// <c>%ProgramData%\Microsoft\Crypto\Keys\</c> default to explicit per-identity ACLs without
-        /// group inheritance for NETWORK SERVICE and without Deny rules, so the approximation is
+        /// group inheritance for service accounts and without Deny rules, so the approximation is
         /// accurate in practice. A false negative leads to a redundant idempotent grant via
-        /// <see cref="TryGrantNetworkServiceReadPermission"/>. A false positive (effective Deny we
+        /// <see cref="TryGrantReadPermission"/>. A false positive (effective Deny we
         /// can't see) surfaces as a service start-time failure rather than at install time.
         /// </remarks>
-        internal static bool HasNetworkServiceReadPermission(X509Certificate2 certificate)
+        internal static bool HasReadPermission(X509Certificate2 certificate, SecurityIdentifier account)
         {
             if (!TryGetKeyFilePath(certificate, out string keyFilePath))
             {
@@ -41,14 +41,13 @@ namespace DevolutionsGateway.Helpers
             try
             {
                 FileSecurity security = new FileInfo(keyFilePath).GetAccessControl();
-                SecurityIdentifier networkService = new SecurityIdentifier(WellKnownSidType.NetworkServiceSid, null);
 
                 AuthorizationRuleCollection rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
 
                 return rules
                     .Cast<FileSystemAccessRule>()
                     .Any(r =>
-                        r.IdentityReference.Equals(networkService) &&
+                        r.IdentityReference.Equals(account) &&
                         r.AccessControlType == AccessControlType.Allow &&
                         (r.FileSystemRights & FileSystemRights.Read) == FileSystemRights.Read);
             }
@@ -59,10 +58,10 @@ namespace DevolutionsGateway.Helpers
         }
 
         /// <summary>
-        /// Grants NETWORK SERVICE Read permission on the certificate's private key file.
+        /// Grants <paramref name="account"/> Read permission on the certificate's private key file.
         /// Returns false (with error) if the key file cannot be located or the ACL cannot be modified.
         /// </summary>
-        internal static bool TryGrantNetworkServiceReadPermission(X509Certificate2 certificate, out Exception error)
+        internal static bool TryGrantReadPermission(X509Certificate2 certificate, SecurityIdentifier account, out Exception error)
         {
             error = null;
 
@@ -76,7 +75,6 @@ namespace DevolutionsGateway.Helpers
             {
                 FileInfo keyFileInfo = new FileInfo(keyFilePath);
                 FileSecurity security = keyFileInfo.GetAccessControl();
-                SecurityIdentifier networkService = new SecurityIdentifier(WellKnownSidType.NetworkServiceSid, null);
 
                 // Skip if an identical explicit Allow rule already exists, so repeat calls don't
                 // grow the ACL with duplicate entries.
@@ -84,7 +82,7 @@ namespace DevolutionsGateway.Helpers
                     .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier))
                     .Cast<FileSystemAccessRule>()
                     .Any(r =>
-                        r.IdentityReference.Equals(networkService) &&
+                        r.IdentityReference.Equals(account) &&
                         r.AccessControlType == AccessControlType.Allow &&
                         (r.FileSystemRights & FileSystemRights.Read) == FileSystemRights.Read);
 
@@ -93,7 +91,7 @@ namespace DevolutionsGateway.Helpers
                     return true;
                 }
 
-                security.AddAccessRule(new FileSystemAccessRule(networkService, FileSystemRights.Read, AccessControlType.Allow));
+                security.AddAccessRule(new FileSystemAccessRule(account, FileSystemRights.Read, AccessControlType.Allow));
                 keyFileInfo.SetAccessControl(security);
 
                 return true;
