@@ -25,9 +25,11 @@ use now_policy_api::{
 };
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::str::{U16CStrExt as _, U16CString};
+use win_api_wrappers::undoc::OBJECT_ATTRIBUTES;
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER,
-    ERROR_NOT_SUPPORTED, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HANDLE, NTSTATUS, WIN32_ERROR,
+    ERROR_NOT_SUPPORTED, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HANDLE, NTSTATUS, UNICODE_STRING,
+    WIN32_ERROR,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
@@ -48,6 +50,9 @@ use crate::policy_store::validation;
 pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
 const FILE_SYNCHRONIZE: u32 = 0x0010_0000;
 const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
+const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
+const FILE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+const OBJ_CASE_INSENSITIVE: u32 = 0x0000_0040;
 
 #[repr(C)]
 struct IoStatusBlock {
@@ -57,6 +62,15 @@ struct IoStatusBlock {
 
 #[link(name = "ntdll")]
 unsafe extern "system" {
+    fn NtOpenFile(
+        file_handle: *mut HANDLE,
+        desired_access: u32,
+        object_attributes: *const OBJECT_ATTRIBUTES,
+        io_status_block: *mut IoStatusBlock,
+        share_access: u32,
+        open_options: u32,
+    ) -> NTSTATUS;
+
     fn NtSetInformationFile(
         file_handle: HANDLE,
         io_status_block: *mut IoStatusBlock,
@@ -732,8 +746,16 @@ fn verify_no_replace_collision(
             }
             Ok(()) => bail!("no-replace rename unexpectedly replaced an occupied destination"),
         }
-        verify_transaction_file_path(source, source_path)?;
-        verify_transaction_file_path(target, target_path)?;
+        verify_probe_directory_entry(
+            dir,
+            source_path.file_name().expect("probe source has a leaf"),
+            source_identity,
+        )?;
+        verify_probe_directory_entry(
+            dir,
+            target_path.file_name().expect("probe target has a leaf"),
+            target_identity,
+        )?;
         ensure!(
             policy_security::file_identity(source)? == source_identity
                 && policy_security::file_identity(target)? == target_identity,
@@ -757,6 +779,70 @@ fn verify_no_replace_collision(
             UnsupportedAtomicSemantics(format!("filesystem failed no-replace collision semantics: {error:#}")).into()
         }
     })
+}
+
+fn verify_probe_directory_entry(dir: &File, leaf: &OsStr, expected_identity: FileIdentity) -> anyhow::Result<()> {
+    let reopened = open_file_relative(dir, leaf)?;
+    ensure!(
+        policy_security::file_identity(&reopened)? == expected_identity,
+        "probe directory entry no longer names the retained file"
+    );
+    ensure!(
+        policy_security::file_link_count(&reopened)? == 1,
+        "probe directory entry has multiple hard links"
+    );
+    Ok(())
+}
+
+fn open_file_relative(dir: &File, leaf: &OsStr) -> anyhow::Result<File> {
+    let mut name: Vec<u16> = leaf.encode_wide().collect();
+    ensure!(
+        !name.is_empty() && !name.contains(&0) && !name.contains(&u16::from(b'\\')) && !name.contains(&u16::from(b'/')),
+        "relative file name is not a single valid path component"
+    );
+    let name_byte_len = name
+        .len()
+        .checked_mul(size_of::<u16>())
+        .and_then(|length| u16::try_from(length).ok())
+        .context("relative file name is too long")?;
+    let object_name = UNICODE_STRING {
+        Length: name_byte_len,
+        MaximumLength: name_byte_len,
+        Buffer: windows::core::PWSTR(name.as_mut_ptr()),
+    };
+    let object_attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).expect("OBJECT_ATTRIBUTES size fits u32"),
+        RootDirectory: HANDLE(dir.as_raw_handle()),
+        ObjectName: &raw const object_name,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: std::ptr::null(),
+        SecurityQualityOfService: std::ptr::null(),
+    };
+    let mut handle = HANDLE::default();
+    let mut io_status = IoStatusBlock {
+        status_or_pointer: 0,
+        information: 0,
+    };
+
+    // SAFETY: The retained directory handle, object attributes, name, output handle, and I/O status remain valid.
+    let status = unsafe {
+        NtOpenFile(
+            &mut handle,
+            FILE_READ_ATTRIBUTES.0,
+            &object_attributes,
+            &mut io_status,
+            (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+        )
+    };
+    ensure!(
+        status.0 >= 0,
+        "failed to reopen probe directory entry with NT status {:#010X}",
+        status.0.cast_unsigned()
+    );
+
+    // SAFETY: Successful NtOpenFile returned a new owned handle.
+    Ok(File::from(unsafe { OwnedHandle::from_raw_handle(handle.0) }))
 }
 
 fn cleanup_probe_file(file: File, path: &Path, subject: &str) -> anyhow::Result<()> {
@@ -4167,6 +4253,53 @@ mod tests {
         assert_eq!(std::fs::read(&target_path).unwrap(), b"target");
         cleanup_probe_file(source, &source_path, "source").unwrap();
         cleanup_probe_file(target, &target_path, "target").unwrap();
+    }
+
+    #[test]
+    fn occupied_no_replace_probe_accepts_verbatim_path_representation() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let source_path = dir.path().join("source.tmp");
+        let target_path = dir.path().join("target.tmp");
+        let source = create_probe_file(&source_path, b"source", false).unwrap();
+        let target = create_probe_file(&target_path, b"target", true).unwrap();
+        let verbatim = |path: &Path| {
+            let mut wide: Vec<u16> = r"\\?\".encode_utf16().collect();
+            wide.extend(path.as_os_str().encode_wide());
+            PathBuf::from(OsString::from_wide(&wide))
+        };
+
+        verify_no_replace_collision(
+            &source,
+            &target,
+            &dir_file,
+            &verbatim(&source_path),
+            &verbatim(&target_path),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&source_path).unwrap(), b"source");
+        assert_eq!(std::fs::read(&target_path).unwrap(), b"target");
+        cleanup_probe_file(source, &source_path, "source").unwrap();
+        cleanup_probe_file(target, &target_path, "target").unwrap();
+    }
+
+    #[test]
+    fn probe_directory_entry_rejects_a_different_identity() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let source_path = dir.path().join("source.tmp");
+        let other_path = dir.path().join("other.tmp");
+        let source = create_probe_file(&source_path, b"source", false).unwrap();
+        let other = create_probe_file(&other_path, b"other", false).unwrap();
+        let other_identity = policy_security::file_identity(&other).unwrap();
+
+        let error = verify_probe_directory_entry(&dir_file, source_path.file_name().unwrap(), other_identity)
+            .expect_err("a directory entry retargeted to a different file must be rejected");
+        assert!(format!("{error:#}").contains("no longer names the retained file"));
+
+        cleanup_probe_file(source, &source_path, "source").unwrap();
+        cleanup_probe_file(other, &other_path, "other").unwrap();
     }
 
     fn windows_io_error(code: WIN32_ERROR) -> std::io::Error {
