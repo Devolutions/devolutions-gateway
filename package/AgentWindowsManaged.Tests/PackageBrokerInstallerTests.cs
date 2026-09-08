@@ -82,6 +82,29 @@ public sealed class PackageBrokerInstallerTests
         Assert.Contains("untrusted owner", diagnostic);
     }
 
+    [Theory]
+    [InlineData("O:SYG:SY")]
+    [InlineData("O:SYG:SYD:P")]
+    public void LegacySourceRejectsNullOrEmptyDacl(string sddl)
+    {
+        Assert.False(
+            PackageBrokerPolicyActions.TryVerifyLegacyPolicySourceSecurity(
+                Security(sddl),
+                out string diagnostic));
+        Assert.Contains("DACL", diagnostic);
+    }
+
+    [Theory]
+    [InlineData("O:SYG:SY")]
+    [InlineData("O:SYG:SYD:P")]
+    public void TrustedAncestorRejectsNullOrEmptyDacl(string sddl)
+    {
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => PackageBrokerPolicyActions.VerifyTrustedDirectorySecurity(
+                DirectorySecurity(sddl)));
+        Assert.Contains("DACL", error.Message);
+    }
+
     [Fact]
     public void StrictConfigWithoutPolicyPathAllowsSourceCleanup()
     {
@@ -199,12 +222,69 @@ public sealed class PackageBrokerInstallerTests
 
         using (PackageBrokerPolicyActions.PinnedPath pinned = PinFile(
             path,
-            WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES))
+            WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES))
         {
-            PackageBrokerPolicyActions.DeleteFileByHandle(pinned.Leaf);
+            string identity = PackageBrokerPolicyActions.FileIdentity(pinned.Leaf);
+            string digest = PackageBrokerPolicyActions.FileContentDigest(pinned.Leaf);
+            Assert.True(
+                PackageBrokerPolicyActions.DeleteFileIfIdentityAndDigestMatch(
+                    pinned.Leaf,
+                    identity,
+                    digest));
         }
 
         Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void ChangedIdentityIsPreservedByDeleteBinding()
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "source.json");
+        File.WriteAllText(path, "original");
+        string identity;
+        string digest;
+        using (PackageBrokerPolicyActions.PinnedPath source = PinFile(path, WinAPI.GENERIC_READ))
+        {
+            identity = PackageBrokerPolicyActions.FileIdentity(source.Leaf);
+            digest = PackageBrokerPolicyActions.FileContentDigest(source.Leaf);
+        }
+
+        File.Delete(path);
+        File.WriteAllText(path, "replacement");
+        using PackageBrokerPolicyActions.PinnedPath replacement = PinFile(
+            path,
+            WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES);
+        Assert.False(
+            PackageBrokerPolicyActions.DeleteFileIfIdentityAndDigestMatch(
+                replacement.Leaf,
+                identity,
+                digest));
+        Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public void UnavailableDeleteHandlePreservesLegacySource()
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "source.json");
+        File.WriteAllText(path, "{}");
+        using PackageBrokerPolicyActions.PinnedPath source = PinFile(path, WinAPI.GENERIC_READ);
+        PackageBrokerPolicyActions.MigrationRecord record = new(
+            PackageBrokerPolicyActions.FileIdentity(source.Leaf),
+            PackageBrokerPolicyActions.FileContentDigest(source.Leaf),
+            "destination",
+            "digest");
+        using FileStream blocker = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        string diagnostic = null;
+
+        Assert.False(
+            PackageBrokerPolicyActions.TryDeleteLegacyPolicySource(
+                message => diagnostic = message,
+                path,
+                record));
+        Assert.True(File.Exists(path));
+        Assert.Contains("preserving both copies", diagnostic);
     }
 
     [Fact]
