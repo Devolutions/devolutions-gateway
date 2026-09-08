@@ -41,6 +41,10 @@ use responses::{
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
 };
 
+tokio::task_local! {
+    static POLICY_MANAGEMENT_AUTHENTICATED: ();
+}
+
 /// How long a per-user manager availability probe stays fresh before it is re-run.
 const MANAGER_PROBE_TTL: Duration = Duration::from_secs(60);
 
@@ -119,20 +123,36 @@ async fn authenticate_policy_management(
 ) -> Response {
     let protected = matches!(
         (request.method(), request.uri().path()),
-        (&Method::GET, "/v1/policy/management") | (&Method::POST, "/v1/policy/validate") | (&Method::PUT, "/v1/policy")
+        (&Method::GET, "/v1/policy/management")
+            | (&Method::HEAD, "/v1/policy/management")
+            | (&Method::POST, "/v1/policy/validate")
+            | (&Method::PUT, "/v1/policy")
     );
-    if protected && let Err(error) = client.validate_connection(state.skip_signature_validation) {
-        warn!(error = format!("{error:#}"), "Rejected policy management request");
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(error_response(
-                ErrorCode::Unauthorized,
-                "pipe client authentication failed",
-            )),
-        )
-            .into_response();
+    if protected {
+        if let Err(error) = client.validate_connection(state.skip_signature_validation) {
+            warn!(error = format!("{error:#}"), "Rejected policy management request");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(error_response(
+                    ErrorCode::Unauthorized,
+                    "pipe client authentication failed",
+                )),
+            )
+                .into_response();
+        }
+        return POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request)).await;
     }
     next.run(request).await
+}
+
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
+fn require_policy_management_authentication() -> Result<(), ErrorResponse> {
+    POLICY_MANAGEMENT_AUTHENTICATED
+        .try_with(|()| ())
+        .map_err(|_| error_response(ErrorCode::Unauthorized, "pipe client authentication failed"))
 }
 
 struct BrokerConnection {
@@ -162,15 +182,7 @@ impl PackageBrokerServer for BrokerConnection {
     }
 
     async fn policy_management(&self) -> Result<PolicyManagementResponse, ErrorResponse> {
-        self.client
-            .validate_connection(self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(
-                    error = format!("{error:#}"),
-                    "Rejected package broker policy management request"
-                );
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+        require_policy_management_authentication()?;
         Ok(PolicyManagementResponse {
             response_kind: now_policy_api::PolicyManagementResponseKind,
             response_version: api_version(),
@@ -183,15 +195,7 @@ impl PackageBrokerServer for BrokerConnection {
         &self,
         request: PolicyValidationRequest,
     ) -> Result<PolicyValidationResponse, ErrorResponse> {
-        self.client
-            .validate_connection(self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(
-                    error = format!("{error:#}"),
-                    "Rejected package broker policy validation request"
-                );
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+        require_policy_management_authentication()?;
         Ok(PolicyValidationResponse {
             response_kind: now_policy_api::PolicyValidationResponseKind,
             response_version: api_version(),
@@ -204,15 +208,7 @@ impl PackageBrokerServer for BrokerConnection {
         &self,
         request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
-        self.client
-            .validate_connection(self.state.skip_signature_validation)
-            .map_err(|error| {
-                warn!(
-                    error = format!("{error:#}"),
-                    "Rejected package broker policy replacement request"
-                );
-                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
-            })?;
+        require_policy_management_authentication()?;
         if !self.client.is_elevated_administrator() {
             return Err(error_response(
                 ErrorCode::AdministratorRequired,
@@ -822,6 +818,16 @@ mod tests {
         state.skip_signature_validation = false;
         let state = Arc::new(state);
         let client = PipeClient::from_current_process().expect("capture current test process");
+        let response = route_raw(
+            Arc::clone(&state),
+            client.clone(),
+            Method::HEAD,
+            "/v1/policy/management",
+            None,
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         for (method, path, body) in [
             (Method::POST, "/v1/policy/validate", Body::from("{")),
             (
@@ -846,6 +852,19 @@ mod tests {
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
             assert_eq!(response_json(response).await["Code"], "Unauthorized");
         }
+    }
+
+    #[tokio::test]
+    async fn policy_management_handlers_require_the_middleware_marker() {
+        let server = BrokerConnection {
+            state: shared_state(None),
+            client: PipeClient::from_current_process().expect("capture current test process"),
+        };
+        let error = server
+            .policy_management()
+            .await
+            .expect_err("direct handler invocation must be rejected");
+        assert_eq!(error.code, ErrorCode::Unauthorized);
     }
 
     #[test]

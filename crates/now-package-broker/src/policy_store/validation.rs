@@ -1,13 +1,13 @@
 //! Strict deterministic validation for editable policy documents.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use now_policy::{Decision, PolicyConstraints, PolicyDraftDocument, PolicyDraftMetadata, PolicyMatch, PolicyRule};
 use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/6";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/7";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -278,7 +278,7 @@ fn check_raw_collection_bounds(raw: &serde_json::Value, findings: &mut Findings)
         let base = format!("/Rules/{index}");
         if let Some(matches) = rule.get("Match").and_then(serde_json::Value::as_object) {
             for &(field, max) in MATCH_COLLECTION_MAXIMA {
-                check_raw_array_len(matches, field, max, &format!("{base}/Match/{field}"), findings);
+                check_raw_set_array(matches, field, max, &format!("{base}/Match/{field}"), findings);
             }
             for &field in BOOLEAN_MATCH_FIELDS {
                 if matches
@@ -320,6 +320,35 @@ fn check_raw_array_len(
 ) {
     if let Some(values) = object.get(field).and_then(serde_json::Value::as_array) {
         check_max_len(values.len(), max, path, findings);
+    }
+}
+fn check_raw_set_array(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    max: usize,
+    path: &str,
+    findings: &mut Findings,
+) {
+    let Some(values) = object.get(field).and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    check_max_len(values.len(), max, path, findings);
+    if values.len() > max {
+        return;
+    }
+    let mut seen = HashSet::with_capacity(values.len());
+    for value in values {
+        let Some(value) = value.as_str() else {
+            return;
+        };
+        if !seen.insert(value) {
+            findings.push(error(
+                PolicyFindingCode::SchemaViolation,
+                path,
+                format!("{path} contains duplicate value '{value}'"),
+            ));
+            return;
+        }
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -951,6 +980,68 @@ mod tests {
             assert_eq!(result.findings.len(), 1, "{section}/{field}");
             assert_eq!(result.findings[0].path, format!("/Rules/0/{section}/{field}"));
         }
+    }
+
+    #[test]
+    fn set_backed_match_arrays_reject_exact_duplicates() {
+        for (field, value) in [
+            ("Operations", "Install"),
+            ("Managers", "Winget"),
+            ("Sources", "source"),
+            ("PackageIdentifiers", "package"),
+            ("PackageNames", "name"),
+            ("Versions", "1.0.0"),
+            ("Scopes", "User"),
+            ("Architectures", "X64"),
+            ("Elevation", "Elevated"),
+        ] {
+            let mut raw = draft();
+            let mut duplicate = rule("duplicate", json!({ "Managers": ["Winget"] }));
+            duplicate["Match"][field] = json!([value, value]);
+            raw["Rules"] = json!([duplicate]);
+            let result = validate_draft(&raw);
+            assert!(!result.is_valid, "{field}");
+            assert!(result.canonical_draft.is_none(), "{field}");
+            assert!(result.validation_receipt.is_none(), "{field}");
+            assert!(result.findings.iter().any(|finding| {
+                finding.code == PolicyFindingCode::SchemaViolation
+                    && finding.path == format!("/Rules/0/Match/{field}")
+                    && finding.message.contains("duplicate value")
+            }));
+        }
+    }
+
+    #[test]
+    fn raw_uniqueness_is_case_sensitive_and_excludes_constraint_vectors() {
+        let mut raw = draft();
+        let mut distinct = rule(
+            "distinct",
+            json!({
+                "Operations": ["Install", "Update"],
+                "Managers": ["Winget", "Npm"],
+                "Sources": ["source", "Source"],
+                "PackageIdentifiers": ["package", "Package"],
+                "Versions": ["1.0.0", "2.0.0"],
+                "Scopes": ["User", "Machine"],
+                "Architectures": ["X64", "Arm64"],
+                "Elevation": ["Standard", "Elevated"]
+            }),
+        );
+        distinct["Constraints"] = json!({
+            "AllowedInstallLocationPatterns": ["C:\\Tools", "C:\\Tools"]
+        });
+        raw["Rules"] = json!([distinct]);
+        let result = validate_draft(&raw);
+        assert!(result.is_valid);
+        assert_eq!(
+            result.canonical_draft.expect("valid canonical draft").rules[0]
+                .constraints
+                .as_ref()
+                .expect("constraints")
+                .allowed_install_location_patterns
+                .len(),
+            2
+        );
     }
 
     #[test]
