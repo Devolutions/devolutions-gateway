@@ -249,15 +249,19 @@ struct AtomicityProbeKey {
 struct CachedAtomicityProbe {
     key: AtomicityProbeKey,
     result: ProbeResult,
+    retry_at: Option<std::time::Instant>,
 }
 
 /// Caches filesystem atomic-replace probes by directory identity and security digest.
-/// Directory replacement or ACL changes invalidate both successful and failed results.
+/// Directory replacement or ACL changes invalidate every result.
+/// Failed probes are retried after a bounded delay so fixed-name collisions recover without restart.
 pub(super) struct AtomicityProbeCache {
     cached: std::sync::Mutex<Option<CachedAtomicityProbe>>,
 }
 
 impl AtomicityProbeCache {
+    const FAILURE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
     pub(super) fn new() -> Self {
         Self {
             cached: std::sync::Mutex::new(None),
@@ -269,6 +273,16 @@ impl AtomicityProbeCache {
     /// directory's identity or its own security digest no longer matches what was last
     /// cached.
     fn get_or_probe(&self, dir: &Path, dir_identity: FileIdentity, dir_security_digest: [u8; 32]) -> ProbeResult {
+        self.get_or_probe_at(dir, dir_identity, dir_security_digest, std::time::Instant::now())
+    }
+
+    fn get_or_probe_at(
+        &self,
+        dir: &Path,
+        dir_identity: FileIdentity,
+        dir_security_digest: [u8; 32],
+        now: std::time::Instant,
+    ) -> ProbeResult {
         let key = AtomicityProbeKey {
             identity: dir_identity,
             security_digest: dir_security_digest,
@@ -277,6 +291,7 @@ impl AtomicityProbeCache {
 
         if let Some(cached) = cached.as_ref()
             && cached.key == key
+            && cached.retry_at.is_none_or(|retry_at| now < retry_at)
         {
             return cached.result.clone();
         }
@@ -292,6 +307,7 @@ impl AtomicityProbeCache {
         *cached = Some(CachedAtomicityProbe {
             key,
             result: result.clone(),
+            retry_at: result.is_err().then_some(now + Self::FAILURE_RETRY_INTERVAL),
         });
         result
     }
@@ -1895,7 +1911,9 @@ struct TransactionMarker {
     old_identity: FileIdentity,
     old_content_digest: [u8; 32],
     old_security_digest: [u8; 32],
+    new_identity: FileIdentity,
     new_content_digest: [u8; 32],
+    new_security_digest: [u8; 32],
 }
 
 impl TransactionMarker {
@@ -1903,6 +1921,7 @@ impl TransactionMarker {
         id: uuid::Uuid,
         final_path: &Path,
         expected: &DiskFingerprint,
+        new_file: &File,
         new_bytes: &[u8],
     ) -> anyhow::Result<Self> {
         let (old_identity, old_content_digest, old_security_digest) = expected
@@ -1918,20 +1937,27 @@ impl TransactionMarker {
             old_identity,
             old_content_digest,
             old_security_digest,
+            new_identity: policy_security::file_identity(new_file)
+                .context("failed to capture replacement policy identity")?,
             new_content_digest: sha256_digest(new_bytes),
+            new_security_digest: policy_security::security_state_digest(new_file)
+                .context("failed to capture replacement policy security")?,
         })
     }
 
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
-            "Version": 1,
+            "Version": 2,
             "TransactionId": self.id.to_string(),
             "FinalLeaf": self.final_leaf,
             "OldVolumeSerial": self.old_identity.volume_serial,
             "OldFileId": hex::encode(self.old_identity.file_id),
             "OldContentDigest": hex::encode(self.old_content_digest),
             "OldSecurityDigest": hex::encode(self.old_security_digest),
+            "NewVolumeSerial": self.new_identity.volume_serial,
+            "NewFileId": hex::encode(self.new_identity.file_id),
             "NewContentDigest": hex::encode(self.new_content_digest),
+            "NewSecurityDigest": hex::encode(self.new_security_digest),
         }))
         .expect("transaction marker fields always serialize")
     }
@@ -1939,9 +1965,9 @@ impl TransactionMarker {
     fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         let value: serde_json::Value = serde_json::from_slice(bytes).context("transaction marker is not valid JSON")?;
         let object = value.as_object().context("transaction marker must be an object")?;
-        ensure!(object.len() == 8, "transaction marker contains unexpected fields");
+        ensure!(object.len() == 11, "transaction marker contains unexpected fields");
         ensure!(
-            object.get("Version").and_then(serde_json::Value::as_u64) == Some(1),
+            object.get("Version").and_then(serde_json::Value::as_u64) == Some(2),
             "unsupported transaction marker"
         );
         let text = |name: &str| -> anyhow::Result<&str> {
@@ -1956,8 +1982,12 @@ impl TransactionMarker {
                 .with_context(|| format!("transaction marker {name} is invalid"))?;
             Ok(output)
         };
-        let mut file_id = [0u8; 16];
-        hex::decode_to_slice(text("OldFileId")?, &mut file_id).context("transaction marker OldFileId is invalid")?;
+        let decode_file_id = |name: &str| -> anyhow::Result<[u8; 16]> {
+            let mut output = [0u8; 16];
+            hex::decode_to_slice(text(name)?, &mut output)
+                .with_context(|| format!("transaction marker {name} is invalid"))?;
+            Ok(output)
+        };
         Ok(Self {
             id: uuid::Uuid::parse_str(text("TransactionId")?).context("transaction marker id is invalid")?,
             final_leaf: text("FinalLeaf")?.to_owned(),
@@ -1966,11 +1996,19 @@ impl TransactionMarker {
                     .get("OldVolumeSerial")
                     .and_then(serde_json::Value::as_u64)
                     .context("transaction marker OldVolumeSerial is missing or invalid")?,
-                file_id,
+                file_id: decode_file_id("OldFileId")?,
             },
             old_content_digest: decode("OldContentDigest")?,
             old_security_digest: decode("OldSecurityDigest")?,
+            new_identity: FileIdentity {
+                volume_serial: object
+                    .get("NewVolumeSerial")
+                    .and_then(serde_json::Value::as_u64)
+                    .context("transaction marker NewVolumeSerial is missing or invalid")?,
+                file_id: decode_file_id("NewFileId")?,
+            },
             new_content_digest: decode("NewContentDigest")?,
+            new_security_digest: decode("NewSecurityDigest")?,
         })
     }
 }
@@ -1990,44 +2028,8 @@ fn conditional_replace(
         .expect("real storage always retains the directory handle");
     let paths =
         TransactionPaths::new(hosting_dir.canonical_path(), final_path).map_err(WriteFailure::PrePublication)?;
-    let marker = TransactionMarker::from_observation(paths.id, final_path, expected_fingerprint, bytes)
-        .map_err(WriteFailure::ConcurrentChange)?;
 
-    let mut marker_file =
-        create_secure_transaction_file(&paths.marker_staging).map_err(WriteFailure::PrePublication)?;
-    if let Err(error) = marker_file
-        .write_all(&marker.to_bytes())
-        .and_then(|()| marker_file.sync_all())
-        .context("failed to persist policy transaction marker")
-    {
-        return Err(prepublication_failure_after_cleanup(
-            &marker_file,
-            error,
-            "incomplete transaction marker cleanup also failed",
-        ));
-    }
-    if let Err(error) = rename_file_handle(
-        &marker_file,
-        dir_handle,
-        paths.marker.file_name().expect("transaction marker path has leaf"),
-    ) {
-        return Err(prepublication_failure_after_cleanup(
-            &marker_file,
-            anyhow::Error::new(error).context("failed to publish completed transaction marker"),
-            "transaction marker staging cleanup also failed",
-        ));
-    }
-
-    let mut temp_file = match create_secure_transaction_file(&paths.new) {
-        Ok(file) => file,
-        Err(error) => {
-            return Err(prepublication_failure_after_cleanup(
-                &marker_file,
-                error,
-                "transaction marker cleanup also failed",
-            ));
-        }
-    };
+    let mut temp_file = create_secure_transaction_file(&paths.new).map_err(WriteFailure::PrePublication)?;
     if let Err(error) = temp_file
         .write_all(bytes)
         .and_then(|()| temp_file.sync_all())
@@ -2037,16 +2039,55 @@ fn conditional_replace(
                 .context("replacement policy temporary file failed security verification")
         })
     {
-        if let Err(cleanup_error) = delete_file_handle(&temp_file) {
-            return Err(WriteFailure::PrePublication(error.context(format!(
-                "temporary replacement cleanup failed; transaction marker retained for recovery: {cleanup_error:#}"
-            ))));
-        }
         return Err(prepublication_failure_after_cleanup(
-            &marker_file,
+            &temp_file,
             error,
-            "transaction marker cleanup also failed",
+            "temporary replacement cleanup also failed",
         ));
+    }
+    let marker =
+        match TransactionMarker::from_observation(paths.id, final_path, expected_fingerprint, &temp_file, bytes) {
+            Ok(marker) => marker,
+            Err(error) => {
+                let error = cleanup_transaction_files(error, &[(&temp_file, "replacement policy cleanup also failed")]);
+                return Err(WriteFailure::ConcurrentChange(error));
+            }
+        };
+
+    let mut marker_file = match create_secure_transaction_file(&paths.marker_staging) {
+        Ok(file) => file,
+        Err(error) => {
+            let error = cleanup_transaction_files(error, &[(&temp_file, "replacement policy cleanup also failed")]);
+            return Err(WriteFailure::PrePublication(error));
+        }
+    };
+    if let Err(error) = marker_file
+        .write_all(&marker.to_bytes())
+        .and_then(|()| marker_file.sync_all())
+        .context("failed to persist policy transaction marker")
+    {
+        let error = cleanup_transaction_files(
+            error,
+            &[
+                (&marker_file, "incomplete transaction marker cleanup also failed"),
+                (&temp_file, "replacement policy cleanup also failed"),
+            ],
+        );
+        return Err(WriteFailure::PrePublication(error));
+    }
+    if let Err(error) = rename_file_handle(
+        &marker_file,
+        dir_handle,
+        paths.marker.file_name().expect("transaction marker path has leaf"),
+    ) {
+        let error = cleanup_transaction_files(
+            anyhow::Error::new(error).context("failed to publish completed transaction marker"),
+            &[
+                (&marker_file, "transaction marker staging cleanup also failed"),
+                (&temp_file, "replacement policy cleanup also failed"),
+            ],
+        );
+        return Err(WriteFailure::PrePublication(error));
     }
 
     let prepared = PreparedTransaction {
@@ -2070,6 +2111,15 @@ fn conditional_replace(
     delete_file_handle(&marker_file).map_err(WriteFailure::PostPublication)?;
     drop(marker_file);
     Ok(persisted)
+}
+
+fn cleanup_transaction_files(mut error: anyhow::Error, files: &[(&File, &str)]) -> anyhow::Error {
+    for (file, message) in files {
+        if let Err(cleanup_error) = delete_file_handle(file) {
+            error = error.context(format!("{message}: {cleanup_error:#}"));
+        }
+    }
+    error
 }
 
 struct PreparedTransaction<'a> {
@@ -2434,22 +2484,26 @@ fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsS
     }
 
     let new_file = open_optional_transaction_file(&paths.new)?;
-    let new_content_matches = if let Some(new_file) = &new_file {
+    if let Some(new_file) = &new_file {
         verify_transaction_file_path(new_file, &paths.new)?;
-        policy_security::verify_managed_policy_file_security(new_file)
-            .context("transaction replacement security is invalid")?;
-        sha256_digest(&read_file_from_start(new_file)?) == marker.new_content_digest
-    } else {
-        true
-    };
-    if old_file.is_some() {
-        ensure!(
-            new_content_matches,
-            "transaction replacement content changed after tombstoning"
-        );
+        verify_transaction_file_state(
+            new_file,
+            marker.new_identity,
+            marker.new_content_digest,
+            marker.new_security_digest,
+        )
+        .context("transaction replacement does not match the prepared policy")?;
     }
 
-    recover_verified_transaction(dir, dir_path, OsStr::new(final_leaf), marker_file, old_file, new_file)
+    recover_verified_transaction_with_evidence(
+        dir,
+        dir_path,
+        OsStr::new(final_leaf),
+        &marker,
+        marker_file,
+        old_file,
+        new_file,
+    )
 }
 
 fn recover_marker_staging(final_path: &Path, marker_staging: File) -> anyhow::Result<()> {
@@ -2461,16 +2515,17 @@ fn recover_marker_staging(final_path: &Path, marker_staging: File) -> anyhow::Re
     Ok(())
 }
 
-fn recover_verified_transaction(
+fn recover_verified_transaction_with_evidence(
     dir: &File,
     dir_path: &Path,
     final_leaf: &OsStr,
+    marker: &TransactionMarker,
     marker_file: File,
     mut old_file: Option<File>,
     new_file: Option<File>,
 ) -> anyhow::Result<()> {
     let final_path = dir_path.join(final_leaf);
-    let mut final_guard = open_optional_final_guard(&final_path)?;
+    let mut final_guard = open_optional_final_policy(&final_path)?;
     let mut restored = false;
     if final_guard.is_none() {
         let old_file = old_file
@@ -2479,7 +2534,7 @@ fn recover_verified_transaction(
         match rename_file_handle(old_file, dir, final_leaf) {
             Ok(()) => restored = true,
             Err(error) => {
-                final_guard = open_optional_final_guard(&final_path)?;
+                final_guard = open_optional_final_policy(&final_path)?;
                 if final_guard.is_none() {
                     return Err(error).context("failed to restore interrupted policy transaction");
                 }
@@ -2488,9 +2543,18 @@ fn recover_verified_transaction(
         }
     }
 
-    if !restored && let Some(old_file) = old_file.take() {
-        delete_file_handle(&old_file).context("failed to retire policy transaction tombstone")?;
-        drop(old_file);
+    if !restored {
+        let final_file = final_guard
+            .as_ref()
+            .context("interrupted transaction has no final policy after recovery")?;
+        let final_state = verify_recovery_final(final_file, &final_path, marker)?;
+        if old_file.is_some() && final_state != RecoveryFinalState::PublishedReplacement {
+            bail!("raced final policy is not the intended published replacement; preserving recovery remnants");
+        }
+        if let Some(old_file) = old_file.take() {
+            delete_file_handle(&old_file).context("failed to retire policy transaction tombstone")?;
+            drop(old_file);
+        }
     }
     if let Some(new_file) = new_file {
         delete_file_handle(&new_file).context("failed to retire unpublished policy transaction replacement")?;
@@ -2500,6 +2564,99 @@ fn recover_verified_transaction(
     drop(marker_file);
     drop(final_guard);
     Ok(())
+}
+
+#[cfg(test)]
+fn recover_verified_transaction(
+    dir: &File,
+    dir_path: &Path,
+    final_leaf: &OsStr,
+    marker_file: File,
+    old_file: Option<File>,
+    new_file: Option<File>,
+) -> anyhow::Result<()> {
+    let final_path = dir_path.join(final_leaf);
+    let mut final_guard = open_optional_final_guard(&final_path)?;
+    let mut old_file = old_file;
+    let restored = if final_guard.is_none() {
+        let old = old_file
+            .as_ref()
+            .context("test transaction has neither a final policy nor a tombstone")?;
+        rename_file_handle(old, dir, final_leaf)?;
+        true
+    } else {
+        false
+    };
+    if !restored && let Some(old) = old_file.take() {
+        delete_file_handle(&old)?;
+    }
+    if let Some(new_file) = new_file {
+        delete_file_handle(&new_file)?;
+    }
+    delete_file_handle(&marker_file)?;
+    drop(final_guard.take());
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecoveryFinalState {
+    ObservedOriginal,
+    PublishedReplacement,
+}
+
+fn verify_recovery_final(
+    file: &File,
+    expected_path: &Path,
+    marker: &TransactionMarker,
+) -> anyhow::Result<RecoveryFinalState> {
+    verify_transaction_file_path(file, expected_path)?;
+    policy_security::verify_policy_file_path(file, expected_path)?;
+    let attributes = file.metadata()?.file_attributes();
+    ensure!(
+        attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0,
+        "transaction final path is a directory"
+    );
+
+    if verify_transaction_file_state(
+        file,
+        marker.old_identity,
+        marker.old_content_digest,
+        marker.old_security_digest,
+    )
+    .is_ok()
+    {
+        return Ok(RecoveryFinalState::ObservedOriginal);
+    }
+
+    verify_transaction_file_state(
+        file,
+        marker.new_identity,
+        marker.new_content_digest,
+        marker.new_security_digest,
+    )
+    .context("transaction final policy is not the prepared replacement")?;
+    let content = read_file_from_start(file)?;
+    let policy = serde_json::from_slice::<PolicyDocument>(&content)
+        .context("transaction final replacement is not a policy document")?;
+    let validation = validation::validate_committed_policy(&policy);
+    ensure!(
+        validation.is_valid && validation.findings.is_empty(),
+        "transaction final replacement failed strict committed-policy validation"
+    );
+    Ok(RecoveryFinalState::PublishedReplacement)
+}
+
+fn open_optional_final_policy(path: &Path) -> anyhow::Result<Option<File>> {
+    match OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)
+    {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to retain raced policy {}", path.display())),
+    }
 }
 
 fn open_optional_final_guard(path: &Path) -> anyhow::Result<Option<File>> {
@@ -2736,6 +2893,20 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("create temp dir")
+    }
+
+    fn valid_committed_policy_bytes() -> Vec<u8> {
+        let draft: now_policy::PolicyDraftDocument = serde_json::from_value(serde_json::json!({
+            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
+            "PolicyVersion": "1.0.0",
+            "PolicyType": "PackageBrokerPolicy",
+            "Metadata": { "Id": "recovery-test", "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Rules": []
+        }))
+        .unwrap();
+        let policy = draft.into_policy_document(1, chrono::Utc::now()).unwrap();
+        serde_json::to_vec(&policy).unwrap()
     }
 
     #[test]
@@ -3247,6 +3418,171 @@ mod tests {
     }
 
     #[test]
+    fn recovery_preserves_verified_tombstone_when_raced_final_is_unsafe() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        std::fs::write(&final_path, b"malicious").unwrap();
+        let marker_file = open_deletable_test_file(&marker_path, b"marker");
+        let old_file = open_deletable_test_file(&old_path, b"verified-old");
+        let marker = TransactionMarker {
+            id: uuid::Uuid::new_v4(),
+            final_leaf: "policy.json".to_owned(),
+            old_identity: policy_security::file_identity(&old_file).unwrap(),
+            old_content_digest: sha256_digest(b"verified-old"),
+            old_security_digest: policy_security::security_state_digest(&old_file).unwrap(),
+            new_identity: test_identity(99),
+            new_content_digest: sha256_digest(b"intended-new"),
+            new_security_digest: test_security_digest(99),
+        };
+
+        recover_verified_transaction_with_evidence(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            &marker,
+            marker_file,
+            Some(old_file),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(std::fs::read(&old_path).unwrap(), b"verified-old");
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"malicious");
+        assert!(marker_path.exists(), "failed recovery must preserve its marker");
+    }
+
+    #[test]
+    fn recovery_preserves_all_evidence_for_distinct_same_byte_final_and_new() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let new_path = dir.path().join("new");
+        std::fs::write(&final_path, b"intended-new").unwrap();
+        let marker_file = open_deletable_test_file(&marker_path, b"marker");
+        let old_file = open_deletable_test_file(&old_path, b"verified-old");
+        let new_file = open_deletable_test_file(&new_path, b"intended-new");
+        let marker = TransactionMarker {
+            id: uuid::Uuid::new_v4(),
+            final_leaf: "policy.json".to_owned(),
+            old_identity: policy_security::file_identity(&old_file).unwrap(),
+            old_content_digest: sha256_digest(b"verified-old"),
+            old_security_digest: policy_security::security_state_digest(&old_file).unwrap(),
+            new_identity: policy_security::file_identity(&new_file).unwrap(),
+            new_content_digest: sha256_digest(b"intended-new"),
+            new_security_digest: policy_security::security_state_digest(&new_file).unwrap(),
+        };
+
+        recover_verified_transaction_with_evidence(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            &marker,
+            marker_file,
+            Some(old_file),
+            Some(new_file),
+        )
+        .unwrap_err();
+
+        assert_eq!(std::fs::read(&old_path).unwrap(), b"verified-old");
+        assert_eq!(std::fs::read(&new_path).unwrap(), b"intended-new");
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"intended-new");
+        assert!(marker_path.exists());
+    }
+
+    #[test]
+    fn recovery_rejects_same_byte_substitute_when_prepared_file_is_absent() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let prepared_path = dir.path().join("prepared");
+        let prepared = open_deletable_test_file(&prepared_path, b"intended-new");
+        let marker = TransactionMarker {
+            id: uuid::Uuid::new_v4(),
+            final_leaf: "policy.json".to_owned(),
+            old_identity: test_identity(1),
+            old_content_digest: sha256_digest(b"verified-old"),
+            old_security_digest: test_security_digest(1),
+            new_identity: policy_security::file_identity(&prepared).unwrap(),
+            new_content_digest: sha256_digest(b"intended-new"),
+            new_security_digest: policy_security::security_state_digest(&prepared).unwrap(),
+        };
+        drop(prepared);
+        std::fs::remove_file(prepared_path).unwrap();
+        std::fs::write(&final_path, b"intended-new").unwrap();
+        let marker_file = open_deletable_test_file(&marker_path, b"marker");
+        let old_file = open_deletable_test_file(&old_path, b"verified-old");
+
+        recover_verified_transaction_with_evidence(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            &marker,
+            marker_file,
+            Some(old_file),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(std::fs::read(&old_path).unwrap(), b"verified-old");
+        assert_eq!(std::fs::read(&final_path).unwrap(), b"intended-new");
+        assert!(marker_path.exists());
+    }
+
+    #[test]
+    fn recovery_accepts_the_exact_prepared_file_after_genuine_rename() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let prepared_path = dir.path().join("prepared");
+        let marker_path = dir.path().join("marker");
+        let old_path = dir.path().join("old");
+        let mut prepared = match create_secure_transaction_file(&prepared_path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        let bytes = valid_committed_policy_bytes();
+        prepared.write_all(&bytes).unwrap();
+        prepared.sync_all().unwrap();
+        let marker = TransactionMarker {
+            id: uuid::Uuid::new_v4(),
+            final_leaf: "policy.json".to_owned(),
+            old_identity: test_identity(1),
+            old_content_digest: sha256_digest(b"verified-old"),
+            old_security_digest: test_security_digest(1),
+            new_identity: policy_security::file_identity(&prepared).unwrap(),
+            new_content_digest: sha256_digest(&bytes),
+            new_security_digest: policy_security::security_state_digest(&prepared).unwrap(),
+        };
+        rename_file_handle(&prepared, &dir_file, final_path.file_name().unwrap()).unwrap();
+        let marker_file = open_deletable_test_file(&marker_path, b"marker");
+        let old_file = open_deletable_test_file(&old_path, b"verified-old");
+
+        recover_verified_transaction_with_evidence(
+            &dir_file,
+            dir.path(),
+            final_path.file_name().unwrap(),
+            &marker,
+            marker_file,
+            Some(old_file),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&final_path).unwrap(), bytes);
+        assert!(!old_path.exists());
+        assert!(!marker_path.exists());
+    }
+
+    #[test]
     fn recovery_failure_never_discards_the_only_tombstone() {
         let dir = temp_dir();
         let dir_file = open_directory_no_reparse(dir.path()).unwrap();
@@ -3307,9 +3643,16 @@ mod tests {
     #[test]
     fn transaction_marker_round_trips_exact_state() {
         let expected = DiskFingerprint::test_active(b"old", 2, 3, 4, 5);
-        let marker =
-            TransactionMarker::from_observation(uuid::Uuid::new_v4(), Path::new(r"C:\policy.json"), &expected, b"new")
-                .unwrap();
+        let dir = temp_dir();
+        let new_file = open_deletable_test_file(&dir.path().join("new"), b"new");
+        let marker = TransactionMarker::from_observation(
+            uuid::Uuid::new_v4(),
+            Path::new(r"C:\policy.json"),
+            &expected,
+            &new_file,
+            b"new",
+        )
+        .unwrap();
 
         let decoded = TransactionMarker::from_bytes(&marker.to_bytes()).unwrap();
 
@@ -3318,7 +3661,18 @@ mod tests {
         assert_eq!(decoded.old_identity, marker.old_identity);
         assert_eq!(decoded.old_content_digest, marker.old_content_digest);
         assert_eq!(decoded.old_security_digest, marker.old_security_digest);
+        assert_eq!(decoded.new_identity, marker.new_identity);
         assert_eq!(decoded.new_content_digest, marker.new_content_digest);
+        assert_eq!(decoded.new_security_digest, marker.new_security_digest);
+
+        let mut legacy: serde_json::Value = serde_json::from_slice(&marker.to_bytes()).unwrap();
+        legacy["Version"] = 1.into();
+        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&legacy).unwrap()).is_err());
+
+        let mut missing_identity = legacy;
+        missing_identity["Version"] = 2.into();
+        missing_identity.as_object_mut().unwrap().remove("NewFileId");
+        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&missing_identity).unwrap()).is_err());
     }
 
     // ─── probe_write_capability / volume_filesystem_name ──────────────────────
@@ -3361,6 +3715,39 @@ mod tests {
         cache
             .get_or_probe(&missing, test_identity(2), test_security_digest(1))
             .expect("changed directory identity must trigger a fresh probe");
+    }
+
+    #[test]
+    fn cleared_probe_collision_retries_after_bounded_delay() {
+        let dir = temp_dir();
+        let collision = dir.path().join(".package-broker-write-probe-a.tmp");
+        std::fs::write(&collision, b"external").unwrap();
+        let cache = AtomicityProbeCache::new();
+        let now = std::time::Instant::now();
+        let identity = test_identity(1);
+        let security = test_security_digest(1);
+
+        assert!(cache.get_or_probe_at(dir.path(), identity, security, now).is_err());
+        std::fs::remove_file(collision).unwrap();
+        assert!(
+            cache
+                .get_or_probe_at(
+                    dir.path(),
+                    identity,
+                    security,
+                    now + AtomicityProbeCache::FAILURE_RETRY_INTERVAL / 2,
+                )
+                .is_err(),
+            "failure must remain cached before the retry deadline"
+        );
+        cache
+            .get_or_probe_at(
+                dir.path(),
+                identity,
+                security,
+                now + AtomicityProbeCache::FAILURE_RETRY_INTERVAL,
+            )
+            .expect("cleared collision must recover without restart");
     }
 
     #[test]
