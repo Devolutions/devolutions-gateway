@@ -7,7 +7,7 @@ use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/5";
+pub const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/6";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -387,12 +387,12 @@ fn check_metadata(metadata: &PolicyDraftMetadata, findings: &mut Findings) {
         check_string_len(description, 0, 512, "/Metadata/Description", findings);
     }
     if let (Some(valid_from), Some(valid_until)) = (metadata.valid_from, metadata.valid_until)
-        && valid_from > valid_until
+        && valid_from >= valid_until
     {
         findings.push(error(
             PolicyFindingCode::InvalidValidityInterval,
             "/Metadata/ValidUntil",
-            "ValidUntil is before ValidFrom",
+            "ValidUntil must be after ValidFrom",
         ));
     }
 }
@@ -995,13 +995,6 @@ mod tests {
         )]);
         assert!(has_code(&validate_draft(&raw), PolicyFindingCode::EmptyVersionRange));
         let mut raw = draft();
-        raw["Metadata"]["ValidFrom"] = json!("2026-02-01T00:00:00Z");
-        raw["Metadata"]["ValidUntil"] = json!("2026-01-01T00:00:00Z");
-        assert!(has_code(
-            &validate_draft(&raw),
-            PolicyFindingCode::InvalidValidityInterval
-        ));
-        let mut raw = draft();
         let mut contradictory = rule("r1", json!({ "Interactive": [true] }));
         contradictory["Constraints"] = json!({ "AllowInteractive": false });
         raw["Rules"] = json!([contradictory]);
@@ -1009,6 +1002,43 @@ mod tests {
             &validate_draft(&raw),
             PolicyFindingCode::ContradictoryConstraints
         ));
+    }
+
+    #[test]
+    fn validity_interval_requires_strictly_increasing_instants() {
+        for (valid_from, valid_until, expected_valid) in [
+            (None, None, true),
+            (Some("2026-01-01T00:00:00Z"), None, true),
+            (None, Some("2026-01-01T00:00:00Z"), true),
+            (Some("2026-01-01T00:00:00Z"), Some("2026-01-01T00:00:01Z"), true),
+            (Some("2026-01-01T00:00:00Z"), Some("2026-01-01T00:00:00Z"), false),
+            (Some("2026-01-01T00:00:00Z"), Some("2025-12-31T19:00:00-05:00"), false),
+            (Some("2026-02-01T00:00:00Z"), Some("2026-01-01T00:00:00Z"), false),
+        ] {
+            let mut raw = draft();
+            if let Some(valid_from) = valid_from {
+                raw["Metadata"]["ValidFrom"] = json!(valid_from);
+            }
+            if let Some(valid_until) = valid_until {
+                raw["Metadata"]["ValidUntil"] = json!(valid_until);
+            }
+            let result = validate_draft(&raw);
+            assert_eq!(result.is_valid, expected_valid, "{valid_from:?}..{valid_until:?}");
+            assert_eq!(result.validator_version, VALIDATOR_VERSION);
+            if expected_valid {
+                assert!(result.canonical_draft.is_some());
+            } else {
+                assert!(result.canonical_draft.is_none());
+                assert!(result.validation_receipt.is_none());
+                let finding = result
+                    .findings
+                    .iter()
+                    .find(|finding| finding.code == PolicyFindingCode::InvalidValidityInterval)
+                    .expect("invalid interval finding");
+                assert_eq!(finding.path, "/Metadata/ValidUntil");
+                assert_eq!(finding.message, "ValidUntil must be after ValidFrom");
+            }
+        }
     }
 
     #[test]
