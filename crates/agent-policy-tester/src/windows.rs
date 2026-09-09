@@ -727,15 +727,20 @@ async fn standard_user_server(
         "AgentPid": agent_pid,
         "AgentSid": child_sid.to_string(),
     }))?;
+    let ready_temp_path = ready_path.with_extension("tmp");
     let mut ready_file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(ready_path)
-        .context("create standard-user readiness file")?;
+        .open(&ready_temp_path)
+        .context("create standard-user readiness temporary file")?;
     ready_file
         .write_all(&readiness)
-        .context("write standard-user readiness file")?;
-    ready_file.sync_all().context("flush standard-user readiness file")?;
+        .context("write standard-user readiness temporary file")?;
+    ready_file
+        .sync_all()
+        .context("flush standard-user readiness temporary file")?;
+    drop(ready_file);
+    std::fs::rename(&ready_temp_path, ready_path).context("publish standard-user readiness file")?;
 
     let deadline = Instant::now() + Duration::from_secs(90);
     while !stop_path.exists() {
