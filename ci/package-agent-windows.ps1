@@ -100,7 +100,7 @@ function New-AgentMsi() {
         # The path to the devolutions-session.exe file.
         [string] $SessionExe,
         [parameter(Mandatory = $true)]
-        # The path to the DevolutionsAgentPolicyConsent.exe file.
+        # The path to the signed DevolutionsAgentPolicyConsent.exe file.
         [string] $PolicyConsentHelper,
         [parameter(Mandatory = $true)]
         [ValidateSet('x64', 'arm64')]
