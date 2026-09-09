@@ -25,7 +25,7 @@ impl WinEvent {
         // SAFETY: Proper UTF-16, null-terminated string.
         let handle = unsafe { EventLog::RegisterEventSourceW(std::ptr::null(), source_name_utf16.as_ptr()) };
 
-        if handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        if handle.is_null() {
             return Err(SysEventError::Platform(format!(
                 "failed to register event source '{source_name}'"
             )));
