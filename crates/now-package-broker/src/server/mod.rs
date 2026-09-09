@@ -135,7 +135,12 @@ async fn authenticate_policy_management(
             | (&Method::PUT, "/v1/policy")
     );
     if protected {
-        if let Err(error) = client.validate_connection(state.skip_signature_validation) {
+        let authentication = if matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy")) {
+            client.validate_policy_write(state.skip_signature_validation)
+        } else {
+            client.validate_connection(state.skip_signature_validation)
+        };
+        if let Err(error) = authentication {
             if let Some(audit) = write_audit {
                 audit.denied(crate::audit::DenialReason::AuthenticationFailed);
             }

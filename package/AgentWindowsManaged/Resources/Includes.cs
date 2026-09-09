@@ -18,6 +18,21 @@ namespace DevolutionsAgent.Resources
 
         internal static readonly string EXECUTABLE_NAME = "DevolutionsAgent.exe";
 
+        internal static readonly string POLICY_CONSENT_EXECUTABLE_NAME =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.ExecutableName;
+
+        internal static readonly string POLICY_CONSENT_PRODUCT_NAME =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.ProductName;
+
+        internal static readonly string POLICY_CONSENT_PROTOCOL_VERSION =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.ProtocolVersion;
+
+        internal static readonly string POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256 =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.CurrentUiSignerSpkiSha256;
+
+        internal static readonly string POLICY_CONSENT_TRANSITION_UI_SIGNER_SPKI_SHA256 =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.TransitionUiSignerSpkiSha256;
+
         internal static readonly string DESKTOP_DIRECTORY_NAME = "desktop";
 
         internal static readonly string DESKTOP_EXECUTABLE_NAME = "DevolutionsDesktopAgent.exe";
