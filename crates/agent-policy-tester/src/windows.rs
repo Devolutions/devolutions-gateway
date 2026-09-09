@@ -1,5 +1,6 @@
 use std::fs::OpenOptions;
 use std::io::Write as _;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -10,13 +11,20 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::windows::named_pipe::ClientOptions;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid, WinLocalSystemSid};
-use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL,
+    TOKEN_QUERY, TokenIntegrityLevel, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+};
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
 const MANAGED_POLICY_RELATIVE_PATH: &str = r"Devolutions\PackageBroker\package-broker-policy.json";
 const MANAGED_AUTHORITY_MARKER: &str = r"Devolutions\PackageBroker\.package-broker-managed-authority.v1";
 const LEGACY_POLICY_RELATIVE_PATH: &str = r"Devolutions\Agent\package-broker-policy.json";
+#[cfg(test)]
+const SECURITY_MANDATORY_LOW_RID: u32 = 0x1000;
+const SECURITY_MANDATORY_MEDIUM_RID: u32 = 0x2000;
 
 struct AgentHarness {
     child: tokio::process::Child,
@@ -221,7 +229,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             standard_user_server(&agent_path, &ready_path, &stop_path, &nonce).await?;
         }
         Mode::StandardClient => {
-            let client = verify_standard_user()?;
+            let expected_sid = next_string(&mut args, "expected client SID")?;
+            let client = verify_standard_user(&expected_sid)?;
             let ready_path = next_path(&mut args, "ready path")?;
             let nonce = next_string(&mut args, "coordination nonce")?;
             ensure!(args.next().is_none(), "unexpected standard-client arguments");
@@ -276,18 +285,85 @@ fn current_process_identity() -> anyhow::Result<(ProcessIdentity, bool, bool)> {
     ))
 }
 
-fn verify_standard_user() -> anyhow::Result<ProcessIdentity> {
+fn verify_standard_user(expected_sid: &str) -> anyhow::Result<ProcessIdentity> {
     let (identity, is_administrator, _) = current_process_identity()?;
-    let system = Sid::from_well_known(WinLocalSystemSid, None).context("construct LocalSystem SID")?;
-    ensure!(
-        identity.sid != system,
-        "standard-client mode requires a non-SYSTEM account"
-    );
+    validate_standard_user_token(
+        &identity.sid.to_string(),
+        expected_sid,
+        is_administrator,
+        current_integrity_level()?,
+    )?;
+    Ok(identity)
+}
+
+fn validate_standard_user_token(
+    actual_sid: &str,
+    expected_sid: &str,
+    is_administrator: bool,
+    integrity_level: u32,
+) -> anyhow::Result<()> {
+    ensure!(actual_sid == expected_sid, "standard-client account SID mismatch");
     ensure!(
         !is_administrator,
         "standard-client mode requires disabled Administrators membership"
     );
-    Ok(identity)
+    ensure!(
+        integrity_level == SECURITY_MANDATORY_MEDIUM_RID,
+        "standard-client mode requires Medium integrity, got RID {integrity_level:#x}"
+    );
+    Ok(())
+}
+
+fn current_integrity_level() -> anyhow::Result<u32> {
+    let mut token = HANDLE::default();
+    // SAFETY: `GetCurrentProcess` has no preconditions and returns a process pseudo-handle.
+    let process = unsafe { GetCurrentProcess() };
+    // SAFETY: The process pseudo-handle is valid and `token` is a writable output parameter.
+    unsafe {
+        OpenProcessToken(process, TOKEN_QUERY, &mut token).context("open current process integrity token")?;
+    }
+    let result = integrity_level(token);
+    // SAFETY: `OpenProcessToken` returned this owned token handle.
+    unsafe {
+        CloseHandle(token).context("close current process integrity token")?;
+    }
+    result
+}
+
+fn integrity_level(token: HANDLE) -> anyhow::Result<u32> {
+    let mut length = 0;
+    // SAFETY: A null output buffer with length zero is the documented size query.
+    let _ = unsafe { GetTokenInformation(token, TokenIntegrityLevel, None, 0, &mut length) };
+    ensure!(
+        usize::try_from(length)? >= size_of::<TOKEN_MANDATORY_LABEL>(),
+        "TokenIntegrityLevel returned an undersized buffer"
+    );
+
+    let word_count = usize::try_from(length)?.div_ceil(size_of::<usize>());
+    let mut buffer = vec![0usize; word_count];
+    // SAFETY: The aligned buffer is writable for `length` bytes and the token handle is valid.
+    unsafe {
+        GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buffer.as_mut_ptr().cast()),
+            length,
+            &mut length,
+        )
+        .context("query token integrity level")?;
+    }
+    // SAFETY: A successful TokenIntegrityLevel query initialized a TOKEN_MANDATORY_LABEL.
+    let label = unsafe { &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
+    // SAFETY: The returned token label contains a valid SID.
+    let sub_authority_count_ptr = unsafe { GetSidSubAuthorityCount(label.Label.Sid) };
+    // SAFETY: `GetSidSubAuthorityCount` returns a pointer into the valid label SID.
+    let sub_authority_count = unsafe { *sub_authority_count_ptr };
+    ensure!(sub_authority_count > 0, "integrity SID has no sub-authority");
+    // SAFETY: The index is within the validated SID sub-authority count.
+    let rid_ptr = unsafe { GetSidSubAuthority(label.Label.Sid, u32::from(sub_authority_count - 1)) };
+    // SAFETY: `GetSidSubAuthority` returns a pointer into the valid label SID.
+    let rid = unsafe { *rid_ptr };
+    Ok(rid)
 }
 
 fn verify_local_system() -> anyhow::Result<ProcessIdentity> {
@@ -1176,6 +1252,7 @@ async fn complete_snapshots_across_reload(agent_path: &Path) -> anyhow::Result<(
         if policy == &full {
             break;
         }
+
         ensure!(Instant::now() < deadline, "agent did not reload the policy");
         tokio::task::yield_now().await;
     }
@@ -1190,4 +1267,29 @@ async fn complete_snapshots_across_reload(agent_path: &Path) -> anyhow::Result<(
         .context("replace policy")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard_user_token_requires_medium_integrity() {
+        validate_standard_user_token(
+            "S-1-5-21-1-2-3-1001",
+            "S-1-5-21-1-2-3-1001",
+            false,
+            SECURITY_MANDATORY_MEDIUM_RID,
+        )
+        .expect("matching standard-user SID at Medium integrity is valid");
+
+        let error = validate_standard_user_token(
+            "S-1-5-21-1-2-3-1001",
+            "S-1-5-21-1-2-3-1001",
+            false,
+            SECURITY_MANDATORY_LOW_RID,
+        )
+        .expect_err("Low integrity must not satisfy the standard-user scenario");
+        assert!(error.to_string().contains("requires Medium integrity"));
+    }
 }
