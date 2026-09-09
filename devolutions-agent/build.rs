@@ -149,14 +149,6 @@ END"#,
             }
         }
 
-        if let Some(candidate) = env::var_os("PATH").and_then(|path| {
-            env::split_paths(&path)
-                .map(|directory| directory.join("mc.exe"))
-                .find(|path| path.is_file())
-        }) {
-            return Some(candidate);
-        }
-
         let bin_dir = std::path::PathBuf::from(env::var_os("WindowsSdkDir")?).join("bin");
         let direct = bin_dir.join("x64").join("mc.exe");
         if direct.is_file() {
