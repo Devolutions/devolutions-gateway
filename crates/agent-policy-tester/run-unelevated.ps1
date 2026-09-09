@@ -10,7 +10,8 @@ param(
     [string] $StopPath,
     [string] $StatusPath,
     [string] $ServerOutputPath,
-    [string] $Nonce
+    [string] $Nonce,
+    [string] $ExpectedClientSid
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,6 +83,163 @@ function Remove-StagingPath {
     }
 }
 
+function New-RandomSecurePassword {
+    $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*"
+    $bytes = [byte[]]::new(32)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $password = [System.Security.SecureString]::new()
+    foreach ($byte in $bytes) {
+        $password.AppendChar($alphabet[$byte % $alphabet.Length])
+    }
+    foreach ($required in "Aa1!".ToCharArray()) {
+        $password.AppendChar($required)
+    }
+    $password.MakeReadOnly()
+    return $password
+}
+
+function New-StandardUserAccount {
+    $name = "dgwpol$([guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $password = New-RandomSecurePassword
+    try {
+        $user = New-LocalUser -Name $name -Password $password -AccountNeverExpires `
+            -PasswordNeverExpires -UserMayNotChangePassword `
+            -Description "Temporary Devolutions Agent policy E2E user"
+        $usersGroup = Get-LocalGroup -SID "S-1-5-32-545"
+        $isMember = Get-LocalGroupMember -Group $usersGroup -ErrorAction Stop |
+            Where-Object { $_.SID.Value -eq $user.SID.Value }
+        if (-not $isMember) {
+            Add-LocalGroupMember -Group $usersGroup -Member $user -ErrorAction Stop
+        }
+        return [pscustomobject]@{
+            Name = $name
+            Sid = $user.SID.Value
+            Credential = [System.Management.Automation.PSCredential]::new(
+                $name,
+                $password
+            )
+        }
+    } catch {
+        Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
+        $password.Dispose()
+        throw
+    }
+}
+
+function Set-StandardUserTempAcl {
+    param(
+        [string] $Path,
+        [string] $UserSid
+    )
+
+    New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
+    & icacls.exe $Path /inheritance:r /grant:r `
+        '*S-1-5-18:(OI)(CI)(F)' `
+        '*S-1-5-32-544:(OI)(CI)(F)' `
+        "*$($UserSid):(OI)(CI)(M)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to protect the standard-user temporary directory"
+    }
+}
+
+function Invoke-StandardUserClient {
+    param(
+        [System.Management.Automation.PSCredential] $Credential,
+        [string] $UserSid,
+        [string] $ClientTempPath,
+        [string] $ScriptPath,
+        [string] $TesterExecutablePath,
+        [string] $AgentExecutablePath,
+        [string] $ReadinessPath,
+        [string] $ExpectedNonce
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command pwsh.exe -CommandType Application).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.LoadUserProfile = $false
+    $startInfo.UserName = $Credential.UserName
+    $startInfo.Domain = "."
+    $startInfo.Password = $Credential.Password
+    $startInfo.WorkingDirectory = $ClientTempPath
+    $startInfo.Environment["TEMP"] = $ClientTempPath
+    $startInfo.Environment["TMP"] = $ClientTempPath
+    foreach ($argument in @(
+        "-NoProfile",
+        "-File",
+        $ScriptPath,
+        "-Action",
+        "Run",
+        "-StagedTesterPath",
+        $TesterExecutablePath,
+        "-AgentPath",
+        $AgentExecutablePath,
+        "-TempPath",
+        $ClientTempPath,
+        "-ReadyPath",
+        $ReadinessPath,
+        "-Nonce",
+        $ExpectedNonce,
+        "-ExpectedClientSid",
+        $UserSid
+    )) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "Failed to start the medium-integrity standard-user client"
+        }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(60000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw "Timed out waiting for the medium-integrity standard-user client"
+        }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StdOut = $stdout.GetAwaiter().GetResult()
+            StdErr = $stderr.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Remove-StandardUserAccount {
+    param(
+        [string] $Name,
+        [string] $Sid
+    )
+
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            $profile = Get-CimInstance -ClassName Win32_UserProfile -Filter "SID='$Sid'" -ErrorAction Stop
+            if ($profile) {
+                $profile | Remove-CimInstance -ErrorAction Stop
+            }
+            if (Get-LocalUser -Name $Name -ErrorAction SilentlyContinue) {
+                Remove-LocalUser -Name $Name -ErrorAction Stop
+            }
+            if (-not (Get-LocalUser -Name $Name -ErrorAction SilentlyContinue)) {
+                return
+            }
+        } catch {
+            if ($attempt -eq 19) {
+                throw
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Temporary standard-user account still exists after 20 removal attempts"
+}
+
 function Invoke-RunnerSelfTests {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) "agent-policy-runner-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $root | Out-Null
@@ -143,7 +301,7 @@ if ($Action -eq "SelfTest") {
 if ($Action -eq "Run") {
     $env:TEMP = $TempPath
     $env:TMP = $TempPath
-    & $StagedTesterPath $AgentPath standard-client $ReadyPath $Nonce
+    & $StagedTesterPath $AgentPath standard-client $ExpectedClientSid $ReadyPath $Nonce
     exit $LASTEXITCODE
 }
 
@@ -251,15 +409,14 @@ $readyPath = Join-Path $stagingPath "standard-user-ready.json"
 $stopPath = Join-Path $stagingPath "standard-user-stop"
 $statusPath = Join-Path $stagingPath "standard-user-server.status"
 $serverOutputPath = Join-Path $stagingPath "standard-user-server.out"
-$tempPath = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
 $nonce = [guid]::NewGuid().ToString("N")
 $exitCode = 1
 $coordinationReady = $false
+$clientAccount = $null
 
 try {
     Invoke-RunnerSelfTests
     Set-Content -LiteralPath $outputPath -Value ""
-    New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
 
     $stageOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
         -Action Stage -TesterPath $testerPath -StagedTesterPath $stagedTesterPath -StagingPath $stagingPath 2>&1
@@ -268,6 +425,10 @@ try {
     if ($stageExitCode -ne 0) {
         throw "LocalSystem tester staging failed with exit code $stageExitCode"
     }
+
+    $clientAccount = New-StandardUserAccount
+    $clientTempPath = Join-Path $stagingPath "standard-user-temp"
+    Set-StandardUserTempAcl -Path $clientTempPath -UserSid $clientAccount.Sid
 
     $serverOutput = & psexec.exe -accepteula -s -d pwsh.exe -NoProfile -File $PSCommandPath `
         -Action Server -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -ReadyPath $readyPath `
@@ -281,11 +442,12 @@ try {
     $coordinationReady = $true
     $readiness | ConvertTo-Json -Compress | Out-File $outputPath -Append
 
-    $testerOutput = & psexec.exe -accepteula -l pwsh.exe -NoProfile -File $PSCommandPath `
-        -Action Run -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -TempPath $tempPath `
-        -ReadyPath $readyPath -Nonce $nonce 2>&1
-    $exitCode = $LASTEXITCODE
-    $testerOutput | Out-File $outputPath -Append
+    $client = Invoke-StandardUserClient -Credential $clientAccount.Credential -UserSid $clientAccount.Sid `
+        -ClientTempPath $clientTempPath -ScriptPath $PSCommandPath -TesterExecutablePath $stagedTesterPath `
+        -AgentExecutablePath $agentPath -ReadinessPath $readyPath -ExpectedNonce $nonce
+    $client.StdOut | Out-File $outputPath -Append
+    $client.StdErr | Out-File $outputPath -Append
+    $exitCode = $client.ExitCode
 } catch {
     $_ | Out-File $outputPath -Append
     $exitCode = 1
@@ -314,6 +476,19 @@ try {
         } elseif ($exitCode -eq 0) {
             "Timed out waiting for LocalSystem test server shutdown" | Out-File $outputPath -Append
             $exitCode = 1
+        }
+    }
+
+    if ($clientAccount) {
+        try {
+            Remove-StandardUserAccount -Name $clientAccount.Name -Sid $clientAccount.Sid
+        } catch {
+            $_ | Out-File $outputPath -Append
+            if ($exitCode -eq 0) {
+                $exitCode = 1
+            }
+        } finally {
+            $clientAccount.Credential.Password.Dispose()
         }
     }
 
