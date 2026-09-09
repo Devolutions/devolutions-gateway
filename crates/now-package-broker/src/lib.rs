@@ -24,6 +24,8 @@ pub mod policy_loader;
 #[cfg(windows)]
 mod policy_security;
 #[cfg(windows)]
+pub mod policy_store;
+#[cfg(windows)]
 pub mod policy_watcher;
 #[cfg(windows)]
 pub mod server;
