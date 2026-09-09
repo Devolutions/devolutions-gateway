@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Orchestrate", "Stage", "Server", "Run", "Signal", "Cleanup")]
+    [ValidateSet("Orchestrate", "Stage", "Server", "Run", "Signal", "Cleanup", "SelfTest")]
     [string] $Action = "Orchestrate",
     [string] $TesterPath,
     [string] $StagedTesterPath,
@@ -14,6 +14,131 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-ExplicitPsExecLaunchFailure {
+    param([string] $Diagnostics)
+
+    return $Diagnostics -match '(?im)^(Couldn''t install PSEXESVC service:|Error establishing communication with PsExec service|Access is denied\.)'
+}
+
+function Wait-ServerReadiness {
+    param(
+        [string] $Path,
+        [string] $ServerStatusPath,
+        [string] $ExpectedNonce,
+        [int] $TimeoutMilliseconds,
+        [int] $LaunchValue,
+        [string] $LaunchDiagnostics
+    )
+
+    if (Test-ExplicitPsExecLaunchFailure $LaunchDiagnostics) {
+        throw "LocalSystem test server launch failed (value $LaunchValue): $LaunchDiagnostics"
+    }
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while (-not (Test-Path -LiteralPath $Path)) {
+        if (Test-Path -LiteralPath $ServerStatusPath) {
+            $status = Get-Content -LiteralPath $ServerStatusPath -Raw
+            throw "LocalSystem test server exited with status $status before publishing readiness (launch value $LaunchValue): $LaunchDiagnostics"
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out waiting for LocalSystem test server readiness (launch value $LaunchValue): $LaunchDiagnostics"
+        }
+        Start-Sleep -Milliseconds 100
+    }
+
+    $readiness = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ($readiness.Nonce -cne $ExpectedNonce) {
+        throw "LocalSystem test server readiness nonce mismatch"
+    }
+    if ([string]::IsNullOrWhiteSpace($readiness.PipeName)) {
+        throw "LocalSystem test server readiness has no pipe name"
+    }
+    if ($readiness.ServerPid -le 0 -or $readiness.AgentPid -le 0 -or $readiness.ServerPid -eq $readiness.AgentPid) {
+        throw "LocalSystem test server readiness has invalid process identities"
+    }
+    if ($readiness.ServerSid -cne 'S-1-5-18' -or $readiness.AgentSid -cne 'S-1-5-18') {
+        throw "LocalSystem test server readiness has non-SYSTEM identities"
+    }
+
+    return $readiness
+}
+
+function Remove-StagingPath {
+    param([string] $Path)
+
+    for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $Path); $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force
+        } catch {
+            if ($attempt -eq 19) {
+                throw "Failed to remove $Path after 20 attempts: $_"
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        throw "Failed to remove $Path"
+    }
+}
+
+function Invoke-RunnerSelfTests {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) "agent-policy-runner-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $root | Out-Null
+    try {
+        $ready = Join-Path $root "ready.json"
+        $status = Join-Path $root "status"
+        Set-Content -LiteralPath $ready -Value (
+            @{
+                Nonce = "nonce"
+                PipeName = "\\.\pipe\test"
+                ServerPid = 100
+                ServerSid = "S-1-5-18"
+                AgentPid = 200
+                AgentSid = "S-1-5-18"
+            } | ConvertTo-Json -Compress
+        )
+        Wait-ServerReadiness -Path $ready -ServerStatusPath $status -ExpectedNonce "nonce" `
+            -TimeoutMilliseconds 50 -LaunchValue 6256 -LaunchDiagnostics "started detached process" | Out-Null
+
+        Remove-Item -LiteralPath $ready
+        try {
+            Wait-ServerReadiness -Path $ready -ServerStatusPath $status -ExpectedNonce "nonce" `
+                -TimeoutMilliseconds 50 -LaunchValue 6256 -LaunchDiagnostics "started detached process" | Out-Null
+            throw "Missing-readiness simulation unexpectedly succeeded"
+        } catch {
+            if (
+                $_ -notmatch "Timed out waiting for LocalSystem test server readiness" -or
+                $_ -notmatch "started detached process"
+            ) {
+                throw
+            }
+        }
+
+        try {
+            Wait-ServerReadiness -Path $ready -ServerStatusPath $status -ExpectedNonce "nonce" `
+                -TimeoutMilliseconds 5000 -LaunchValue 6 `
+                -LaunchDiagnostics "Couldn't install PSEXESVC service: Access is denied." | Out-Null
+            throw "Explicit-launch-failure simulation unexpectedly succeeded"
+        } catch {
+            if (
+                $_ -notmatch "LocalSystem test server launch failed" -or
+                $_ -notmatch "Couldn't install PSEXESVC service"
+            ) {
+                throw
+            }
+        }
+
+        Remove-StagingPath -Path (Join-Path $root "already-absent")
+    } finally {
+        Remove-StagingPath -Path $root
+    }
+}
+
+if ($Action -eq "SelfTest") {
+    Invoke-RunnerSelfTests
+    exit 0
+}
 
 if ($Action -eq "Run") {
     $env:TEMP = $TempPath
@@ -37,22 +162,15 @@ if ($Action -eq "Server") {
 }
 
 if ($Action -eq "Signal") {
-    New-Item -ItemType File -Path $StopPath -ErrorAction Stop | Out-Null
+    if (-not (Test-Path -LiteralPath $StopPath)) {
+        New-Item -ItemType File -Path $StopPath -ErrorAction Stop | Out-Null
+    }
     exit 0
 }
 
 if ($Action -eq "Cleanup") {
-    for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $StagingPath); $attempt++) {
-        try {
-            Remove-Item -LiteralPath $StagingPath -Recurse -Force
-        } catch {
-            if ($attempt -eq 19) {
-                throw "Failed to remove $StagingPath after 20 attempts: $_"
-            }
-            Start-Sleep -Milliseconds 250
-        }
-    }
-    exit $(if (Test-Path -LiteralPath $StagingPath) { 1 } else { 0 })
+    Remove-StagingPath -Path $StagingPath
+    exit 0
 }
 
 if ($Action -eq "Stage") {
@@ -136,9 +254,10 @@ $serverOutputPath = Join-Path $stagingPath "standard-user-server.out"
 $tempPath = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
 $nonce = [guid]::NewGuid().ToString("N")
 $exitCode = 1
-$serverStarted = $false
+$coordinationReady = $false
 
 try {
+    Invoke-RunnerSelfTests
     Set-Content -LiteralPath $outputPath -Value ""
     New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
 
@@ -155,22 +274,12 @@ try {
         -StopPath $stopPath -StatusPath $statusPath -ServerOutputPath $serverOutputPath -Nonce $nonce 2>&1
     $serverStartExitCode = $LASTEXITCODE
     $serverOutput | Out-File $outputPath -Append
-    if ($serverStartExitCode -ne 0) {
-        throw "LocalSystem test server failed to start with exit code $serverStartExitCode"
-    }
-    $serverStarted = $true
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    while (-not (Test-Path -LiteralPath $readyPath)) {
-        if (Test-Path -LiteralPath $statusPath) {
-            throw "LocalSystem test server exited before publishing readiness"
-        }
-        if ([DateTime]::UtcNow -ge $deadline) {
-            throw "Timed out waiting for LocalSystem test server readiness"
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    Get-Content -LiteralPath $readyPath | Out-File $outputPath -Append
+    "Detached server launch value: $serverStartExitCode" | Out-File $outputPath -Append
+    $serverLaunchDiagnostics = ($serverOutput | Out-String).Trim()
+    $readiness = Wait-ServerReadiness -Path $readyPath -ServerStatusPath $statusPath -ExpectedNonce $nonce `
+        -TimeoutMilliseconds 30000 -LaunchValue $serverStartExitCode -LaunchDiagnostics $serverLaunchDiagnostics
+    $coordinationReady = $true
+    $readiness | ConvertTo-Json -Compress | Out-File $outputPath -Append
 
     $testerOutput = & psexec.exe -accepteula -l pwsh.exe -NoProfile -File $PSCommandPath `
         -Action Run -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -TempPath $tempPath `
@@ -181,7 +290,7 @@ try {
     $_ | Out-File $outputPath -Append
     $exitCode = 1
 } finally {
-    if ($serverStarted) {
+    if ($coordinationReady) {
         $signalOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
             -Action Signal -StopPath $stopPath 2>&1
         $signalExitCode = $LASTEXITCODE
