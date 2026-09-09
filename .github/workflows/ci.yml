@@ -228,6 +228,22 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
 
+      ## Required by the RDCleanPath credential-injection tests in the testsuite.
+      ## Keep the version in sync with IRONRDP_AGENT_VERSION in testsuite/src/ironrdp_agent.rs.
+      - name: Cache ironrdp-agent
+        id: cache-ironrdp-agent
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/ironrdp-agent
+            ~/.cargo/bin/ironrdp-agent.exe
+          key: ironrdp-agent-0.1.0-${{ runner.os }}
+
+      - name: Install ironrdp-agent
+        if: ${{ steps.cache-ironrdp-agent.outputs.cache-hit != 'true' }}
+        shell: pwsh
+        run: cargo install ironrdp-agent --version 0.1.0 --locked
+
       - name: Tests
         run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
         shell: pwsh
