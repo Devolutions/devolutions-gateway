@@ -1,15 +1,18 @@
 use std::collections::HashMap;
 use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
+use std::fs::File;
 use std::os::windows::ffi::OsStringExt;
+use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use std::{ptr, slice};
 
 use anyhow::{Context, Result, bail};
 use tracing::{error, warn};
 use windows::Win32::Foundation::{
-    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM, MAX_PATH,
-    WAIT_EVENT, WAIT_FAILED, WPARAM,
+    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FILETIME, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM,
+    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -21,13 +24,15 @@ use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnviron
 use windows::Win32::System::LibraryLoader::{
     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GetModuleFileNameW, GetModuleHandleExW, GetProcAddress,
 };
+use windows::Win32::System::ProcessStatus::K32GetMappedFileNameW;
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
-    LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION,
-    PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW,
-    STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
+    LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
+    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE,
+    QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -41,7 +46,10 @@ use crate::security::attributes::SecurityAttributes;
 use crate::security::privilege::{self, ScopedPrivileges};
 use crate::thread::Thread;
 use crate::token::Token;
-use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
+use crate::undoc::{
+    NtQueryInformationProcess, ProcessBasicInformation, ProcessImageFileMapping, ProcessImageInformation,
+    RTL_USER_PROCESS_PARAMETERS, SECTION_IMAGE_INFORMATION,
+};
 use crate::utils::{Allocation, AnsiString, ComContext, CommandLine, WideString, u32size_of};
 
 #[derive(Debug)]
@@ -101,6 +109,76 @@ impl Process {
         unsafe { path.set_len(length as usize) };
 
         Ok(OsString::from_wide(&path).into())
+    }
+
+    /// Returns the main image's transfer address and a candidate native path for it.
+    ///
+    /// The address comes from `ProcessImageInformation`, which reports the kernel image
+    /// section rather than the target-controlled PEB or loader module list.
+    /// The path identifies the file currently mapped at that address.
+    /// Callers must confirm the opened candidate with [`Process::verify_image_file_mapping`].
+    pub fn main_image_mapped_path(&self) -> Result<(usize, PathBuf)> {
+        let mut image = SECTION_IMAGE_INFORMATION::default();
+
+        // SAFETY: `image` is a writable buffer with the exact native structure size.
+        unsafe {
+            NtQueryInformationProcess(
+                self.handle.raw(),
+                ProcessImageInformation,
+                (&raw mut image).cast(),
+                u32size_of::<SECTION_IMAGE_INFORMATION>(),
+                None,
+            )
+        }?;
+
+        let image_address = image.TransferAddress as usize;
+        if image_address == 0 {
+            bail!(Error::NullPointer("SECTION_IMAGE_INFORMATION::TransferAddress"));
+        }
+
+        let mut capacity = MAX_PATH as usize;
+        loop {
+            let mut path = vec![0u16; capacity];
+            // SAFETY: `image_address` is inside the kernel-reported main image section,
+            // and `path` is a writable UTF-16 output buffer.
+            let length = unsafe {
+                K32GetMappedFileNameW(self.handle.raw(), image_address as *const c_void, path.as_mut_slice())
+            };
+            if length == 0 {
+                bail!(Error::last_error());
+            }
+            if usize::try_from(length).expect("u32 fits in usize") < path.len() {
+                path.truncate(length as usize);
+                return Ok((image_address, OsString::from_wide(&path).into()));
+            }
+            capacity = capacity
+                .checked_mul(2)
+                .filter(|capacity| u16::try_from(*capacity).is_ok())
+                .context("main image mapped path is too long")?;
+        }
+    }
+
+    /// Verifies that `file` is the same kernel file object backing this process's main image.
+    ///
+    /// `ProcessImageFileMapping` compares section-object pointers, but does not attest the
+    /// bytes originally mapped into the image section.
+    /// The handle is an input despite `NtQueryInformationProcess`'s generic output-buffer
+    /// signature, and must grant `SYNCHRONIZE | FILE_EXECUTE`.
+    pub fn verify_image_file_mapping(&self, file: &File) -> Result<()> {
+        let mut file_handle = HANDLE(file.as_raw_handle());
+
+        // SAFETY: ProcessImageFileMapping reads one valid HANDLE-sized input value.
+        unsafe {
+            NtQueryInformationProcess(
+                self.handle.raw(),
+                ProcessImageFileMapping,
+                (&raw mut file_handle).cast(),
+                u32size_of::<HANDLE>(),
+                None,
+            )
+        }?;
+
+        Ok(())
     }
 
     pub fn inject_dll(&self, path: &Path) -> Result<()> {
@@ -194,6 +272,28 @@ impl Process {
         let handle = unsafe { Handle::new_owned(handle)? };
 
         Ok(Token::from(handle))
+    }
+
+    pub fn creation_time(&self) -> Result<SystemTime> {
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+
+        // SAFETY: All output pointers are valid for the duration of the call.
+        unsafe { GetProcessTimes(self.handle.raw(), &mut creation, &mut exit, &mut kernel, &mut user) }?;
+
+        const WINDOWS_TO_UNIX_EPOCH_SECONDS: u64 = 11_644_473_600;
+        const TICKS_PER_SECOND: u64 = 10_000_000;
+
+        let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+        let seconds = ticks / TICKS_PER_SECOND;
+        let unix_seconds = seconds
+            .checked_sub(WINDOWS_TO_UNIX_EPOCH_SECONDS)
+            .context("process creation time predates the Unix epoch")?;
+        let nanos = u32::try_from((ticks % TICKS_PER_SECOND) * 100).expect("FILETIME subsecond value fits in u32");
+
+        Ok(SystemTime::UNIX_EPOCH + Duration::new(unix_seconds, nanos))
     }
 
     pub fn wait(&self, timeout_ms: Option<u32>) -> Result<WAIT_EVENT> {

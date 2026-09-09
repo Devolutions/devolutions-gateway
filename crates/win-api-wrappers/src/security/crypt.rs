@@ -1,6 +1,7 @@
 use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
 use std::fs::File;
+use std::io::{Seek as _, SeekFrom};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
@@ -21,9 +22,10 @@ use windows::Win32::Security::Cryptography::{
 };
 use windows::Win32::Security::WinTrust::{
     CRYPT_PROVIDER_CERT, CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR, WINTRUST_ACTION_GENERIC_VERIFY_V2,
-    WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
-    WTD_CHOICE_CATALOG, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
-    WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_USE_DEFAULT_OSVER_CHECK, WTHelperProvDataFromStateData, WinVerifyTrustEx,
+    WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_DATA_UNION_CHOICE, WINTRUST_FILE_INFO,
+    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4, WTD_REVOKE_WHOLECHAIN,
+    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_USE_DEFAULT_OSVER_CHECK,
+    WTHelperProvDataFromStateData, WinVerifyTrustEx,
 };
 use windows::core::HRESULT;
 
@@ -37,16 +39,64 @@ pub struct CatalogInfo {
 
 impl CatalogInfo {
     pub fn try_from_file(path: &Path) -> Result<Option<Self>> {
-        let admin_ctx = CatalogAdminContext::try_new()?;
-
-        let hash = admin_ctx.hash_file(path)?;
-
-        let catalog_path = admin_ctx.catalogs_for_hash(&hash).next();
+        let admin_context = CatalogAdminContext::try_new()?;
+        let hash = admin_context.hash_file(path)?;
+        let catalog_path = admin_context.catalogs_for_hash(&hash).next();
 
         Ok(catalog_path.map(|catalog_path| Self {
             hash,
             path: catalog_path,
         }))
+    }
+}
+
+struct RetainedCatalogInfo {
+    path: PathBuf,
+    hash: Vec<u8>,
+    admin_context: CatalogAdminContext,
+}
+
+impl RetainedCatalogInfo {
+    fn try_from_file(file: &File) -> Result<Option<Self>> {
+        let admin_context = CatalogAdminContext::try_new()?;
+        let hash = admin_context.hash_file_handle(file)?;
+        let catalog_path = {
+            let mut catalogs = admin_context.catalogs_for_hash(&hash);
+            catalogs.next()
+        };
+
+        Ok(catalog_path.map(|catalog_path| Self {
+            hash,
+            path: catalog_path,
+            admin_context,
+        }))
+    }
+}
+
+fn wintrust_catalog_info(
+    catalog_info: &RetainedCatalogInfo,
+    catalog_path: &WideString,
+    member_path: &WideString,
+    member_tag: &WideString,
+    file: &File,
+) -> WINTRUST_CATALOG_INFO {
+    WINTRUST_CATALOG_INFO {
+        cbStruct: u32size_of::<WINTRUST_CATALOG_INFO>(),
+        pcwszCatalogFilePath: catalog_path.as_pcwstr(),
+        pcwszMemberFilePath: member_path.as_pcwstr(),
+        pcwszMemberTag: member_tag.as_pcwstr(),
+        hMemberFile: HANDLE(file.as_raw_handle().cast()),
+        hCatAdmin: catalog_info.admin_context.handle.0 as isize,
+        ..Default::default()
+    }
+}
+
+fn wintrust_file_info(path: &WideString, file: &File) -> WINTRUST_FILE_INFO {
+    WINTRUST_FILE_INFO {
+        cbStruct: u32size_of::<WINTRUST_FILE_INFO>(),
+        pcwszFilePath: path.as_pcwstr(),
+        hFile: HANDLE(file.as_raw_handle().cast()),
+        ..Default::default()
     }
 }
 
@@ -56,10 +106,10 @@ impl CatalogInfo {
 /// https://github.com/microsoft/Windows-classic-samples/blob/main/Samples/Security/CodeSigning/cpp/codesigning.cpp
 pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Result<WinVerifyTrustResult> {
     let path = WideString::from(path);
-    let catalog_info = catalog_info.map(|c| {
+    let catalog_info = catalog_info.map(|catalog| {
         (
-            WideString::from(&c.path),
-            WideString::from(base16ct::upper::encode_string(&c.hash)),
+            WideString::from(&catalog.path),
+            WideString::from(base16ct::upper::encode_string(&catalog.hash)),
         )
     });
 
@@ -69,11 +119,11 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
     }
 
     let mut wintrust_info = match &catalog_info {
-        Some((catalog_info_path, catalog_info_member)) => WintrustInfo::Catalog(WINTRUST_CATALOG_INFO {
+        Some((catalog_path, member_tag)) => WintrustInfo::Catalog(WINTRUST_CATALOG_INFO {
             cbStruct: u32size_of::<WINTRUST_CATALOG_INFO>(),
-            pcwszCatalogFilePath: catalog_info_path.as_pcwstr(),
+            pcwszCatalogFilePath: catalog_path.as_pcwstr(),
             pcwszMemberFilePath: path.as_pcwstr(),
-            pcwszMemberTag: catalog_info_member.as_pcwstr(),
+            pcwszMemberTag: member_tag.as_pcwstr(),
             ..Default::default()
         }),
         None => WintrustInfo::File(WINTRUST_FILE_INFO {
@@ -83,19 +133,65 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
         }),
     };
 
+    let (choice, data) = match &mut wintrust_info {
+        WintrustInfo::Catalog(info) => (WTD_CHOICE_CATALOG, WINTRUST_DATA_0 { pCatalog: info }),
+        WintrustInfo::File(info) => (WTD_CHOICE_FILE, WINTRUST_DATA_0 { pFile: info }),
+    };
+    run_win_verify_trust(choice, data)
+}
+
+/// Verify `file` itself.
+/// `path` is passed to WinTrust as subject metadata and must not be relied on for identity.
+pub fn win_verify_trust_for_file(path: &Path, file: &File) -> Result<WinVerifyTrustResult> {
+    let catalog_info = RetainedCatalogInfo::try_from_file(file)?;
+    win_verify_trust_for_file_with_catalog(path, file, catalog_info)
+}
+
+fn win_verify_trust_for_file_with_catalog(
+    path: &Path,
+    file: &File,
+    catalog_info: Option<RetainedCatalogInfo>,
+) -> Result<WinVerifyTrustResult> {
+    let path = WideString::from(path);
+    let catalog_strings = catalog_info.as_ref().map(|catalog_info| {
+        (
+            WideString::from(&catalog_info.path),
+            WideString::from(base16ct::upper::encode_string(&catalog_info.hash)),
+        )
+    });
+
+    enum WintrustInfo {
+        Catalog(WINTRUST_CATALOG_INFO),
+        File(WINTRUST_FILE_INFO),
+    }
+
+    let mut wintrust_info = match (&catalog_info, &catalog_strings) {
+        (Some(catalog_info), Some((catalog_path, member_tag))) => WintrustInfo::Catalog(wintrust_catalog_info(
+            catalog_info,
+            catalog_path,
+            &path,
+            member_tag,
+            file,
+        )),
+        (None, None) => WintrustInfo::File(wintrust_file_info(&path, file)),
+        _ => unreachable!("catalog info and derived strings are created together"),
+    };
+
+    let (choice, data) = match &mut wintrust_info {
+        WintrustInfo::Catalog(info) => (WTD_CHOICE_CATALOG, WINTRUST_DATA_0 { pCatalog: info }),
+        WintrustInfo::File(info) => (WTD_CHOICE_FILE, WINTRUST_DATA_0 { pFile: info }),
+    };
+    run_win_verify_trust(choice, data)
+}
+
+fn run_win_verify_trust(choice: WINTRUST_DATA_UNION_CHOICE, data: WINTRUST_DATA_0) -> Result<WinVerifyTrustResult> {
     let mut win_trust_data = WINTRUST_DATA {
         cbStruct: u32size_of::<WINTRUST_DATA>(),
         dwUIChoice: WTD_UI_NONE,
         fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN,
-        dwUnionChoice: match &wintrust_info {
-            WintrustInfo::Catalog(_) => WTD_CHOICE_CATALOG,
-            WintrustInfo::File(_) => WTD_CHOICE_FILE,
-        },
+        dwUnionChoice: choice,
         dwStateAction: WTD_STATEACTION_VERIFY,
-        Anonymous: match &mut wintrust_info {
-            WintrustInfo::Catalog(x) => WINTRUST_DATA_0 { pCatalog: x },
-            WintrustInfo::File(x) => WINTRUST_DATA_0 { pFile: x },
-        },
+        Anonymous: data,
         dwProvFlags: WTD_USE_DEFAULT_OSVER_CHECK | WTD_DISABLE_MD2_MD4 | WTD_CACHE_ONLY_URL_RETRIEVAL,
         ..Default::default()
     };
@@ -136,8 +232,12 @@ pub struct WinVerifyTrustResult {
 
 pub fn authenticode_status(path: &Path) -> Result<WinVerifyTrustResult> {
     let catalog_info = CatalogInfo::try_from_file(path)?;
-
     win_verify_trust(path, catalog_info)
+}
+
+/// Read the Authenticode status of `file`; `path` only supplies WinTrust subject metadata.
+pub fn authenticode_status_for_file(path: &Path, file: &File) -> Result<WinVerifyTrustResult> {
+    win_verify_trust_for_file(path, file)
 }
 
 pub struct CatalogAdminContext {
@@ -164,11 +264,18 @@ impl CatalogAdminContext {
     }
 
     pub fn hash_file(&self, path: &Path) -> Result<Vec<u8>> {
+        let file = File::open(path)?;
+        self.hash_file_handle(&file)
+    }
+
+    /// Hash the exact retained file object and reset its cursor to offset zero.
+    pub fn hash_file_handle(&self, file: &File) -> Result<Vec<u8>> {
         // The output has a variable size.
         // Therefore, we must call CryptCATAdminCalcHashFromFileHandle2 once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
         // At this point, we call CryptCATAdminCalcHashFromFileHandle2 again with a buffer of the correct size.
 
-        let file = File::open(path)?;
+        let mut cursor = file;
+        cursor.seek(SeekFrom::Start(0))?;
         let mut required_size = 0u32;
 
         // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
@@ -200,6 +307,7 @@ impl CatalogAdminContext {
         debug_assert_eq!(allocated_length, required_size);
 
         hash.truncate(required_size as usize);
+        cursor.seek(SeekFrom::Start(0))?;
 
         Ok(hash)
     }
@@ -213,6 +321,87 @@ impl Drop for CatalogAdminContext {
     fn drop(&mut self) {
         // SAFETY: Handle is valid as it is created at construction of this object.
         let _ = unsafe { CryptCATAdminReleaseContext(self.handle.0 as isize, 0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Seek as _, SeekFrom};
+
+    use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn catalog_hash_uses_retained_handle_and_resets_position() {
+        let executable = std::env::current_exe().expect("current executable");
+        let mut file = File::open(executable).expect("open current executable");
+        file.seek(SeekFrom::Start(17)).expect("move retained handle position");
+        let context = CatalogAdminContext::try_new().expect("create catalog context");
+
+        let hash = context
+            .hash_file_handle(&file)
+            .expect("hash retained executable handle");
+
+        assert!(!hash.is_empty());
+        assert_eq!(file.stream_position().expect("query retained handle position"), 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn catalog_wintrust_info_carries_live_sha256_context_and_member_handle() {
+        let executable = std::env::current_exe().expect("current executable");
+        let file = File::open(&executable).expect("open current executable");
+        let admin_context = CatalogAdminContext::try_new().expect("create SHA-256 catalog context");
+        let catalog_info = RetainedCatalogInfo {
+            path: PathBuf::from(r"C:\test\catalog.cat"),
+            hash: vec![0xAB; 32],
+            admin_context,
+        };
+        let catalog_path = WideString::from(&catalog_info.path);
+        let member_path = WideString::from(&executable);
+        let member_tag = WideString::from(base16ct::upper::encode_string(&catalog_info.hash));
+
+        let native = wintrust_catalog_info(&catalog_info, &catalog_path, &member_path, &member_tag, &file);
+
+        assert_eq!(native.hCatAdmin, catalog_info.admin_context.handle.0 as isize);
+        assert_eq!(native.hMemberFile, HANDLE(file.as_raw_handle().cast()));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn embedded_wintrust_info_carries_retained_file_handle() {
+        let executable = std::env::current_exe().expect("current executable");
+        let file = File::open(&executable).expect("open current executable");
+        let path = WideString::from(&executable);
+
+        let native = wintrust_file_info(&path, &file);
+
+        assert_eq!(native.hFile, HANDLE(file.as_raw_handle().cast()));
+    }
+
+    #[test]
+    fn catalog_backed_signature_uses_retained_context_when_available() {
+        let Some(windows_dir) = std::env::var_os("WINDIR") else {
+            return;
+        };
+        let candidates = [
+            PathBuf::from(&windows_dir).join(r"System32\cmd.exe"),
+            PathBuf::from(&windows_dir).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+            PathBuf::from(&windows_dir).join(r"System32\drivers\acpi.sys"),
+        ];
+
+        for path in candidates {
+            let Ok(file) = File::open(&path) else {
+                continue;
+            };
+            let Ok(Some(catalog_info)) = RetainedCatalogInfo::try_from_file(&file) else {
+                continue;
+            };
+            let result = win_verify_trust_for_file_with_catalog(&path, &file, Some(catalog_info))
+                .expect("verify catalog-backed system file");
+            assert!(matches!(result.status, AuthenticodeSignatureStatus::Valid));
+            return;
+        }
     }
 }
 
