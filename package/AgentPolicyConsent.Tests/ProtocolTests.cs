@@ -102,6 +102,29 @@ public sealed class ProtocolTests
         }
 
         [Fact]
+        public void AuthenticodeRequiresFreshWholeChainRevocation()
+        {
+            Native.WinTrustData data = new(IntPtr.Zero);
+
+            Assert.Equal(Native.WtdRevokeWholeChain, data.RevocationChecks);
+            Assert.Equal(
+                Native.WtdRevocationCheckChain | Native.WtdDisableMd2Md4,
+                data.ProviderFlags);
+            Assert.Equal(0u, data.ProviderFlags & Native.WtdCacheOnlyUrlRetrieval);
+        }
+
+        [Theory]
+        [InlineData(0, true)]
+        [InlineData(unchecked((int)0x800B010C), false)]
+        [InlineData(unchecked((int)0x80092012), false)]
+        [InlineData(unchecked((int)0x80092013), false)]
+        [InlineData(unchecked((int)0x800B010E), false)]
+        public void AuthenticodeFailsClosedForIndeterminateStatus(int status, bool accepted)
+        {
+            Assert.Equal(accepted, PeerLease.IsAuthenticodeStatusAccepted(status));
+        }
+
+        [Fact]
         public void ProcessImageMappingAcceptsOnlyCurrentMappedImage()
         {
             using SafeProcessHandle process = Native.OpenProcess(

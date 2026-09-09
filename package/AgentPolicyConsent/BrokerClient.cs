@@ -29,7 +29,7 @@ internal static class BrokerClient
             using CancellationTokenSource connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             connectTimeout.CancelAfter(ConnectTimeout);
             await pipe.ConnectAsync(connectTimeout.Token);
-            using BrokerServerLease broker = BrokerServerLease.Open(pipe.SafePipeHandle);
+            using BrokerServerLease broker = await OpenBrokerServerAsync(pipe, cancellationToken);
 
             byte[] headers = Encoding.ASCII.GetBytes(
                 $"PUT /v1/policy HTTP/1.1\r\nHost: now-package-broker\r\nConnection: close\r\n" +
@@ -59,6 +59,10 @@ internal static class BrokerClient
         catch (BrokerResponseException error)
         {
             return Unknown(request.RequestId, error.StatusCode, "InvalidResponse");
+        }
+        catch (BrokerAuthenticationException)
+        {
+            return Rejected(request.RequestId, "Unauthorized");
         }
         catch (InvalidOperationException)
         {
@@ -239,6 +243,41 @@ internal static class BrokerClient
     private static ElevationResponse Unknown(string requestId, int? statusCode, string errorCode) =>
         new(Protocol.Version, requestId, "Unknown", statusCode, errorCode, null, null, null, null);
 
+    private static ElevationResponse Rejected(string requestId, string errorCode) =>
+        new(Protocol.Version, requestId, "Rejected", null, errorCode, null, null, null, null);
+
+    private static async Task<BrokerServerLease> OpenBrokerServerAsync(
+        NamedPipeClientStream pipe,
+        CancellationToken cancellationToken)
+    {
+        Task<BrokerServerLease> open = Task.Run(() => BrokerServerLease.Open(pipe.SafePipeHandle));
+        try
+        {
+            return await open.WaitAsync(cancellationToken);
+        }
+        catch (Exception error)
+        {
+            DisposeLateResult(open);
+            throw new BrokerAuthenticationException(error);
+        }
+    }
+
+    private static void DisposeLateResult(Task<BrokerServerLease> open)
+    {
+        _ = open.ContinueWith(
+            static completed =>
+            {
+                if (completed.Status == TaskStatus.RanToCompletion)
+                {
+                    completed.Result.Dispose();
+                }
+                _ = completed.Exception;
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
     private static string Truncate(string value, int maximum) =>
         value.Length <= maximum ? value : value[..maximum];
 
@@ -247,4 +286,7 @@ internal static class BrokerClient
     {
         internal int? StatusCode { get; } = statusCode;
     }
+
+    private sealed class BrokerAuthenticationException(Exception innerException)
+        : Exception("broker server authentication failed", innerException);
 }
