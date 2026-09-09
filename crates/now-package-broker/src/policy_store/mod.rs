@@ -398,10 +398,10 @@ impl PolicyStore {
         // Both conflict modes require this exact token.
         // ConfirmOverwrite records retry intent without retaining token history.
         if fresh_token != request.expected_store_token {
-            let audit_path = observation.canonical_path.clone();
             let management = self.publish_external_observation(observation);
             if let Some(audit) = &audit {
-                audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
+                let path = Path::new(&management.configured_path);
+                audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
             }
             return Err(error_with_management(
                 ErrorCode::StalePolicyStoreToken,
@@ -543,10 +543,10 @@ impl PolicyStore {
                 tracing::warn!(error = format!("{error:#}"), "Policy persistence failed");
                 let (_, current) = self.observe_storage(false);
                 if current.fingerprint != observation.fingerprint {
-                    let audit_path = current.canonical_path.clone();
                     let management = self.publish_external_observation(current);
                     if let Some(audit) = &audit {
-                        audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
+                        let path = Path::new(&management.configured_path);
+                        audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
                     }
                     return Err(error_with_management(
                         ErrorCode::StalePolicyStoreToken,
@@ -585,10 +585,10 @@ impl PolicyStore {
                         "failed to conditionally persist the policy",
                     ));
                 }
-                let audit_path = current.canonical_path.clone();
                 let management = self.publish_external_observation(current);
                 if let Some(audit) = &audit {
-                    audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
+                    let path = Path::new(&management.configured_path);
+                    audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
                 }
                 return Err(error_with_management(
                     ErrorCode::StalePolicyStoreToken,
@@ -602,10 +602,10 @@ impl PolicyStore {
                     "Published policy failed authoritative reload"
                 );
                 let (_, current) = self.observe_storage(false);
-                let audit_path = current.canonical_path.clone();
                 let management = self.publish_external_observation(current);
                 if let Some(audit) = &audit {
-                    audit.failed_at(operation, &audit_path, crate::audit::FailureReason::ActivationFailed);
+                    let path = Path::new(&management.configured_path);
+                    audit.failed_at(operation, path, crate::audit::FailureReason::ActivationFailed);
                 }
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
