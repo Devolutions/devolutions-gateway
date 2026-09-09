@@ -60,5 +60,18 @@ namespace DevolutionsAgent.Resources
         ///    NT AUTHORITY\SYSTEM Allow  FullControl
         /// </remarks>
         internal static readonly string PROGRAM_DATA_PEDM_SDDL = "O:SYG:SYD:(A;OICI;FA;;;SY)";
+
+        /// <summary>
+        /// Protected ACL for the dedicated package-broker policy directory.
+        /// </summary>
+        /// <remarks>
+        /// This directory must not inherit the LOCAL SERVICE and Users grants required by
+        /// unrelated Agent features under %ProgramData%\Devolutions\Agent.
+        /// </remarks>
+        internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_SDDL =
+            "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+        internal static readonly string PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL =
+            "O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
     }
 }
