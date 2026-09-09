@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -9,6 +11,7 @@ use tokio::net::windows::named_pipe::ClientOptions;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid, WinLocalSystemSid};
+use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
 const MANAGED_POLICY_RELATIVE_PATH: &str = r"Devolutions\PackageBroker\package-broker-policy.json";
@@ -180,16 +183,18 @@ impl HttpResponse {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
-    Unelevated,
+    StandardServer,
+    StandardClient,
     Elevated,
 }
 
 impl Mode {
     fn parse(value: &str) -> anyhow::Result<Self> {
         match value {
-            "unelevated" => Ok(Self::Unelevated),
+            "standard-server" => Ok(Self::StandardServer),
+            "standard-client" => Ok(Self::StandardClient),
             "elevated" => Ok(Self::Elevated),
-            _ => bail!("unknown mode '{value}'; expected 'unelevated' or 'elevated'"),
+            _ => bail!("unknown mode '{value}'; expected 'standard-server', 'standard-client', or 'elevated'"),
         }
     }
 }
@@ -199,23 +204,33 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     let agent_path = args
         .next()
         .map(PathBuf::from)
-        .context("usage: agent-policy-tester <path-to-devolutions-agent> <unelevated|elevated>")?;
+        .context("usage: agent-policy-tester <path-to-devolutions-agent> <mode> [mode arguments]")?;
     let mode = args
         .next()
         .and_then(|value| value.into_string().ok())
-        .context("test mode must be 'unelevated' or 'elevated'")
+        .context("test mode is required")
         .and_then(|value| Mode::parse(&value))?;
-    ensure!(args.next().is_none(), "unexpected extra command-line arguments");
-    verify_process_token(mode)?;
-    ensure!(
-        agent_path.is_file(),
-        "agent executable does not exist: {}",
-        agent_path.display()
-    );
-
     match mode {
-        Mode::Unelevated => standard_user_management(&agent_path).await?,
+        Mode::StandardServer => {
+            verify_local_system()?;
+            ensure_agent_path(&agent_path)?;
+            let ready_path = next_path(&mut args, "ready path")?;
+            let stop_path = next_path(&mut args, "stop path")?;
+            let nonce = next_string(&mut args, "coordination nonce")?;
+            ensure!(args.next().is_none(), "unexpected standard-server arguments");
+            standard_user_server(&agent_path, &ready_path, &stop_path, &nonce).await?;
+        }
+        Mode::StandardClient => {
+            let client = verify_standard_user()?;
+            let ready_path = next_path(&mut args, "ready path")?;
+            let nonce = next_string(&mut args, "coordination nonce")?;
+            ensure!(args.next().is_none(), "unexpected standard-client arguments");
+            standard_user_management(&ready_path, &nonce, &client).await?;
+        }
         Mode::Elevated => {
+            verify_local_system()?;
+            ensure_agent_path(&agent_path)?;
+            ensure!(args.next().is_none(), "unexpected elevated arguments");
             unavailable_policy_and_method_restrictions(&agent_path).await?;
             complete_snapshots_across_reload(&agent_path).await?;
             redirected_policy_paths_fail_closed(&agent_path).await?;
@@ -227,7 +242,21 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn verify_process_token(mode: Mode) -> anyhow::Result<()> {
+fn ensure_agent_path(agent_path: &Path) -> anyhow::Result<()> {
+    ensure!(
+        agent_path.is_file(),
+        "agent executable does not exist: {}",
+        agent_path.display()
+    );
+    Ok(())
+}
+
+struct ProcessIdentity {
+    pid: u32,
+    sid: Sid,
+}
+
+fn current_process_identity() -> anyhow::Result<(ProcessIdentity, bool, bool)> {
     let token = Process::current_process()
         .token(TOKEN_QUERY | TOKEN_DUPLICATE)
         .context("open tester process token")?;
@@ -236,26 +265,59 @@ fn verify_process_token(mode: Mode) -> anyhow::Result<()> {
     let is_administrator = token
         .is_member(&administrators)
         .context("query tester Administrators membership")?;
+    let identity = ProcessIdentity {
+        pid: std::process::id(),
+        sid: token.sid_and_attributes().context("query tester user SID")?.sid,
+    };
+    Ok((
+        identity,
+        is_administrator,
+        token.is_elevated().context("query tester token elevation")?,
+    ))
+}
+
+fn verify_standard_user() -> anyhow::Result<ProcessIdentity> {
+    let (identity, is_administrator, _) = current_process_identity()?;
     let system = Sid::from_well_known(WinLocalSystemSid, None).context("construct LocalSystem SID")?;
-    let user = token.sid_and_attributes().context("query tester user SID")?.sid;
-    match mode {
-        Mode::Unelevated => {
-            ensure!(user != system, "unelevated mode requires a standard user account");
-            ensure!(
-                !is_administrator,
-                "unelevated mode requires disabled Administrators membership"
-            );
-        }
-        Mode::Elevated => {
-            ensure!(is_administrator, "elevated mode requires Administrators membership");
-            ensure!(
-                token.is_elevated().context("query tester token elevation")?,
-                "elevated mode requires an elevated token"
-            );
-            ensure!(user == system, "elevated mode requires the LocalSystem account");
-        }
-    }
-    Ok(())
+    ensure!(
+        identity.sid != system,
+        "standard-client mode requires a non-SYSTEM account"
+    );
+    ensure!(
+        !is_administrator,
+        "standard-client mode requires disabled Administrators membership"
+    );
+    Ok(identity)
+}
+
+fn verify_local_system() -> anyhow::Result<ProcessIdentity> {
+    let (identity, is_administrator, is_elevated) = current_process_identity()?;
+    let system = Sid::from_well_known(WinLocalSystemSid, None).context("construct LocalSystem SID")?;
+    ensure!(identity.sid == system, "this mode requires the LocalSystem account");
+    ensure!(is_administrator && is_elevated, "LocalSystem token is not elevated");
+    Ok(identity)
+}
+
+fn process_sid(pid: u32) -> anyhow::Result<Sid> {
+    Process::get_by_pid(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+        .with_context(|| format!("open process {pid}"))?
+        .token(TOKEN_QUERY)
+        .with_context(|| format!("open process {pid} token"))?
+        .sid_and_attributes()
+        .with_context(|| format!("query process {pid} SID"))
+        .map(|identity| identity.sid)
+}
+
+fn next_path(args: &mut impl Iterator<Item = std::ffi::OsString>, name: &str) -> anyhow::Result<PathBuf> {
+    args.next()
+        .map(PathBuf::from)
+        .with_context(|| format!("missing {name}"))
+}
+
+fn next_string(args: &mut impl Iterator<Item = std::ffi::OsString>, name: &str) -> anyhow::Result<String> {
+    args.next()
+        .and_then(|value| value.into_string().ok())
+        .with_context(|| format!("missing or non-Unicode {name}"))
 }
 
 fn unique_pipe_name() -> String {
@@ -493,7 +555,11 @@ async fn redirected_policy_paths_fail_closed(agent_path: &Path) -> anyhow::Resul
 }
 
 async fn policy_management(agent: &AgentHarness) -> anyhow::Result<Value> {
-    let response = request(&agent.pipe_name, "GET", "/v1/policy/management").await?;
+    policy_management_by_pipe(&agent.pipe_name).await
+}
+
+async fn policy_management_by_pipe(pipe_name: &str) -> anyhow::Result<Value> {
+    let response = request(pipe_name, "GET", "/v1/policy/management").await?;
     ensure!(
         response.status == 200,
         "GET /v1/policy/management returned HTTP {}",
@@ -502,14 +568,14 @@ async fn policy_management(agent: &AgentHarness) -> anyhow::Result<Value> {
     Ok(response.json()?["Management"].clone())
 }
 
-async fn validate_policy(agent: &AgentHarness, draft: &Value) -> anyhow::Result<Value> {
+async fn validate_policy_by_pipe(pipe_name: &str, draft: &Value) -> anyhow::Result<Value> {
     let validation_request = json!({
         "RequestKind": "PolicyValidationRequest",
         "RequestVersion": "1.0",
         "Draft": draft
     });
     let validation_response = request_with_body(
-        &agent.pipe_name,
+        pipe_name,
         "POST",
         "/v1/policy/validate",
         Some("application/json"),
@@ -533,7 +599,24 @@ async fn replace_policy_response(
     expected_store_token: Value,
     draft: Value,
 ) -> anyhow::Result<HttpResponse> {
-    let validation = validate_policy(agent, &draft).await?;
+    replace_policy_response_by_pipe(
+        &agent.pipe_name,
+        operation,
+        conflict_handling,
+        expected_store_token,
+        draft,
+    )
+    .await
+}
+
+async fn replace_policy_response_by_pipe(
+    pipe_name: &str,
+    operation: &str,
+    conflict_handling: &str,
+    expected_store_token: Value,
+    draft: Value,
+) -> anyhow::Result<HttpResponse> {
+    let validation = validate_policy_by_pipe(pipe_name, &draft).await?;
     let replacement_request = json!({
         "RequestKind": "PolicyReplacementRequest",
         "RequestVersion": "1.0",
@@ -545,7 +628,7 @@ async fn replace_policy_response(
         "ValidationReceipt": validation["ValidationReceipt"]
     });
     let response = request_with_body(
-        &agent.pipe_name,
+        pipe_name,
         "PUT",
         "/v1/policy",
         Some("application/json"),
@@ -618,13 +701,94 @@ async fn management_write_tokens_survive_watcher_reload(agent_path: &Path) -> an
     Ok(())
 }
 
-async fn standard_user_management(agent_path: &Path) -> anyhow::Result<()> {
-    let agent = AgentHarness::start_unelevated(agent_path).await?;
-    let management = policy_management(&agent).await?;
+async fn standard_user_server(
+    agent_path: &Path,
+    ready_path: &Path,
+    stop_path: &Path,
+    nonce: &str,
+) -> anyhow::Result<()> {
+    ensure!(!ready_path.exists(), "standard-user readiness path already exists");
+    ensure!(!stop_path.exists(), "standard-user stop path already exists");
+
+    let mut agent = AgentHarness::start_unelevated(agent_path).await?;
+    let server = verify_local_system()?;
+    let agent_pid = agent.child.id().context("Agent process has no PID")?;
+    let child_sid = process_sid(agent_pid)?;
+    ensure!(
+        child_sid == server.sid,
+        "Agent and test server must both run as LocalSystem"
+    );
+
+    let readiness = serde_json::to_vec(&json!({
+        "Nonce": nonce,
+        "PipeName": agent.pipe_name,
+        "ServerPid": server.pid,
+        "ServerSid": server.sid.to_string(),
+        "AgentPid": agent_pid,
+        "AgentSid": child_sid.to_string(),
+    }))?;
+    let mut ready_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(ready_path)
+        .context("create standard-user readiness file")?;
+    ready_file
+        .write_all(&readiness)
+        .context("write standard-user readiness file")?;
+    ready_file.sync_all().context("flush standard-user readiness file")?;
+
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while !stop_path.exists() {
+        if let Some(status) = agent.child.try_wait().context("query Agent status")? {
+            bail!("Agent exited during standard-user test with {status}");
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "timed out waiting for standard-user client completion"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    wait_for_log(&agent, "Policy management write denied").await
+}
+
+async fn standard_user_management(ready_path: &Path, nonce: &str, client: &ProcessIdentity) -> anyhow::Result<()> {
+    let readiness: Value =
+        serde_json::from_slice(&std::fs::read(ready_path).context("read standard-user readiness file")?)
+            .context("parse standard-user readiness file")?;
+    ensure!(readiness["Nonce"] == nonce, "standard-user readiness nonce mismatch");
+    let pipe_name = readiness["PipeName"]
+        .as_str()
+        .context("readiness file has no pipe name")?;
+    let server_pid = readiness["ServerPid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .context("readiness file has no valid server PID")?;
+    let agent_pid = readiness["AgentPid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .context("readiness file has no valid Agent PID")?;
+    let system = Sid::from_well_known(WinLocalSystemSid, None)
+        .context("construct LocalSystem SID")?
+        .to_string();
+    ensure!(
+        readiness["ServerSid"] == system && readiness["AgentSid"] == system,
+        "test server and Agent identities were not recorded as LocalSystem"
+    );
+    ensure!(
+        client.pid != server_pid && client.pid != agent_pid && server_pid != agent_pid,
+        "standard-user client, test server, and Agent must be distinct processes"
+    );
+    ensure!(
+        client.sid.to_string() != system,
+        "standard-user client unexpectedly uses the server identity"
+    );
+
+    let management = policy_management_by_pipe(pipe_name).await?;
     ensure!(management["State"] == "Missing", "expected a missing policy");
 
     let valid_draft = policy_draft("tests.standard-user", "Test");
-    let validation = validate_policy(&agent, &valid_draft).await?;
+    let validation = validate_policy_by_pipe(pipe_name, &valid_draft).await?;
     ensure!(
         validation["CanonicalDraft"].is_object() && validation["ValidationReceipt"].is_string(),
         "valid draft did not produce a canonical draft and receipt"
@@ -638,7 +802,7 @@ async fn standard_user_management(agent_path: &Path) -> anyhow::Result<()> {
         "Draft": invalid_draft
     });
     let invalid_response = request_with_body(
-        &agent.pipe_name,
+        pipe_name,
         "POST",
         "/v1/policy/validate",
         Some("application/json"),
@@ -657,8 +821,8 @@ async fn standard_user_management(agent_path: &Path) -> anyhow::Result<()> {
         "invalid draft returned a canonical draft"
     );
 
-    let denied = replace_policy_response(
-        &agent,
+    let denied = replace_policy_response_by_pipe(
+        pipe_name,
         "Create",
         "Reject",
         management["StoreToken"].clone(),
@@ -674,7 +838,7 @@ async fn standard_user_management(agent_path: &Path) -> anyhow::Result<()> {
         denied.json()?["Code"] == "AdministratorRequired",
         "standard-user Create did not require an administrator"
     );
-    wait_for_log(&agent, "Policy management write denied").await
+    Ok(())
 }
 
 async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {

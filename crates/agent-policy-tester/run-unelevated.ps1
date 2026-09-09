@@ -1,11 +1,16 @@
 param(
-    [ValidateSet("Orchestrate", "Stage", "Run", "Cleanup")]
+    [ValidateSet("Orchestrate", "Stage", "Server", "Run", "Signal", "Cleanup")]
     [string] $Action = "Orchestrate",
     [string] $TesterPath,
     [string] $StagedTesterPath,
     [string] $StagingPath,
     [string] $AgentPath,
-    [string] $TempPath
+    [string] $TempPath,
+    [string] $ReadyPath,
+    [string] $StopPath,
+    [string] $StatusPath,
+    [string] $ServerOutputPath,
+    [string] $Nonce
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,8 +18,27 @@ $ErrorActionPreference = "Stop"
 if ($Action -eq "Run") {
     $env:TEMP = $TempPath
     $env:TMP = $TempPath
-    & $StagedTesterPath $AgentPath unelevated
+    & $StagedTesterPath $AgentPath standard-client $ReadyPath $Nonce
     exit $LASTEXITCODE
+}
+
+if ($Action -eq "Server") {
+    try {
+        & $StagedTesterPath $AgentPath standard-server $ReadyPath $StopPath $Nonce 2>&1 |
+            Out-File -LiteralPath $ServerOutputPath
+        $exitCode = $LASTEXITCODE
+    } catch {
+        $_ | Out-File -LiteralPath $ServerOutputPath -Append
+        $exitCode = 1
+    } finally {
+        Set-Content -LiteralPath $StatusPath -Value $exitCode
+    }
+    exit $exitCode
+}
+
+if ($Action -eq "Signal") {
+    New-Item -ItemType File -Path $StopPath -ErrorAction Stop | Out-Null
+    exit 0
 }
 
 if ($Action -eq "Cleanup") {
@@ -37,7 +61,7 @@ using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-public static class AgentPolicyUnelevatedTesterNativeDirectory
+public static class AgentPolicyStandardUserTesterDirectory
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct SecurityAttributes
@@ -77,7 +101,7 @@ public static class AgentPolicyUnelevatedTesterNativeDirectory
     $directorySecurity.SetSecurityDescriptorSddlForm(
         'O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)'
     )
-    [AgentPolicyUnelevatedTesterNativeDirectory]::Create(
+    [AgentPolicyStandardUserTesterDirectory]::Create(
         $StagingPath,
         $directorySecurity.GetSecurityDescriptorBinaryForm()
     )
@@ -105,7 +129,14 @@ $agentPath = Join-Path $workspacePath "target/debug/devolutions-agent.exe"
 $outputPath = Join-Path $PSScriptRoot "agent-policy-tester-unelevated.out"
 $stagingPath = Join-Path $env:ProgramData "dgw-agent-policy-tester-$([guid]::NewGuid().ToString('N'))"
 $stagedTesterPath = Join-Path $stagingPath "agent-policy-tester.exe"
+$readyPath = Join-Path $stagingPath "standard-user-ready.json"
+$stopPath = Join-Path $stagingPath "standard-user-stop"
+$statusPath = Join-Path $stagingPath "standard-user-server.status"
+$serverOutputPath = Join-Path $stagingPath "standard-user-server.out"
 $tempPath = Join-Path $env:USERPROFILE "AppData\LocalLow\Temp"
+$nonce = [guid]::NewGuid().ToString("N")
+$exitCode = 1
+$serverStarted = $false
 
 try {
     Set-Content -LiteralPath $outputPath -Value ""
@@ -119,14 +150,64 @@ try {
         throw "LocalSystem tester staging failed with exit code $stageExitCode"
     }
 
+    $serverOutput = & psexec.exe -accepteula -s -d pwsh.exe -NoProfile -File $PSCommandPath `
+        -Action Server -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -ReadyPath $readyPath `
+        -StopPath $stopPath -StatusPath $statusPath -ServerOutputPath $serverOutputPath -Nonce $nonce 2>&1
+    $serverStartExitCode = $LASTEXITCODE
+    $serverOutput | Out-File $outputPath -Append
+    if ($serverStartExitCode -ne 0) {
+        throw "LocalSystem test server failed to start with exit code $serverStartExitCode"
+    }
+    $serverStarted = $true
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $readyPath)) {
+        if (Test-Path -LiteralPath $statusPath) {
+            throw "LocalSystem test server exited before publishing readiness"
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out waiting for LocalSystem test server readiness"
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Get-Content -LiteralPath $readyPath | Out-File $outputPath -Append
+
     $testerOutput = & psexec.exe -accepteula -l pwsh.exe -NoProfile -File $PSCommandPath `
-        -Action Run -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -TempPath $tempPath 2>&1
+        -Action Run -StagedTesterPath $stagedTesterPath -AgentPath $agentPath -TempPath $tempPath `
+        -ReadyPath $readyPath -Nonce $nonce 2>&1
     $exitCode = $LASTEXITCODE
     $testerOutput | Out-File $outputPath -Append
 } catch {
     $_ | Out-File $outputPath -Append
     $exitCode = 1
 } finally {
+    if ($serverStarted) {
+        $signalOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
+            -Action Signal -StopPath $stopPath 2>&1
+        $signalExitCode = $LASTEXITCODE
+        $signalOutput | Out-File $outputPath -Append
+        if ($signalExitCode -ne 0 -and $exitCode -eq 0) {
+            $exitCode = $signalExitCode
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while (-not (Test-Path -LiteralPath $statusPath) -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+        }
+        if (Test-Path -LiteralPath $serverOutputPath) {
+            Get-Content -LiteralPath $serverOutputPath | Out-File $outputPath -Append
+        }
+        if (Test-Path -LiteralPath $statusPath) {
+            $serverExitCode = [int](Get-Content -LiteralPath $statusPath -Raw)
+            if ($serverExitCode -ne 0 -and $exitCode -eq 0) {
+                $exitCode = $serverExitCode
+            }
+        } elseif ($exitCode -eq 0) {
+            "Timed out waiting for LocalSystem test server shutdown" | Out-File $outputPath -Append
+            $exitCode = 1
+        }
+    }
+
     $cleanupOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
         -Action Cleanup -StagingPath $stagingPath 2>&1
     $cleanupExitCode = $LASTEXITCODE
