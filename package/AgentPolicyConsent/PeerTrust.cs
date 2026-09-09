@@ -242,7 +242,7 @@ internal sealed class PeerLease : IDisposable
             Marshal.StructureToPtr(data, dataPointer, false);
             dataInitialized = true;
             int status = Native.WinVerifyTrust(new IntPtr(-1), ref action, dataPointer);
-            if (status != 0)
+            if (!IsAuthenticodeStatusAccepted(status))
             {
                 throw new InvalidOperationException($"{subject} Authenticode validation failed (0x{status:X8})");
             }
@@ -288,6 +288,8 @@ internal sealed class PeerLease : IDisposable
             Marshal.FreeHGlobal(filePointer);
         }
     }
+
+    internal static bool IsAuthenticodeStatusAccepted(int status) => status == 0;
 
     private static void VerifySigner(X509Certificate2 certificate)
     {
@@ -494,6 +496,11 @@ internal sealed class BrokerServerLease : IDisposable
 
 internal static partial class Native
 {
+    internal const uint WtdRevokeWholeChain = 1;
+    internal const uint WtdRevocationCheckChain = 0x0000_0040;
+    internal const uint WtdCacheOnlyUrlRetrieval = 0x0000_1000;
+    internal const uint WtdDisableMd2Md4 = 0x0000_2000;
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     internal readonly struct WinTrustFileInfo
     {
@@ -535,13 +542,13 @@ internal static partial class Native
             PolicyCallbackData = IntPtr.Zero;
             SipClientData = IntPtr.Zero;
             UiChoice = 2;
-            RevocationChecks = 0;
+            RevocationChecks = WtdRevokeWholeChain;
             UnionChoice = 1;
             FileInfo = fileInfo;
             StateAction = 1;
             StateData = IntPtr.Zero;
             UrlReference = IntPtr.Zero;
-            ProviderFlags = 0x1000 | 0x2000;
+            ProviderFlags = WtdRevocationCheckChain | WtdDisableMd2Md4;
             UiContext = 0;
             SignatureSettings = IntPtr.Zero;
         }
