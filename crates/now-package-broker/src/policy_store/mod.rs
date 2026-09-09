@@ -1136,7 +1136,7 @@ mod storage_tests {
         crate::audit::WriteAudit::begin_recording(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn concurrent_external_replacement_is_preserved_and_published() {
         crate::audit::take_test_events();
         let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
@@ -1334,7 +1334,7 @@ mod storage_tests {
         assert_eq!(store.watched_paths(), [replacement_canonical]);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn default_store_switches_from_legacy_when_managed_policy_appears() {
         let dir = tempfile::tempdir().expect("create temp directory");
         let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);

@@ -285,7 +285,7 @@ impl WriteAudit {
     }
 
     pub(crate) fn failed(&self, operation: PolicyReplacementOperation, reason: FailureReason) {
-        self.failed_at(operation, &self.0.path.clone(), reason);
+        self.failed_at(operation, &self.0.path, reason);
     }
 
     pub(crate) fn failed_at(&self, operation: PolicyReplacementOperation, path: &Path, reason: FailureReason) {
