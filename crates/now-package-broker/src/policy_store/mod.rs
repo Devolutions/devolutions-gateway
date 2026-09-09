@@ -1,17 +1,10 @@
 //! Serialized policy management, validation, persistence, and reload.
-//! Store tokens serialize API writers and reloads, not privileged out-of-band writes.
-//! Conditional handle-relative publication is deferred.
+//! Store tokens serialize API writers and reloads.
+//! Retained handles and conditional handle-relative publication preserve privileged out-of-band writes.
 
-use std::fs::{File, OpenOptions};
-use std::io::{Read as _, Write as _};
-use std::mem::size_of;
-use std::os::windows::ffi::OsStrExt as _;
-use std::os::windows::fs::OpenOptionsExt as _;
-use std::os::windows::io::AsRawHandle as _;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use anyhow::Context as _;
 use chrono::Utc;
 use now_policy::PolicyDocument;
 use now_policy_api::{
@@ -20,86 +13,137 @@ use now_policy_api::{
     PolicyReplacementRequest, PolicyStoreToken, PolicyValidationResult, PolicyWriteCapability, ServerContext,
     Transport,
 };
-use sha2::{Digest as _, Sha256};
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo, GetFileInformationByHandleEx, GetVolumeInformationW,
-    GetVolumePathNameW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL,
-};
-use windows::core::PCWSTR;
 
-use crate::policy_security;
 mod receipt;
 mod validation;
+mod windows;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ReloadCause {
     ExternalChange,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct DiskFingerprint([u8; 32]);
-
-struct Observation {
-    state: PolicyManagementState,
-    policy: Option<PolicyDocument>,
-    invalid_diagnostics: Option<InvalidPolicyDiagnostics>,
-    write_capability: PolicyWriteCapability,
-    read_only_reason: Option<PolicyReadOnlyReason>,
-    configured_path: PathBuf,
-    fingerprint: DiskFingerprint,
-}
-
-struct PersistedPolicy {
-    policy: PolicyDocument,
-    observation: Observation,
-}
-
-enum WriteFailure {
-    PrePublication(anyhow::Error),
-    PostPublication(anyhow::Error),
-}
+type DiskFingerprint = windows::DiskFingerprint;
+type Observation = windows::DiskObservation;
+type PersistedPolicy = windows::PersistedPolicy;
+type WriteFailure = windows::WriteFailure;
 
 trait PolicyStorage: Send + Sync {
     fn observe(&self, source: PolicyConfigurationSource, path: &Path) -> Observation;
+    fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> Observation {
+        self.observe(source, path)
+    }
     fn create(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure>;
     fn replace(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
-        observation: &Observation,
+        observation: &mut Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure>;
 }
 
-struct FilePolicyStorage;
+struct FilePolicyStorage {
+    probe_cache: windows::AtomicityProbeCache,
+}
+
+impl FilePolicyStorage {
+    fn new() -> Self {
+        Self {
+            probe_cache: windows::AtomicityProbeCache::new(),
+        }
+    }
+}
 
 impl PolicyStorage for FilePolicyStorage {
     fn observe(&self, source: PolicyConfigurationSource, path: &Path) -> Observation {
-        observe_file(source, path)
+        windows::observe(source, path, &self.probe_cache)
+    }
+
+    fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> Observation {
+        windows::observe_for_write(source, path, &self.probe_cache)
     }
 
     fn create(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
-        publish_file(configured_path, observation, bytes, false)
+        let hosting_dir = observation
+            .hosting_dir
+            .as_ref()
+            .expect("writable observations retain the verified hosting directory");
+        windows::atomic_create(
+            hosting_dir,
+            &observation.fingerprint,
+            &observation.canonical_path,
+            bytes,
+        )?;
+        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
+            .map_err(WriteFailure::PostPublication)?;
+        self.authoritative_reobserve(configured_path, bytes)
     }
 
     fn replace(
         &self,
+        source: PolicyConfigurationSource,
         configured_path: &Path,
-        observation: &Observation,
+        observation: &mut Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
-        publish_file(configured_path, observation, bytes, true)
+        let hosting_dir = observation
+            .hosting_dir
+            .as_ref()
+            .expect("writable observations retain the verified hosting directory");
+        windows::atomic_replace(
+            hosting_dir,
+            observation.retained_target.take(),
+            &observation.fingerprint,
+            &observation.canonical_path,
+            bytes,
+        )?;
+        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
+            .map_err(WriteFailure::PostPublication)?;
+        self.authoritative_reobserve(configured_path, bytes)
+    }
+}
+
+impl FilePolicyStorage {
+    fn authoritative_reobserve(
+        &self,
+        configured_path: &Path,
+        expected_bytes: &[u8],
+    ) -> Result<PersistedPolicy, WriteFailure> {
+        let observation = windows::observe(
+            PolicyConfigurationSource::ConfiguredPath,
+            configured_path,
+            &self.probe_cache,
+        );
+        let policy = observation
+            .policy
+            .ok_or_else(|| WriteFailure::PostPublication(anyhow::anyhow!("published policy failed re-observation")))?;
+        let expected: serde_json::Value =
+            serde_json::from_slice(expected_bytes).map_err(|error| WriteFailure::PostPublication(error.into()))?;
+        if serde_json::to_value(&policy).map_err(|error| WriteFailure::PostPublication(error.into()))? != expected {
+            return Err(WriteFailure::PostPublication(anyhow::anyhow!(
+                "re-observed policy does not match the committed document"
+            )));
+        }
+        Ok(PersistedPolicy {
+            policy,
+            fingerprint: observation.fingerprint,
+            write_capability: observation.write_capability,
+            read_only_reason: observation.read_only_reason,
+            canonical_path: observation.canonical_path,
+        })
     }
 }
 
@@ -130,6 +174,8 @@ pub struct ReplaceSuccess {
 
 pub struct PolicyStore {
     configured_path: PathBuf,
+    default_paths: Option<[PathBuf; 2]>,
+    default_managed_selected: std::sync::atomic::AtomicBool,
     source: PolicyConfigurationSource,
     snapshot: RwLock<Arc<Snapshot>>,
     writer: tokio::sync::Mutex<Monitoring>,
@@ -139,7 +185,11 @@ pub struct PolicyStore {
 
 impl PolicyStore {
     pub fn load(configured_path: Option<PathBuf>) -> Arc<Self> {
-        Self::load_with_storage(configured_path, Arc::new(FilePolicyStorage), Monitoring::Initializing)
+        Self::load_with_storage(
+            configured_path,
+            Arc::new(FilePolicyStorage::new()),
+            Monitoring::Initializing,
+        )
     }
 
     fn load_with_storage(
@@ -147,18 +197,36 @@ impl PolicyStore {
         storage: Arc<dyn PolicyStorage>,
         monitoring: Monitoring,
     ) -> Arc<Self> {
-        let (configured_path, source) = match configured_path {
-            Some(path) => (path, PolicyConfigurationSource::ConfiguredPath),
-            None => (
-                crate::policy_loader::find_default_policy()
-                    .unwrap_or_else(|_| crate::policy_loader::default_policy_candidate()),
-                PolicyConfigurationSource::DefaultPath,
-            ),
+        let (mut configured_path, default_paths, source) = match configured_path {
+            Some(path) => (path, None, PolicyConfigurationSource::ConfiguredPath),
+            None => {
+                let [managed, legacy] = windows::default_policy_paths();
+                (
+                    windows::select_default_policy_path(managed.clone(), legacy.clone()),
+                    Some([managed, legacy]),
+                    PolicyConfigurationSource::DefaultPath,
+                )
+            }
         };
-        let observation = storage.observe(source, &configured_path);
+        let mut default_managed_selected = default_paths
+            .as_ref()
+            .is_some_and(|[managed, _]| crate::policy_security::windows_paths_equal(&configured_path, managed));
+        let mut observation = storage.observe(source, &configured_path);
+        if let Some([managed, legacy]) = &default_paths
+            && !default_managed_selected
+        {
+            let final_path = windows::select_default_policy_path(managed.clone(), legacy.clone());
+            if crate::policy_security::windows_paths_equal(&final_path, managed) {
+                configured_path = final_path;
+                default_managed_selected = true;
+                observation = storage.observe(source, &configured_path);
+            }
+        }
         let snapshot = Arc::new(snapshot_from_observation(observation, random_store_token()));
         Arc::new(Self {
             configured_path,
+            default_paths,
+            default_managed_selected: std::sync::atomic::AtomicBool::new(default_managed_selected),
             source,
             snapshot: RwLock::new(snapshot),
             writer: tokio::sync::Mutex::new(monitoring),
@@ -180,8 +248,61 @@ impl PolicyStore {
         management_from_snapshot(&snapshot, self.source)
     }
 
-    pub(crate) fn configured_path(&self) -> PathBuf {
-        self.snapshot().configured_path.clone()
+    fn observation_path(&self) -> PathBuf {
+        match &self.default_paths {
+            Some([managed, _]) if self.default_managed_selected.load(std::sync::atomic::Ordering::Acquire) => {
+                managed.clone()
+            }
+            Some([managed, legacy]) => {
+                let selected = windows::select_default_policy_path(managed.clone(), legacy.clone());
+                if crate::policy_security::windows_paths_equal(&selected, managed) {
+                    self.default_managed_selected
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                selected
+            }
+            None => self.configured_path.clone(),
+        }
+    }
+
+    fn observe_storage(&self, retain_for_write: bool) -> (PathBuf, Observation) {
+        let path = self.observation_path();
+        let observation = if retain_for_write {
+            self.storage.observe_for_write(self.source, &path)
+        } else {
+            self.storage.observe(self.source, &path)
+        };
+        let Some([managed, legacy]) = &self.default_paths else {
+            return (path, observation);
+        };
+        if self.default_managed_selected.load(std::sync::atomic::Ordering::Acquire)
+            || crate::policy_security::windows_paths_equal(&path, managed)
+        {
+            return (path, observation);
+        }
+
+        let final_path = windows::select_default_policy_path(managed.clone(), legacy.clone());
+        if crate::policy_security::windows_paths_equal(&final_path, managed) {
+            self.default_managed_selected
+                .store(true, std::sync::atomic::Ordering::Release);
+            if retain_for_write {
+                (
+                    final_path.clone(),
+                    self.storage.observe_for_write(self.source, &final_path),
+                )
+            } else {
+                (final_path.clone(), self.storage.observe(self.source, &final_path))
+            }
+        } else {
+            (path, observation)
+        }
+    }
+
+    pub(crate) fn watched_paths(&self) -> Vec<PathBuf> {
+        match &self.default_paths {
+            Some(paths) => paths.to_vec(),
+            None => vec![self.snapshot().configured_path.clone()],
+        }
     }
 
     pub fn validate_draft(&self, raw: &serde_json::Value) -> PolicyValidationResult {
@@ -201,7 +322,7 @@ impl PolicyStore {
         if *monitoring != Monitoring::Available {
             return self.management_snapshot();
         }
-        let observation = self.storage.observe(self.source, &self.configured_path);
+        let (_, observation) = self.observe_storage(false);
         let management = self.publish_observation(observation);
         tracing::info!(?cause, state = ?management.state, "Reloaded package broker policy");
         management
@@ -212,7 +333,8 @@ impl PolicyStore {
         if *monitoring != Monitoring::Initializing {
             return self.management_snapshot();
         }
-        let management = self.publish_observation(self.storage.observe(self.source, &self.configured_path));
+        let (_, observation) = self.observe_storage(false);
+        let management = self.publish_observation(observation);
         *monitoring = Monitoring::Available;
         management
     }
@@ -232,8 +354,10 @@ impl PolicyStore {
             }),
             write_capability: PolicyWriteCapability::ReadOnly,
             read_only_reason: Some(PolicyReadOnlyReason::ManagementDisabled),
-            configured_path: previous.configured_path.clone(),
-            fingerprint: DiskFingerprint(Sha256::digest(b"watcher unavailable").into()),
+            canonical_path: previous.configured_path.clone(),
+            fingerprint: windows::unavailable_fingerprint(previous.configured_path.clone()),
+            hosting_dir: None,
+            retained_target: None,
         };
         self.publish_observation(observation);
     }
@@ -248,7 +372,7 @@ impl PolicyStore {
             ));
         }
         let previous = self.snapshot();
-        let observation = self.storage.observe(self.source, &self.configured_path);
+        let (write_configured_path, mut observation) = self.observe_storage(true);
         let fresh_token = token_for(&previous, &observation.fingerprint);
 
         // Both conflict modes require this exact token.
@@ -320,15 +444,17 @@ impl PolicyStore {
             .map_err(|_| error_response(ErrorCode::InternalError, "failed to serialize the committed policy"))?;
 
         let persisted = if request.operation == PolicyReplacementOperation::Create {
-            self.storage.create(&self.configured_path, &observation, &bytes)
+            self.storage
+                .create(self.source, &write_configured_path, &observation, &bytes)
         } else {
-            self.storage.replace(&self.configured_path, &observation, &bytes)
+            self.storage
+                .replace(self.source, &write_configured_path, &mut observation, &bytes)
         };
         let persisted = match persisted {
             Ok(persisted) => persisted,
             Err(WriteFailure::PrePublication(error)) => {
                 tracing::warn!(error = format!("{error:#}"), "Policy persistence failed");
-                let current = self.storage.observe(self.source, &self.configured_path);
+                let (_, current) = self.observe_storage(false);
                 if current.fingerprint != observation.fingerprint {
                     let management = self.publish_observation(current);
                     return Err(error_with_management(
@@ -342,12 +468,31 @@ impl PolicyStore {
                     "failed to persist the policy",
                 ));
             }
+            Err(WriteFailure::ConcurrentChange(error)) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "Conditional policy publication observed a concurrent storage change"
+                );
+                let (_, current) = self.observe_storage(false);
+                if current.fingerprint == observation.fingerprint {
+                    return Err(error_response(
+                        ErrorCode::PolicyPersistenceFailed,
+                        "failed to conditionally persist the policy",
+                    ));
+                }
+                let management = self.publish_observation(current);
+                return Err(error_with_management(
+                    ErrorCode::StalePolicyStoreToken,
+                    "the policy storage changed during publication; retry with the current store token",
+                    management,
+                ));
+            }
             Err(WriteFailure::PostPublication(error)) => {
                 tracing::warn!(
                     error = format!("{error:#}"),
                     "Published policy failed authoritative reload"
                 );
-                let current = self.storage.observe(self.source, &self.configured_path);
+                let (_, current) = self.observe_storage(false);
                 let management = self.publish_observation(current);
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
@@ -357,16 +502,17 @@ impl PolicyStore {
             }
         };
 
-        if persisted.observation.state != PolicyManagementState::Active {
-            let management = self.publish_observation(persisted.observation);
-            return Err(error_with_management(
-                ErrorCode::PolicyActivationFailed,
-                "the policy was published but failed authoritative reload",
-                management,
-            ));
-        }
-        let token = token_for(&previous, &persisted.observation.fingerprint);
-        let snapshot = Arc::new(snapshot_from_observation(persisted.observation, token));
+        let token = token_for(&previous, &persisted.fingerprint);
+        let snapshot = Arc::new(Snapshot {
+            state: PolicyManagementState::Active,
+            policy: Some(Arc::new(persisted.policy.clone())),
+            invalid_diagnostics: None,
+            write_capability: persisted.write_capability,
+            read_only_reason: persisted.read_only_reason,
+            configured_path: persisted.canonical_path,
+            store_token: token,
+            fingerprint: persisted.fingerprint,
+        });
         *self.snapshot.write().expect("policy store snapshot lock poisoned") = snapshot;
 
         Ok(ReplaceSuccess {
@@ -400,9 +546,8 @@ impl PolicyStore {
     #[cfg(test)]
     pub(crate) fn test_set_active(&self, policy: Arc<PolicyDocument>) {
         let previous = self.snapshot();
-        let fingerprint = DiskFingerprint(
-            Sha256::digest(serde_json::to_vec(policy.as_ref()).expect("test policy serializes")).into(),
-        );
+        let bytes = serde_json::to_vec(policy.as_ref()).expect("test policy serializes");
+        let fingerprint = DiskFingerprint::test_active(&bytes, 1, 1, 1, 1);
         let snapshot = Arc::new(Snapshot {
             state: PolicyManagementState::Active,
             policy: Some(policy),
@@ -457,7 +602,7 @@ fn snapshot_from_observation(observation: Observation, store_token: PolicyStoreT
         invalid_diagnostics: observation.invalid_diagnostics,
         write_capability: observation.write_capability,
         read_only_reason: observation.read_only_reason,
-        configured_path: observation.configured_path,
+        configured_path: observation.canonical_path,
         store_token,
         fingerprint: observation.fingerprint,
     }
@@ -486,7 +631,7 @@ fn token_for(previous: &Snapshot, fingerprint: &DiskFingerprint) -> PolicyStoreT
 }
 
 fn random_store_token() -> PolicyStoreToken {
-    format!("store:{}", uuid::Uuid::new_v4().simple()).into()
+    windows::random_store_token()
 }
 
 fn error_response(code: ErrorCode, message: impl Into<String>) -> ErrorResponse {
@@ -525,473 +670,54 @@ fn error_with_management(
     response
 }
 
-fn observe_file(_source: PolicyConfigurationSource, configured_path: &Path) -> Observation {
-    let mut hasher = Sha256::new();
-    for unit in configured_path.as_os_str().encode_wide() {
-        hasher.update(unit.to_le_bytes());
-    }
-
-    if !is_safe_path_shape(configured_path) {
-        return invalid_observation(
-            configured_path.to_owned(),
-            PolicyWriteCapability::Unsupported,
-            Some(PolicyReadOnlyReason::UnsafePath),
-            validation::DiskFailureReason::InsecureStorage,
-            hasher,
-        );
-    }
-
-    let extension = configured_path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if extension != "json" {
-        return invalid_observation(
-            configured_path.to_owned(),
-            PolicyWriteCapability::Unsupported,
-            Some(PolicyReadOnlyReason::UnsupportedFormat),
-            validation::DiskFailureReason::UnsupportedFormat,
-            hasher,
-        );
-    }
-
-    let display_path = match canonical_display_path(configured_path) {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return missing_observation(
-                configured_path.to_owned(),
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::InsufficientPermissions),
-                hasher,
-            );
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "Failed to resolve policy path");
-            return invalid_observation(
-                configured_path.to_owned(),
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::UnsafePath),
-                validation::DiskFailureReason::InsecureStorage,
-                hasher,
-            );
-        }
-    };
-    for unit in display_path.as_os_str().encode_wide() {
-        hasher.update(unit.to_le_bytes());
-    }
-
-    let Some(parent) = display_path.parent() else {
-        return invalid_observation(
-            display_path,
-            PolicyWriteCapability::ReadOnly,
-            Some(PolicyReadOnlyReason::UnsafePath),
-            validation::DiskFailureReason::Unreadable,
-            hasher,
-        );
-    };
-    let directory = match open_directory(parent) {
-        Ok(directory) => directory,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return missing_observation(
-                display_path,
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::InsufficientPermissions),
-                hasher,
-            );
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "Failed to open policy directory");
-            return invalid_observation(
-                display_path,
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::UnsafePath),
-                validation::DiskFailureReason::InsecureStorage,
-                hasher,
-            );
-        }
-    };
-    hash_file_identity(&directory, &mut hasher);
-    let directory_safe = match policy_security::verify_policy_path_ancestors(configured_path)
-        .and_then(|()| policy_security::verify_policy_path_ancestors(&display_path))
-        .and_then(|()| {
-            let current_path = canonical_display_path(configured_path)
-                .context("failed to resolve policy path after security validation")?;
-            if policy_security::windows_paths_equal(&display_path, &current_path) {
-                Ok(())
-            } else {
-                anyhow::bail!("policy path canonical chain changed during security validation")
-            }
-        })
-        .and_then(|()| policy_security::verify_policy_directory_security(&directory))
-        .and_then(|()| policy_security::security_state_digest(&directory))
-    {
-        Ok(digest) => {
-            hasher.update(digest);
-            true
-        }
-        Err(error) => {
-            tracing::warn!(
-                error = format!("{error:#}"),
-                "Policy directory security validation failed"
-            );
-            false
-        }
-    };
-    if !directory_safe {
-        return invalid_observation(
-            display_path,
-            PolicyWriteCapability::ReadOnly,
-            Some(PolicyReadOnlyReason::UnsafePath),
-            validation::DiskFailureReason::InsecureStorage,
-            hasher,
-        );
-    }
-    let atomic_filesystem = directory_safe && supports_atomic_replace(parent);
-    let capability = if !atomic_filesystem {
-        PolicyWriteCapability::Unsupported
-    } else {
-        PolicyWriteCapability::Writable
-    };
-    let read_only_reason = match capability {
-        PolicyWriteCapability::Writable => None,
-        PolicyWriteCapability::Unsupported => Some(PolicyReadOnlyReason::UnsupportedFileSystem),
-        PolicyWriteCapability::ReadOnly => unreachable!("unsafe directories returned above"),
-    };
-
-    let mut file = match OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(&display_path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return missing_observation(display_path, capability, read_only_reason, hasher);
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "Failed to open configured policy");
-            return invalid_observation(
-                display_path,
-                capability,
-                read_only_reason,
-                validation::DiskFailureReason::Unreadable,
-                hasher,
-            );
-        }
-    };
-    hash_file_identity(&file, &mut hasher);
-    if let Err(error) = policy_security::verify_policy_file_path(&file, &display_path)
-        .and_then(|()| policy_security::verify_policy_file_security(&file))
-    {
-        tracing::warn!(
-            error = format!("{error:#}"),
-            "Configured policy security validation failed"
-        );
-        return invalid_observation(
-            display_path,
-            PolicyWriteCapability::ReadOnly,
-            Some(PolicyReadOnlyReason::UnsafePath),
-            validation::DiskFailureReason::InsecureStorage,
-            hasher,
-        );
-    }
-    match policy_security::security_state_digest(&file) {
-        Ok(digest) => hasher.update(digest),
-        Err(error) => {
-            tracing::warn!(
-                error = format!("{error:#}"),
-                "Failed to fingerprint configured policy security"
-            );
-            return invalid_observation(
-                display_path,
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::UnsafePath),
-                validation::DiskFailureReason::InsecureStorage,
-                hasher,
-            );
-        }
-    }
-    let mut bytes = Vec::new();
-    if let Err(error) = file.read_to_end(&mut bytes) {
-        tracing::warn!(error = %error, "Failed to read configured policy");
-        return invalid_observation(
-            display_path,
-            capability,
-            read_only_reason,
-            validation::DiskFailureReason::Unreadable,
-            hasher,
-        );
-    }
-    hasher.update(&bytes);
-    let policy = serde_json::from_slice::<PolicyDocument>(&bytes);
-    let policy = match policy {
-        Ok(policy) => policy,
-        Err(error) => {
-            tracing::warn!(error = %error, "Configured policy parsing failed");
-            return invalid_observation(
-                display_path,
-                capability,
-                read_only_reason,
-                validation::DiskFailureReason::MalformedContent,
-                hasher,
-            );
-        }
-    };
-    let committed_validation = validation::validate_committed_policy(&policy);
-    if !committed_validation.is_valid {
-        tracing::warn!(
-            findings = ?committed_validation.findings,
-            "Configured policy semantic validation failed"
-        );
-        return invalid_observation(
-            display_path,
-            capability,
-            read_only_reason,
-            validation::DiskFailureReason::FailedSemanticValidation,
-            hasher,
-        );
-    }
-
-    Observation {
-        state: PolicyManagementState::Active,
-        policy: Some(policy),
-        invalid_diagnostics: None,
-        write_capability: capability,
-        read_only_reason,
-        configured_path: display_path,
-        fingerprint: DiskFingerprint(hasher.finalize().into()),
-    }
-}
-
-fn publish_file(
-    configured_path: &Path,
-    observation: &Observation,
-    bytes: &[u8],
-    replace: bool,
-) -> Result<PersistedPolicy, WriteFailure> {
-    let path = &observation.configured_path;
-    let parent = path
-        .parent()
-        .ok_or_else(|| WriteFailure::PrePublication(anyhow::anyhow!("policy path has no parent")))?;
-    let leaf = path
-        .file_name()
-        .ok_or_else(|| WriteFailure::PrePublication(anyhow::anyhow!("policy path has no file name")))?;
-    let temp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        leaf.to_string_lossy(),
-        uuid::Uuid::new_v4().simple()
-    ));
-    let prepared = (|| {
-        let mut temp = OpenOptions::new().write(true).create_new(true).open(&temp_path)?;
-        temp.write_all(bytes)?;
-        temp.sync_all()?;
-        policy_security::verify_policy_file_security(&temp)?;
-        drop(temp);
-
-        let from = wide_path(&temp_path);
-        let to = wide_path(path);
-        let flags = if replace {
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
-        } else {
-            MOVEFILE_WRITE_THROUGH
-        };
-        // SAFETY: Both buffers are live, nul-terminated absolute paths.
-        unsafe { MoveFileExW(PCWSTR(from.as_ptr()), PCWSTR(to.as_ptr()), flags) }?;
-        Ok::<(), anyhow::Error>(())
-    })();
-    if let Err(error) = prepared {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(WriteFailure::PrePublication(error));
-    }
-
-    let reloaded = (|| {
-        let reloaded = observe_file(PolicyConfigurationSource::ConfiguredPath, configured_path);
-        let policy = reloaded
-            .policy
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("published policy failed authoritative reload"))?;
-        let expected: serde_json::Value = serde_json::from_slice(bytes)?;
-        if serde_json::to_value(&policy)? != expected {
-            anyhow::bail!("published policy does not match the requested committed document");
-        }
-        Ok(PersistedPolicy {
-            policy,
-            observation: reloaded,
-        })
-    })();
-    reloaded.map_err(WriteFailure::PostPublication)
-}
-
-fn missing_observation(
-    path: PathBuf,
-    capability: PolicyWriteCapability,
-    reason: Option<PolicyReadOnlyReason>,
-    mut hasher: Sha256,
-) -> Observation {
-    hasher.update(b"missing");
-    Observation {
-        state: PolicyManagementState::Missing,
-        policy: None,
-        invalid_diagnostics: None,
-        write_capability: capability,
-        read_only_reason: reason,
-        configured_path: path,
-        fingerprint: DiskFingerprint(hasher.finalize().into()),
-    }
-}
-
-fn invalid_observation(
-    path: PathBuf,
-    capability: PolicyWriteCapability,
-    reason: Option<PolicyReadOnlyReason>,
-    failure: validation::DiskFailureReason,
-    mut hasher: Sha256,
-) -> Observation {
-    hasher.update(format!("{failure:?}"));
-    Observation {
-        state: PolicyManagementState::Invalid,
-        policy: None,
-        invalid_diagnostics: Some(InvalidPolicyDiagnostics {
-            diagnostics_version: API_VERSION_STR.into(),
-            findings: vec![validation::disk_failure_finding(failure)],
-        }),
-        write_capability: capability,
-        read_only_reason: reason,
-        configured_path: path,
-        fingerprint: DiskFingerprint(hasher.finalize().into()),
-    }
-}
-
-fn is_safe_path_shape(path: &Path) -> bool {
-    let raw = path.as_os_str().to_string_lossy();
-    path.is_absolute()
-        && path.file_name().is_some()
-        && !raw.split(['\\', '/']).any(|segment| matches!(segment, "." | ".."))
-        && path
-            .components()
-            .all(|component| !matches!(component, Component::CurDir | Component::ParentDir))
-}
-
-fn canonical_display_path(path: &Path) -> std::io::Result<PathBuf> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "policy path has no parent"))?;
-    let leaf = path
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "policy path has no file name"))?;
-    Ok(parent.canonicalize()?.join(leaf))
-}
-
-fn open_directory(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
-        .open(path)
-}
-
-fn supports_atomic_replace(path: &Path) -> bool {
-    let path = wide_path(path);
-    let mut root = vec![0; 512];
-    // SAFETY: The path is nul-terminated and the root buffer is writable.
-    if unsafe { GetVolumePathNameW(PCWSTR(path.as_ptr()), &mut root) }.is_err() {
-        return false;
-    }
-    let mut filesystem = vec![0; 261];
-    // SAFETY: GetVolumePathNameW returned a nul-terminated root and the output buffer is writable.
-    if unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), None, None, None, None, Some(&mut filesystem)) }.is_err() {
-        return false;
-    }
-    let length = filesystem
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(filesystem.len());
-    matches!(
-        String::from_utf16_lossy(&filesystem[..length]).as_str(),
-        "NTFS" | "ReFS"
-    )
-}
-
-fn hash_file_identity(file: &File, hasher: &mut Sha256) {
-    let mut info = FILE_ID_INFO::default();
-    let size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits u32");
-    // SAFETY: The file handle and correctly sized output buffer are valid for the call.
-    if unsafe { GetFileInformationByHandleEx(HANDLE(file.as_raw_handle()), FileIdInfo, (&raw mut info).cast(), size) }
-        .is_ok()
-    {
-        hasher.update(info.VolumeSerialNumber.to_le_bytes());
-        hasher.update(info.FileId.Identifier);
-    }
-}
-
-fn wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+#[cfg(test)]
+fn observe_file(source: PolicyConfigurationSource, path: &Path) -> Observation {
+    windows::observe(source, path, &windows::AtomicityProbeCache::new())
 }
 
 #[cfg(test)]
 struct TestStorage {
     observation: parking_lot::Mutex<Observation>,
     fail_persist: std::sync::atomic::AtomicBool,
+    fail_concurrent_check: std::sync::atomic::AtomicBool,
+    fail_target_retention: std::sync::atomic::AtomicBool,
+    race_before_persist: parking_lot::Mutex<Option<PolicyDocument>>,
+    post_persist_capability: parking_lot::Mutex<Option<(PolicyWriteCapability, Option<PolicyReadOnlyReason>)>>,
+    persisted_configured_paths: parking_lot::Mutex<Vec<PathBuf>>,
 }
 
 #[cfg(test)]
 impl TestStorage {
     fn new(policy: Option<PolicyDocument>) -> Self {
-        let state = if policy.is_some() {
-            PolicyManagementState::Active
-        } else {
-            PolicyManagementState::Missing
-        };
         Self {
-            observation: parking_lot::Mutex::new(Observation {
-                state,
-                policy,
-                invalid_diagnostics: None,
-                write_capability: PolicyWriteCapability::Writable,
-                read_only_reason: None,
-                configured_path: PathBuf::from(r"C:\policy.json"),
-                fingerprint: DiskFingerprint([0; 32]),
-            }),
+            observation: parking_lot::Mutex::new(test_observation(policy, false, 0)),
             fail_persist: std::sync::atomic::AtomicBool::new(false),
+            fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
+            fail_target_retention: std::sync::atomic::AtomicBool::new(false),
+            race_before_persist: parking_lot::Mutex::new(None),
+            post_persist_capability: parking_lot::Mutex::new(None),
+            persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
     fn invalid() -> Self {
-        let mut storage = Self::new(None);
-        storage.observation = parking_lot::Mutex::new(Observation {
-            state: PolicyManagementState::Invalid,
-            policy: None,
-            invalid_diagnostics: Some(InvalidPolicyDiagnostics {
-                diagnostics_version: API_VERSION_STR.into(),
-                findings: vec![validation::disk_failure_finding(
-                    validation::DiskFailureReason::MalformedContent,
-                )],
-            }),
-            write_capability: PolicyWriteCapability::Writable,
-            read_only_reason: None,
-            configured_path: PathBuf::from(r"C:\policy.json"),
-            fingerprint: DiskFingerprint([1; 32]),
-        });
-        storage
+        Self {
+            observation: parking_lot::Mutex::new(test_observation(None, true, 1)),
+            fail_persist: std::sync::atomic::AtomicBool::new(false),
+            fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
+            fail_target_retention: std::sync::atomic::AtomicBool::new(false),
+            race_before_persist: parking_lot::Mutex::new(None),
+            post_persist_capability: parking_lot::Mutex::new(None),
+            persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
+        }
     }
 
     fn set_disk_state(&self, policy: Option<PolicyDocument>, invalid: bool, marker: u8) {
-        let mut observation = self.observation.lock();
-        observation.state = if invalid {
-            PolicyManagementState::Invalid
-        } else if policy.is_some() {
-            PolicyManagementState::Active
-        } else {
-            PolicyManagementState::Missing
-        };
-        observation.policy = policy;
-        observation.invalid_diagnostics = invalid.then(|| InvalidPolicyDiagnostics {
-            diagnostics_version: API_VERSION_STR.into(),
-            findings: vec![validation::disk_failure_finding(
-                validation::DiskFailureReason::MalformedContent,
-            )],
-        });
-        observation.fingerprint = DiskFingerprint([marker; 32]);
+        *self.observation.lock() = test_observation(policy, invalid, marker);
+    }
+
+    fn race_before_next_persist(&self, policy: PolicyDocument) {
+        *self.race_before_persist.lock() = Some(policy);
     }
 }
 
@@ -1001,21 +727,44 @@ impl PolicyStorage for TestStorage {
         clone_observation(&self.observation.lock())
     }
 
+    fn observe_for_write(&self, source: PolicyConfigurationSource, path: &Path) -> Observation {
+        let mut observation = self.observe(source, path);
+        if observation.state != PolicyManagementState::Missing
+            && !self
+                .fail_target_retention
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            observation.retained_target = Some(windows::RetainedPolicyFile::for_fake(observation.fingerprint.clone()));
+        }
+        observation
+    }
+
     fn create(
         &self,
-        _configured_path: &Path,
+        _source: PolicyConfigurationSource,
+        configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
+        self.persisted_configured_paths.lock().push(configured_path.to_owned());
         self.persist(observation, bytes)
     }
 
     fn replace(
         &self,
-        _configured_path: &Path,
-        observation: &Observation,
+        _source: PolicyConfigurationSource,
+        configured_path: &Path,
+        observation: &mut Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure> {
+        self.persisted_configured_paths.lock().push(configured_path.to_owned());
+        let retained = observation
+            .retained_target
+            .take()
+            .ok_or_else(|| WriteFailure::ConcurrentChange(anyhow::anyhow!("missing retained test target")))?;
+        retained
+            .verify_matches(&observation.fingerprint)
+            .map_err(WriteFailure::ConcurrentChange)?;
         self.persist(observation, bytes)
     }
 }
@@ -1028,18 +777,80 @@ impl TestStorage {
                 "injected persistence failure"
             )));
         }
+        if self
+            .fail_concurrent_check
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(WriteFailure::ConcurrentChange(anyhow::anyhow!(
+                "injected identity query failure"
+            )));
+        }
+        if let Some(external) = self.race_before_persist.lock().take() {
+            *self.observation.lock() = test_observation(Some(external), false, 9);
+            return Err(WriteFailure::ConcurrentChange(anyhow::anyhow!(
+                "injected external policy replacement"
+            )));
+        }
         let policy: PolicyDocument =
             serde_json::from_slice(bytes).map_err(|error| WriteFailure::PrePublication(error.into()))?;
         let mut next = clone_observation(observation);
         next.state = PolicyManagementState::Active;
         next.policy = Some(policy.clone());
         next.invalid_diagnostics = None;
-        next.fingerprint = DiskFingerprint(Sha256::digest(bytes).into());
+        next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 1);
+        if let Some((capability, reason)) = self.post_persist_capability.lock().take() {
+            next.write_capability = capability;
+            next.read_only_reason = reason;
+            next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 2);
+        }
         *self.observation.lock() = clone_observation(&next);
         Ok(PersistedPolicy {
             policy,
-            observation: next,
+            fingerprint: next.fingerprint,
+            write_capability: next.write_capability,
+            read_only_reason: next.read_only_reason,
+            canonical_path: next.canonical_path,
         })
+    }
+}
+
+#[cfg(test)]
+fn test_observation(policy: Option<PolicyDocument>, invalid: bool, marker: u8) -> Observation {
+    let state = if invalid {
+        PolicyManagementState::Invalid
+    } else if policy.is_some() {
+        PolicyManagementState::Active
+    } else {
+        PolicyManagementState::Missing
+    };
+    let bytes = policy
+        .as_ref()
+        .map(|policy| serde_json::to_vec(policy).expect("test policy serializes"))
+        .unwrap_or_default();
+    let fingerprint = match state {
+        PolicyManagementState::Active => DiskFingerprint::test_active(&bytes, marker.into(), 1, 1, 1),
+        PolicyManagementState::Missing => DiskFingerprint::test_missing(marker.into(), 1),
+        PolicyManagementState::Invalid => DiskFingerprint::test_invalid(&bytes, marker.into(), 1, 1, 1),
+    };
+    Observation {
+        state,
+        policy,
+        invalid_diagnostics: invalid.then(|| InvalidPolicyDiagnostics {
+            diagnostics_version: API_VERSION_STR.into(),
+            findings: vec![validation::disk_failure_finding(
+                validation::DiskFailureReason::MalformedContent,
+            )],
+        }),
+        fingerprint,
+        write_capability: PolicyWriteCapability::Writable,
+        read_only_reason: None,
+        canonical_path: PathBuf::from(r"C:\policy.json"),
+        hosting_dir: Some(windows::VerifiedHostingDirectory::for_fake_storage(
+            PathBuf::from(r"C:\"),
+            windows::test_identity(1),
+            windows::test_security_digest(1),
+        )),
+        retained_target: None,
     }
 }
 
@@ -1051,7 +862,374 @@ fn clone_observation(observation: &Observation) -> Observation {
         invalid_diagnostics: observation.invalid_diagnostics.clone(),
         write_capability: observation.write_capability,
         read_only_reason: observation.read_only_reason,
-        configured_path: observation.configured_path.clone(),
+        canonical_path: observation.canonical_path.clone(),
         fingerprint: observation.fingerprint.clone(),
+        hosting_dir: Some(windows::VerifiedHostingDirectory::for_fake_storage(
+            PathBuf::from(r"C:\"),
+            windows::test_identity(1),
+            windows::test_security_digest(1),
+        )),
+        retained_target: None,
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use now_policy::PolicyDraftDocument;
+    use now_policy_api::{PolicyConflictHandling, PolicyReplacementRequestKind};
+
+    struct DefaultTransitionStorage {
+        managed: PathBuf,
+        legacy_policy: PolicyDocument,
+        managed_policy: parking_lot::RwLock<Option<PolicyDocument>>,
+        publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool,
+    }
+
+    impl PolicyStorage for DefaultTransitionStorage {
+        fn observe(&self, _source: PolicyConfigurationSource, path: &Path) -> Observation {
+            let managed = crate::policy_security::windows_paths_equal(path, &self.managed);
+            if !managed
+                && self
+                    .publish_managed_while_observing_legacy
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                std::fs::create_dir_all(self.managed.parent().expect("managed path has a parent"))
+                    .expect("create managed directory");
+                std::fs::write(&self.managed, b"managed").expect("publish managed marker");
+            }
+            let (policy, invalid, marker) = if managed {
+                let managed_policy = self.managed_policy.read().clone();
+                let invalid = managed_policy.is_none();
+                (managed_policy, invalid, 9)
+            } else {
+                (Some(self.legacy_policy.clone()), false, 1)
+            };
+            let mut observation = test_observation(policy, invalid, marker);
+            observation.canonical_path = path.to_owned();
+            observation
+        }
+
+        fn create(
+            &self,
+            _source: PolicyConfigurationSource,
+            _configured_path: &Path,
+            _observation: &Observation,
+            _bytes: &[u8],
+        ) -> Result<PersistedPolicy, WriteFailure> {
+            unreachable!("default transition tests do not write")
+        }
+
+        fn replace(
+            &self,
+            _source: PolicyConfigurationSource,
+            _configured_path: &Path,
+            _observation: &mut Observation,
+            _bytes: &[u8],
+        ) -> Result<PersistedPolicy, WriteFailure> {
+            unreachable!("default transition tests do not write")
+        }
+    }
+
+    fn default_transition_store(paths: [PathBuf; 2], storage: Arc<DefaultTransitionStorage>) -> Arc<PolicyStore> {
+        let configured_path = windows::select_default_policy_path(paths[0].clone(), paths[1].clone());
+        let managed_selected = crate::policy_security::windows_paths_equal(&configured_path, &paths[0]);
+        let observation = storage.observe(PolicyConfigurationSource::DefaultPath, &configured_path);
+        Arc::new(PolicyStore {
+            configured_path,
+            default_paths: Some(paths),
+            default_managed_selected: std::sync::atomic::AtomicBool::new(managed_selected),
+            source: PolicyConfigurationSource::DefaultPath,
+            snapshot: RwLock::new(Arc::new(snapshot_from_observation(observation, random_store_token()))),
+            writer: tokio::sync::Mutex::new(Monitoring::Available),
+            storage,
+            receipt_key: receipt::ReceiptKey::generate(),
+        })
+    }
+
+    use super::*;
+
+    fn draft(id: &str) -> PolicyDraftDocument {
+        serde_json::from_value(serde_json::json!({
+            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
+            "PolicyVersion": "1.0.0",
+            "PolicyType": "PackageBrokerPolicy",
+            "Metadata": { "Id": id, "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Rules": []
+        }))
+        .expect("valid draft")
+    }
+
+    fn policy(id: &str, revision: u32) -> PolicyDocument {
+        draft(id)
+            .into_policy_document(revision, Utc::now())
+            .expect("valid committed policy")
+    }
+
+    fn update_request(store: &PolicyStore) -> PolicyReplacementRequest {
+        let raw = serde_json::to_value(draft("current")).expect("serialize draft");
+        let validation = store.validate_draft(&raw);
+        PolicyReplacementRequest {
+            request_kind: PolicyReplacementRequestKind,
+            request_version: API_VERSION_STR.into(),
+            expected_store_token: store.management_snapshot().store_token,
+            operation: PolicyReplacementOperation::Update,
+            conflict_handling: PolicyConflictHandling::Reject,
+            warnings_acknowledged: false,
+            draft: raw,
+            validation_receipt: validation.validation_receipt.expect("valid receipt"),
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_external_replacement_is_preserved_and_published() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        storage.race_before_next_persist(policy("external", 7));
+
+        let error = store.replace(request).await.expect_err("external replacement wins");
+
+        assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
+        assert_eq!(
+            store.active_policy().expect("external policy is active").metadata.id.0,
+            "external"
+        );
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("external policy is active")
+                .metadata
+                .revision,
+            7
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_identity_check_without_change_is_a_persistence_failure() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let previous_token = store.management_snapshot().store_token;
+        storage
+            .fail_concurrent_check
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let error = store.replace(request).await.expect_err("identity check fails");
+
+        assert_eq!(error.code, ErrorCode::PolicyPersistenceFailed);
+        assert_eq!(store.management_snapshot().store_token, previous_token);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("previous policy remains active")
+                .metadata
+                .revision,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_target_retention_preserves_the_active_snapshot() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let previous_token = store.management_snapshot().store_token;
+        storage
+            .fail_target_retention
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let error = store.replace(request).await.expect_err("target retention fails");
+
+        assert_eq!(error.code, ErrorCode::PolicyPersistenceFailed);
+        assert_eq!(store.management_snapshot().store_token, previous_token);
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("previous policy remains active")
+                .metadata
+                .revision,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn replacement_returns_authoritative_post_write_capability() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        *storage.post_persist_capability.lock() =
+            Some((PolicyWriteCapability::ReadOnly, Some(PolicyReadOnlyReason::UnsafePath)));
+
+        let success = store.replace(request).await.expect("policy replacement succeeds");
+
+        assert_eq!(success.management.write_capability, PolicyWriteCapability::ReadOnly);
+        assert_eq!(
+            success.management.read_only_reason,
+            Some(PolicyReadOnlyReason::UnsafePath)
+        );
+        assert_eq!(
+            store.management_snapshot().write_capability,
+            PolicyWriteCapability::ReadOnly
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_watcher_uses_canonical_path_but_writes_reobserve_configured_path() {
+        let configured = PathBuf::from(r"C:\RUNNER~1\AppData\Local\Temp\policy.json");
+        let canonical = PathBuf::from(r"C:\actions\runneradmin\AppData\Local\Temp\policy.json");
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        storage.observation.lock().canonical_path = canonical.clone();
+        let store = PolicyStore::load_with_storage(
+            Some(configured.clone()),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+
+        assert_eq!(store.watched_paths().as_slice(), std::slice::from_ref(&canonical));
+        let success = store.replace(update_request(&store)).await.expect("replace policy");
+        assert_eq!(&*storage.persisted_configured_paths.lock(), &[configured]);
+        assert_eq!(store.watched_paths(), [canonical]);
+
+        let post_write_token = success.management.store_token;
+        let reloaded = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(reloaded.store_token, post_write_token);
+
+        let replacement_canonical = PathBuf::from(r"C:\actions\runneradmin\AppData\Local\Temp\replacement\policy.json");
+        storage.set_disk_state(Some(policy("current", 2)), false, 9);
+        storage.observation.lock().canonical_path = replacement_canonical.clone();
+        let replaced = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_ne!(replaced.store_token, post_write_token);
+        assert_eq!(store.watched_paths(), [replacement_canonical]);
+    }
+
+    #[tokio::test]
+    async fn default_store_switches_from_legacy_when_managed_policy_appears() {
+        let dir = tempfile::tempdir().expect("create temp directory");
+        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
+        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
+        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
+        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
+        let storage = Arc::new(DefaultTransitionStorage {
+            managed: managed.clone(),
+            legacy_policy: policy("legacy", 1),
+            managed_policy: parking_lot::RwLock::new(Some(policy("managed", 2))),
+            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
+        });
+        let store = default_transition_store([managed.clone(), legacy], Arc::clone(&storage));
+        assert_eq!(
+            store.active_policy().expect("legacy policy active").metadata.id.0,
+            "legacy"
+        );
+
+        std::fs::create_dir_all(managed.parent().expect("managed path has a parent"))
+            .expect("create managed directory");
+        std::fs::write(&managed, b"managed").expect("write managed marker");
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+
+        assert_eq!(
+            store.active_policy().expect("managed policy active").metadata.id.0,
+            "managed"
+        );
+        assert_eq!(
+            store.management_snapshot().configured_path,
+            managed.display().to_string()
+        );
+
+        std::fs::remove_file(&managed).expect("remove managed marker");
+        *storage.managed_policy.write() = None;
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(store.active_policy().is_none(), "managed selection must remain sticky");
+        assert_eq!(
+            store.management_snapshot().configured_path,
+            managed.display().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_transaction_evidence_after_startup_fails_closed_instead_of_using_legacy() {
+        let dir = tempfile::tempdir().expect("create temp directory");
+        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
+        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
+        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
+        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
+        let storage = Arc::new(DefaultTransitionStorage {
+            managed: managed.clone(),
+            legacy_policy: policy("legacy", 1),
+            managed_policy: parking_lot::RwLock::new(None),
+            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
+        });
+        let store = default_transition_store([managed.clone(), legacy], storage);
+        assert_eq!(
+            store.active_policy().expect("legacy policy active").metadata.id.0,
+            "legacy"
+        );
+
+        std::fs::create_dir_all(managed.parent().expect("managed path has a parent"))
+            .expect("create managed directory");
+        let marker = managed.parent().expect("managed path has a parent").join(format!(
+            ".{}.txn-{}.marker",
+            windows::POLICY_FILE_NAME,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(marker, b"unsafe remnant").expect("write managed transaction marker");
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+
+        assert!(store.active_policy().is_none());
+        assert_eq!(store.management_snapshot().state, PolicyManagementState::Invalid);
+        assert_eq!(
+            store.management_snapshot().configured_path,
+            managed.display().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_policy_created_during_legacy_observation_is_never_published_as_legacy() {
+        let dir = tempfile::tempdir().expect("create temp directory");
+        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
+        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
+        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
+        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
+        let storage = Arc::new(DefaultTransitionStorage {
+            managed: managed.clone(),
+            legacy_policy: policy("legacy", 1),
+            managed_policy: parking_lot::RwLock::new(Some(policy("managed", 2))),
+            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
+        });
+        let store = default_transition_store([managed.clone(), legacy], Arc::clone(&storage));
+        assert_eq!(
+            store.active_policy().expect("legacy policy active").metadata.id.0,
+            "legacy"
+        );
+        storage
+            .publish_managed_while_observing_legacy
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+
+        assert_eq!(
+            store.active_policy().expect("managed policy active").metadata.id.0,
+            "managed"
+        );
+        assert_eq!(
+            store.management_snapshot().configured_path,
+            managed.display().to_string()
+        );
     }
 }
