@@ -11,6 +11,8 @@ param(
     [parameter(Mandatory = $true)]
     [string] $SessionExe,
     [parameter(Mandatory = $true)]
+    [string] $PolicyConsentHelper,
+    [parameter(Mandatory = $true)]
     [ValidateSet('x64', 'arm64')]
     [string] $Architecture,
     [string] $Outfile
@@ -98,6 +100,9 @@ function New-AgentMsi() {
         # The path to the devolutions-session.exe file.
         [string] $SessionExe,
         [parameter(Mandatory = $true)]
+        # The path to the DevolutionsAgentPolicyConsent.exe file.
+        [string] $PolicyConsentHelper,
+        [parameter(Mandatory = $true)]
         [ValidateSet('x64', 'arm64')]
         # Architecture: x64 or arm64
         [string] $Architecture,
@@ -120,6 +125,7 @@ function New-AgentMsi() {
     $PedmDll = Convert-Path -Path $PedmDll
     $PedmMsix = Convert-Path -Path $PedmMsix
     $SessionExe = Convert-Path -Path $SessionExe
+    $PolicyConsentHelper = Convert-Path -Path $PolicyConsentHelper
     if ($Outfile) {
         $Outfile = Convert-Path -Path $Outfile
     }
@@ -137,6 +143,7 @@ function New-AgentMsi() {
     $myUpdaterExe = Set-FileNameAndCopy -Path $UpdaterExe -NewName 'DevolutionsAgentUpdater.exe'
     # The session is a service that gets launched on demand.
     $mySessionExe = Set-FileNameAndCopy -Path $SessionExe -NewName 'DevolutionsSession.exe'
+    $myPolicyConsentHelper = Set-FileNameAndCopy -Path $PolicyConsentHelper -NewName 'DevolutionsAgentPolicyConsent.exe'
 
     Write-Output "$repoDir\dotnet\DesktopAgent\bin\Release\net48\DevolutionsDesktopAgent.exe"
 
@@ -145,6 +152,7 @@ function New-AgentMsi() {
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_DLL' $myPedmDll
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_MSIX' $myPedmMsix
     Set-EnvVarPath 'DAGENT_SESSION_EXECUTABLE' $mySessionExe
+    Set-EnvVarPath 'DAGENT_POLICY_CONSENT_HELPER' $myPolicyConsentHelper
 
     # The actual DevolutionsDesktopAgent.exe will be `\dotnet\DesktopAgent\bin\Release\net48\DevolutionsDesktopAgent.exe`.
     # After install, the contents of `net48` will be copied to `C:\Program Files\Devolutions\Agent\desktop\`.
@@ -184,4 +192,4 @@ function New-AgentMsi() {
     Pop-Location
 }
 
-New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -UpdaterExe $UpdaterExe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -Architecture $Architecture -Outfile $Outfile
+New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -UpdaterExe $UpdaterExe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -PolicyConsentHelper $PolicyConsentHelper -Architecture $Architecture -Outfile $Outfile
