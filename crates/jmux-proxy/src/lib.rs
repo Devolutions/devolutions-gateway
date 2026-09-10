@@ -128,10 +128,8 @@ impl JmuxProxy {
 
     /// Overrides the default direct TCP connector when applicable.
     ///
-    /// Return `Ok(Some(stream))` to use the override, `Ok(None)` to delegate to the default connector,
-    /// or an error to reject the connection without falling back.
-    /// Connection attempts handled by the override do not emit outgoing traffic events because
-    /// their resolved target IP is unknown.
+    /// Return `Ok(Some(stream))` to use the override, `Ok(None)` to delegate to the default connector, or an error to reject the connection without falling back.
+    /// Connection attempts handled by the override do not emit outgoing traffic events because their resolved target IP is unknown.
     #[must_use]
     pub fn with_target_connector_override<C, F, S>(mut self, connector: C) -> Self
     where
@@ -153,8 +151,7 @@ impl JmuxProxy {
 
     /// Configures an outgoing-traffic callback for lifecycle event monitoring.
     ///
-    /// The provided callback is invoked exactly once at the end of each outgoing stream whose
-    /// resolved target IP is known.
+    /// The provided callback is invoked exactly once at the end of each outgoing stream whose resolved target IP is known.
     /// It provides connection metadata, byte counts, timing, and termination classification.
     ///
     /// # Event Emission
