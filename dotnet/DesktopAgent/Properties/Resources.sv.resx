@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="lblAbout" xml:space="preserve">
+    <value>Om</value>
+  </data>
+  <data name="lblCopyright" xml:space="preserve">
+    <value>Alla rättigheter förbehållna</value>
+  </data>
+  <data name="mnuAbout" xml:space="preserve">
+    <value>Om</value>
+  </data>
+  <data name="mnuExit" xml:space="preserve">
+    <value>Avsluta</value>
+  </data>
+  <data name="mnuProfileNone" xml:space="preserve">
+    <value>Ingen</value>
+  </data>
+  <data name="mnuProfiles" xml:space="preserve">
+    <value>Profiler</value>
+  </data>
+  <data name="mnuServiceUnavailable" xml:space="preserve">
+    <value>Tjänsten är inte tillgänglig</value>
+  </data>
+  <data name="msgElevationBlocked" xml:space="preserve">
+    <value>Privilegieförhöjning blockerad</value>
+  </data>
+  <data name="msgElevationBlockedDescription" xml:space="preserve">
+    <value>Privilegieförhöjning blockeras av den aktuellt valda profilen</value>
+  </data>
+  <data name="msgElevationFailed" xml:space="preserve">
+    <value>Privilegieförhöjningen misslyckades</value>
+  </data>
+  <data name="msgUnexpectedError" xml:space="preserve">
+    <value>Oväntat fel</value>
+  </data>
+  <data name="msgUnexpectedErrorDescription" xml:space="preserve">
+    <value>Ett oväntat fel inträffade</value>
+  </data>
+  <data name="mnuPEDMUnavailable" xml:space="preserve">
+    <value>PEDM är inte tillgängligt</value>
+  </data>
+  <data name="mnuServiceAvailable" xml:space="preserve">
+    <value>Tjänsten körs</value>
+  </data>
+</root>
