@@ -19,10 +19,12 @@
     <None Remove="wix\**" />
     <None Remove="Resources\DevolutionsAgent_en-us.wxl" />
     <None Remove="Resources\DevolutionsAgent_fr-fr.wxl" />
+    <None Remove="Resources\DevolutionsAgent_sv-se.wxl" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\DevolutionsAgent_en-us.wxl" />
     <EmbeddedResource Include="Resources\DevolutionsAgent_fr-fr.wxl" />
+    <EmbeddedResource Include="Resources\DevolutionsAgent_sv-se.wxl" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
