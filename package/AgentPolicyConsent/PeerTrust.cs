@@ -2,8 +2,10 @@ using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
 using System.Text;
 
 namespace DevolutionsAgentPolicyConsent;
@@ -21,8 +23,14 @@ internal sealed class PeerLease : IDisposable
     internal const uint Synchronize = 0x0010_0000;
     internal const uint GenericRead = 0x8000_0000;
     internal const uint FileExecute = 0x20;
+    internal const uint FileReadAttributes = 0x80;
+    internal const uint ReadControl = 0x0002_0000;
     internal const uint FileShareRead = 0x1;
+    internal const uint FileShareWrite = 0x2;
     internal const uint OpenExisting = 3;
+    internal const uint FileAttributeReparsePoint = 0x400;
+    internal const uint FileFlagBackupSemantics = 0x0200_0000;
+    internal const uint FileFlagOpenReparsePoint = 0x0020_0000;
     internal const int ProcessImageFileMapping = 44;
     internal const uint StillActive = 259;
 
@@ -121,6 +129,10 @@ internal sealed class PeerLease : IDisposable
     internal static bool IsAllowedSigner(string digest) =>
         FixedTimeEqualsHex(digest, CurrentUiSignerSpkiSha256) ||
         FixedTimeEqualsHex(digest, TransitionUiSignerSpkiSha256);
+
+    internal static bool IsAllowedDevolutionsSigner(string thumbprint) =>
+        PolicyConsentContract.DevolutionsSignerSha1Thumbprints.Any(
+            expected => FixedTimeEqualsHex(thumbprint, expected, 40));
 
     internal static bool IsSupportedUiIdentity(string? productName, string? originalFilename, string? productVersion) =>
         string.Equals(productName, "UniGetUI", StringComparison.Ordinal) &&
@@ -315,10 +327,10 @@ internal sealed class PeerLease : IDisposable
         }
     }
 
-    private static bool FixedTimeEqualsHex(string candidate, string expected)
+    private static bool FixedTimeEqualsHex(string candidate, string expected, int length = 64)
     {
-        if (candidate.Length != 64 ||
-            expected.Length != 64 ||
+        if (candidate.Length != length ||
+            expected.Length != length ||
             candidate.AsSpan().IndexOfAnyExcept("0123456789abcdef") >= 0)
         {
             return false;
@@ -349,6 +361,107 @@ internal sealed class PeerLease : IDisposable
             throw new InvalidOperationException($"parent image mapping mismatch (0x{status:X8})");
         }
     }
+
+    internal static void VerifyProtectedPath(SafeFileHandle handle, string subject, int tamperRights)
+    {
+        if (!Native.GetFileInformationByHandle(handle, out Native.ByHandleFileInformation information))
+        {
+            throw new Win32Exception();
+        }
+        if (IsReparsePoint(information.FileAttributes))
+        {
+            throw new InvalidOperationException($"{subject} is a reparse point");
+        }
+
+        uint error = Native.GetSecurityInfo(
+            handle,
+            1,
+            0x1 | 0x4,
+            out _,
+            out _,
+            out _,
+            out _,
+            out IntPtr securityDescriptor);
+        if (error != 0)
+        {
+            throw new Win32Exception(checked((int)error));
+        }
+
+        try
+        {
+            int length = checked((int)Native.GetSecurityDescriptorLength(securityDescriptor));
+            byte[] bytes = new byte[length];
+            Marshal.Copy(securityDescriptor, bytes, 0, length);
+            VerifyTrustedSecurityDescriptor(new RawSecurityDescriptor(bytes, 0), subject, tamperRights);
+        }
+        finally
+        {
+            _ = Native.LocalFree(securityDescriptor);
+        }
+    }
+
+    internal static bool IsReparsePoint(uint attributes) =>
+        (attributes & FileAttributeReparsePoint) != 0;
+
+    internal const int FileTamperRights =
+        0x0000_0002 | 0x0000_0004 | 0x0000_0010 | 0x0000_0100 |
+        0x0001_0000 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000 | 0x4000_0000;
+    internal const int ParentDirectoryTamperRights =
+        0x0000_0002 | 0x0000_0004 | 0x0000_0040 |
+        0x0001_0000 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000 | 0x4000_0000;
+    internal const int AncestorDirectoryTamperRights =
+        0x0000_0040 | 0x0001_0000 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000;
+
+    internal static void VerifyTrustedSecurityDescriptor(
+        RawSecurityDescriptor descriptor,
+        string subject,
+        int tamperRights)
+    {
+        if (descriptor.Owner is not SecurityIdentifier owner || !IsTrustedWriter(owner))
+        {
+            throw new InvalidOperationException($"{subject} has an untrusted owner");
+        }
+        if (!descriptor.ControlFlags.HasFlag(ControlFlags.DiscretionaryAclPresent) ||
+            descriptor.DiscretionaryAcl is not { Count: > 0 } dacl)
+        {
+            throw new InvalidOperationException($"{subject} has no protective DACL");
+        }
+
+        foreach (GenericAce generic in dacl)
+        {
+            if (generic.AceFlags.HasFlag(AceFlags.InheritOnly) || !IsAccessAllowedAce(generic.AceType))
+            {
+                continue;
+            }
+            if (generic is not QualifiedAce ace || ace is not KnownAce known)
+            {
+                throw new InvalidOperationException($"{subject} has an unsupported access-allowed entry");
+            }
+            if ((known.AccessMask & tamperRights) == 0)
+            {
+                continue;
+            }
+            if (ace.SecurityIdentifier is null || !IsTrustedWriter(ace.SecurityIdentifier))
+            {
+                throw new InvalidOperationException($"{subject} grants write access to an untrusted principal");
+            }
+        }
+    }
+
+    private static bool IsAccessAllowedAce(AceType type) =>
+        type is AceType.AccessAllowed or
+            AceType.AccessAllowedCompound or
+            AceType.AccessAllowedObject or
+            AceType.AccessAllowedCallback or
+            AceType.AccessAllowedCallbackObject;
+
+    private static bool IsTrustedWriter(SecurityIdentifier sid) =>
+        sid.IsWellKnown(WellKnownSidType.LocalSystemSid) ||
+        sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) ||
+        string.Equals(
+            sid.Value,
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            StringComparison.Ordinal);
 
     internal static string ImagePath(SafeProcessHandle process)
     {
@@ -407,11 +520,16 @@ internal sealed class BrokerServerLease : IDisposable
 
     private readonly SafeProcessHandle process;
     private readonly SafeFileHandle image;
+    private readonly List<SafeFileHandle> directories;
 
-    private BrokerServerLease(SafeProcessHandle process, SafeFileHandle image)
+    private BrokerServerLease(
+        SafeProcessHandle process,
+        SafeFileHandle image,
+        List<SafeFileHandle> directories)
     {
         this.process = process;
         this.image = image;
+        this.directories = directories;
     }
 
     internal static BrokerServerLease Open(SafePipeHandle pipe)
@@ -422,7 +540,9 @@ internal sealed class BrokerServerLease : IDisposable
         }
 
         SafeProcessHandle process = Native.OpenProcess(
-            PeerLease.ProcessQueryLimitedInformation | PeerLease.Synchronize,
+            PeerLease.ProcessQueryInformation |
+                PeerLease.ProcessQueryLimitedInformation |
+                PeerLease.Synchronize,
             false,
             processId);
         if (process.IsInvalid)
@@ -449,12 +569,15 @@ internal sealed class BrokerServerLease : IDisposable
             }
 
             SafeFileHandle image = Native.CreateFile(
-                expectedPath,
-                PeerLease.GenericRead | PeerLease.FileExecute | PeerLease.Synchronize,
+                serverPath,
+                PeerLease.GenericRead |
+                    PeerLease.FileExecute |
+                    PeerLease.ReadControl |
+                    PeerLease.Synchronize,
                 PeerLease.FileShareRead,
                 IntPtr.Zero,
                 PeerLease.OpenExisting,
-                0,
+                PeerLease.FileFlagOpenReparsePoint,
                 IntPtr.Zero);
             if (image.IsInvalid)
             {
@@ -463,10 +586,37 @@ internal sealed class BrokerServerLease : IDisposable
 
             try
             {
-                using X509Certificate2 _ =
-                    PeerLease.VerifyAuthenticodeSigner(expectedPath, image, "broker server");
-                PeerLease.EnsureActive(process);
-                return new BrokerServerLease(process, image);
+                PeerLease.VerifyImageMapping(process, image);
+                PeerLease.VerifyProtectedPath(image, "broker server image", PeerLease.FileTamperRights);
+                using X509Certificate2 signer =
+                    PeerLease.VerifyAuthenticodeSigner(serverPath, image, "broker server");
+                string thumbprint = signer.GetCertHashString(HashAlgorithmName.SHA1).ToLowerInvariant();
+                if (!PeerLease.IsAllowedDevolutionsSigner(thumbprint))
+                {
+                    throw new InvalidOperationException("broker server signer is not authorized");
+                }
+                List<SafeFileHandle>? directories = RetainProtectedDirectories(
+                    Path.GetDirectoryName(expectedPath)
+                        ?? throw new InvalidOperationException("Agent installation directory is unavailable"));
+                try
+                {
+                    PeerLease.VerifyImageMapping(process, image);
+                    PeerLease.EnsureActive(process);
+                    if (!Native.GetNamedPipeServerProcessId(pipe, out int confirmedProcessId) ||
+                        confirmedProcessId != processId)
+                    {
+                        throw new InvalidOperationException("broker server process changed during authentication");
+                    }
+                    return new BrokerServerLease(process, image, directories);
+                }
+                catch
+                {
+                    foreach (SafeFileHandle directory in directories)
+                    {
+                        directory.Dispose();
+                    }
+                    throw;
+                }
             }
             catch
             {
@@ -489,8 +639,53 @@ internal sealed class BrokerServerLease : IDisposable
 
     public void Dispose()
     {
+        foreach (SafeFileHandle directory in directories)
+        {
+            directory.Dispose();
+        }
         image.Dispose();
         process.Dispose();
+    }
+
+    private static List<SafeFileHandle> RetainProtectedDirectories(string installationDirectory)
+    {
+        List<SafeFileHandle> handles = [];
+        try
+        {
+            int tamperRights = PeerLease.ParentDirectoryTamperRights;
+            for (DirectoryInfo? directory = new(Path.GetFullPath(installationDirectory));
+                 directory is not null;
+                 directory = directory.Parent)
+            {
+                SafeFileHandle handle = Native.CreateFile(
+                    directory.FullName,
+                    PeerLease.FileReadAttributes | PeerLease.ReadControl | PeerLease.Synchronize,
+                    PeerLease.FileShareRead | PeerLease.FileShareWrite,
+                    IntPtr.Zero,
+                    PeerLease.OpenExisting,
+                    PeerLease.FileFlagBackupSemantics | PeerLease.FileFlagOpenReparsePoint,
+                    IntPtr.Zero);
+                if (handle.IsInvalid)
+                {
+                    throw new Win32Exception();
+                }
+                handles.Add(handle);
+                PeerLease.VerifyProtectedPath(
+                    handle,
+                    $"Agent installation directory '{directory.FullName}'",
+                    tamperRights);
+                tamperRights = PeerLease.AncestorDirectoryTamperRights;
+            }
+            return handles;
+        }
+        catch
+        {
+            foreach (SafeFileHandle handle in handles)
+            {
+                handle.Dispose();
+            }
+            throw;
+        }
     }
 }
 
@@ -648,6 +843,23 @@ internal static partial class Native
     [LibraryImport("advapi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool IsWellKnownSid(IntPtr sid, int wellKnownSidType);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    internal static partial uint GetSecurityInfo(
+        SafeFileHandle handle,
+        uint objectType,
+        uint securityInformation,
+        out IntPtr owner,
+        out IntPtr group,
+        out IntPtr dacl,
+        out IntPtr sacl,
+        out IntPtr securityDescriptor);
+
+    [LibraryImport("advapi32.dll")]
+    internal static partial uint GetSecurityDescriptorLength(IntPtr securityDescriptor);
+
+    [LibraryImport("kernel32.dll")]
+    internal static partial IntPtr LocalFree(IntPtr memory);
 
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     internal static partial SafeFileHandle CreateFile(
