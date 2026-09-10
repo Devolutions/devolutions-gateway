@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_tunnel::AgentTunnelHandle;
@@ -5,10 +6,17 @@ use agent_tunnel::registry::AgentRegistry;
 use agent_tunnel_proto::{
     CertRenewalResult, ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, DomainName,
 };
+use devolutions_gateway::recording::recording_message_channel;
+use devolutions_gateway::session::SessionManagerTask;
+use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::target_addr::TargetAddr;
+use devolutions_gateway::token::{ApplicationProtocol, JmuxTokenClaims, RecordingPolicy, SessionTtl};
+use devolutions_gateway::traffic_audit::TrafficAuditHandle;
 use devolutions_gateway::upstream::{ConnectedUpstream, UpstreamLeg, connect_upstream};
+use devolutions_gateway_task::{ShutdownHandle, Task};
+use jmux_proto::{Bytes, BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use nonempty::NonEmpty;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
@@ -19,6 +27,32 @@ use super::common::{
 
 fn target(host: &str, port: u16) -> TargetAddr {
     TargetAddr::from_components("tcp", host, port).expect("build target address")
+}
+
+async fn send_jmux_message(writer: &mut (impl AsyncWrite + Unpin), message: Message) {
+    let mut bytes = BytesMut::new();
+    message.encode(&mut bytes).expect("encode JMUX message");
+    writer.write_all(&bytes).await.expect("send JMUX message");
+}
+
+async fn receive_jmux_message(reader: &mut (impl AsyncRead + Unpin)) -> Message {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut header = [0; Header::SIZE];
+        reader.read_exact(&mut header).await.expect("read JMUX header");
+        let header = Header::decode(Bytes::copy_from_slice(&header)).expect("decode JMUX header");
+        let body_size = usize::from(header.size)
+            .checked_sub(Header::SIZE)
+            .expect("JMUX message size smaller than header");
+        let mut body = vec![0; body_size];
+        reader.read_exact(&mut body).await.expect("read JMUX body");
+
+        let mut bytes = BytesMut::with_capacity(usize::from(header.size));
+        header.encode(&mut bytes);
+        bytes.extend_from_slice(&body);
+        Message::decode(bytes.freeze()).expect("decode JMUX message")
+    })
+    .await
+    .expect("JMUX response timed out")
 }
 
 async fn advertise_domain(
@@ -308,6 +342,134 @@ async fn gateway_connect_upstream_does_not_bypass_failed_agent_routes() {
 
     first_connection.close(0u32.into(), b"test done");
     second_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("jmux-agent").await;
+    let _ctrl = advertise_routes(
+        &connection,
+        listener.handle.registry(),
+        agent_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    let direct_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
+    let target_port = direct_listener.local_addr().expect("read direct target address").port();
+    let target = target("127.0.0.1", target_port);
+    let session_id = Uuid::new_v4();
+
+    let (recordings, _recording_rx) = recording_message_channel();
+    let session_manager = SessionManagerTask::init(recordings);
+    let sessions = session_manager.handle();
+    let (session_shutdown, session_shutdown_signal) = ShutdownHandle::new();
+    let session_task = tokio::spawn(session_manager.run(session_shutdown_signal));
+    let (subscriber_tx, _subscriber_rx) = subscriber_channel();
+    let (traffic_audit_handle, _traffic_audit_rx) = TrafficAuditHandle::new();
+    let claims = JmuxTokenClaims {
+        jet_aid: session_id,
+        hosts: NonEmpty::new(target.clone()),
+        jet_ap: ApplicationProtocol::unknown(),
+        jet_rec: RecordingPolicy::None,
+        jet_ttl: SessionTtl::Unlimited,
+        exp: i64::MAX,
+        jti: Uuid::new_v4(),
+    };
+    let (proxy_stream, mut peer_stream) = tokio::io::duplex(8192);
+    let proxy_task = tokio::spawn(devolutions_gateway::jmux::handle(
+        proxy_stream,
+        claims,
+        sessions,
+        subscriber_tx,
+        traffic_audit_handle,
+        Some(Arc::new(listener.handle.clone())),
+    ));
+
+    send_jmux_message(
+        &mut peer_stream,
+        Message::open(
+            LocalChannelId::from(20),
+            4096,
+            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
+        ),
+    )
+    .await;
+    let mut routed_session = tokio::time::timeout(
+        Duration::from_secs(5),
+        accept_session_request(&connection, session_id, target.as_addr()),
+    )
+    .await
+    .expect("routed JMUX request timed out");
+    routed_session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("accept routed JMUX request");
+    let Message::OpenSuccess(success) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected OPEN SUCCESS");
+    };
+    assert_eq!(success.recipient_channel_id, 20);
+
+    let local_id = DistantChannelId::from(success.sender_channel_id);
+    send_jmux_message(&mut peer_stream, Message::data(local_id, Bytes::from_static(b"ping"))).await;
+    let (mut routed_send, mut routed_recv) = routed_session.into_inner();
+    let mut request = [0; 4];
+    routed_recv
+        .read_exact(&mut request)
+        .await
+        .expect("read routed JMUX payload");
+    assert_eq!(&request, b"ping");
+    routed_send
+        .write_all(b"pong")
+        .await
+        .expect("write routed JMUX response");
+    let Message::Data(response) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected CHANNEL DATA");
+    };
+    assert_eq!(response.recipient_channel_id, 20);
+    assert_eq!(response.transfer_data, b"pong"[..]);
+
+    send_jmux_message(
+        &mut peer_stream,
+        Message::open(
+            LocalChannelId::from(21),
+            4096,
+            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
+        ),
+    )
+    .await;
+    let mut failed_session = tokio::time::timeout(
+        Duration::from_secs(5),
+        accept_session_request(&connection, session_id, target.as_addr()),
+    )
+    .await
+    .expect("failed routed JMUX request timed out");
+    failed_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("reject routed JMUX request");
+    let Message::OpenFailure(failure) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected OPEN FAILURE");
+    };
+    assert_eq!(failure.recipient_channel_id, 21);
+    assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), direct_listener.accept())
+            .await
+            .is_err(),
+        "matched Agent route must not fall back to direct TCP"
+    );
+
+    proxy_task.abort();
+    session_shutdown.signal();
+    session_task
+        .await
+        .expect("session manager task panicked")
+        .expect("session manager shutdown");
+    connection.close(0u32.into(), b"test done");
     listener.shutdown().await;
 }
 

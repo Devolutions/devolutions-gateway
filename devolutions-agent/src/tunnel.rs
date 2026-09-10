@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
 use sha2::Digest as _;
-use tokio::io::AsyncWriteExt as _;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 
 use crate::config::ConfHandle;
 use crate::tunnel_helpers::{Target, connect_to_target, resolve_target};
@@ -583,8 +583,8 @@ async fn try_renew_certificate<S, R>(
     ca_path: &camino::Utf8Path,
 ) -> anyhow::Result<Option<ConnectionOutcome>>
 where
-    S: tokio::io::AsyncWrite + Unpin,
-    R: tokio::io::AsyncRead + Unpin,
+    S: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
 {
     const RENEWAL_THRESHOLD_DAYS: u32 = 15;
     const RENEWAL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -660,7 +660,7 @@ where
 // Control stream reader
 // ---------------------------------------------------------------------------
 
-async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRecv<R>) {
+async fn run_control_reader<R: AsyncRead + Unpin>(mut ctrl: FramedRecv<R>) {
     let _ = async move {
         loop {
             let message: ControlMessage = ctrl.recv().await.context("recv control message")?;
@@ -701,6 +701,34 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 /// (`crates/agent-tunnel/src/listener.rs`). We have to give up before it does, otherwise a
 /// black-holed target outlives its deadline and it never hears why we failed.
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
+
+async fn proxy_session_traffic(
+    (mut tunnel_send, mut tunnel_recv): (impl AsyncWrite + Unpin, impl AsyncRead + Unpin),
+    (mut target_read, mut target_write): (impl AsyncRead + Unpin, impl AsyncWrite + Unpin),
+) -> anyhow::Result<()> {
+    let tunnel_to_target = async {
+        tokio::io::copy(&mut tunnel_recv, &mut target_write)
+            .await
+            .context("proxy QUIC to TCP")?;
+        if let Err(error) = target_write.shutdown().await {
+            debug!(%error, "TCP write shutdown failed");
+        }
+        Ok::<_, anyhow::Error>(())
+    };
+    let target_to_tunnel = async {
+        tokio::io::copy(&mut target_read, &mut tunnel_send)
+            .await
+            .context("proxy TCP to QUIC")?;
+        if let Err(error) = tunnel_send.shutdown().await {
+            debug!(%error, "QUIC send shutdown failed");
+        }
+        Ok::<_, anyhow::Error>(())
+    };
+
+    let (tunnel_to_target, target_to_tunnel) = tokio::join!(tunnel_to_target, target_to_tunnel);
+    tunnel_to_target?;
+    target_to_tunnel
+}
 
 async fn run_session_proxy(
     advertise_subnets: Vec<Ipv4Network>,
@@ -770,29 +798,7 @@ async fn run_session_proxy(
 
         let (mut send, mut recv) = session.into_inner();
         let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-        let quic_to_tcp = async {
-            tokio::io::copy(&mut recv, &mut tcp_write)
-                .await
-                .context("proxy QUIC to TCP")?;
-            if let Err(error) = tcp_write.shutdown().await {
-                debug!(%error, "TCP write shutdown failed");
-            }
-            Ok::<_, anyhow::Error>(())
-        };
-        let tcp_to_quic = async {
-            tokio::io::copy(&mut tcp_read, &mut send)
-                .await
-                .context("proxy TCP to QUIC")?;
-            if let Err(error) = send.shutdown().await {
-                debug!(%error, "QUIC send shutdown failed");
-            }
-            Ok::<_, anyhow::Error>(())
-        };
-
-        let (quic_to_tcp, tcp_to_quic) = tokio::join!(quic_to_tcp, tcp_to_quic);
-        quic_to_tcp?;
-        tcp_to_quic?;
+        proxy_session_traffic((&mut send, &mut recv), (&mut tcp_read, &mut tcp_write)).await?;
 
         Ok(())
     }
@@ -803,9 +809,87 @@ async fn run_session_proxy(
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
+    use tokio::io::AsyncReadExt as _;
 
     use super::*;
     use crate::config::{TunnelConf, dto};
+
+    async fn tcp_pair() -> (tokio::net::TcpStream, tokio::net::TcpStream) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind TCP listener");
+        let client = tokio::net::TcpStream::connect(listener.local_addr().expect("read listener address"))
+            .await
+            .expect("connect TCP client");
+        let (server, _) = listener.accept().await.expect("accept TCP client");
+        (client, server)
+    }
+
+    async fn spawn_relay() -> (
+        tokio::io::DuplexStream,
+        tokio::net::TcpStream,
+        tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) {
+        let (tunnel, gateway) = tokio::io::duplex(64);
+        let (tunnel_recv, tunnel_send) = tokio::io::split(tunnel);
+        let (target, peer) = tcp_pair().await;
+        let (target_read, target_write) = target.into_split();
+        let relay = tokio::spawn(proxy_session_traffic(
+            (tunnel_send, tunnel_recv),
+            (target_read, target_write),
+        ));
+        (gateway, peer, relay)
+    }
+
+    #[tokio::test]
+    async fn tunnel_eof_half_closes_target_and_preserves_response() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut gateway, mut peer, relay) = spawn_relay().await;
+
+            gateway.write_all(b"request").await.expect("write tunnel request");
+            gateway.shutdown().await.expect("finish tunnel request");
+
+            let mut request = [0; 7];
+            peer.read_exact(&mut request).await.expect("read target request");
+            assert_eq!(&request, b"request");
+            assert_eq!(peer.read(&mut [0]).await.expect("read target EOF"), 0);
+
+            peer.write_all(b"response").await.expect("write target response");
+            peer.shutdown().await.expect("finish target response");
+
+            let mut response = [0; 8];
+            gateway.read_exact(&mut response).await.expect("read tunnel response");
+            assert_eq!(&response, b"response");
+            relay.await.expect("relay task panicked").expect("relay traffic");
+        })
+        .await
+        .expect("tunnel EOF test timed out");
+    }
+
+    #[tokio::test]
+    async fn target_eof_finishes_tunnel_send_and_preserves_request() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut gateway, mut peer, relay) = spawn_relay().await;
+
+            peer.write_all(b"response").await.expect("write target response");
+            peer.shutdown().await.expect("finish target response");
+
+            let mut response = [0; 8];
+            gateway.read_exact(&mut response).await.expect("read tunnel response");
+            assert_eq!(&response, b"response");
+            assert_eq!(gateway.read(&mut [0]).await.expect("read tunnel EOF"), 0);
+
+            gateway.write_all(b"request").await.expect("write tunnel request");
+            gateway.shutdown().await.expect("finish tunnel request");
+
+            let mut request = [0; 7];
+            peer.read_exact(&mut request).await.expect("read target request");
+            assert_eq!(&request, b"request");
+            relay.await.expect("relay task panicked").expect("relay traffic");
+        })
+        .await
+        .expect("target EOF test timed out");
+    }
 
     fn tunnel_conf(endpoint: impl Into<String>) -> TunnelConf {
         let conf = dto::TunnelConf {

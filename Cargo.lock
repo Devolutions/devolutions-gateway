@@ -7539,6 +7539,7 @@ dependencies = [
  "fastrand",
  "futures-util",
  "ipnetwork",
+ "jmux-proto",
  "libsql",
  "mcp-proxy",
  "network-scanner",
