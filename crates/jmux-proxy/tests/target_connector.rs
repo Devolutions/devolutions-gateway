@@ -42,6 +42,7 @@ async fn override_stream_carries_channel_data() {
             tokio::spawn(async move {
                 let mut payload = [0; 4];
                 target_peer.read_exact(&mut payload).await.expect("read target data");
+                assert_eq!(target_peer.read(&mut [0]).await.expect("read target EOF"), 0);
                 target_peer.write_all(&payload).await.expect("echo target data");
             });
             Ok(Some(target_stream))
@@ -64,6 +65,7 @@ async fn override_stream_carries_channel_data() {
     let local_id = DistantChannelId::from(open_success.sender_channel_id);
 
     send_message(&mut peer_writer, Message::data(local_id, Bytes::from_static(b"ping"))).await;
+    send_message(&mut peer_writer, Message::eof(local_id)).await;
     let Message::Data(data) = receive_message(&mut peer_reader).await else {
         panic!("expected CHANNEL DATA");
     };
