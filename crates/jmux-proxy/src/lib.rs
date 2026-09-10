@@ -130,7 +130,8 @@ impl JmuxProxy {
     ///
     /// Return `Ok(Some(stream))` to use the override, `Ok(None)` to delegate to the default connector,
     /// or an error to reject the connection without falling back.
-    /// Overridden streams do not emit outgoing traffic events because their resolved target IP is unknown.
+    /// Connection attempts handled by the override do not emit outgoing traffic events because
+    /// their resolved target IP is unknown.
     #[must_use]
     pub fn with_target_connector_override<C, F, S>(mut self, connector: C) -> Self
     where
@@ -152,9 +153,9 @@ impl JmuxProxy {
 
     /// Configures an outgoing-traffic callback for lifecycle event monitoring.
     ///
-    /// The provided callback will be invoked exactly once per outgoing stream at the end of its
-    /// lifecycle, providing comprehensive audit information including connection metadata,
-    /// byte counts, timing, and termination classification.
+    /// The provided callback is invoked exactly once at the end of each outgoing stream whose
+    /// resolved target IP is known.
+    /// It provides connection metadata, byte counts, timing, and termination classification.
     ///
     /// # Event Emission
     ///
@@ -165,6 +166,7 @@ impl JmuxProxy {
     ///
     /// Events are **NOT** emitted for:
     /// - DNS resolution failures (no concrete IP address available)
+    /// - Connection attempts handled by a target connector override (no concrete IP address available)
     /// - Internal JMUX protocol errors before stream establishment
     ///
     /// For hostnames with multiple IP addresses, connection attempts follow a Happy Eyeballs
@@ -172,7 +174,7 @@ impl JmuxProxy {
     ///
     /// # Callback Contract
     ///
-    /// - **Exactly once**: Each traffic item generates precisely one event, protected by atomic guards
+    /// - **Exactly once**: Each eligible traffic item generates one event, protected by atomic guards
     /// - **At stream end**: Events are emitted during cleanup, not during operation
     /// - **Synchronous**: The callback is called synchronously from JMUX task contexts
     /// - **Thread safe**: Must be `Send + Sync + 'static` for multi-threaded access

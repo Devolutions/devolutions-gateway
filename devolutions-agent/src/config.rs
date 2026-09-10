@@ -167,6 +167,13 @@ impl TunnelConf {
             route_advertise_interval_secs > 0,
             "invalid Tunnel.RouteAdvertiseIntervalSecs: value must be greater than zero"
         );
+        anyhow::ensure!(
+            heartbeat_interval_secs.min(route_advertise_interval_secs)
+                <= agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3,
+            "invalid Tunnel.HeartbeatIntervalSecs and Tunnel.RouteAdvertiseIntervalSecs: \
+             at least one value must be at most {} seconds",
+            agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3
+        );
 
         let server_spki_sha256 = conf
             .server_spki_sha256
@@ -1143,6 +1150,20 @@ mod tests {
         .expect("load disabled tunnel configuration");
 
         assert!(!conf.tunnel.enabled);
+    }
+
+    #[test]
+    fn tunnel_config_requires_liveness_margin() {
+        let mut tunnel = valid_tunnel_json();
+        let invalid_interval = agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3 + 1;
+        tunnel["HeartbeatIntervalSecs"] = serde_json::json!(invalid_interval);
+        tunnel["RouteAdvertiseIntervalSecs"] = serde_json::json!(invalid_interval);
+
+        let error = load_tunnel_json(tunnel).expect_err("stale liveness intervals should fail loading");
+
+        assert!(
+            format!("{error:#}").contains("invalid Tunnel.HeartbeatIntervalSecs and Tunnel.RouteAdvertiseIntervalSecs")
+        );
     }
 
     #[test]
