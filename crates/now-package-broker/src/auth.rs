@@ -32,6 +32,7 @@ use windows::Win32::System::Threading::{
 use crate::policy_security::RetainedExecutableSecurity;
 
 const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
+const POLICY_CONSENT_HELPER_NAME: &str = "DevolutionsAgentPolicyConsent.exe";
 const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(
     PROCESS_QUERY_INFORMATION.0 | PROCESS_QUERY_LIMITED_INFORMATION.0 | PROCESS_VM_READ.0 | PROCESS_SYNCHRONIZE.0,
 );
@@ -289,6 +290,20 @@ impl PipeClient {
         Ok(())
     }
 
+    pub(crate) fn validate_policy_write(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
+        self.validate_connection(skip_signature_validation)?;
+        // Dev builds cannot enforce helper identity when signature validation is explicitly disabled.
+        if signature_validation_skipped(skip_signature_validation) {
+            return Ok(());
+        }
+        let agent = std::env::current_exe().context("failed to query Agent executable path")?;
+        let executable_file = self
+            .executable_file
+            .as_deref()
+            .context("policy consent helper executable handle is not retained")?;
+        Self::validate_policy_consent_helper_path(&self.executable_path, executable_file, &agent)
+    }
+
     fn validate_process_instance(&self) -> anyhow::Result<()> {
         let Some(process) = &self.process else {
             return Ok(());
@@ -302,6 +317,29 @@ impl PipeClient {
             },
             process_instance_identity(self.process_id, process)?,
         )
+    }
+
+    fn validate_policy_consent_helper_path(client: &Path, client_file: &File, agent: &Path) -> anyhow::Result<()> {
+        if !client
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(POLICY_CONSENT_HELPER_NAME))
+        {
+            bail!("policy replacement requires the Agent policy consent helper");
+        }
+        let expected = agent
+            .parent()
+            .context("Agent executable has no installation directory")?
+            .join(POLICY_CONSENT_HELPER_NAME);
+        if !crate::policy_security::windows_paths_equal(client, &expected) {
+            bail!("policy consent helper is not the installed Agent helper path");
+        }
+        let expected_id = file_id(&expected).context("failed to query installed policy consent helper identity")?;
+        let retained_id =
+            file_id_from_handle(client_file).context("failed to query retained policy consent helper identity")?;
+        if !same_file(&expected_id, &retained_id) {
+            bail!("policy consent helper does not match the installed helper");
+        }
+        Ok(())
     }
 
     /// Validate that the request's `effective_user` denotes the authenticated pipe client user.
@@ -537,6 +575,51 @@ mod tests {
 
         ensure_same_process_instance(expected, actual)
             .expect_err("a recycled PID with a different creation time must be rejected");
+    }
+
+    #[test]
+    fn policy_consent_helper_requires_exact_agent_sibling_path() {
+        let current_executable = std::env::current_exe().expect("current executable");
+        let current_file = open_executable_file(&current_executable).expect("open current executable");
+        let agent = Path::new(r"C:\Program Files\Devolutions\Agent\DevolutionsAgent.exe");
+        assert!(
+            PipeClient::validate_policy_consent_helper_path(
+                Path::new(r"C:\Program Files\Devolutions\Agent\DevolutionsAgentPolicyConsent.exe"),
+                &current_file,
+                agent,
+            )
+            .is_err(),
+            "path text alone must not authorize a different retained image"
+        );
+        assert!(
+            PipeClient::validate_policy_consent_helper_path(
+                Path::new(r"C:\Users\Alice\DevolutionsAgentPolicyConsent.exe"),
+                &current_file,
+                agent,
+            )
+            .is_err()
+        );
+        assert!(
+            PipeClient::validate_policy_consent_helper_path(
+                Path::new(r"C:\Users\Alice\UniGetUI.exe"),
+                &current_file,
+                agent,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn policy_consent_helper_accepts_exact_retained_sibling() {
+        let temp = tempfile::tempdir().expect("temp directory");
+        let agent = temp.path().join("DevolutionsAgent.exe");
+        let helper = temp.path().join(POLICY_CONSENT_HELPER_NAME);
+        std::fs::write(&agent, b"agent path anchor").expect("write Agent path anchor");
+        std::fs::copy(std::env::current_exe().expect("current executable"), &helper).expect("copy helper fixture");
+        let retained = open_executable_file(&helper).expect("retain helper fixture");
+
+        PipeClient::validate_policy_consent_helper_path(&helper, &retained, &agent)
+            .expect("exact retained sibling must be accepted");
     }
 
     #[test]

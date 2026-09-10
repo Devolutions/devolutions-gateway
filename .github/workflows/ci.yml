@@ -878,6 +878,9 @@ jobs:
             $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
             echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
 
+            $DAgentPolicyConsentHelper = Join-Path $TargetOutputPath "DevolutionsAgentPolicyConsent.exe"
+            echo "dagent-policy-consent-helper=$DAgentPolicyConsentHelper" >> $Env:GITHUB_OUTPUT
+
             $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater.exe"
             echo "dagent-updater-executable=$DAgentUpdaterExecutable" >> $Env:GITHUB_OUTPUT
           }
@@ -1043,6 +1046,28 @@ jobs:
           DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
 
+      - name: Build NativeAOT policy consent helper
+        if: ${{ matrix.os == 'windows' }}
+        run: |
+          $Rid = "win-${{ matrix.arch }}"
+          $Output = Split-Path -Parent '${{ steps.load-variables.outputs.dagent-policy-consent-helper }}'
+          dotnet publish package/AgentPolicyConsent/DevolutionsAgentPolicyConsent.csproj `
+            --configuration Release `
+            --runtime $Rid `
+            --output $Output `
+            -p:Version=${{ needs.preflight.outputs.version }}
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $Helper = '${{ steps.load-variables.outputs.dagent-policy-consent-helper }}'
+          if (-Not (Test-Path -LiteralPath $Helper -PathType Leaf)) {
+            throw "NativeAOT policy consent helper was not produced"
+          }
+          if ((Get-Item -LiteralPath $Helper).Length -gt 8MB) {
+            throw "NativeAOT policy consent helper exceeds 8 MiB"
+          }
+        shell: pwsh
+
       - name: Package
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
@@ -1056,6 +1081,7 @@ jobs:
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
+            $Env:DAGENT_POLICY_CONSENT_HELPER = "${{ steps.load-variables.outputs.dagent-policy-consent-helper }}"
             $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
             $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
             $Env:DAGENT_MULTI_PWSH_EXECUTABLE = "${{ steps.multi-pwsh.outputs.executable-path }}"
@@ -1175,6 +1201,10 @@ jobs:
 
       - name: Tests
         run: dotnet test package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj
+        shell: pwsh
+
+      - name: Policy consent helper tests
+        run: dotnet test package/AgentPolicyConsent.Tests/DevolutionsAgentPolicyConsent.Tests.csproj -c Release
         shell: pwsh
 
 

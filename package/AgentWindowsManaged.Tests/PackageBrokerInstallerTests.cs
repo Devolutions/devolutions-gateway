@@ -1,5 +1,6 @@
 using DevolutionsAgent;
 using DevolutionsAgent.Actions;
+using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
 using System.ComponentModel;
@@ -618,6 +619,55 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal(migrate.Id, commit.Step.ToString());
         Assert.Equal(Condition.NOT_BeingRemoved.ToString(), ensure.Condition.ToString());
         Assert.Equal(Condition.NOT_BeingRemoved.ToString(), migrate.Condition.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PolicyConsentDiscoveryIsTransactionalAndArchitectureCorrect(bool win64)
+    {
+        RegValue value = Program.CreatePolicyConsentRegistryValue(
+            "ProtocolVersion",
+            DevolutionsAgent.Resources.Includes.POLICY_CONSENT_PROTOCOL_VERSION,
+            win64);
+
+        Assert.Equal(RegistryHive.LocalMachine, value.Root);
+        Assert.Equal(@"Software\Devolutions\Agent\PolicyConsentHelper", value.Key);
+        Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
+        Assert.Equal(win64, value.Win64);
+        Assert.Equal(
+            win64 ? "Type=string; Component:Win64=yes" : "Type=string",
+            value.AttributesDefinition);
+        Assert.Contains(Features.AGENT_FEATURE, value.ActualFeatures);
+    }
+
+    [Theory]
+    [InlineData(Platform.x86, false)]
+    [InlineData(Platform.x64, true)]
+    [InlineData(Platform.arm64, true)]
+    public void PolicyConsentDiscoveryUsesNativeRegistryView(Platform platform, bool expected)
+    {
+        Assert.Equal(expected, Program.Use64BitRegistryView(platform));
+    }
+
+    [Fact]
+    public void PolicyConsentDiscoveryPublishesFixedProtectedHelperIdentity()
+    {
+        (string Name, string Value)[] values =
+        [
+            ("ProtocolVersion", DevolutionsAgent.Resources.Includes.POLICY_CONSENT_PROTOCOL_VERSION),
+            ("ExecutableName", DevolutionsAgent.Resources.Includes.POLICY_CONSENT_EXECUTABLE_NAME),
+            ("ExecutablePath", "[INSTALLDIR]DevolutionsAgentPolicyConsent.exe"),
+            ("ProductName", DevolutionsAgent.Resources.Includes.POLICY_CONSENT_PRODUCT_NAME),
+        ];
+
+        foreach ((string name, string expectedValue) in values)
+        {
+            RegValue value = Program.CreatePolicyConsentRegistryValue(name, expectedValue, true);
+            Assert.Equal(expectedValue, value.Value);
+            Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
+            Assert.Contains(Features.AGENT_FEATURE, value.ActualFeatures);
+        }
     }
 
     [Theory]

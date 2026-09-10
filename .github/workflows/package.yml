@@ -322,7 +322,7 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway.exe') }
-            'devolutions-agent' { @('DevolutionsAgent.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsAgentPolicyConsent.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat.exe', 'jetsocat') }
           })
           $ExcludePattern = "*.pdb"
@@ -495,6 +495,7 @@ jobs:
             $Env:DAGENT_PEDM_SHELL_EXT_DLL  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.dll'  -File | Select-Object -First 1
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.msix' -File | Select-Object -First 1
             $Env:DAGENT_SESSION_EXECUTABLE  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       -File | Select-Object -First 1
+            $Env:DAGENT_POLICY_CONSENT_HELPER = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsAgentPolicyConsent.exe' -File | Select-Object -First 1
             $Env:DAGENT_TUN2SOCKS_EXE       = Join-Path $ArchRoot 'tun2socks.exe'
             $Env:DAGENT_WINTUN_DLL          = Join-Path $ArchRoot 'wintun.dll'
             $MultiPwshDirectory              = Join-Path $Env:RUNNER_TEMP 'multi-pwsh' 'windows' $Arch
@@ -508,6 +509,7 @@ jobs:
             Write-Host "DAGENT_PEDM_SHELL_EXT_DLL  = ${Env:DAGENT_PEDM_SHELL_EXT_DLL}"
             Write-Host "DAGENT_PEDM_SHELL_EXT_MSIX = ${Env:DAGENT_PEDM_SHELL_EXT_MSIX}"
             Write-Host "DAGENT_SESSION_EXECUTABLE  = ${Env:DAGENT_SESSION_EXECUTABLE}"
+            Write-Host "DAGENT_POLICY_CONSENT_HELPER = ${Env:DAGENT_POLICY_CONSENT_HELPER}"
             Write-Host "DAGENT_TUN2SOCKS_EXE       = ${Env:DAGENT_TUN2SOCKS_EXE}"
             Write-Host "DAGENT_WINTUN_DLL          = ${Env:DAGENT_WINTUN_DLL}"
             Write-Host "DAGENT_MULTI_PWSH_EXECUTABLE = ${Env:DAGENT_MULTI_PWSH_EXECUTABLE}"
@@ -534,7 +536,8 @@ jobs:
             @((Join-Path $ArchRoot DesktopAgent),
               (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.dll'  | Select-Object -First 1),
               (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.msix' | Select-Object -First 1),
-              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       | Select-Object -First 1)) | ForEach-Object {
+              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       | Select-Object -First 1),
+              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsAgentPolicyConsent.exe' | Select-Object -First 1)) | ForEach-Object {
               Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
             }
           }
