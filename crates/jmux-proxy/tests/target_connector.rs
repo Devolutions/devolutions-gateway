@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use jmux_proto::{Bytes, BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use jmux_proxy::{DestinationUrl, JmuxConfig, JmuxProxy};
+use jmux_proxy::{DestinationUrl, JmuxConfig, JmuxProxy, TrafficEvent};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+const NO_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 
 async fn send_message(writer: &mut (impl AsyncWrite + Unpin), message: Message) {
     let mut bytes = BytesMut::new();
@@ -30,13 +32,25 @@ async fn receive_message(reader: &mut (impl AsyncRead + Unpin)) -> Message {
     .expect("JMUX response timed out")
 }
 
+async fn assert_no_traffic_event(receiver: &mut mpsc::UnboundedReceiver<TrafficEvent>) {
+    match timeout(NO_EVENT_TIMEOUT, receiver.recv()).await {
+        Err(_) => {}
+        Ok(Some(event)) => panic!("unexpected traffic event: {event:?}"),
+        Ok(None) => panic!("traffic event callback dropped"),
+    }
+}
+
 #[tokio::test]
 async fn override_stream_carries_channel_data() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
+    let (traffic_tx, mut traffic_rx) = mpsc::unbounded_channel();
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
+        .with_outgoing_traffic_event_callback(move |event| {
+            traffic_tx.send(event).expect("capture traffic event");
+        })
         .with_target_connector_override(|_| async move {
             let (target_stream, mut target_peer) = tokio::io::duplex(64);
             tokio::spawn(async move {
@@ -72,6 +86,13 @@ async fn override_stream_carries_channel_data() {
     };
     assert_eq!(data.recipient_channel_id, 7);
     assert_eq!(data.transfer_data, b"ping"[..]);
+
+    let Message::Close(close) = receive_message(&mut peer_reader).await else {
+        panic!("expected CHANNEL CLOSE");
+    };
+    assert_eq!(close.recipient_channel_id, 7);
+    send_message(&mut peer_writer, Message::close(local_id)).await;
+    assert_no_traffic_event(&mut traffic_rx).await;
 }
 
 #[tokio::test]
@@ -79,8 +100,12 @@ async fn resolution_failures_free_id_and_keep_direct_fallback() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
+    let (traffic_tx, mut traffic_rx) = mpsc::unbounded_channel();
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
+        .with_outgoing_traffic_event_callback(move |event| {
+            traffic_tx.send(event).expect("capture traffic event");
+        })
         .with_target_connector_override(|destination| async move {
             if destination.host() == "fail.example" {
                 anyhow::bail!("agent error");
@@ -104,6 +129,7 @@ async fn resolution_failures_free_id_and_keep_direct_fallback() {
     };
     assert_eq!(open_failure.reason_code, ReasonCode::GENERAL_FAILURE);
     assert_eq!(open_failure.description, "target connection failed");
+    assert_no_traffic_event(&mut traffic_rx).await;
 
     send_message(
         &mut peer_writer,
