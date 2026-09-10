@@ -356,6 +356,18 @@ public sealed class ProtocolTests
         Assert.Throws<ProtocolException>(() => Protocol.ValidateRequest(request));
     }
 
+    [Theory]
+    [InlineData("a", true)]
+    [InlineData("A0._~:-", true)]
+    [InlineData("a/b", false)]
+    [InlineData("a b", false)]
+    [InlineData("a\"b", false)]
+    [InlineData("-token", false)]
+    public void CredentialsMatchOfficialPolicyApiCharacterRules(string value, bool accepted)
+    {
+        Assert.Equal(accepted, Protocol.IsCredential(value, 512));
+    }
+
     [Fact]
     public void CommittedResponseContainsOnlyStoreToken()
     {
@@ -424,7 +436,7 @@ public sealed class ProtocolTests
     }
 
     [Fact]
-    public void MaximumStaleResponseFitsExactWireBudget()
+    public void MaximumValidStaleResponseFitsWireBudget()
     {
         ElevationResponse response = new(
             "2.0",
@@ -433,9 +445,9 @@ public sealed class ProtocolTests
             409,
             "StalePolicyStoreToken",
             null,
-            "T" + new string('"', 511),
+            "T" + new string('~', 511),
             "Active",
-            "P" + new string('"', 2047));
+            "P" + new string('~', 2047));
 
         Protocol.ValidateResponse(response);
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(
