@@ -852,7 +852,8 @@ mod tests {
             let mut request = [0; 7];
             peer.read_exact(&mut request).await.expect("read target request");
             assert_eq!(&request, b"request");
-            assert_eq!(peer.read(&mut [0]).await.expect("read target EOF"), 0);
+            let mut eof_probe = [0u8; 1];
+            assert_eq!(peer.read(&mut eof_probe).await.expect("read target EOF"), 0);
 
             peer.write_all(b"response").await.expect("write target response");
             peer.shutdown().await.expect("finish target response");
@@ -877,7 +878,8 @@ mod tests {
             let mut response = [0; 8];
             gateway.read_exact(&mut response).await.expect("read tunnel response");
             assert_eq!(&response, b"response");
-            assert_eq!(gateway.read(&mut [0]).await.expect("read tunnel EOF"), 0);
+            let mut eof_probe = [0u8; 1];
+            assert_eq!(gateway.read(&mut eof_probe).await.expect("read tunnel EOF"), 0);
 
             gateway.write_all(b"request").await.expect("write tunnel request");
             gateway.shutdown().await.expect("finish tunnel request");

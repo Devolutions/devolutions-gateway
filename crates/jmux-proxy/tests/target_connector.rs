@@ -42,7 +42,8 @@ async fn override_stream_carries_channel_data() {
             tokio::spawn(async move {
                 let mut payload = [0; 4];
                 target_peer.read_exact(&mut payload).await.expect("read target data");
-                assert_eq!(target_peer.read(&mut [0]).await.expect("read target EOF"), 0);
+                let mut eof_probe = [0u8; 1];
+                assert_eq!(target_peer.read(&mut eof_probe).await.expect("read target EOF"), 0);
                 target_peer.write_all(&payload).await.expect("echo target data");
             });
             Ok(Some(target_stream))
