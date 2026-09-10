@@ -1,10 +1,7 @@
-#![allow(unused_crate_dependencies)]
-#![allow(clippy::unwrap_used)]
-
 use std::time::Duration;
 
-use jmux_proto::{BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use jmux_proxy::{ConnectedTarget, DestinationUrl, JmuxConfig, JmuxProxy};
+use jmux_proto::{Bytes, BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
+use jmux_proxy::{DestinationUrl, JmuxConfig, JmuxProxy};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 
@@ -34,21 +31,22 @@ async fn receive_message(reader: &mut (impl AsyncRead + Unpin)) -> Message {
 }
 
 #[tokio::test]
-async fn connector_success_opens_channel() {
+async fn override_stream_carries_channel_data() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
-        .with_target_connector(move |destination| async move {
-            assert_eq!(destination.host(), "agent.example");
+        .with_target_connector_override(|_| async move {
             let (target_stream, mut target_peer) = tokio::io::duplex(64);
             tokio::spawn(async move {
-                target_peer.shutdown().await.expect("close target stream");
+                let mut payload = [0; 4];
+                target_peer.read_exact(&mut payload).await.expect("read target data");
+                target_peer.write_all(&payload).await.expect("echo target data");
             });
-            Ok(Some(ConnectedTarget::new(target_stream)))
+            Ok(Some(target_stream))
         });
-    let proxy_task = tokio::spawn(proxy.run());
+    let _proxy_task = tokio::spawn(proxy.run());
 
     send_message(
         &mut peer_writer,
@@ -65,28 +63,28 @@ async fn connector_success_opens_channel() {
     };
     let local_id = DistantChannelId::from(open_success.sender_channel_id);
 
-    assert!(matches!(receive_message(&mut peer_reader).await, Message::Eof(_)));
-    send_message(&mut peer_writer, Message::eof(local_id)).await;
-    assert!(matches!(receive_message(&mut peer_reader).await, Message::Close(_)));
-    send_message(&mut peer_writer, Message::close(local_id)).await;
-
-    proxy_task.abort();
+    send_message(&mut peer_writer, Message::data(local_id, Bytes::from_static(b"ping"))).await;
+    let Message::Data(data) = receive_message(&mut peer_reader).await else {
+        panic!("expected CHANNEL DATA");
+    };
+    assert_eq!(data.recipient_channel_id, 7);
+    assert_eq!(data.transfer_data, b"ping"[..]);
 }
 
 #[tokio::test]
-async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
+async fn resolution_failures_free_id_and_keep_direct_fallback() {
     let (proxy_stream, peer_stream) = tokio::io::duplex(8192);
     let (proxy_reader, proxy_writer) = tokio::io::split(proxy_stream);
     let (mut peer_reader, mut peer_writer) = tokio::io::split(peer_stream);
     let proxy = JmuxProxy::new(Box::new(proxy_reader), Box::new(proxy_writer))
         .with_config(JmuxConfig::permissive())
-        .with_target_connector(|destination| async move {
+        .with_target_connector_override(|destination| async move {
             if destination.host() == "fail.example" {
-                anyhow::bail!("{}", "agent error ".repeat(8192));
+                anyhow::bail!("agent error");
             }
-            Ok(None)
+            Ok(None::<tokio::io::DuplexStream>)
         });
-    let proxy_task = tokio::spawn(proxy.run());
+    let _proxy_task = tokio::spawn(proxy.run());
 
     send_message(
         &mut peer_writer,
@@ -103,19 +101,30 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
     };
     assert_eq!(open_failure.reason_code, ReasonCode::GENERAL_FAILURE);
     assert_eq!(open_failure.description, "target connection failed");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind direct target");
-    let target_port = listener.local_addr().expect("read direct target address").port();
-    let server_task = tokio::spawn(async move {
-        let (_stream, _) = listener.accept().await.expect("accept direct connection");
-        std::future::pending::<()>().await;
-    });
 
     send_message(
         &mut peer_writer,
         Message::open(
             LocalChannelId::from(12),
+            4096,
+            DestinationUrl::new("tcp", "127.0.0.1", 0),
+        ),
+    )
+    .await;
+    assert!(matches!(
+        receive_message(&mut peer_reader).await,
+        Message::OpenFailure(_)
+    ));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind direct target");
+    let target_port = listener.local_addr().expect("read direct target address").port();
+
+    send_message(
+        &mut peer_writer,
+        Message::open(
+            LocalChannelId::from(13),
             4096,
             DestinationUrl::new("tcp", "127.0.0.1", target_port),
         ),
@@ -124,8 +133,6 @@ async fn connector_failure_is_bounded_and_does_not_stop_direct_fallback() {
     let Message::OpenSuccess(open_success) = receive_message(&mut peer_reader).await else {
         panic!("expected OPEN SUCCESS");
     };
+    // The failed channel released ID 0 for reuse.
     assert_eq!(open_success.sender_channel_id, 0);
-
-    server_task.abort();
-    proxy_task.abort();
 }

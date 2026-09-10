@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
 use sha2::Digest as _;
+use tokio::io::AsyncWriteExt as _;
 
 use crate::config::ConfHandle;
 use crate::tunnel_helpers::{Target, connect_to_target, resolve_target};
@@ -257,23 +258,10 @@ async fn run_single_connection(
     let key_path = &tunnel_conf.client_key_path;
     let ca_path = &tunnel_conf.gateway_ca_cert_path;
 
-    let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
-        .advertise_subnets
-        .iter()
-        .map(|subnet| subnet.parse())
-        .collect::<Result<Vec<_>, _>>()
-        .context("failed to parse advertise_subnets")?;
+    let advertise_subnets = tunnel_conf.advertise_subnets.clone();
 
     if advertise_subnets.is_empty() {
         warn!("No subnets configured to advertise");
-    }
-
-    if let Some(route) = tunnel_conf
-        .advertise_domains
-        .iter()
-        .find(|route| !DomainName::is_valid_route(route))
-    {
-        bail!("invalid advertise domain route: {route}");
     }
 
     let detected_domain = if tunnel_conf.auto_detect_domain && tunnel_conf.advertise_domains.is_empty() {
@@ -454,12 +442,9 @@ async fn connect_to_gateway(
     // -- DNS resolve --
 
     // Extract hostname for TLS server name validation.
-    let (gateway_hostname, _) = tunnel_conf
-        .gateway_endpoint
-        .rsplit_once(':')
-        .context("gateway_endpoint missing port separator")?;
+    let gateway_hostname = tunnel_conf.gateway_hostname();
 
-    let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
+    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
         .await
         .context("failed to resolve gateway endpoint")?
         .next()
@@ -517,7 +502,7 @@ pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout
 }
 
 async fn reach_gateway(tunnel_conf: &crate::config::TunnelConf) -> anyhow::Result<()> {
-    let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
+    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
         .await
         .context("failed to resolve gateway endpoint")?
         .next()
@@ -756,7 +741,7 @@ async fn run_session_proxy(
 
         // Whatever went wrong has to travel back as a ConnectResponse::Error — returning
         // early instead drops the stream and the Gateway just sees an unexplained EOF.
-        let (mut tcp_stream, selected_target) = match connect_result {
+        let (tcp_stream, selected_target) = match connect_result {
             Ok(connected) => connected,
             Err(error) => {
                 let reason = format!("{error:#}");
@@ -783,10 +768,31 @@ async fn run_session_proxy(
             .context("send ConnectResponse")?;
         info!("Sent ConnectResponse::Success");
 
-        let (send, recv) = session.into_inner();
-        tokio::io::copy_bidirectional(&mut tokio::io::join(recv, send), &mut tcp_stream)
-            .await
-            .context("proxy session traffic")?;
+        let (mut send, mut recv) = session.into_inner();
+        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
+
+        let quic_to_tcp = async {
+            tokio::io::copy(&mut recv, &mut tcp_write)
+                .await
+                .context("proxy QUIC to TCP")?;
+            if let Err(error) = tcp_write.shutdown().await {
+                debug!(%error, "TCP write shutdown failed");
+            }
+            Ok::<_, anyhow::Error>(())
+        };
+        let tcp_to_quic = async {
+            tokio::io::copy(&mut tcp_read, &mut send)
+                .await
+                .context("proxy TCP to QUIC")?;
+            if let Err(error) = send.shutdown().await {
+                debug!(%error, "QUIC send shutdown failed");
+            }
+            Ok::<_, anyhow::Error>(())
+        };
+
+        let (quic_to_tcp, tcp_to_quic) = tokio::join!(quic_to_tcp, tcp_to_quic);
+        quic_to_tcp?;
+        tcp_to_quic?;
 
         Ok(())
     }
@@ -799,28 +805,23 @@ mod tests {
     use camino::Utf8PathBuf;
 
     use super::*;
-    use crate::config::TunnelConf;
+    use crate::config::{TunnelConf, dto};
 
-    fn tunnel_conf_template() -> TunnelConf {
-        TunnelConf {
+    fn tunnel_conf(endpoint: impl Into<String>) -> TunnelConf {
+        let conf = dto::TunnelConf {
             enabled: true,
-            gateway_endpoint: String::new(),
-            client_cert_path: Utf8PathBuf::new(),
-            client_key_path: Utf8PathBuf::new(),
-            gateway_ca_cert_path: Utf8PathBuf::new(),
-            advertise_subnets: Vec::new(),
-            advertise_domains: Vec::new(),
-            auto_detect_domain: false,
-            heartbeat_interval_secs: 15,
-            route_advertise_interval_secs: 60,
-            server_spki_sha256: None,
-        }
+            gateway_endpoint: endpoint.into(),
+            client_cert_path: Some(Utf8PathBuf::from("client.crt")),
+            client_key_path: Some(Utf8PathBuf::from("client.key")),
+            gateway_ca_cert_path: Some(Utf8PathBuf::from("gateway-ca.crt")),
+            ..dto::TunnelConf::default()
+        };
+        TunnelConf::from_dto(conf).expect("validate tunnel configuration")
     }
 
     #[tokio::test]
     async fn probe_fails_fast_when_tunnel_disabled() {
-        let mut conf = tunnel_conf_template();
-        conf.enabled = false;
+        let conf = TunnelConf::from_dto(dto::TunnelConf::default()).expect("validate disabled tunnel configuration");
 
         let error = probe_connectivity(&conf, Duration::from_millis(200))
             .await
@@ -842,8 +843,7 @@ mod tests {
             .expect("bind blackhole socket");
         let blackhole_addr = blackhole.local_addr().expect("blackhole addr");
 
-        let mut conf = tunnel_conf_template();
-        conf.gateway_endpoint = blackhole_addr.to_string();
+        let conf = tunnel_conf(blackhole_addr.to_string());
 
         let started = std::time::Instant::now();
         let result = probe_connectivity(&conf, Duration::from_millis(300)).await;

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
-use jmux_proxy::{ConnectedTarget, DestinationUrl, FilteringRule, JmuxConfig, JmuxProxy};
+use jmux_proxy::{DestinationUrl, FilteringRule, JmuxConfig, JmuxProxy};
 use tap::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
@@ -113,7 +113,7 @@ pub async fn handle(
         .with_outgoing_traffic_event_callback(traffic_event_callback);
 
     if let Some(agent_tunnel_handle) = agent_tunnel_handle {
-        proxy = proxy.with_target_connector(move |destination_url: DestinationUrl| {
+        proxy = proxy.with_target_connector_override(move |destination_url: DestinationUrl| {
             let agent_tunnel_handle = Arc::clone(&agent_tunnel_handle);
 
             async move {
@@ -139,7 +139,7 @@ pub async fn handle(
                     return Ok(None);
                 };
 
-                Ok(Some(ConnectedTarget::new(stream)))
+                Ok(Some(stream))
             }
         });
     }
