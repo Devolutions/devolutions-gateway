@@ -255,6 +255,11 @@ internal static class BrokerClient
         {
             return await open.WaitAsync(cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            DisposeLateResult(open);
+            throw;
+        }
         catch (Exception error)
         {
             DisposeLateResult(open);

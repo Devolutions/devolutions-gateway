@@ -138,7 +138,7 @@ internal sealed class PeerLease : IDisposable
         string.Equals(productName, "UniGetUI", StringComparison.Ordinal) &&
         string.Equals(originalFilename, "UniGetUI.dll", StringComparison.OrdinalIgnoreCase) &&
         productVersion is not null &&
-        Version.TryParse(productVersion.Split('+', '-', StringSplitOptions.TrimEntries)[0], out Version? parsed) &&
+        Version.TryParse(productVersion.Split(['+', '-'], StringSplitOptions.TrimEntries)[0], out Version? parsed) &&
         parsed >= new Version(3, 3, 7);
 
     internal static bool MatchesProcessIdentity(
