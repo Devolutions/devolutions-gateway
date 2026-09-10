@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.AccessControl;
 using System.Text.Json;
 using DevolutionsAgentPolicyConsent;
 using Microsoft.Win32.SafeHandles;
@@ -39,6 +40,46 @@ public sealed class ProtocolTests
         public void LookalikeSignerIsRejected()
         {
             Assert.False(PeerLease.IsAllowedSigner(new string('0', 64)));
+        }
+
+        [Fact]
+        public void AgentSignerRequiresKnownDevolutionsCertificate()
+        {
+            Assert.All(
+                PolicyConsentContract.DevolutionsSignerSha1Thumbprints,
+                thumbprint => Assert.True(PeerLease.IsAllowedDevolutionsSigner(thumbprint)));
+            Assert.False(PeerLease.IsAllowedDevolutionsSigner(new string('0', 40)));
+        }
+
+        [Theory]
+        [InlineData("O:SYG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)", PeerLease.FileTamperRights, true)]
+        [InlineData("O:BUG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)", PeerLease.FileTamperRights, false)]
+        [InlineData("O:SYG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GW;;;BU)", PeerLease.FileTamperRights, false)]
+        [InlineData("O:SYG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;AU)", PeerLease.ParentDirectoryTamperRights, false)]
+        [InlineData("O:SYG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x6;;;AU)", PeerLease.AncestorDirectoryTamperRights, true)]
+        [InlineData("O:SYG:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x40;;;BU)", PeerLease.AncestorDirectoryTamperRights, false)]
+        public void ProtectedAgentPathRequiresTrustedOwnerAndWriters(
+            string sddl,
+            int tamperRights,
+            bool accepted)
+        {
+            RawSecurityDescriptor descriptor = new(sddl);
+            if (accepted)
+            {
+                PeerLease.VerifyTrustedSecurityDescriptor(descriptor, "test path", tamperRights);
+            }
+            else
+            {
+                Assert.Throws<InvalidOperationException>(
+                    () => PeerLease.VerifyTrustedSecurityDescriptor(descriptor, "test path", tamperRights));
+            }
+        }
+
+        [Fact]
+        public void ProtectedAgentPathRejectsReparsePoints()
+        {
+            Assert.True(PeerLease.IsReparsePoint(PeerLease.FileAttributeReparsePoint));
+            Assert.False(PeerLease.IsReparsePoint(0));
         }
 
         [Fact]
@@ -90,6 +131,9 @@ public sealed class ProtocolTests
             Assert.False(BrokerServerLease.IsExpectedPath(
                 @"C:\Users\Alice\DevolutionsAgent.exe",
                 @"C:\Program Files\Devolutions\Agent\DevolutionsAgent.exe"));
+            Assert.True(BrokerServerLease.IsExpectedPath(
+                @"D:\Managed Apps\Agent\DevolutionsAgent.exe",
+                @"d:\managed apps\Agent\DevolutionsAgent.exe"));
         }
 
         [Fact]
