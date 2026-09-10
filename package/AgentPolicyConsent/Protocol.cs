@@ -172,7 +172,7 @@ internal static class Protocol
         value.Length is > 0 &&
         value.Length <= maximum &&
         IsAsciiAlphaNumeric(value[0]) &&
-        value.AsSpan(1).IndexOfAnyExceptInRange('!', '~') < 0;
+        value.AsSpan(1).IndexOfAnyExcept("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~:-") < 0;
 
     private static bool IsOptionalCredential(string? value, int maximum) =>
         value is null || IsCredential(value, maximum);
