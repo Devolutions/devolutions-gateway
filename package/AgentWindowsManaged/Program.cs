@@ -484,7 +484,7 @@ internal class Program
             name,
             value)
         {
-            AttributesDefinition = "Type=string",
+            AttributesDefinition = win64 ? "Type=string; Component:Win64=yes" : "Type=string",
             Win64 = win64,
             RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
             Feature = Features.AGENT_FEATURE,

@@ -91,6 +91,7 @@ public sealed class ProtocolTests
         [Theory]
         [InlineData("3.3.7")]
         [InlineData("2026.2.7")]
+        [InlineData("2026.2.7-preview")]
         public void ProductBindingSupportsProtocolEraAndCurrentInstallModes(string version)
         {
             Assert.True(PeerLease.IsSupportedUiIdentity("UniGetUI", "UniGetUI.dll", version));

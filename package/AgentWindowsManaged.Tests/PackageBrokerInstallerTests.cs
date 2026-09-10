@@ -635,6 +635,9 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal(@"Software\Devolutions\Agent\PolicyConsentHelper", value.Key);
         Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
         Assert.Equal(win64, value.Win64);
+        Assert.Equal(
+            win64 ? "Type=string; Component:Win64=yes" : "Type=string",
+            value.AttributesDefinition);
         Assert.Contains(Features.AGENT_FEATURE, value.ActualFeatures);
     }
 
