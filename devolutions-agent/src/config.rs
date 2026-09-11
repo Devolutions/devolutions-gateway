@@ -33,11 +33,15 @@ pub struct Conf {
 /// Validated tunnel configuration.
 ///
 /// Required fields and field values are validated when this is constructed from [`dto::TunnelConf`].
-/// A disabled or unenrolled tunnel is represented by `enabled` being `false`.
 #[derive(Debug, Clone)]
-pub struct TunnelConf {
-    pub enabled: bool,
-    gateway_endpoint: Option<GatewayEndpoint>,
+pub enum TunnelConf {
+    Disabled,
+    Enabled(Box<EnabledTunnelConf>),
+}
+
+#[derive(Debug, Clone)]
+pub struct EnabledTunnelConf {
+    gateway_endpoint: GatewayEndpoint,
     pub client_cert_path: Utf8PathBuf,
     pub client_key_path: Utf8PathBuf,
     pub gateway_ca_cert_path: Utf8PathBuf,
@@ -98,36 +102,36 @@ impl std::str::FromStr for GatewayEndpoint {
 }
 
 impl TunnelConf {
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+
+    pub(crate) fn as_enabled(&self) -> Option<&EnabledTunnelConf> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled(conf) => Some(conf),
+        }
+    }
+
+    pub(crate) fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
+        if !conf.enabled {
+            return Ok(Self::Disabled);
+        }
+
+        EnabledTunnelConf::from_dto(conf).map(Box::new).map(Self::Enabled)
+    }
+}
+
+impl EnabledTunnelConf {
     pub(crate) fn gateway_hostname(&self) -> &str {
         self.gateway_endpoint().0
     }
 
     pub(crate) fn gateway_endpoint(&self) -> (&str, u16) {
-        let endpoint = self
-            .gateway_endpoint
-            .as_ref()
-            .expect("enabled tunnel has a gateway endpoint");
-        (&endpoint.host, endpoint.port.get())
+        (&self.gateway_endpoint.host, self.gateway_endpoint.port.get())
     }
 
-    pub(crate) fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
-        if !conf.enabled {
-            // Disabled tunnel — return a placeholder with defaults.
-            return Ok(Self {
-                enabled: false,
-                gateway_endpoint: None,
-                client_cert_path: Utf8PathBuf::new(),
-                client_key_path: Utf8PathBuf::new(),
-                gateway_ca_cert_path: Utf8PathBuf::new(),
-                advertise_subnets: Vec::new(),
-                advertise_domains: Vec::new(),
-                auto_detect_domain: true,
-                heartbeat_interval_secs: 60,
-                route_advertise_interval_secs: 30,
-                server_spki_sha256: None,
-            });
-        }
-
+    fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
         let gateway_endpoint = conf
             .gateway_endpoint
             .parse()
@@ -185,10 +189,8 @@ impl TunnelConf {
                 Ok(hash.to_ascii_lowercase())
             })
             .transpose()?;
-
         Ok(Self {
-            enabled: true,
-            gateway_endpoint: Some(gateway_endpoint),
+            gateway_endpoint,
             client_cert_path,
             client_key_path,
             gateway_ca_cert_path,
@@ -1083,10 +1085,11 @@ mod tests {
     #[test]
     fn tunnel_config_normalizes_spki_and_hostname() {
         let conf = load_tunnel_json(valid_tunnel_json()).expect("load valid tunnel configuration");
+        let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
 
-        assert_eq!(conf.tunnel.gateway_hostname(), "::1");
+        assert_eq!(tunnel.gateway_hostname(), "::1");
         assert_eq!(
-            conf.tunnel.server_spki_sha256.as_deref(),
+            tunnel.server_spki_sha256.as_deref(),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
     }
@@ -1097,9 +1100,10 @@ mod tests {
         tunnel["GatewayEndpoint"] = serde_json::json!("::1:4433");
 
         let conf = load_tunnel_json(tunnel).expect("load legacy tunnel endpoint");
+        let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
 
-        assert_eq!(conf.tunnel.gateway_hostname(), "::1");
-        assert_eq!(conf.tunnel.gateway_endpoint().1, 4433);
+        assert_eq!(tunnel.gateway_hostname(), "::1");
+        assert_eq!(tunnel.gateway_endpoint().1, 4433);
     }
 
     #[test]
@@ -1149,7 +1153,7 @@ mod tests {
         }))
         .expect("load disabled tunnel configuration");
 
-        assert!(!conf.tunnel.enabled);
+        assert!(matches!(conf.tunnel, TunnelConf::Disabled));
     }
 
     #[test]

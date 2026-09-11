@@ -18,7 +18,7 @@ use ipnetwork::Ipv4Network;
 use sha2::Digest as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 
-use crate::config::ConfHandle;
+use crate::config::{ConfHandle, EnabledTunnelConf};
 use crate::tunnel_helpers::{Target, connect_to_target, resolve_target};
 
 // ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ async fn run_single_connection(
     shutdown_signal: &mut ShutdownSignal,
 ) -> anyhow::Result<ConnectionOutcome> {
     let agent_conf = conf_handle.get_conf();
-    let tunnel_conf = &agent_conf.tunnel;
+    let tunnel_conf = agent_conf.tunnel.as_enabled().context("agent tunnel is not enabled")?;
 
     let cert_path = &tunnel_conf.client_cert_path;
     let key_path = &tunnel_conf.client_key_path;
@@ -371,9 +371,7 @@ async fn run_single_connection(
 
 /// Build the mTLS client config, resolve the gateway endpoint, and perform the
 /// QUIC handshake, returning the live endpoint and connection.
-async fn connect_to_gateway(
-    tunnel_conf: &crate::config::TunnelConf,
-) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
+async fn connect_to_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -489,9 +487,7 @@ async fn connect_to_gateway(
 /// wait for the gateway to reply with a Version Negotiation packet. That reply proves UDP/4433
 /// reaches the gateway while creating zero connection state on it, and needs no client cert.
 pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout: Duration) -> anyhow::Result<()> {
-    if !tunnel_conf.enabled {
-        bail!("agent tunnel is not enabled");
-    }
+    let tunnel_conf = tunnel_conf.as_enabled().context("agent tunnel is not enabled")?;
 
     // The whole probe — DNS resolution, socket setup, and the retransmit loop — is bounded by
     // `timeout`, so a stalled resolver or a black-holed path can't hang past it.
@@ -501,7 +497,7 @@ pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout
     }
 }
 
-async fn reach_gateway(tunnel_conf: &crate::config::TunnelConf) -> anyhow::Result<()> {
+async fn reach_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<()> {
     let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
         .await
         .context("failed to resolve gateway endpoint")?
