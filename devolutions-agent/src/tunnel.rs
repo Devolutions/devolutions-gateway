@@ -16,8 +16,9 @@ use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
 use sha2::Digest as _;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 
-use crate::config::ConfHandle;
+use crate::config::{ConfHandle, EnabledTunnelConf};
 use crate::tunnel_helpers::{Target, connect_to_target, resolve_target};
 
 // ---------------------------------------------------------------------------
@@ -251,29 +252,16 @@ async fn run_single_connection(
     shutdown_signal: &mut ShutdownSignal,
 ) -> anyhow::Result<ConnectionOutcome> {
     let agent_conf = conf_handle.get_conf();
-    let tunnel_conf = &agent_conf.tunnel;
+    let tunnel_conf = agent_conf.tunnel.as_enabled().context("agent tunnel is not enabled")?;
 
     let cert_path = &tunnel_conf.client_cert_path;
     let key_path = &tunnel_conf.client_key_path;
     let ca_path = &tunnel_conf.gateway_ca_cert_path;
 
-    let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
-        .advertise_subnets
-        .iter()
-        .map(|subnet| subnet.parse())
-        .collect::<Result<Vec<_>, _>>()
-        .context("failed to parse advertise_subnets")?;
+    let advertise_subnets = tunnel_conf.advertise_subnets.clone();
 
     if advertise_subnets.is_empty() {
         warn!("No subnets configured to advertise");
-    }
-
-    if let Some(route) = tunnel_conf
-        .advertise_domains
-        .iter()
-        .find(|route| !DomainName::is_valid_route(route))
-    {
-        bail!("invalid advertise domain route: {route}");
     }
 
     let detected_domain = if tunnel_conf.auto_detect_domain && tunnel_conf.advertise_domains.is_empty() {
@@ -383,9 +371,7 @@ async fn run_single_connection(
 
 /// Build the mTLS client config, resolve the gateway endpoint, and perform the
 /// QUIC handshake, returning the live endpoint and connection.
-async fn connect_to_gateway(
-    tunnel_conf: &crate::config::TunnelConf,
-) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
+async fn connect_to_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<(quinn::Endpoint, quinn::Connection)> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -454,12 +440,9 @@ async fn connect_to_gateway(
     // -- DNS resolve --
 
     // Extract hostname for TLS server name validation.
-    let (gateway_hostname, _) = tunnel_conf
-        .gateway_endpoint
-        .rsplit_once(':')
-        .context("gateway_endpoint missing port separator")?;
+    let gateway_hostname = tunnel_conf.gateway_hostname();
 
-    let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
+    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
         .await
         .context("failed to resolve gateway endpoint")?
         .next()
@@ -504,9 +487,7 @@ async fn connect_to_gateway(
 /// wait for the gateway to reply with a Version Negotiation packet. That reply proves UDP/4433
 /// reaches the gateway while creating zero connection state on it, and needs no client cert.
 pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout: Duration) -> anyhow::Result<()> {
-    if !tunnel_conf.enabled {
-        bail!("agent tunnel is not enabled");
-    }
+    let tunnel_conf = tunnel_conf.as_enabled().context("agent tunnel is not enabled")?;
 
     // The whole probe — DNS resolution, socket setup, and the retransmit loop — is bounded by
     // `timeout`, so a stalled resolver or a black-holed path can't hang past it.
@@ -516,8 +497,8 @@ pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout
     }
 }
 
-async fn reach_gateway(tunnel_conf: &crate::config::TunnelConf) -> anyhow::Result<()> {
-    let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
+async fn reach_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<()> {
+    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
         .await
         .context("failed to resolve gateway endpoint")?
         .next()
@@ -598,8 +579,8 @@ async fn try_renew_certificate<S, R>(
     ca_path: &camino::Utf8Path,
 ) -> anyhow::Result<Option<ConnectionOutcome>>
 where
-    S: tokio::io::AsyncWrite + Unpin,
-    R: tokio::io::AsyncRead + Unpin,
+    S: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
 {
     const RENEWAL_THRESHOLD_DAYS: u32 = 15;
     const RENEWAL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -675,7 +656,7 @@ where
 // Control stream reader
 // ---------------------------------------------------------------------------
 
-async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRecv<R>) {
+async fn run_control_reader<R: AsyncRead + Unpin>(mut ctrl: FramedRecv<R>) {
     let _ = async move {
         loop {
             let message: ControlMessage = ctrl.recv().await.context("recv control message")?;
@@ -716,6 +697,34 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRec
 /// (`crates/agent-tunnel/src/listener.rs`). We have to give up before it does, otherwise a
 /// black-holed target outlives its deadline and it never hears why we failed.
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
+
+async fn proxy_session_traffic(
+    (mut tunnel_send, mut tunnel_recv): (impl AsyncWrite + Unpin, impl AsyncRead + Unpin),
+    (mut target_read, mut target_write): (impl AsyncRead + Unpin, impl AsyncWrite + Unpin),
+) -> anyhow::Result<()> {
+    let tunnel_to_target = async {
+        tokio::io::copy(&mut tunnel_recv, &mut target_write)
+            .await
+            .context("proxy QUIC to TCP")?;
+        if let Err(error) = target_write.shutdown().await {
+            debug!(%error, "TCP write shutdown failed");
+        }
+        Ok::<_, anyhow::Error>(())
+    };
+    let target_to_tunnel = async {
+        tokio::io::copy(&mut target_read, &mut tunnel_send)
+            .await
+            .context("proxy TCP to QUIC")?;
+        if let Err(error) = tunnel_send.shutdown().await {
+            debug!(%error, "QUIC send shutdown failed");
+        }
+        Ok::<_, anyhow::Error>(())
+    };
+
+    let (tunnel_to_target, target_to_tunnel) = tokio::join!(tunnel_to_target, target_to_tunnel);
+    tunnel_to_target?;
+    target_to_tunnel
+}
 
 async fn run_session_proxy(
     advertise_subnets: Vec<Ipv4Network>,
@@ -785,18 +794,7 @@ async fn run_session_proxy(
 
         let (mut send, mut recv) = session.into_inner();
         let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-        // Use join! (not select!) to wait for BOTH directions to finish.
-        // select! would cancel in-flight data when one direction closes first.
-        let (r1, r2) = tokio::join!(
-            tokio::io::copy(&mut recv, &mut tcp_write),
-            tokio::io::copy(&mut tcp_read, &mut send),
-        );
-        r1.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
-        r2.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
-
-        // Gracefully finish the QUIC send stream (signals EOF to peer).
-        let _ = send.finish();
+        proxy_session_traffic((&mut send, &mut recv), (&mut tcp_read, &mut tcp_write)).await?;
 
         Ok(())
     }
@@ -807,30 +805,105 @@ async fn run_session_proxy(
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
+    use tokio::io::AsyncReadExt as _;
 
     use super::*;
-    use crate::config::TunnelConf;
+    use crate::config::{TunnelConf, dto};
 
-    fn tunnel_conf_template() -> TunnelConf {
-        TunnelConf {
+    async fn tcp_pair() -> (tokio::net::TcpStream, tokio::net::TcpStream) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind TCP listener");
+        let client = tokio::net::TcpStream::connect(listener.local_addr().expect("read listener address"))
+            .await
+            .expect("connect TCP client");
+        let (server, _) = listener.accept().await.expect("accept TCP client");
+        (client, server)
+    }
+
+    async fn spawn_relay() -> (
+        tokio::io::DuplexStream,
+        tokio::net::TcpStream,
+        tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) {
+        let (tunnel, gateway) = tokio::io::duplex(64);
+        let (tunnel_recv, tunnel_send) = tokio::io::split(tunnel);
+        let (target, peer) = tcp_pair().await;
+        let (target_read, target_write) = target.into_split();
+        let relay = tokio::spawn(proxy_session_traffic(
+            (tunnel_send, tunnel_recv),
+            (target_read, target_write),
+        ));
+        (gateway, peer, relay)
+    }
+
+    #[tokio::test]
+    async fn tunnel_eof_half_closes_target_and_preserves_response() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut gateway, mut peer, relay) = spawn_relay().await;
+
+            gateway.write_all(b"request").await.expect("write tunnel request");
+            gateway.shutdown().await.expect("finish tunnel request");
+
+            let mut request = [0; 7];
+            peer.read_exact(&mut request).await.expect("read target request");
+            assert_eq!(&request, b"request");
+            let mut eof_probe = [0u8; 1];
+            assert_eq!(peer.read(&mut eof_probe).await.expect("read target EOF"), 0);
+
+            peer.write_all(b"response").await.expect("write target response");
+            peer.shutdown().await.expect("finish target response");
+
+            let mut response = [0; 8];
+            gateway.read_exact(&mut response).await.expect("read tunnel response");
+            assert_eq!(&response, b"response");
+            relay.await.expect("relay task panicked").expect("relay traffic");
+        })
+        .await
+        .expect("tunnel EOF test timed out");
+    }
+
+    #[tokio::test]
+    async fn target_eof_finishes_tunnel_send_and_preserves_request() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut gateway, mut peer, relay) = spawn_relay().await;
+
+            peer.write_all(b"response").await.expect("write target response");
+            peer.shutdown().await.expect("finish target response");
+
+            let mut response = [0; 8];
+            gateway.read_exact(&mut response).await.expect("read tunnel response");
+            assert_eq!(&response, b"response");
+            let mut eof_probe = [0u8; 1];
+            assert_eq!(gateway.read(&mut eof_probe).await.expect("read tunnel EOF"), 0);
+
+            gateway.write_all(b"request").await.expect("write tunnel request");
+            gateway.shutdown().await.expect("finish tunnel request");
+
+            let mut request = [0; 7];
+            peer.read_exact(&mut request).await.expect("read target request");
+            assert_eq!(&request, b"request");
+            relay.await.expect("relay task panicked").expect("relay traffic");
+        })
+        .await
+        .expect("target EOF test timed out");
+    }
+
+    fn tunnel_conf(endpoint: impl Into<String>) -> TunnelConf {
+        let conf = dto::TunnelConf {
             enabled: true,
-            gateway_endpoint: String::new(),
-            client_cert_path: Utf8PathBuf::new(),
-            client_key_path: Utf8PathBuf::new(),
-            gateway_ca_cert_path: Utf8PathBuf::new(),
-            advertise_subnets: Vec::new(),
-            advertise_domains: Vec::new(),
-            auto_detect_domain: false,
-            heartbeat_interval_secs: 15,
-            route_advertise_interval_secs: 60,
-            server_spki_sha256: None,
-        }
+            gateway_endpoint: endpoint.into(),
+            client_cert_path: Some(Utf8PathBuf::from("client.crt")),
+            client_key_path: Some(Utf8PathBuf::from("client.key")),
+            gateway_ca_cert_path: Some(Utf8PathBuf::from("gateway-ca.crt")),
+            ..dto::TunnelConf::default()
+        };
+        TunnelConf::from_dto(conf).expect("validate tunnel configuration")
     }
 
     #[tokio::test]
     async fn probe_fails_fast_when_tunnel_disabled() {
-        let mut conf = tunnel_conf_template();
-        conf.enabled = false;
+        let conf = TunnelConf::from_dto(dto::TunnelConf::default()).expect("validate disabled tunnel configuration");
 
         let error = probe_connectivity(&conf, Duration::from_millis(200))
             .await
@@ -852,8 +925,7 @@ mod tests {
             .expect("bind blackhole socket");
         let blackhole_addr = blackhole.local_addr().expect("blackhole addr");
 
-        let mut conf = tunnel_conf_template();
-        conf.gateway_endpoint = blackhole_addr.to_string();
+        let conf = tunnel_conf(blackhole_addr.to_string());
 
         let started = std::time::Instant::now();
         let result = probe_connectivity(&conf, Duration::from_millis(300)).await;

@@ -40,6 +40,7 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
 ipnetwork = "0.20"
+jmux-proto = { path = "../crates/jmux-proto" }
 libsql = { version = "0.9", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }

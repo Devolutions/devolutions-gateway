@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
-use jmux_proxy::{FilteringRule, JmuxConfig, JmuxProxy};
+use jmux_proxy::{DestinationUrl, FilteringRule, JmuxConfig, JmuxProxy};
 use tap::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
@@ -10,8 +10,10 @@ use transport::{ErasedRead, ErasedWrite};
 
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
+use crate::target_addr::TargetAddr;
 use crate::token::{JmuxTokenClaims, RecordingPolicy};
 use crate::traffic_audit::TrafficAuditHandle;
+use crate::upstream::route_target_from_target_addr;
 
 pub async fn handle(
     stream: impl AsyncRead + AsyncWrite + Send + 'static,
@@ -19,6 +21,7 @@ pub async fn handle(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     traffic_audit_handle: TrafficAuditHandle,
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     match claims.jet_rec {
         RecordingPolicy::None | RecordingPolicy::Stream => (),
@@ -105,10 +108,43 @@ pub async fn handle(
         });
     };
 
-    let proxy_fut = JmuxProxy::new(reader, writer)
+    let mut proxy = JmuxProxy::new(reader, writer)
         .with_config(config)
-        .with_outgoing_traffic_event_callback(traffic_event_callback)
-        .run();
+        .with_outgoing_traffic_event_callback(traffic_event_callback);
+
+    if let Some(agent_tunnel_handle) = agent_tunnel_handle {
+        proxy = proxy.with_target_connector_override(move |destination_url: DestinationUrl| {
+            let agent_tunnel_handle = Arc::clone(&agent_tunnel_handle);
+
+            async move {
+                let target = TargetAddr::from_components(
+                    destination_url.scheme(),
+                    destination_url.host(),
+                    destination_url.port(),
+                )
+                .context("invalid JMUX target")?;
+                let route_target = route_target_from_target_addr(&target);
+
+                let routed = agent_tunnel::routing::try_route(
+                    Some(agent_tunnel_handle.as_ref()),
+                    // TODO: Pass `jet_agent_id` after JMUX consumers start issuing it.
+                    None,
+                    &route_target,
+                    session_id,
+                    target.as_addr(),
+                )
+                .await?;
+
+                let Some((stream, _agent)) = routed else {
+                    return Ok(None);
+                };
+
+                Ok(Some(stream))
+            }
+        });
+    }
+
+    let proxy_fut = proxy.run();
     let proxy_handle = ChildTask::spawn(proxy_fut);
     let join_fut = proxy_handle.join();
     tokio::pin!(join_fut);

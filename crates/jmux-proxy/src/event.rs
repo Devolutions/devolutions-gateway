@@ -66,8 +66,8 @@ pub enum EventOutcome {
 
 /// Complete audit information for one traffic item's lifecycle.
 ///
-/// A single `TrafficEvent` is emitted exactly once per JMUX traffic item when
-/// it ends (successfully or with error).
+/// A single `TrafficEvent` is emitted exactly once when an eligible JMUX traffic item ends.
+/// An item is eligible only when direct target resolution provides a concrete IP address.
 ///
 /// # Timestamp semantics
 ///
@@ -94,7 +94,7 @@ pub enum EventOutcome {
 ///   - connect failure: the last IP that was attempted
 /// - `target_port`: the destination port.
 ///
-/// DNS failures do **not** produce an event because `target_ip` is unknown.
+/// DNS failures and connection attempts handled by connector overrides do **not** produce an event because `target_ip` is unknown.
 #[derive(Clone, Debug)]
 pub struct TrafficEvent {
     /// How the traffic item's lifecycle ended.
@@ -142,13 +142,13 @@ pub struct TrafficEvent {
 
 /// Type-erased traffic audit callback.
 ///
-/// Invoked exactly once per JMUX traffic item at end-of-lifecycle. The callback
-/// itself is **synchronous**; perform any asynchronous work by spawning within
-/// the callback (e.g., `tokio::spawn`) or by sending to an internal channel.
+/// Invoked exactly once at the end of each eligible JMUX traffic item.
+/// An item is eligible only when direct target resolution provides a concrete IP address.
+/// The callback itself is **synchronous**; perform asynchronous work by spawning within the callback (e.g., `tokio::spawn`) or by sending to an internal channel.
 ///
 /// # Exactly-once
 ///
-/// - Each traffic item yields exactly one event.
+/// - Each eligible traffic item yields exactly one event.
 /// - Emitted at cleanup time, not during operation.
 /// - Guarded to prevent duplicate emission.
 /// - No aggregation—each event stands alone.
@@ -162,7 +162,7 @@ pub struct TrafficEvent {
 ///
 /// ```rust,ignore
 /// let proxy = JmuxProxy::new(reader, writer)
-///     .with_traffic_event_callback(|event| {
+///     .with_outgoing_traffic_event_callback(|event| {
 ///         // Log quickly...
 ///         tracing::info!(
 ///             outcome = ?event.outcome,

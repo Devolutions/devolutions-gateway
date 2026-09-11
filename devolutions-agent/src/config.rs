@@ -1,11 +1,14 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
+use agent_tunnel_proto::DomainName;
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::{default_schedule_window_start, get_data_dir};
+use ipnetwork::Ipv4Network;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 use url::Url;
@@ -27,19 +30,22 @@ pub struct Conf {
     pub debug: dto::DebugConf,
 }
 
-/// Validated tunnel configuration — required fields are guaranteed present.
+/// Validated tunnel configuration.
 ///
-/// Constructed from `dto::TunnelConf` via `TryFrom`. If the tunnel is disabled
-/// or not yet enrolled, the `enabled` field is `false` and path fields are empty
-/// (but the struct is always constructible).
+/// Required fields and field values are validated when this is constructed from [`dto::TunnelConf`].
 #[derive(Debug, Clone)]
-pub struct TunnelConf {
-    pub enabled: bool,
-    pub gateway_endpoint: String,
+pub enum TunnelConf {
+    Disabled,
+    Enabled(Box<EnabledTunnelConf>),
+}
+
+#[derive(Debug, Clone)]
+pub struct EnabledTunnelConf {
+    gateway_endpoint: GatewayEndpoint,
     pub client_cert_path: Utf8PathBuf,
     pub client_key_path: Utf8PathBuf,
     pub gateway_ca_cert_path: Utf8PathBuf,
-    pub advertise_subnets: Vec<String>,
+    pub advertise_subnets: Vec<Ipv4Network>,
     pub advertise_domains: Vec<String>,
     pub auto_detect_domain: bool,
     pub heartbeat_interval_secs: u64,
@@ -47,57 +53,161 @@ pub struct TunnelConf {
     pub server_spki_sha256: Option<String>,
 }
 
-impl TryFrom<dto::TunnelConf> for TunnelConf {
-    type Error = anyhow::Error;
+#[derive(Debug, Clone)]
+struct GatewayEndpoint {
+    host: String,
+    port: NonZeroU16,
+}
 
-    fn try_from(conf: dto::TunnelConf) -> anyhow::Result<Self> {
-        if !conf.enabled {
-            // Disabled tunnel — return a placeholder with defaults.
+impl std::str::FromStr for GatewayEndpoint {
+    type Err = anyhow::Error;
+
+    fn from_str(endpoint: &str) -> anyhow::Result<Self> {
+        anyhow::ensure!(!endpoint.is_empty(), "value is required when Tunnel.Enabled is true");
+        anyhow::ensure!(
+            endpoint.trim() == endpoint,
+            "value must not contain leading or trailing whitespace"
+        );
+
+        if let Ok(socket_addr) = endpoint.parse::<SocketAddr>() {
+            let port = NonZeroU16::new(socket_addr.port()).context("port must be greater than zero")?;
             return Ok(Self {
-                enabled: false,
-                gateway_endpoint: String::new(),
-                client_cert_path: Utf8PathBuf::new(),
-                client_key_path: Utf8PathBuf::new(),
-                gateway_ca_cert_path: Utf8PathBuf::new(),
-                advertise_subnets: Vec::new(),
-                advertise_domains: Vec::new(),
-                auto_detect_domain: true,
-                heartbeat_interval_secs: 60,
-                route_advertise_interval_secs: 30,
-                server_spki_sha256: None,
+                host: socket_addr.ip().to_string(),
+                port,
             });
         }
 
-        // Enabled tunnel — all required fields must be present.
-        let client_cert_path = conf
-            .client_cert_path
-            .context("tunnel enabled but client_cert_path not configured")?;
-        let client_key_path = conf
-            .client_key_path
-            .context("tunnel enabled but client_key_path not configured")?;
-        let gateway_ca_cert_path = conf
-            .gateway_ca_cert_path
-            .context("tunnel enabled but gateway_ca_cert_path not configured")?;
-
+        let (hostname, port) = endpoint
+            .rsplit_once(':')
+            .context("expected an endpoint in host:port format")?;
+        anyhow::ensure!(!hostname.is_empty(), "hostname must not be empty");
         anyhow::ensure!(
-            !conf.gateway_endpoint.is_empty(),
-            "tunnel enabled but gateway_endpoint is empty"
+            hostname.parse::<Ipv6Addr>().is_ok()
+                || !hostname.chars().any(|character| matches!(character, ':' | '[' | ']')),
+            "IPv6 addresses must use bracketed host:port notation"
         );
 
+        rustls_pki_types::ServerName::try_from(hostname.to_owned())
+            .map_err(|_| anyhow::anyhow!("invalid hostname `{hostname}`"))?;
+
+        let port = port
+            .parse::<NonZeroU16>()
+            .with_context(|| format!("invalid port `{port}`"))?;
+
         Ok(Self {
-            enabled: true,
-            gateway_endpoint: conf.gateway_endpoint,
+            host: hostname.to_owned(),
+            port,
+        })
+    }
+}
+
+impl TunnelConf {
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+
+    pub(crate) fn as_enabled(&self) -> Option<&EnabledTunnelConf> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled(conf) => Some(conf),
+        }
+    }
+
+    pub(crate) fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
+        if !conf.enabled {
+            return Ok(Self::Disabled);
+        }
+
+        EnabledTunnelConf::from_dto(conf).map(Box::new).map(Self::Enabled)
+    }
+}
+
+impl EnabledTunnelConf {
+    pub(crate) fn gateway_hostname(&self) -> &str {
+        self.gateway_endpoint().0
+    }
+
+    pub(crate) fn gateway_endpoint(&self) -> (&str, u16) {
+        (&self.gateway_endpoint.host, self.gateway_endpoint.port.get())
+    }
+
+    fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
+        let gateway_endpoint = conf
+            .gateway_endpoint
+            .parse()
+            .context("invalid Tunnel.GatewayEndpoint")?;
+
+        let client_cert_path = required_tunnel_path(conf.client_cert_path).context("invalid Tunnel.ClientCertPath")?;
+        let client_key_path = required_tunnel_path(conf.client_key_path).context("invalid Tunnel.ClientKeyPath")?;
+        let gateway_ca_cert_path =
+            required_tunnel_path(conf.gateway_ca_cert_path).context("invalid Tunnel.GatewayCaCertPath")?;
+
+        let advertise_subnets = conf
+            .advertise_subnets
+            .into_iter()
+            .enumerate()
+            .map(|(index, subnet)| {
+                subnet
+                    .parse::<Ipv4Network>()
+                    .with_context(|| format!("invalid Tunnel.AdvertiseSubnets[{index}] value `{subnet}`"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        for (index, route) in conf.advertise_domains.iter().enumerate() {
+            anyhow::ensure!(
+                DomainName::is_valid_route(route),
+                "invalid Tunnel.AdvertiseDomains[{index}] value `{route}`"
+            );
+        }
+
+        let heartbeat_interval_secs = conf.heartbeat_interval_secs.unwrap_or(60);
+        anyhow::ensure!(
+            heartbeat_interval_secs > 0,
+            "invalid Tunnel.HeartbeatIntervalSecs: value must be greater than zero"
+        );
+
+        let route_advertise_interval_secs = conf.route_advertise_interval_secs.unwrap_or(30);
+        anyhow::ensure!(
+            route_advertise_interval_secs > 0,
+            "invalid Tunnel.RouteAdvertiseIntervalSecs: value must be greater than zero"
+        );
+        anyhow::ensure!(
+            heartbeat_interval_secs.min(route_advertise_interval_secs)
+                <= agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3,
+            "invalid Tunnel.HeartbeatIntervalSecs and Tunnel.RouteAdvertiseIntervalSecs: \
+             at least one value must be at most {} seconds",
+            agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3
+        );
+
+        let server_spki_sha256 = conf
+            .server_spki_sha256
+            .map(|hash| {
+                anyhow::ensure!(
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "invalid Tunnel.ServerSpkiSha256: expected 64 hexadecimal characters"
+                );
+                Ok(hash.to_ascii_lowercase())
+            })
+            .transpose()?;
+        Ok(Self {
+            gateway_endpoint,
             client_cert_path,
             client_key_path,
             gateway_ca_cert_path,
-            advertise_subnets: conf.advertise_subnets,
+            advertise_subnets,
             advertise_domains: conf.advertise_domains,
             auto_detect_domain: conf.auto_detect_domain,
-            heartbeat_interval_secs: conf.heartbeat_interval_secs.unwrap_or(60),
-            route_advertise_interval_secs: conf.route_advertise_interval_secs.unwrap_or(30),
-            server_spki_sha256: conf.server_spki_sha256,
+            heartbeat_interval_secs,
+            route_advertise_interval_secs,
+            server_spki_sha256,
         })
     }
+}
+
+fn required_tunnel_path(path: Option<Utf8PathBuf>) -> anyhow::Result<Utf8PathBuf> {
+    let path = path.context("value is required when Tunnel.Enabled is true")?;
+    anyhow::ensure!(!path.as_str().trim().is_empty(), "path must not be empty");
+    Ok(path)
 }
 
 /// Validated PSU agent configuration.
@@ -178,7 +288,7 @@ impl Conf {
                 .tunnel
                 .clone()
                 .unwrap_or_default()
-                .pipe(TunnelConf::try_from)
+                .pipe(TunnelConf::from_dto)
                 .context("invalid tunnel config")?,
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
@@ -953,6 +1063,112 @@ pub fn handle_cli(command: &str) -> Result<(), anyhow::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn valid_tunnel_json() -> serde_json::Value {
+        serde_json::json!({
+            "Enabled": true,
+            "GatewayEndpoint": "[::1]:4433",
+            "ClientCertPath": "client.crt",
+            "ClientKeyPath": "client.key",
+            "GatewayCaCertPath": "gateway-ca.crt",
+            "HeartbeatIntervalSecs": 60,
+            "ServerSpkiSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        })
+    }
+
+    fn load_tunnel_json(tunnel: serde_json::Value) -> anyhow::Result<Conf> {
+        let conf_file = serde_json::from_value(serde_json::json!({ "Tunnel": tunnel }))
+            .context("deserialize test configuration")?;
+        Conf::from_conf_file(&conf_file)
+    }
+
+    #[test]
+    fn tunnel_config_normalizes_spki_and_hostname() {
+        let conf = load_tunnel_json(valid_tunnel_json()).expect("load valid tunnel configuration");
+        let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
+
+        assert_eq!(tunnel.gateway_hostname(), "::1");
+        assert_eq!(
+            tunnel.server_spki_sha256.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+    }
+
+    #[test]
+    fn tunnel_config_accepts_legacy_unbracketed_ipv6_endpoint() {
+        let mut tunnel = valid_tunnel_json();
+        tunnel["GatewayEndpoint"] = serde_json::json!("::1:4433");
+
+        let conf = load_tunnel_json(tunnel).expect("load legacy tunnel endpoint");
+        let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
+
+        assert_eq!(tunnel.gateway_hostname(), "::1");
+        assert_eq!(tunnel.gateway_endpoint().1, 4433);
+    }
+
+    #[test]
+    fn tunnel_config_errors_identify_invalid_fields() {
+        let cases = [
+            (
+                "GatewayEndpoint",
+                serde_json::json!("gateway.example.com"),
+                "invalid Tunnel.GatewayEndpoint",
+            ),
+            ("ClientKeyPath", serde_json::json!(""), "invalid Tunnel.ClientKeyPath"),
+            (
+                "AdvertiseDomains",
+                serde_json::json!(["invalid.*.example.com"]),
+                "invalid Tunnel.AdvertiseDomains[0]",
+            ),
+            (
+                "HeartbeatIntervalSecs",
+                serde_json::json!(0),
+                "invalid Tunnel.HeartbeatIntervalSecs",
+            ),
+            (
+                "ServerSpkiSha256",
+                serde_json::json!("not-a-sha256-hash"),
+                "invalid Tunnel.ServerSpkiSha256",
+            ),
+        ];
+
+        for (field, value, expected) in cases {
+            let mut tunnel = valid_tunnel_json();
+            tunnel[field] = value;
+
+            let error = match load_tunnel_json(tunnel) {
+                Ok(_) => panic!("invalid {field} should fail loading"),
+                Err(error) => error,
+            };
+            let error = format!("{error:#}");
+            assert!(error.contains(expected), "expected `{expected}` in `{error}`");
+        }
+    }
+
+    #[test]
+    fn disabled_tunnel_skips_validation() {
+        let conf = load_tunnel_json(serde_json::json!({
+            "Enabled": false,
+            "GatewayEndpoint": "invalid"
+        }))
+        .expect("load disabled tunnel configuration");
+
+        assert!(matches!(conf.tunnel, TunnelConf::Disabled));
+    }
+
+    #[test]
+    fn tunnel_config_requires_liveness_margin() {
+        let mut tunnel = valid_tunnel_json();
+        let invalid_interval = agent_tunnel_proto::AGENT_OFFLINE_TIMEOUT_SECS / 3 + 1;
+        tunnel["HeartbeatIntervalSecs"] = serde_json::json!(invalid_interval);
+        tunnel["RouteAdvertiseIntervalSecs"] = serde_json::json!(invalid_interval);
+
+        let error = load_tunnel_json(tunnel).expect_err("stale liveness intervals should fail loading");
+
+        assert!(
+            format!("{error:#}").contains("invalid Tunnel.HeartbeatIntervalSecs and Tunnel.RouteAdvertiseIntervalSecs")
+        );
+    }
 
     #[test]
     fn psu_config_deserializes() {
