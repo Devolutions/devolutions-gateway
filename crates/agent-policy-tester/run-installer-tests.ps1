@@ -3,17 +3,26 @@ param(
     [Parameter(Mandatory)] [string] $TestOutputPath,
     [Parameter(Mandatory)] [string] $AgentPath,
     [Parameter(Mandatory)] [string] $ResultsPath,
-    [Parameter(Mandatory)] [string] $DotnetPath
+    [Parameter(Mandatory)] [string] $ArtifactResultsPath,
+    [Parameter(Mandatory)] [string] $DotnetPath,
+    [Parameter(Mandatory)] [string] $NuGetPackagesPath
 )
 
 $ErrorActionPreference = "Stop"
 $exitCode = 1
 $previousAgent = $env:DEVOLUTIONS_AGENT_MIGRATION_TEST_EXE
+$previousNuGetPackages = $env:NUGET_PACKAGES
 
 try {
     if (-not [System.Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
         throw "Installer transaction tests must execute as LocalSystem"
     }
+    $nuGetPackageRoot = (Resolve-Path -LiteralPath $NuGetPackagesPath).Path
+    $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+    if (-not $nuGetPackageRoot.EndsWith($separator, [System.StringComparison]::Ordinal)) {
+        $nuGetPackageRoot += $separator
+    }
+    $env:NUGET_PACKAGES = $nuGetPackageRoot
     $testClass = 'DevolutionsAgent.Installer.Tests.PackageBrokerInstallerTests'
     $expectedTests = @(
         "$testClass.TransactionTestsRunAsLocalSystem"
@@ -39,6 +48,7 @@ try {
     $env:DEVOLUTIONS_AGENT_MIGRATION_TEST_EXE = (Resolve-Path -LiteralPath $AgentPath).Path
     & $DotnetPath test $ProjectPath --no-build --no-restore --configuration Debug --framework net48 `
         "-p:OutputPath=$TestOutputPath\" -p:AppendTargetFrameworkToOutputPath=false `
+        "-p:NuGetPackageRoot=$env:NUGET_PACKAGES" `
         --filter $filter --logger "trx;LogFileName=installer-system.trx" --results-directory $ResultsPath
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
@@ -61,6 +71,8 @@ try {
             throw "Required SYSTEM installer test did not pass exactly once: $name"
         }
     }
+    New-Item -ItemType Directory -Path $ArtifactResultsPath -Force | Out-Null
+    Copy-Item -LiteralPath $trxPath -Destination $ArtifactResultsPath -Force
     Write-Output "Verified all 12 installer SystemFacts and the installed-Agent migration E2E: 13 passed, zero skipped"
 } catch {
     Write-Output $_
@@ -69,6 +81,7 @@ try {
     }
 } finally {
     $env:DEVOLUTIONS_AGENT_MIGRATION_TEST_EXE = $previousAgent
+    $env:NUGET_PACKAGES = $previousNuGetPackages
 }
 
 exit $exitCode

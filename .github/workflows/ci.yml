@@ -1413,7 +1413,15 @@ jobs:
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-as-system.ps1"
           $dotnetPath = (Get-Command dotnet.exe).Source
-          psexec -accepteula -s pwsh.exe -NoProfile -File $scriptPath -DotnetPath $dotnetPath
+          $nuGetPackagesPath = (
+            & $dotnetPath nuget locals global-packages --list |
+              Select-String '^global-packages:\s*(.+)$'
+          ).Matches[0].Groups[1].Value.Trim()
+          if ([string]::IsNullOrWhiteSpace($nuGetPackagesPath) -or -not (Test-Path -LiteralPath $nuGetPackagesPath)) {
+            throw "Could not resolve the restored NuGet package root for LocalSystem"
+          }
+          psexec -accepteula -s pwsh.exe -NoProfile -File $scriptPath `
+            -DotnetPath $dotnetPath -NuGetPackagesPath $nuGetPackagesPath
           $exitCode = $LASTEXITCODE
           Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester.out
           if ($exitCode -ne 0) {
