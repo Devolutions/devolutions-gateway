@@ -950,8 +950,7 @@ mod storage_tests {
 
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
-            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
-            "PolicyVersion": "1.0.0",
+            "PolicyFormatVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": id, "Publisher": "Test" },
             "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
@@ -979,6 +978,52 @@ mod storage_tests {
             draft: raw,
             validation_receipt: validation.validation_receipt.expect("valid receipt"),
         }
+    }
+
+    #[tokio::test]
+    async fn compatible_format_version_is_bound_to_receipts_and_persisted_tokens() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let mut request = update_request(&store);
+        request.draft["PolicyFormatVersion"] = serde_json::json!("1.7.3");
+        let error = store
+            .replace(request.clone())
+            .await
+            .expect_err("format version is receipt-bound");
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+
+        let validation = store.validate_draft(&request.draft);
+        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/9");
+        let canonical = validation.canonical_draft.as_ref().expect("compatible draft");
+        let old_receipt =
+            store
+                .receipt_key
+                .issue("now-package-broker-policy-validator/8", canonical, &validation.findings);
+        request.validation_receipt = old_receipt;
+        let error = store
+            .replace(request.clone())
+            .await
+            .expect_err("old validator receipt is rejected");
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+
+        request.validation_receipt = validation.validation_receipt.expect("current receipt");
+        let before = store.management_snapshot().store_token;
+        let result = store.replace(request).await.expect("compatible format is writable");
+        assert_eq!(
+            serde_json::to_value(&result.policy).unwrap()["PolicyFormatVersion"],
+            "1.7.3"
+        );
+        assert_ne!(before, result.management.store_token);
+        let reloaded = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(reloaded.store_token, result.management.store_token);
+        assert_eq!(
+            serde_json::to_value(store.active_policy().expect("active policy").as_ref()).unwrap(),
+            serde_json::to_value(result.policy).unwrap()
+        );
     }
 
     #[tokio::test]
