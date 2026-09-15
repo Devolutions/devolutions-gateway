@@ -197,6 +197,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             info!(%peer_addr, "Accepted peer");
 
+            if let Err(error) = socket.set_nodelay(true) {
+                warn!(%error, %peer_addr, "Couldn’t set TCP_NODELAY on accepted stream");
+            }
+
             Ok(Pipe {
                 name: "tcp-listener",
                 stream: Box::new(socket),
@@ -325,6 +329,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .with_context(|| "TCP listener couldn't accept")?;
 
             info!(%peer_addr, "Accepted peer");
+
+            if let Err(error) = socket.set_nodelay(true) {
+                warn!(%error, %peer_addr, "Couldn’t set TCP_NODELAY on accepted stream");
+            }
 
             let ws = accept_async(socket)
                 .await
