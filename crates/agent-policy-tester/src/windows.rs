@@ -245,6 +245,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             redirected_policy_paths_fail_closed(&agent_path).await?;
             management_write_tokens_survive_watcher_reload(&agent_path).await?;
             managed_policy_lifecycle(&agent_path).await?;
+            legacy_contract_and_interrupted_repair(&agent_path).await?;
         }
     }
 
@@ -663,7 +664,28 @@ async fn validate_policy_by_pipe(pipe_name: &str, draft: &Value) -> anyhow::Resu
     );
     let validation = validation_response.json()?["Validation"].clone();
     ensure!(validation["IsValid"] == true, "policy validation failed");
+    ensure!(
+        validation["ValidatorVersion"] == "now-package-broker-policy-validator/9",
+        "unexpected validator contract"
+    );
+    ensure!(
+        validation["CanonicalDraft"].get("$schema").is_none()
+            && validation["CanonicalDraft"].get("PolicyVersion").is_none()
+            && validation["CanonicalDraft"]["PolicyFormatVersion"] == draft["PolicyFormatVersion"],
+        "canonical draft changed the format version or emitted legacy fields"
+    );
     Ok(validation)
+}
+
+async fn send_replacement(pipe_name: &str, replacement: &Value) -> anyhow::Result<HttpResponse> {
+    request_with_body(
+        pipe_name,
+        "PUT",
+        "/v1/policy",
+        Some("application/json"),
+        &serde_json::to_vec(replacement)?,
+    )
+    .await
 }
 
 async fn replace_policy_response(
@@ -701,15 +723,7 @@ async fn replace_policy_response_by_pipe(
         "Draft": validation["CanonicalDraft"],
         "ValidationReceipt": validation["ValidationReceipt"]
     });
-    let response = request_with_body(
-        pipe_name,
-        "PUT",
-        "/v1/policy",
-        Some("application/json"),
-        &serde_json::to_vec(&replacement_request)?,
-    )
-    .await?;
-    Ok(response)
+    send_replacement(pipe_name, &replacement_request).await
 }
 
 async fn replace_policy(
@@ -828,7 +842,9 @@ async fn standard_user_server(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    wait_for_log(&agent, "Policy management write denied").await
+    let result = wait_for_log(&agent, "Policy management write denied").await;
+    agent.stop().await?;
+    result
 }
 
 async fn standard_user_management(ready_path: &Path, nonce: &str, client: &ProcessIdentity) -> anyhow::Result<()> {
@@ -873,12 +889,64 @@ async fn standard_user_management(ready_path: &Path, nonce: &str, client: &Proce
         "valid draft did not produce a canonical draft and receipt"
     );
 
-    let mut invalid_draft = valid_draft.clone();
-    invalid_draft["$schema"] = json!("https://example.com/not-the-policy-draft-schema.json");
+    strict_contract_validation(pipe_name).await?;
+
+    for operation in ["Create", "Update", "Repair", "ReplaceIdentity"] {
+        let denied = replace_policy_response_by_pipe(
+            pipe_name,
+            operation,
+            "Reject",
+            management["StoreToken"].clone(),
+            valid_draft.clone(),
+        )
+        .await?;
+        ensure!(
+            denied.status == 403 && denied.json()?["Code"] == "AdministratorRequired",
+            "standard-user {operation} did not require an administrator"
+        );
+    }
+    ensure!(
+        policy_management_by_pipe(pipe_name).await?["StoreToken"] == management["StoreToken"],
+        "denied writes changed the store token"
+    );
+    Ok(())
+}
+
+async fn strict_contract_validation(pipe_name: &str) -> anyhow::Result<()> {
+    for version in ["1.0.0", "1.7.3"] {
+        let mut draft = policy_draft("tests.contract", "Contract");
+        draft["PolicyFormatVersion"] = json!(version);
+        validate_policy_by_pipe(pipe_name, &draft).await?;
+    }
+    for (field, value, expected_path) in [
+        (
+            "$schema",
+            "https://devolutions.net/schemas/now-policy.schema.1.0.json",
+            "/$schema",
+        ),
+        ("PolicyVersion", "1.0.0", "/PolicyVersion"),
+        ("PolicyFormatVersion", "2.0.0", "/PolicyFormatVersion"),
+        ("PolicyFormatVersion", "broken", "/PolicyFormatVersion"),
+    ] {
+        let mut draft = policy_draft("tests.contract", "Contract");
+        draft[field] = json!(value);
+        assert_invalid_draft(pipe_name, draft, expected_path).await?;
+    }
+    let mut legacy = policy_draft("tests.contract", "Contract");
+    legacy
+        .as_object_mut()
+        .context("draft is not an object")?
+        .remove("PolicyFormatVersion");
+    legacy["PolicyVersion"] = json!("1.0.0");
+    legacy["$schema"] = json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
+    assert_invalid_draft(pipe_name, legacy, "/PolicyVersion").await
+}
+
+async fn assert_invalid_draft(pipe_name: &str, draft: Value, expected_path: &str) -> anyhow::Result<()> {
     let invalid_request = json!({
         "RequestKind": "PolicyValidationRequest",
         "RequestVersion": "1.0",
-        "Draft": invalid_draft
+        "Draft": draft
     });
     let invalid_response = request_with_body(
         pipe_name,
@@ -896,32 +964,25 @@ async fn standard_user_management(ready_path: &Path, nonce: &str, client: &Proce
     let invalid_validation = invalid_response.json()?["Validation"].clone();
     ensure!(invalid_validation["IsValid"] == false, "invalid draft was accepted");
     ensure!(
-        invalid_validation.get("CanonicalDraft").is_none(),
-        "invalid draft returned a canonical draft"
-    );
-
-    let denied = replace_policy_response_by_pipe(
-        pipe_name,
-        "Create",
-        "Reject",
-        management["StoreToken"].clone(),
-        valid_draft,
-    )
-    .await?;
-    ensure!(
-        denied.status == 403,
-        "standard-user Create returned HTTP {}",
-        denied.status
+        invalid_validation.get("CanonicalDraft").is_none()
+            && invalid_validation.get("ValidationReceipt").is_none()
+            && invalid_validation["ValidatorVersion"] == "now-package-broker-policy-validator/9",
+        "invalid draft returned a canonical draft, receipt, or wrong validator version"
     );
     ensure!(
-        denied.json()?["Code"] == "AdministratorRequired",
-        "standard-user Create did not require an administrator"
+        invalid_validation["Findings"]
+            .as_array()
+            .is_some_and(|findings| findings
+                .iter()
+                .any(|finding| finding["Severity"] == "Error" && finding["Path"] == expected_path)),
+        "invalid draft did not report {expected_path}: {invalid_validation}"
     );
     Ok(())
 }
 
 async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
     let mut agent = AgentHarness::start_managed_default(agent_path).await?;
+    strict_contract_validation(&agent.pipe_name).await?;
     let initial = policy_management(&agent).await?;
     ensure!(
         initial["State"] == "Missing",
@@ -1052,6 +1113,7 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
         "reused ConfirmOverwrite token did not conflict"
     );
 
+    let confirmed = warnings_identity_and_receipts(&mut agent, agent_path, &confirmed).await?;
     agent.restart(agent_path).await?;
     let restarted = request(&agent.pipe_name, "GET", "/v1/policy").await?;
     ensure!(
@@ -1087,6 +1149,150 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
         request(&agent.pipe_name, "GET", "/v1/policy").await?.status == 404,
         "legacy policy became active after managed authority was established"
     );
+    Ok(())
+}
+
+async fn warnings_identity_and_receipts(
+    agent: &mut AgentHarness,
+    agent_path: &Path,
+    current: &Value,
+) -> anyhow::Result<Value> {
+    let mut draft = policy_draft("tests.replaced-identity", "Compatible contract");
+    draft["PolicyFormatVersion"] = json!("1.7.3");
+    draft["Enforcement"]["AuditMode"] = json!(true);
+    let validation = validate_policy_by_pipe(&agent.pipe_name, &draft).await?;
+    ensure!(
+        validation["Findings"].as_array().is_some_and(|findings| findings
+            .iter()
+            .any(|finding| finding["Code"] == "AuditModeEnabled" && finding["Severity"] == "Warning")),
+        "audit-mode draft did not produce its warning"
+    );
+    let mut replacement = json!({
+        "RequestKind": "PolicyReplacementRequest",
+        "RequestVersion": "1.0",
+        "ExpectedStoreToken": current["Management"]["StoreToken"],
+        "Operation": "ReplaceIdentity",
+        "ConflictHandling": "Reject",
+        "WarningsAcknowledged": false,
+        "Draft": validation["CanonicalDraft"],
+        "ValidationReceipt": validation["ValidationReceipt"]
+    });
+    let warning = send_replacement(&agent.pipe_name, &replacement).await?;
+    ensure!(
+        warning.status == 409 && warning.json()?["Code"] == "WarningConfirmationRequired",
+        "unacknowledged warnings were not rejected"
+    );
+    replacement["WarningsAcknowledged"] = json!(true);
+    replacement["Draft"]["Metadata"]["Publisher"] = json!("Tampered after validation");
+    let tampered = send_replacement(&agent.pipe_name, &replacement).await?;
+    ensure!(
+        tampered.status == 422 && tampered.json()?["Code"] == "ValidationFailed",
+        "receipt authorized a different draft"
+    );
+    replacement["Draft"] = validation["CanonicalDraft"].clone();
+    agent.restart(agent_path).await?;
+    let restarted = policy_management(agent).await?;
+    replacement["ExpectedStoreToken"] = restarted["StoreToken"].clone();
+    let expired = send_replacement(&agent.pipe_name, &replacement).await?;
+    ensure!(
+        expired.status == 422 && expired.json()?["Code"] == "ValidationFailed",
+        "pre-restart receipt remained valid in a new validator instance"
+    );
+    ensure!(
+        restarted["Policy"] == current["Policy"]
+            && policy_management(agent).await?["StoreToken"] == restarted["StoreToken"],
+        "rejected requests changed the policy or exact store token"
+    );
+    let replaced = replace_policy(agent, "ReplaceIdentity", restarted["StoreToken"].clone(), draft).await?;
+    ensure!(
+        replaced["Policy"]["Metadata"]["Id"] == "tests.replaced-identity"
+            && replaced["Policy"]["Metadata"]["Revision"] == 1
+            && replaced["Policy"]["PolicyFormatVersion"] == "1.7.3"
+            && replaced["Policy"].get("$schema").is_none()
+            && replaced["Policy"].get("PolicyVersion").is_none(),
+        "ReplaceIdentity did not preserve the compatible contract and reset revision"
+    );
+    wait_for_log(agent, "Policy change succeeded").await?;
+    wait_for_log(agent, "replace_identity").await?;
+    wait_for_log(agent, "invalid_receipt").await?;
+    wait_for_log(agent, "warnings_not_acknowledged").await?;
+    Ok(replaced)
+}
+
+async fn legacy_contract_and_interrupted_repair(agent_path: &Path) -> anyhow::Result<()> {
+    let mut legacy = empty_policy();
+    legacy
+        .as_object_mut()
+        .context("policy is not an object")?
+        .remove("PolicyFormatVersion");
+    legacy["$schema"] = json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
+    legacy["PolicyVersion"] = json!("1.0.0");
+    let mut mixed = legacy.clone();
+    mixed["PolicyFormatVersion"] = json!("1.0.0");
+    for original in [
+        serde_json::to_vec(&legacy)?,
+        serde_json::to_vec(&mixed)?,
+        b"malformed-policy-secret-marker".to_vec(),
+    ] {
+        for marker_staging in [false, true] {
+            let data_dir = create_data_dir()?;
+            let policy_path = data_dir.path().join("policy.json");
+            std::fs::write(&policy_path, &original)?;
+            secure_policy_path(&policy_path, false)?;
+            let prefix = ".policy.json.txn-11111111-2222-4333-8444-555555555555";
+            let new_path = data_dir.path().join(format!("{prefix}.new"));
+            std::fs::write(&new_path, b"partial replacement")?;
+            secure_policy_path(&new_path, false)?;
+            let marker_path = data_dir.path().join(format!("{prefix}.marker.prepare"));
+            if marker_staging {
+                std::fs::write(&marker_path, br#"{"Version":"#)?;
+                secure_policy_path(&marker_path, false)?;
+            }
+            let mut agent =
+                AgentHarness::start_with_path(agent_path, data_dir, unique_pipe_name(), policy_path).await?;
+            let mut invalid = policy_management(&agent).await?;
+            ensure!(
+                invalid["State"] == "Invalid" && invalid["WriteCapability"] == "Writable",
+                "interrupted Repair did not retain a repairable invalid original: {invalid}"
+            );
+            ensure!(
+                std::fs::read(&agent.policy_path)? == original && !new_path.exists() && !marker_path.exists(),
+                "recovery changed the original or retained prepublication remnants"
+            );
+            ensure!(
+                request(&agent.pipe_name, "GET", "/v1/policy").await?.status == 404,
+                "legacy, mixed, or malformed policy became active"
+            );
+            if original.starts_with(b"{") {
+                ensure!(
+                    invalid["InvalidDiagnostics"]["Findings"]
+                        .as_array()
+                        .is_some_and(|findings| findings
+                            .iter()
+                            .any(|finding| finding["Code"] == "UnsupportedPolicyFormatVersion")),
+                    "legacy contract did not produce its strict diagnostic"
+                );
+                std::fs::write(&agent.policy_path, serde_json::to_vec(&empty_policy())?)?;
+                wait_for_management(&agent, |management| management["State"] == "Active").await?;
+                std::fs::write(&agent.policy_path, &original)?;
+                invalid = wait_for_management(&agent, |management| management["State"] == "Invalid").await?;
+                wait_for_log(&agent, "legacy_policy_contract").await?;
+            }
+            let repaired = replace_policy(
+                &agent,
+                "Repair",
+                invalid["StoreToken"].clone(),
+                policy_draft("tests.interrupted-repair", "Recovered"),
+            )
+            .await?;
+            agent.restart(agent_path).await?;
+            ensure!(
+                policy_management(&agent).await?["Policy"] == repaired["Policy"],
+                "repaired policy did not survive restart"
+            );
+            agent.stop().await?;
+        }
+    }
     Ok(())
 }
 
@@ -1270,6 +1476,26 @@ async fn complete_snapshots_across_reload(agent_path: &Path) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn policy_fixtures_use_the_current_contract() {
+        for policy in [full_policy(), empty_policy(), policy_draft("tests.contract", "Test")] {
+            assert_eq!(policy["PolicyFormatVersion"], "1.0.0");
+            assert!(policy.get("$schema").is_none());
+            assert!(policy.get("PolicyVersion").is_none());
+        }
+    }
+
+    #[test]
+    fn standard_user_token_rejects_wrong_identity_and_administrators() {
+        for (actual_sid, administrator, integrity) in [
+            ("S-1-5-21-1-2-3-1002", false, SECURITY_MANDATORY_MEDIUM_RID),
+            ("S-1-5-21-1-2-3-1001", true, SECURITY_MANDATORY_MEDIUM_RID),
+            ("S-1-5-21-1-2-3-1001", false, 0x3000),
+        ] {
+            assert!(validate_standard_user_token(actual_sid, "S-1-5-21-1-2-3-1001", administrator, integrity).is_err());
+        }
+    }
 
     #[test]
     fn standard_user_token_requires_medium_integrity() {

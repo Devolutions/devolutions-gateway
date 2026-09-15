@@ -22,6 +22,31 @@ function Test-ExplicitPsExecLaunchFailure {
     return $Diagnostics -match '(?im)^(Couldn''t install PSEXESVC service:|Error establishing communication with PsExec service|Access is denied\.)'
 }
 
+function Publish-ServerStatus {
+    param([string] $Path, [int] $ExitCode)
+
+    $temporaryPath = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [System.IO.File]::WriteAllText($temporaryPath, $ExitCode.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+        [System.IO.File]::Move($temporaryPath, $Path)
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
+
+function Read-ServerStatus {
+    param([string] $Path)
+
+    $text = [System.IO.File]::ReadAllText($Path)
+    $value = 0
+    if ($text -notmatch '^-?[0-9]+$' -or -not [int]::TryParse($text, [ref] $value)) {
+        throw "LocalSystem test server published an invalid completion status"
+    }
+    return $value
+}
+
 function Wait-ServerReadiness {
     param(
         [string] $Path,
@@ -39,7 +64,7 @@ function Wait-ServerReadiness {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while (-not (Test-Path -LiteralPath $Path)) {
         if (Test-Path -LiteralPath $ServerStatusPath) {
-            $status = Get-Content -LiteralPath $ServerStatusPath -Raw
+            $status = Read-ServerStatus -Path $ServerStatusPath
             throw "LocalSystem test server exited with status $status before publishing readiness (launch value $LaunchValue): $LaunchDiagnostics"
         }
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -246,6 +271,25 @@ function Invoke-RunnerSelfTests {
     try {
         $ready = Join-Path $root "ready.json"
         $status = Join-Path $root "status"
+        foreach ($expected in @(0, 1, -1)) {
+            Publish-ServerStatus -Path $status -ExitCode $expected
+            if ((Read-ServerStatus -Path $status) -ne $expected) {
+                throw "Completion-status round trip failed"
+            }
+            Remove-Item -LiteralPath $status
+        }
+        foreach ($invalid in @("", " ", "failed", "2147483648", "0`n1")) {
+            [System.IO.File]::WriteAllText($status, $invalid)
+            try {
+                Read-ServerStatus -Path $status | Out-Null
+                throw "Invalid completion status unexpectedly succeeded"
+            } catch {
+                if ($_ -notmatch "published an invalid completion status") {
+                    throw
+                }
+            }
+            Remove-Item -LiteralPath $status
+        }
         Set-Content -LiteralPath $ready -Value (
             @{
                 Nonce = "nonce"
@@ -366,7 +410,7 @@ if ($Action -eq "Server") {
         $_ | Out-File -LiteralPath $ServerOutputPath -Append
         $exitCode = 1
     } finally {
-        Set-Content -LiteralPath $StatusPath -Value $exitCode
+        Publish-ServerStatus -Path $StatusPath -ExitCode $exitCode
     }
     exit $exitCode
 }
@@ -533,9 +577,14 @@ try {
                 Get-Content -LiteralPath $serverOutputPath | Out-File $outputPath -Append
             }
             if (Test-Path -LiteralPath $statusPath) {
-                $serverExitCode = [int](Get-Content -LiteralPath $statusPath -Raw)
-                if ($serverExitCode -ne 0 -and $exitCode -eq 0) {
-                    $exitCode = $serverExitCode
+                try {
+                    $serverExitCode = Read-ServerStatus -Path $statusPath
+                    if ($serverExitCode -ne 0 -and $exitCode -eq 0) {
+                        $exitCode = $serverExitCode
+                    }
+                } catch {
+                    $_ | Out-File $outputPath -Append
+                    $exitCode = 1
                 }
             } elseif ($exitCode -eq 0) {
                 "Timed out waiting for LocalSystem test server shutdown" | Out-File $outputPath -Append
