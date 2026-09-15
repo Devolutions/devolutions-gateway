@@ -194,6 +194,7 @@ enum Mode {
     StandardServer,
     StandardClient,
     Elevated,
+    Probe,
 }
 
 impl Mode {
@@ -202,7 +203,8 @@ impl Mode {
             "standard-server" => Ok(Self::StandardServer),
             "standard-client" => Ok(Self::StandardClient),
             "elevated" => Ok(Self::Elevated),
-            _ => bail!("unknown mode '{value}'; expected 'standard-server', 'standard-client', or 'elevated'"),
+            "probe" => Ok(Self::Probe),
+            _ => bail!("unknown mode '{value}'; expected 'standard-server', 'standard-client', 'elevated', or 'probe'"),
         }
     }
 }
@@ -247,6 +249,23 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             managed_policy_lifecycle(&agent_path).await?;
             legacy_contract_and_interrupted_repair(&agent_path).await?;
         }
+        Mode::Probe => {
+            verify_local_system()?;
+            let pipe_name = next_string(&mut args, "pipe name")?;
+            let path = next_string(&mut args, "request path")?;
+            ensure!(args.next().is_none(), "unexpected probe arguments");
+            probe(&pipe_name, &path).await?;
+        }
+    }
+
+    async fn probe(pipe_name: &str, path: &str) -> anyhow::Result<()> {
+        let response = request(pipe_name, "GET", path).await?;
+        let body = response.json()?;
+        let mut stdout = std::io::stdout().lock();
+        serde_json::to_writer(&mut stdout, &json!({ "Status": response.status, "Body": body }))?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+        Ok(())
     }
 
     Ok(())
@@ -1495,6 +1514,11 @@ mod tests {
         ] {
             assert!(validate_standard_user_token(actual_sid, "S-1-5-21-1-2-3-1001", administrator, integrity).is_err());
         }
+    }
+
+    #[test]
+    fn probe_mode_is_only_available_to_a_local_system_client() {
+        assert!(matches!(Mode::parse("probe"), Ok(Mode::Probe)));
     }
 
     #[test]
