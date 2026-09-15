@@ -1,17 +1,17 @@
 //! Package broker entry point
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::executor::{self, CommandExecutor};
 use crate::pipe::DEFAULT_PIPE_NAME;
-use crate::policy_loader;
-use crate::policy_watcher::{PolicyState, PolicyWatcher};
+use crate::policy_store::PolicyStore;
+use crate::policy_watcher::{PolicyWatcher, WatcherFailure, fail_closed, monitor_watcher_task};
 use crate::server::BrokerState;
 
 /// Configuration for the broker task.
@@ -53,53 +53,13 @@ impl Task for BrokerTask {
     const NAME: &'static str = "package-broker";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
-        // Resolve policy file path.
-
-        let policy_path = match &self.config.policy_path {
-            Some(path) => std::path::PathBuf::from(path),
-            None => policy_loader::find_default_policy().unwrap_or_else(|error| {
-                let candidate = policy_loader::default_policy_candidate();
-                warn!(
-                    %error,
-                    path = %candidate.display(),
-                    "Default broker policy is unavailable; broker will pause until this file is provided"
-                );
-                candidate
-            }),
-        };
-
-        // Create policy watcher with initial load attempt.
-        let (watcher, mut state_rx) = PolicyWatcher::new(policy_path.clone());
-
-        // Log initial state.
-        match &*state_rx.borrow() {
-            PolicyState::Active(policy) => {
-                info!(
-                    policy_id = %policy.metadata.id,
-                    policy_revision = %policy.metadata.revision,
-                    path = %policy_path.display(),
-                    "Loaded package broker policy"
-                );
-            }
-            PolicyState::Unavailable { reason } => {
-                warn!(
-                    %reason,
-                    path = %policy_path.display(),
-                    "Policy unavailable at startup; broker will pause until a valid policy is provided"
-                );
-            }
-        }
+        let policy_store = PolicyStore::load(self.config.policy_path.clone().map(std::path::PathBuf::from));
+        let watcher = PolicyWatcher::new(Arc::clone(&policy_store));
 
         let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
 
-        // Initialize BrokerState with current policy (or None if unavailable).
-        let initial_policy = match &*state_rx.borrow() {
-            PolicyState::Active(policy) => Some(Arc::clone(policy)),
-            PolicyState::Unavailable { .. } => None,
-        };
-
         let state = Arc::new(BrokerState {
-            policy: RwLock::new(initial_policy),
+            policy_store,
             executor,
             pipe_name: self.config.pipe_name.clone(),
             tracker: crate::operation_tracker::OperationTracker::new(),
@@ -113,41 +73,22 @@ impl Task for BrokerTask {
 
         // Spawn policy watcher task.
         let watcher_shutdown = shutdown.clone();
-        tokio::spawn(async move {
-            watcher.watch(watcher_shutdown).await;
+        let (watcher_ready_tx, watcher_ready_rx) = tokio::sync::oneshot::channel();
+        let watcher_handle = tokio::spawn(async move {
+            watcher.watch(watcher_shutdown, watcher_ready_tx).await;
         });
-
-        // Spawn policy state relay: updates BrokerState when policy watcher reports changes.
-        let relay_state = Arc::clone(&state);
-        let relay_shutdown = shutdown.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = relay_shutdown.cancelled() => break,
-                    result = state_rx.changed() => {
-                        if result.is_err() {
-                            // Sender dropped (watcher exited).
-                            break;
-                        }
-                        let new_policy = match &*state_rx.borrow_and_update() {
-                            PolicyState::Active(policy) => {
-                                info!(
-                                    policy_id = %policy.metadata.id,
-                                    revision = policy.metadata.revision,
-                                    "Policy hot-reloaded; broker resumed"
-                                );
-                                Some(Arc::clone(policy))
-                            }
-                            PolicyState::Unavailable { reason } => {
-                                warn!(%reason, "Policy became unavailable; broker paused");
-                                None
-                            }
-                        };
-                        *relay_state.policy.write().expect("policy lock poisoned") = new_policy;
-                    }
-                }
+        match watcher_ready_rx.await {
+            Ok(Ok(())) => {
+                state.policy_store.mark_monitoring_ready().await;
             }
-        });
+            Ok(Err(failure)) => fail_closed(&state.policy_store, failure).await,
+            Err(_) => fail_closed(&state.policy_store, WatcherFailure::TaskTerminated).await,
+        }
+        tokio::spawn(monitor_watcher_task(
+            Arc::clone(&state.policy_store),
+            shutdown.clone(),
+            watcher_handle,
+        ));
 
         // Spawn pipe server.
         let server_shutdown = shutdown.clone();

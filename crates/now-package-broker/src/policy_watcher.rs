@@ -1,55 +1,60 @@
 //! Policy file watcher with live reload.
 //!
 //! Watches the policy file for changes and reloads it when modified.
-//! If the file becomes unavailable or corrupted, the broker pauses
-//! (denies all requests) until a valid policy is available again.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use now_policy::PolicyDocument;
-use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-use crate::policy_loader;
+use crate::policy_store::{PolicyStore, ReloadCause};
 
-/// State of the policy: either loaded and active, or unavailable.
-#[derive(Debug, Clone)]
-pub enum PolicyState {
-    /// A valid policy is loaded and active.
-    Active(Arc<PolicyDocument>),
-    /// The policy file is missing or corrupted; broker should deny all requests.
-    Unavailable { reason: String },
+fn affects_policy(event: &notify::Event, path: &Path) -> bool {
+    (event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove())
+        && event
+            .paths
+            .iter()
+            .any(|event_path| crate::policy_security::windows_paths_equal(event_path, path))
 }
 
-/// Watches a JSON policy file and sends updates via a channel.
-///
-/// On startup, attempts to load the policy. If it fails, starts in `Unavailable` state.
-/// When the file is modified, reloads it. If reload fails, transitions to `Unavailable`.
-/// When a valid file becomes available again, transitions back to `Active`.
-pub struct PolicyWatcher {
-    path: PathBuf,
-    state_tx: watch::Sender<PolicyState>,
+async fn debounce_change(
+    changes: &mut tokio::sync::mpsc::Receiver<tokio::time::Instant>,
+    failures: &mut tokio::sync::mpsc::UnboundedReceiver<WatcherFailure>,
+    shutdown: &CancellationToken,
+    deadline: tokio::time::Instant,
+) -> Result<bool, WatcherFailure> {
+    loop {
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(false),
+            failure = failures.recv() => return Err(failure.unwrap_or(WatcherFailure::ChannelClosed)),
+            _ = tokio::time::sleep_until(deadline) => {
+                while changes.try_recv().is_ok() {}
+                return Ok(true);
+            }
+            Some(_) = changes.recv() => {}
+        }
+    }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum WatcherFailure {
+    Creation,
+    Registration,
+    Notification,
+    ChannelClosed,
+    TaskTerminated,
+}
+
+/// Watches a JSON policy file and reloads the shared policy store on change.
+pub struct PolicyWatcher(Arc<PolicyStore>);
 
 impl PolicyWatcher {
-    /// Create a new watcher for the given policy file path.
-    ///
-    /// Returns the watcher and a receiver for policy state changes.
-    pub fn new(path: PathBuf) -> (Self, watch::Receiver<PolicyState>) {
-        let initial_state = match policy_loader::load_policy(&path) {
-            Ok(policy) => PolicyState::Active(Arc::new(policy)),
-            Err(e) => PolicyState::Unavailable { reason: e.to_string() },
-        };
-
-        let (state_tx, state_rx) = watch::channel(initial_state);
-
-        let watcher = Self { path, state_tx };
-
-        (watcher, state_rx)
+    pub fn new(store: Arc<PolicyStore>) -> Self {
+        Self(store)
     }
 
     /// Start watching the policy file for changes.
@@ -57,87 +62,138 @@ impl PolicyWatcher {
     /// This spawns a background task that watches the policy file's parent directory
     /// and reloads the policy when the file is modified, created, or removed.
     /// The task runs until the shutdown notify is triggered.
-    pub async fn watch(self, shutdown: CancellationToken) {
-        let path = self.path.clone();
-        let state_tx = self.state_tx;
+    pub(crate) async fn watch(
+        self,
+        shutdown: CancellationToken,
+        ready: tokio::sync::oneshot::Sender<Result<(), WatcherFailure>>,
+    ) {
+        let store = self.0;
+        let path = store.configured_path();
         let dir = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
 
-        let (fs_tx, mut fs_rx) = tokio::sync::mpsc::channel::<()>(16);
+        let (change_tx, mut changes) = tokio::sync::mpsc::channel(1);
+        let (failure_tx, mut failures) = tokio::sync::mpsc::unbounded_channel();
         let (watcher_stop_tx, watcher_stop_rx) = std::sync::mpsc::channel::<()>();
 
-        // Set up file watcher in a blocking context.
-        let watch_path = dir.clone();
-        let setup_state_tx = state_tx.clone();
         let _watcher_handle = tokio::task::spawn_blocking(move || {
-            let rt_tx = fs_tx;
             let mut watcher: RecommendedWatcher =
-                match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                    if let Ok(event) = res {
-                        // Only react to modify/create/remove events.
-                        use notify::EventKind;
-                        match event.kind {
-                            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
-                                let _ = rt_tx.blocking_send(());
-                            }
-                            _ => {}
-                        }
-                    }
+                match notify::recommended_watcher(move |result: notify::Result<notify::Event>| match result {
+                    Ok(event) if affects_policy(&event, &path) => _ = change_tx.try_send(tokio::time::Instant::now()),
+                    Ok(_) => {}
+                    Err(_) => _ = failure_tx.send(WatcherFailure::Notification),
                 }) {
                     Ok(watcher) => watcher,
                     Err(error) => {
                         error!(%error, "Failed to create policy file watcher");
-                        let _ = setup_state_tx.send(PolicyState::Unavailable {
-                            reason: format!("failed to create policy file watcher: {error}"),
-                        });
+                        let _ = ready.send(Err(WatcherFailure::Creation));
                         return;
                     }
                 };
 
-            if let Err(error) = watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
-                error!(%error, path = %watch_path.display(), "Failed to watch policy directory");
-                let _ = setup_state_tx.send(PolicyState::Unavailable {
-                    reason: format!("failed to watch policy directory {}: {error}", watch_path.display()),
-                });
+            if let Err(error) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
+                error!(%error, path = %dir.display(), "Failed to watch policy directory");
+                let _ = ready.send(Err(WatcherFailure::Registration));
                 return;
             }
 
+            let _ = ready.send(Ok(()));
             let _ = watcher_stop_rx.recv();
         });
 
-        // Debounce interval to avoid rapid reloads.
         let debounce = Duration::from_millis(500);
 
-        loop {
+        let failure = loop {
             tokio::select! {
-                _ = shutdown.cancelled() => {
-                    info!("Policy watcher shutting down");
-                    let _ = watcher_stop_tx.send(());
-                    break;
-                }
-                Some(()) = fs_rx.recv() => {
-                    // Debounce: drain any additional events that arrived.
-                    tokio::time::sleep(debounce).await;
-                    while fs_rx.try_recv().is_ok() {}
-
-                    // Attempt reload.
-                    match policy_loader::load_policy(&path) {
-                        Ok(policy) => {
-                            info!(
-                                policy_id = %policy.metadata.id,
-                                revision = policy.metadata.revision,
-                                "Policy reloaded successfully"
-                            );
-                            let _ = state_tx.send(PolicyState::Active(Arc::new(policy)));
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Policy reload failed; broker paused");
-                            let _ = state_tx.send(PolicyState::Unavailable {
-                                reason: e.to_string(),
-                            });
-                        }
+                biased;
+                _ = shutdown.cancelled() => break None,
+                failure = failures.recv() => break Some(failure.unwrap_or(WatcherFailure::ChannelClosed)),
+                Some(changed_at) = changes.recv() => {
+                    match debounce_change(&mut changes, &mut failures, &shutdown, changed_at + debounce).await {
+                        Ok(true) => _ = store.reload_from_disk(ReloadCause::ExternalChange).await,
+                        Ok(false) => break None,
+                        Err(failure) => break Some(failure),
                     }
                 }
             }
+        };
+        match failure {
+            Some(failure) => fail_closed(&store, failure).await,
+            None => info!("Policy watcher shutting down"),
         }
+        let _ = watcher_stop_tx.send(());
+    }
+}
+
+pub(crate) async fn fail_closed(store: &PolicyStore, failure: WatcherFailure) {
+    error!(?failure, "Policy watcher failed; broker paused");
+    store.mark_watcher_unavailable().await;
+}
+
+pub(crate) async fn monitor_watcher_task(
+    store: Arc<PolicyStore>,
+    shutdown: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+) {
+    let _ = handle.await;
+    if !shutdown.is_cancelled() {
+        fail_closed(&store, WatcherFailure::TaskTerminated).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use notify::EventKind;
+    use notify::event::{CreateKind, ModifyKind, RemoveKind, RenameMode};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn fatal_error_preempts_expired_deadline_which_preempts_queued_change() {
+        let (tx, mut changes) = tokio::sync::mpsc::channel(2);
+        let (failure_tx, mut failures) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(tokio::time::Instant::now()).await.expect("send change");
+        let stop = CancellationToken::new();
+        let result = debounce_change(&mut changes, &mut failures, &stop, tokio::time::Instant::now()).await;
+        assert!(matches!(result, Ok(true)));
+        failure_tx.send(WatcherFailure::Notification).expect("send failure");
+        let result = debounce_change(&mut changes, &mut failures, &stop, tokio::time::Instant::now()).await;
+        assert!(matches!(result, Err(WatcherFailure::Notification)));
+    }
+
+    #[test]
+    fn event_filter_ignores_siblings_and_accepts_relevant_kinds() {
+        let policy = Path::new(r"C:\POLICY.json");
+        let event = |name| notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(policy.with_file_name(name));
+        assert!(!affects_policy(&event("sibling.json"), policy));
+        let relevant = |kind| {
+            affects_policy(
+                &notify::Event::new(kind).add_path(policy.with_file_name("policy.json")),
+                policy,
+            )
+        };
+        assert!(relevant(EventKind::Create(CreateKind::Any)));
+        assert!(relevant(EventKind::Modify(ModifyKind::Any)));
+        assert!(relevant(EventKind::Remove(RemoveKind::Any)));
+        assert!(relevant(EventKind::Modify(ModifyKind::Name(RenameMode::From))));
+        assert!(relevant(EventKind::Modify(ModifyKind::Name(RenameMode::To))));
+        assert!(relevant(EventKind::Modify(ModifyKind::Name(RenameMode::Both))));
+        assert!(affects_policy(
+            &notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(Path::new(r"C:\pölicy.json").to_owned()),
+            Path::new(r"C:\PÖLICY.json"),
+        ));
+    }
+
+    #[tokio::test]
+    async fn watcher_task_exit_fails_closed_but_shutdown_does_not() {
+        let store = PolicyStore::for_tests(None);
+        let initial = store.management_snapshot().state;
+        monitor_watcher_task(Arc::clone(&store), CancellationToken::new(), tokio::spawn(async {})).await;
+        assert_ne!(store.management_snapshot().state, initial);
+        let store = PolicyStore::for_tests(None);
+        let initial = store.management_snapshot().state;
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        monitor_watcher_task(Arc::clone(&store), shutdown, tokio::spawn(async {})).await;
+        assert_eq!(store.management_snapshot().state, initial);
     }
 }
