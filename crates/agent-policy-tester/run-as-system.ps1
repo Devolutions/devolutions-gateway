@@ -1,14 +1,36 @@
+param(
+    [string] $DotnetPath = (Join-Path $env:ProgramFiles "dotnet\dotnet.exe"),
+    [Parameter(Mandatory)] [string] $NuGetPackagesPath
+)
+
 $ErrorActionPreference = "Stop"
 
 $workspacePath = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $testerPath = Join-Path $workspacePath "target/debug/agent-policy-tester.exe"
 $agentPath = Join-Path $workspacePath "target/debug/devolutions-agent.exe"
 $outputPath = Join-Path $PSScriptRoot "agent-policy-tester.out"
-$stagingPath = Join-Path $env:ProgramData "dgw-agent-policy-tester-$([guid]::NewGuid().ToString('N'))"
+$stagingPath = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) "dgw-agent-policy-tester-$([guid]::NewGuid().ToString('N'))"
 $stagedTesterPath = Join-Path $stagingPath "agent-policy-tester.exe"
+$stagedAgentPath = Join-Path $stagingPath "DevolutionsAgent.exe"
+$installerProject = Join-Path $workspacePath "package\AgentWindowsManaged.Tests\DevolutionsAgent.Installer.Tests.csproj"
+$installerOutput = Join-Path $workspacePath "package\AgentWindowsManaged.Tests\bin\Debug\net48"
+$stagedInstallerOutput = Join-Path $stagingPath "installer-tests"
+$resultsPath = Join-Path $PSScriptRoot "installer-test-results"
+$stagedResultsPath = Join-Path $stagingPath "installer-test-results"
+$exitCode = 1
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
+$previousInstallerTester = $env:AGENT_POLICY_TESTER_E2E_EXE
 
 try {
     Set-Content -LiteralPath $outputPath -Value ""
+    if (-not [System.Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        throw "This runner requires LocalSystem"
+    }
+    if ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($workspacePath)).DriveType -ne 'Fixed') {
+        throw "Use a local fixed-volume workspace path visible to LocalSystem, not a mapped drive"
+    }
+    $NuGetPackagesPath = (Resolve-Path -LiteralPath $NuGetPackagesPath).Path
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -61,11 +83,19 @@ public static class AgentPolicyTesterNativeDirectory
     if (Get-ChildItem -LiteralPath $stagingPath -Force) {
         throw "The atomically protected staged tester directory was not empty"
     }
+    if (Test-Path -LiteralPath $resultsPath) {
+        Remove-Item -LiteralPath $resultsPath -Recurse -Force
+    }
+    $env:TEMP = Join-Path $stagingPath "scratch"
+    $env:TMP = $env:TEMP
+    New-Item -ItemType Directory -Path $env:TEMP | Out-Null
 
     Copy-Item -LiteralPath $testerPath -Destination $stagedTesterPath
-    & icacls.exe $stagedTesterPath /setowner '*S-1-5-18' 2>&1 | Out-File $outputPath -Append
+    Copy-Item -LiteralPath $agentPath -Destination $stagedAgentPath
+    Copy-Item -LiteralPath $installerOutput -Destination $stagedInstallerOutput -Recurse
+    & icacls.exe $stagingPath /setowner '*S-1-5-18' /T /Q 2>&1 | Out-File $outputPath -Append
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to set the staged tester owner"
+        throw "Failed to set the staged executable and installer test owners"
     }
     & icacls.exe $stagedTesterPath /inheritance:r /grant:r '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' 2>&1 |
         Out-File $outputPath -Append
@@ -76,18 +106,31 @@ public static class AgentPolicyTesterNativeDirectory
     "Staged policy tester at $stagedTesterPath" | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagingPath | Format-List Owner, Sddl | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagedTesterPath | Format-List Owner, Sddl | Out-File $outputPath -Append
-    & $stagedTesterPath $agentPath 2>&1 | Out-File $outputPath -Append
+    & $stagedTesterPath $stagedAgentPath elevated 2>&1 | Out-File $outputPath -Append
     $exitCode = $LASTEXITCODE
+    $env:AGENT_POLICY_TESTER_E2E_EXE = $stagedTesterPath
+    & (Join-Path $PSScriptRoot "run-installer-tests.ps1") `
+        -ProjectPath $installerProject -TestOutputPath $stagedInstallerOutput `
+        -AgentPath $stagedAgentPath -ResultsPath $stagedResultsPath -ArtifactResultsPath $resultsPath `
+        -DotnetPath $DotnetPath -NuGetPackagesPath $NuGetPackagesPath `
+        2>&1 | Out-File $outputPath -Append
+    if ($LASTEXITCODE -ne 0) {
+        $exitCode = $LASTEXITCODE
+    }
 } catch {
     $_ | Out-File $outputPath -Append
     $exitCode = 1
 } finally {
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
+    $env:AGENT_POLICY_TESTER_E2E_EXE = $previousInstallerTester
     for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $stagingPath); $attempt++) {
         try {
             Remove-Item -LiteralPath $stagingPath -Recurse -Force
         } catch {
             if ($attempt -eq 19) {
                 "Failed to remove $stagingPath after 20 attempts: $_" | Out-File $outputPath -Append
+                $exitCode = 1
             } else {
                 Start-Sleep -Milliseconds 250
             }

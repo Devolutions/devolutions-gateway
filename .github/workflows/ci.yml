@@ -1338,12 +1338,14 @@ jobs:
     name: Agent policy end-to-end test
     runs-on: windows-2022
     needs: [preflight]
+    env:
+      AGENT_POLICY_TEST_SHA: ${{ inputs.ref || github.event.pull_request.head.sha || needs.preflight.outputs.ref }}
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.preflight.outputs.ref }}
+          ref: ${{ env.AGENT_POLICY_TEST_SHA }}
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -1366,8 +1368,13 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
 
       - name: Build Agent policy test executables
+        id: build-policy-executables
         shell: pwsh
         run: |
+          $actualCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:AGENT_POLICY_TEST_SHA) {
+            throw "Agent policy tests must build the requested commit $env:AGENT_POLICY_TEST_SHA, got $actualCommit"
+          }
           cargo build --locked -p devolutions-agent --features dev-skip-broker-signature
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
@@ -1377,16 +1384,54 @@ jobs:
             exit $LASTEXITCODE
           }
 
+      - name: Build installer tests before entering LocalSystem
+        id: build-installer-tests
+        shell: pwsh
+        run: dotnet build package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj --configuration Debug --framework net48
+
+      - name: Run Agent policy tester as standard user
+        shell: pwsh
+        run: |
+          ./crates/agent-policy-tester/run-unelevated.ps1
+          $exitCode = $LASTEXITCODE
+          Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester-unelevated.out
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
       - name: Run Agent policy tester as LocalSystem
+        if: ${{ !cancelled() && steps.build-policy-executables.outcome == 'success' && steps.build-installer-tests.outcome == 'success' }}
         shell: pwsh
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-as-system.ps1"
-          psexec -accepteula -s pwsh.exe -NoProfile -File $scriptPath
+          $dotnetPath = (Get-Command dotnet.exe).Source
+          $nuGetPackagesPath = (
+            & $dotnetPath nuget locals global-packages --list |
+              Select-String '^global-packages:\s*(.+)$'
+          ).Matches[0].Groups[1].Value.Trim()
+          if ([string]::IsNullOrWhiteSpace($nuGetPackagesPath) -or -not (Test-Path -LiteralPath $nuGetPackagesPath)) {
+            throw "Could not resolve the restored NuGet package root for LocalSystem"
+          }
+          psexec -accepteula -s pwsh.exe -NoProfile -File $scriptPath `
+            -DotnetPath $dotnetPath -NuGetPackagesPath $nuGetPackagesPath
           $exitCode = $LASTEXITCODE
           Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester.out
           if ($exitCode -ne 0) {
             exit $exitCode
           }
+
+      - name: Upload SYSTEM installer test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-policy-installer-system-results
+          path: |
+            crates/agent-policy-tester/installer-test-results/*.trx
+            crates/agent-policy-tester/agent-policy-tester.out
+
+      - name: Run policy route authorization tests
+        shell: pwsh
+        run: cargo test --locked -p now-package-broker --features dev-skip-broker-signature
 
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
