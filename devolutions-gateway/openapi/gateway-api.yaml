@@ -315,6 +315,22 @@ paths:
         '200':
           description: Recording file
           content:
+            video/webm:
+              schema:
+                type: string
+                format: binary
+            application/x-asciicast:
+              schema:
+                type: string
+                format: binary
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: string
+                format: binary
             application/octet-stream:
               schema:
                 type: string
