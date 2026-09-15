@@ -675,10 +675,14 @@ impl PolicyStore {
                     crate::audit::external_change_applied(path, &policy.metadata.id.0, policy.metadata.revision);
                 }
                 (PolicyManagementState::Missing | PolicyManagementState::Invalid, _) => {
-                    crate::audit::external_change_rejected(path, management.state);
+                    crate::audit::external_change_rejected(
+                        path,
+                        management.state,
+                        management.invalid_diagnostics.as_ref(),
+                    );
                 }
                 (PolicyManagementState::Active, None) => {
-                    crate::audit::external_change_rejected(path, PolicyManagementState::Invalid);
+                    crate::audit::external_change_rejected(path, PolicyManagementState::Invalid, None);
                 }
             }
         }
@@ -1133,6 +1137,124 @@ mod storage_tests {
         let sid =
             Sid::from_well_known(::windows::Win32::Security::WinLocalSystemSid, None).expect("resolve SYSTEM SID");
         crate::audit::WriteAudit::begin_recording(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
+    }
+
+    #[tokio::test]
+    async fn audited_legacy_drafts_and_old_receipts_fail_once_without_publication() {
+        for legacy_field in [Some("$schema"), Some("PolicyVersion"), None] {
+            let store = PolicyStore::load_with_storage(
+                Some(PathBuf::from(r"C:\policy.json")),
+                Arc::new(TestStorage::new(Some(policy("current", 1)))),
+                Monitoring::Available,
+            );
+            let before = store.management_snapshot().store_token;
+            let mut request = update_request(&store);
+            let (expected_code, expected_reason) = if let Some(field) = legacy_field {
+                request.draft[field] = serde_json::json!("private legacy value");
+                (ErrorCode::InvalidPolicy, "invalid_policy")
+            } else {
+                let validation = store.validate_draft(&request.draft);
+                assert_eq!(validation.validator_version, "now-package-broker-policy-validator/9");
+                request.validation_receipt = store.receipt_key.issue(
+                    "now-package-broker-policy-validator/8",
+                    validation.canonical_draft.as_ref().expect("valid draft"),
+                    &validation.findings,
+                );
+                (ErrorCode::ValidationFailed, "invalid_receipt")
+            };
+            let (audit, recorder) = recording_audit();
+            let error = store
+                .replace_audited(request, audit)
+                .await
+                .expect_err("reject old contract");
+            assert_eq!(error.code, expected_code);
+            assert_eq!(store.management_snapshot().store_token, before);
+            assert_eq!(store.active_policy().expect("unchanged policy").metadata.revision, 1);
+            let events = recorder.events();
+            assert_eq!(
+                events.iter().map(|entry| entry.event_code).collect::<Vec<_>>(),
+                [
+                    Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                    Some(sysevent_codes::POLICY_CHANGE_FAILED)
+                ]
+            );
+            assert!(
+                events[1]
+                    .fields
+                    .iter()
+                    .any(|(name, value)| name == "reason" && value == expected_reason)
+            );
+            assert!(!format!("{events:?}").contains("private legacy value"));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn external_legacy_rejection_and_converted_policy_are_not_write_outcomes() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        crate::audit::take_test_events();
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(
+            crate::audit::take_test_events().is_empty(),
+            "unchanged current format is not an event"
+        );
+
+        storage.set_disk_state(None, true, 2);
+        storage.observation.lock().invalid_diagnostics = Some(InvalidPolicyDiagnostics {
+            diagnostics_version: API_VERSION_STR.into(),
+            findings: vec![validation::disk_failure_finding(
+                validation::DiskFailureReason::LegacyPolicyContract,
+            )],
+        });
+        let rejected = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(rejected.state, PolicyManagementState::Invalid);
+        assert!(store.active_policy().is_none());
+        let events = crate::audit::take_test_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
+        );
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "legacy_policy_contract")
+        );
+
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(
+            crate::audit::take_test_events().is_empty(),
+            "unremediated legacy policy is not a new change"
+        );
+
+        let mut legacy = serde_json::to_value(policy("converted", 7)).expect("serialize policy");
+        let version = legacy
+            .as_object_mut()
+            .expect("object")
+            .remove("PolicyFormatVersion")
+            .expect("version");
+        legacy["PolicyVersion"] = version;
+        legacy["$schema"] = serde_json::json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
+        let converted =
+            crate::installer_policy_migration::convert_document(&legacy.to_string()).expect("convert legacy");
+        let converted = now_policy::schema::parse_policy_json(&converted).expect("official contract");
+        storage.set_disk_state(Some(converted), false, 3);
+        let applied = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(applied.state, PolicyManagementState::Active);
+        assert_eq!(store.active_policy().expect("converted policy").metadata.revision, 7);
+        let events = crate::audit::take_test_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)
+        );
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(crate::audit::take_test_events().is_empty());
     }
 
     #[tokio::test]
