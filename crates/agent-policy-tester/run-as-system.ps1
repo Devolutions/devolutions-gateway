@@ -1,5 +1,6 @@
 param(
-    [string] $DotnetPath = (Join-Path $env:ProgramFiles "dotnet\dotnet.exe")
+    [string] $DotnetPath = (Join-Path $env:ProgramFiles "dotnet\dotnet.exe"),
+    [Parameter(Mandatory)] [string] $NuGetPackagesPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,7 @@ $installerProject = Join-Path $workspacePath "package\AgentWindowsManaged.Tests\
 $installerOutput = Join-Path $workspacePath "package\AgentWindowsManaged.Tests\bin\Debug\net48"
 $stagedInstallerOutput = Join-Path $stagingPath "installer-tests"
 $resultsPath = Join-Path $PSScriptRoot "installer-test-results"
+$stagedResultsPath = Join-Path $stagingPath "installer-test-results"
 $exitCode = 1
 $previousTemp = $env:TEMP
 $previousTmp = $env:TMP
@@ -27,6 +29,7 @@ try {
     if ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($workspacePath)).DriveType -ne 'Fixed') {
         throw "Use a local fixed-volume workspace path visible to LocalSystem, not a mapped drive"
     }
+    $NuGetPackagesPath = (Resolve-Path -LiteralPath $NuGetPackagesPath).Path
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -79,6 +82,9 @@ public static class AgentPolicyTesterNativeDirectory
     if (Get-ChildItem -LiteralPath $stagingPath -Force) {
         throw "The atomically protected staged tester directory was not empty"
     }
+    if (Test-Path -LiteralPath $resultsPath) {
+        Remove-Item -LiteralPath $resultsPath -Recurse -Force
+    }
     $env:TEMP = Join-Path $stagingPath "scratch"
     $env:TMP = $env:TEMP
     New-Item -ItemType Directory -Path $env:TEMP | Out-Null
@@ -103,7 +109,8 @@ public static class AgentPolicyTesterNativeDirectory
     $exitCode = $LASTEXITCODE
     & (Join-Path $PSScriptRoot "run-installer-tests.ps1") `
         -ProjectPath $installerProject -TestOutputPath $stagedInstallerOutput `
-        -AgentPath $stagedAgentPath -ResultsPath $resultsPath -DotnetPath $DotnetPath `
+        -AgentPath $stagedAgentPath -ResultsPath $stagedResultsPath -ArtifactResultsPath $resultsPath `
+        -DotnetPath $DotnetPath -NuGetPackagesPath $NuGetPackagesPath `
         2>&1 | Out-File $outputPath -Append
     if ($LASTEXITCODE -ne 0) {
         $exitCode = $LASTEXITCODE
