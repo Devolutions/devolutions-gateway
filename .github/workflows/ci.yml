@@ -234,6 +234,12 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      - name: Timing-sensitive tests
+        run: cargo test -p testsuite --test integration_tests timing:: -- --ignored --test-threads=1
+        shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
         shell: pwsh

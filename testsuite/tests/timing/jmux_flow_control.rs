@@ -1,6 +1,3 @@
-#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
-#![allow(clippy::print_stdout, reason = "test code prints timing diagnostics")]
-
 use std::time::{Duration, Instant};
 
 use rstest::rstest;
@@ -108,7 +105,7 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
 #[case::tcp(false)]
 #[case::websocket(true)]
 #[tokio::test]
-#[ignore = "timing-sensitive; run alone with --ignored --test-threads=1"]
+#[ignore = "run serially by the timing-sensitive CI step"]
 async fn jmux_flow_control_credits_are_not_delayed(#[case] use_websocket: bool) {
     let elapsed = run_jmux_flow_control_case(use_websocket).await;
     let transport = if use_websocket { "WebSocket" } else { "TCP" };
