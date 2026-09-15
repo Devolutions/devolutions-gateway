@@ -98,6 +98,11 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
     elapsed
 }
 
+/// Reproduces the round-trip bottleneck seen in VMware HTTP/2 uploads without embedding an HTTP stack.
+///
+/// HTTP/2 commonly limits an upload to about 64 KiB before the server returns a small flow-control update.
+/// This test models that dependency by waiting for one byte of credit after every 64 KiB sent through jetsocat.
+/// The old JMUX sender delayed each credit behind its flush timer, so the accumulated delay exceeds the transfer budget.
 #[tokio::test]
 async fn jmux_flow_control_credits_are_not_delayed() {
     for use_websocket in [false, true] {
