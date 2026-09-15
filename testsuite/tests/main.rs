@@ -4,6 +4,7 @@
 
 mod agent_tunnel;
 mod cli;
+mod jmux_flow_control;
 mod mcp_proxy;
 mod network_scanner;
 mod sysevent;

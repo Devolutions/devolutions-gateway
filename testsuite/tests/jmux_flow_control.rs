@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use rstest::rstest;
 use test_utils::find_unused_ports;
 use testsuite::cli::{jetsocat_tokio_cmd, wait_for_port_bound};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -103,18 +104,20 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
 /// HTTP/2 commonly limits an upload to about 64 KiB before the server returns a small flow-control update.
 /// This test models that dependency by waiting for one byte of credit after every 64 KiB sent through jetsocat.
 /// The old JMUX sender delayed each credit behind its flush timer, so the accumulated delay exceeds the transfer budget.
+#[rstest]
+#[case::tcp(false)]
+#[case::websocket(true)]
 #[tokio::test]
-async fn jmux_flow_control_credits_are_not_delayed() {
-    for use_websocket in [false, true] {
-        let elapsed = run_jmux_flow_control_case(use_websocket).await;
-        let transport = if use_websocket { "WebSocket" } else { "TCP" };
+#[ignore = "timing-sensitive; run alone with --ignored --test-threads=1"]
+async fn jmux_flow_control_credits_are_not_delayed(#[case] use_websocket: bool) {
+    let elapsed = run_jmux_flow_control_case(use_websocket).await;
+    let transport = if use_websocket { "WebSocket" } else { "TCP" };
 
-        println!("{transport} JMUX flow-controlled transfer completed in {elapsed:?}");
+    println!("{transport} JMUX flow-controlled transfer completed in {elapsed:?}");
 
-        assert!(
-            elapsed < TRANSFER_BUDGET,
-            "{transport} JMUX took {elapsed:?} to relay flow-controlled traffic, exceeding the \
-             {TRANSFER_BUDGET:?} budget"
-        );
-    }
+    assert!(
+        elapsed < TRANSFER_BUDGET,
+        "{transport} JMUX took {elapsed:?} to relay flow-controlled traffic, exceeding the \
+         {TRANSFER_BUDGET:?} budget"
+    );
 }

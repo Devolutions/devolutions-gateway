@@ -15,11 +15,6 @@ name = "integration_tests"
 path = "tests/main.rs"
 harness = true
 
-[[test]]
-name = "jmux_flow_control"
-path = "tests/jmux_flow_control.rs"
-harness = true
-
 [dependencies]
 anyhow = "1.0"
 assert_cmd = "2.2"
