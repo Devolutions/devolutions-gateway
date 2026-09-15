@@ -6,264 +6,105 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Security
 
-- _agent_: compare broker client executables by file identity ([#1869](https://github.com/Devolutions/devolutions-gateway/issues/1869)) ([5b0844d816](https://github.com/Devolutions/devolutions-gateway/commit/5b0844d8160d23878d3c18ba5d2a07c32d716708)) ([DGW-419](https://devolutions.atlassian.net/browse/DGW-419))
+- _agent_: harden package broker file and executable validation ([#1869](https://github.com/Devolutions/devolutions-gateway/issues/1869)) ([5b0844d816](https://github.com/Devolutions/devolutions-gateway/commit/5b0844d8160d23878d3c18ba5d2a07c32d716708)) ([DGW-419](https://devolutions.atlassian.net/browse/DGW-419)) ([#1870](https://github.com/Devolutions/devolutions-gateway/issues/1870)) ([d1bcc02e80](https://github.com/Devolutions/devolutions-gateway/commit/d1bcc02e80a50a76b3c174129597c7f4842f9f0a)) ([#1872](https://github.com/Devolutions/devolutions-gateway/issues/1872)) ([27f7fc9377](https://github.com/Devolutions/devolutions-gateway/commit/27f7fc9377e939bd2f109246909d506169acff8a)) ([#1889](https://github.com/Devolutions/devolutions-gateway/issues/1889)) ([4e10a490f6](https://github.com/Devolutions/devolutions-gateway/commit/4e10a490f6a365160d364b32827c9d5a838d33d5)) ([#1906](https://github.com/Devolutions/devolutions-gateway/issues/1906)) ([88799db384](https://github.com/Devolutions/devolutions-gateway/commit/88799db384c41dbfae4d6eb92bfc86da53db1cd5))
 
-  The package broker authenticated pipe clients by comparing executable
-  path strings using a lossy, ASCII-case-insensitive comparison. This was
-  fragile for a security-relevant identity check, as it could be tripped
-  up by Unicode casing rules, invalid UTF-8, and other path representation
-  edge cases.
+  The Agent now validates package policy files, broker executables, signatures, ownership, and permissions before trusting them for elevated operations.
 
-  The broker now opens both executables and compares their file identity
-  directly (volume serial number + 128-bit file ID via
-  `GetFileInformationByHandleEx`/`FILE_ID_INFO`), which is immune to these
-  edge cases.
+- _agent_: harden package broker client and execution isolation ([#1871](https://github.com/Devolutions/devolutions-gateway/issues/1871)) ([48f9b0c4b7](https://github.com/Devolutions/devolutions-gateway/commit/48f9b0c4b768ea72a9f561dba7b7988ddbc79dd9)) ([#1873](https://github.com/Devolutions/devolutions-gateway/issues/1873)) ([0e2f9a485c](https://github.com/Devolutions/devolutions-gateway/commit/0e2f9a485c9670bdd750a921607f3cebc487ffc9)) ([#1892](https://github.com/Devolutions/devolutions-gateway/issues/1892)) ([1fe893d2b1](https://github.com/Devolutions/devolutions-gateway/commit/1fe893d2b16211d4f62cf308a7f2f5c0f5b09613)) ([#1902](https://github.com/Devolutions/devolutions-gateway/issues/1902)) ([23a97845f8](https://github.com/Devolutions/devolutions-gateway/commit/23a97845f847664f675227bb0fd39ae33a7476ec)) ([#1903](https://github.com/Devolutions/devolutions-gateway/issues/1903)) ([4c4cd8792f](https://github.com/Devolutions/devolutions-gateway/commit/4c4cd8792f87e663ba3c11bd61af305bbdaca050))
 
-- _agent_: trust Local Service writes during broker security checks ([#1906](https://github.com/Devolutions/devolutions-gateway/issues/1906)) ([88799db384](https://github.com/Devolutions/devolutions-gateway/commit/88799db384c41dbfae4d6eb92bfc86da53db1cd5))
+  The Agent now verifies the requesting Windows user, restricts temporary scripts and operation hooks, and protects the broker from connection floods.
 
-- _agent_: [**breaking**] expose active package policy ([#1937](https://github.com/Devolutions/devolutions-gateway/issues/1937)) ([ab34966851](https://github.com/Devolutions/devolutions-gateway/commit/ab3496685169d13528e578aad820f6b8ef35ec0b))
+- _agent_: restrict Agent Tunnel private key permissions on Windows ([#1931](https://github.com/Devolutions/devolutions-gateway/issues/1931)) ([f87b5d7a74](https://github.com/Devolutions/devolutions-gateway/commit/f87b5d7a746cd618f1ce66ed34284e163921193c))
 
-  Exposes the validated active package-broker policy through the
-  authenticated `GET /v1/policy` route. Clients receive a stable snapshot,
-  while an unavailable policy returns the shared structured 404 response
-  without exposing policy source or file-security details.
-
-  Uses the official `now-policy` 0.3.0, `now-policy-api` 0.4.0, and
-  `now-policy-server-template` 0.4.0 releases. Phase 1 remains read-only:
-  policy management, validation, and replacement routes are not exposed.
-
-  Package policy files are now JSON-only. Deployments using `.yaml` or
-  `.yml` policy files must convert them to `.json`; unsupported extensions
-  and YAML content are rejected rather than silently parsed.
-
-  Coordinated stack: Devolutions/now-libraries#93 defines the shared
-  contract, this PR implements the Agent endpoint, and
-  Devolutions/UniGetUI#5292 consumes it. Keep this PR open while Phase 2
-  #1963 is restacked and the full stack is finalized.
+  New Agent Tunnel private keys are accessible only to SYSTEM and Administrators.
 
 ### Features
 
-- _agent_: add Chocolatey package broker support ([#1874](https://github.com/Devolutions/devolutions-gateway/issues/1874)) ([8e66d24fe9](https://github.com/Devolutions/devolutions-gateway/commit/8e66d24fe99935410e6fd7c21892fab4f7f25e37))
+- _agent_: add Chocolatey, Scoop, vcpkg, .NET, pip, Cargo, npm, and Bun package broker support ([#1874](https://github.com/Devolutions/devolutions-gateway/issues/1874)) ([8e66d24fe9](https://github.com/Devolutions/devolutions-gateway/commit/8e66d24fe99935410e6fd7c21892fab4f7f25e37)) ([#1876](https://github.com/Devolutions/devolutions-gateway/issues/1876)) ([5e480c9804](https://github.com/Devolutions/devolutions-gateway/commit/5e480c98045c4a85d1e2523c49d1ce522c73a5a3)) ([#1881](https://github.com/Devolutions/devolutions-gateway/issues/1881)) ([235e3a29b5](https://github.com/Devolutions/devolutions-gateway/commit/235e3a29b53adcba54d2e169591bd5c0f179b37f)) ([#1880](https://github.com/Devolutions/devolutions-gateway/issues/1880)) ([d1c276bc57](https://github.com/Devolutions/devolutions-gateway/commit/d1c276bc57417026330bf48f05a07d6341ed6657)) ([#1878](https://github.com/Devolutions/devolutions-gateway/issues/1878)) ([911a658eed](https://github.com/Devolutions/devolutions-gateway/commit/911a658eed79759e0abaec574d0865fbbc5127fd)) ([#1877](https://github.com/Devolutions/devolutions-gateway/issues/1877)) ([3881db378e](https://github.com/Devolutions/devolutions-gateway/commit/3881db378e1440e203294856cdfb6af59d609d14)) ([#1882](https://github.com/Devolutions/devolutions-gateway/issues/1882)) ([f348786471](https://github.com/Devolutions/devolutions-gateway/commit/f348786471e65bed816cfc96952ab587c96b8bc2)) ([#1879](https://github.com/Devolutions/devolutions-gateway/issues/1879)) ([771cd11aae](https://github.com/Devolutions/devolutions-gateway/commit/771cd11aae97bd039e174ee5d729039637765ea6))
 
-- _agent_: add Scoop package broker support ([#1876](https://github.com/Devolutions/devolutions-gateway/issues/1876)) ([5e480c9804](https://github.com/Devolutions/devolutions-gateway/commit/5e480c98045c4a85d1e2523c49d1ce522c73a5a3))
-
-- _agent_: add vcpkg package broker support ([#1881](https://github.com/Devolutions/devolutions-gateway/issues/1881)) ([235e3a29b5](https://github.com/Devolutions/devolutions-gateway/commit/235e3a29b53adcba54d2e169591bd5c0f179b37f))
-
-- _agent_: add .NET package broker support ([#1880](https://github.com/Devolutions/devolutions-gateway/issues/1880)) ([d1c276bc57](https://github.com/Devolutions/devolutions-gateway/commit/d1c276bc57417026330bf48f05a07d6341ed6657))
-
-- _agent_: add pip package broker support ([#1878](https://github.com/Devolutions/devolutions-gateway/issues/1878)) ([911a658eed](https://github.com/Devolutions/devolutions-gateway/commit/911a658eed79759e0abaec574d0865fbbc5127fd))
-
-- _agent_: add Cargo package broker support ([#1877](https://github.com/Devolutions/devolutions-gateway/issues/1877)) ([3881db378e](https://github.com/Devolutions/devolutions-gateway/commit/3881db378e1440e203294856cdfb6af59d609d14))
-
-- _agent_: add npm package broker support ([#1882](https://github.com/Devolutions/devolutions-gateway/issues/1882)) ([f348786471](https://github.com/Devolutions/devolutions-gateway/commit/f348786471e65bed816cfc96952ab587c96b8bc2))
-
-- _agent_: add Bun package broker support ([#1879](https://github.com/Devolutions/devolutions-gateway/issues/1879)) ([771cd11aae](https://github.com/Devolutions/devolutions-gateway/commit/771cd11aae97bd039e174ee5d729039637765ea6))
-
-- _agent_: bundle multi-pwsh with Windows installer ([#1904](https://github.com/Devolutions/devolutions-gateway/issues/1904)) ([d204d8e42b](https://github.com/Devolutions/devolutions-gateway/commit/d204d8e42bb6d76ae537e04a70ea6f879f79abc8))
+- _agent_: bundle multi-pwsh with the Windows installer ([#1904](https://github.com/Devolutions/devolutions-gateway/issues/1904)) ([d204d8e42b](https://github.com/Devolutions/devolutions-gateway/commit/d204d8e42bb6d76ae537e04a70ea6f879f79abc8))
 
   The Agent installer now includes the multi-pwsh executable required for PowerShell Universal integration.
 
-- _agent_: publish Docker container ([#1912](https://github.com/Devolutions/devolutions-gateway/issues/1912)) ([ec6951bcfb](https://github.com/Devolutions/devolutions-gateway/commit/ec6951bcfb75ca922475bbcd0f45b93f1c0759cb))
+- _agent_: publish a multi-architecture Docker container ([#1912](https://github.com/Devolutions/devolutions-gateway/issues/1912)) ([ec6951bcfb](https://github.com/Devolutions/devolutions-gateway/commit/ec6951bcfb75ca922475bbcd0f45b93f1c0759cb))
 
-  Add a multi-architecture Devolutions Agent container with PowerShell
-  Universal enabled by default and multi-pwsh support. Release workflows
-  publish and sign versioned and latest Docker Hub manifests from signed
-  Agent artifacts.
+  The Agent container enables PowerShell Universal by default and includes multi-pwsh support.
 
-- _agent_: support operation cancellation in package broker ([#1913](https://github.com/Devolutions/devolutions-gateway/issues/1913)) ([db23a516eb](https://github.com/Devolutions/devolutions-gateway/commit/db23a516ebcb11cc0e7740df577c974f9631d9b7)) ([DGW-437](https://devolutions.atlassian.net/browse/DGW-437))
+- _agent_: support package operation cancellation ([#1913](https://github.com/Devolutions/devolutions-gateway/issues/1913)) ([db23a516eb](https://github.com/Devolutions/devolutions-gateway/commit/db23a516ebcb11cc0e7740df577c974f9631d9b7)) ([DGW-437](https://devolutions.atlassian.net/browse/DGW-437))
 
-  Clients can cancel package-broker operations through an asynchronous, idempotent endpoint that attempts graceful termination before forcing the process to stop.
+  Clients can cancel package operations through an asynchronous, idempotent endpoint.
 
-- _agent_: stream package operation output over per-operation event channel ([#1914](https://github.com/Devolutions/devolutions-gateway/issues/1914)) ([f413772c4f](https://github.com/Devolutions/devolutions-gateway/commit/f413772c4f379c3b22f4c1a3fc64eb48cf162880)) ([DGW-438](https://devolutions.atlassian.net/browse/DGW-438))
+- _agent_: stream package operation output and status updates ([#1914](https://github.com/Devolutions/devolutions-gateway/issues/1914)) ([f413772c4f](https://github.com/Devolutions/devolutions-gateway/commit/f413772c4f379c3b22f4c1a3fc64eb48cf162880)) ([DGW-438](https://devolutions.atlassian.net/browse/DGW-438))
 
-  Package-broker clients now receive live standard output, standard error, and status notifications through a dedicated event channel for each operation.
+  Clients receive live standard output, standard error, and status notifications through a dedicated channel for each operation.
 
-- _dgw_: zip multi-clip recording downloads ([#1923](https://github.com/Devolutions/devolutions-gateway/issues/1923)) ([e34e0a4b05](https://github.com/Devolutions/devolutions-gateway/commit/e34e0a4b055ad2e12fd671f4845ea66a62ef476d))
+- _agent_: [**breaking**] expose the active package policy ([#1937](https://github.com/Devolutions/devolutions-gateway/issues/1937)) ([ab34966851](https://github.com/Devolutions/devolutions-gateway/commit/ab3496685169d13528e578aad820f6b8ef35ec0b))
 
-  Add GET /jet/jrec/pull/{id} that streams a ZIP of recording.json and
-  every clip listed in the session manifest. Callers no longer need to
-  guess a single clip filename when a reconnect produced multiple files.
-  The existing per-file pull route is unchanged for player and granular
-  access.
+  Authenticated clients can retrieve the validated active package policy through `GET /v1/policy`.
+  Package policy files must now use JSON; YAML policy files are rejected.
+
+- _dgw_: download multi-clip recordings as ZIP archives ([#1923](https://github.com/Devolutions/devolutions-gateway/issues/1923)) ([e34e0a4b05](https://github.com/Devolutions/devolutions-gateway/commit/e34e0a4b055ad2e12fd671f4845ea66a62ef476d))
+
+  `GET /jet/jrec/pull/{id}` streams `recording.json` and every clip in the session manifest as one archive.
 
 - _dgw_: support VMConnect through RDCleanPath ([#1372](https://github.com/Devolutions/devolutions-gateway/issues/1372)) ([1c06391a0c](https://github.com/Devolutions/devolutions-gateway/commit/1c06391a0ce6a673861cc7776e97a97731fa99f2)) ([Devolutions/IronRDP#1505](https://github.com/Devolutions/IronRDP/pull/1505))
 
-  Gateway now supports the explicit VMConnect RDCleanPath request shape and sends its binary preconnection blob before TLS.
+- _dgw_: enable target-side Kerberos credential injection without debug flags ([#1895](https://github.com/Devolutions/devolutions-gateway/issues/1895)) ([0e91bbf503](https://github.com/Devolutions/devolutions-gateway/commit/0e91bbf503ed7e49a6824c45615fda45688fb4d1)) ([#1953](https://github.com/Devolutions/devolutions-gateway/issues/1953)) ([f0828c91c2](https://github.com/Devolutions/devolutions-gateway/commit/f0828c91c2b3f7bd0094013536fbdc94c38339bb)) ([DVLS-14697](https://devolutions.atlassian.net/browse/DVLS-14697))
 
-- _dgw_: provision the target-side KDC for credential injection ([#1895](https://github.com/Devolutions/devolutions-gateway/issues/1895)) ([0e91bbf503](https://github.com/Devolutions/devolutions-gateway/commit/0e91bbf503ed7e49a6824c45615fda45688fb4d1))
+  Existing debug configuration keys still parse so deployments can upgrade without configuration errors.
 
-  Gateway can now provision target-side KDC connection options and construct KDC sessions on demand for credential injection.
+- _dgw_: stabilize Agent Tunnel and persist authorization ([#1958](https://github.com/Devolutions/devolutions-gateway/issues/1958)) ([0086a50237](https://github.com/Devolutions/devolutions-gateway/commit/0086a50237e2809bb091fa19fe491527f8724d19)) ([#1947](https://github.com/Devolutions/devolutions-gateway/issues/1947)) ([16a9cf7da4](https://github.com/Devolutions/devolutions-gateway/commit/16a9cf7da4a31394c72971ce0f61c3b76e3cfe0e))
 
-- _dgw_: enable Kerberos injection without debug flags ([#1953](https://github.com/Devolutions/devolutions-gateway/issues/1953)) ([f0828c91c2](https://github.com/Devolutions/devolutions-gateway/commit/f0828c91c2b3f7bd0094013536fbdc94c38339bb)) ([DVLS-14697](https://devolutions.atlassian.net/browse/DVLS-14697))
-
-  Kerberos credential injection no longer requires
-  __debug__.enable_unstable or kerberos_credential_injection.
-  Those keys still parse so existing configs keep loading.
-
-- _dgw_: persist agent tunnel authorization ([#1958](https://github.com/Devolutions/devolutions-gateway/issues/1958)) ([0086a50237](https://github.com/Devolutions/devolutions-gateway/commit/0086a50237e2809bb091fa19fe491527f8724d19))
-
-  Persists accepted Agent identities and authorized public keys so
-  deleting an Agent remains effective after Gateway restarts.
-
-  Gateway now admits tunnel connections only when the certificate Agent ID
-  and SPKI match stored authorization. Deleting an Agent removes that
-  authorization before closing its live tunnel connection, and management
-  endpoints continue to list accepted Agents while offline.
-
-  Existing pre-stable Agents must be re-enrolled after upgrading.
-
-- _dgw_: move agent tunnel out of debug ([#1947](https://github.com/Devolutions/devolutions-gateway/issues/1947)) ([16a9cf7da4](https://github.com/Devolutions/devolutions-gateway/commit/16a9cf7da4a31394c72971ce0f61c3b76e3cfe0e))
-
-  Agent Tunnel is now a stable, opt-in feature in the OpenAPI contract and generated clients, with enrollment and connection-management endpoints available when enabled.
+  Agent Tunnel is now a stable, opt-in feature in the OpenAPI contract and generated clients.
+  Accepted Agent identities and authorized keys persist across Gateway restarts; Agents enrolled before stabilization must be enrolled again.
 
 - _installer_: configure Agent Tunnel during setup ([#1969](https://github.com/Devolutions/devolutions-gateway/issues/1969)) ([1b709918fe](https://github.com/Devolutions/devolutions-gateway/commit/1b709918fe38de7d4d6ea1d88beb3cf2446f7ae0))
 
-  Adds an Agent Tunnel option to the Gateway installer.
+  Administrators can enable Agent Tunnel and change its default UDP listening port of 4433.
 
-  Administrators can enable it during initial configuration.
-  The UDP listening port defaults to 4433 and can be changed.
+- _webapp_: add ARD input-only encryption ([#1965](https://github.com/Devolutions/devolutions-gateway/issues/1965)) ([1eb4d47625](https://github.com/Devolutions/devolutions-gateway/commit/1eb4d476253648db155d8c7f312d869f1bad5ca5))
 
-- _webapp_: add option for ARD only input encryption ([#1965](https://github.com/Devolutions/devolutions-gateway/issues/1965)) ([1eb4d47625](https://github.com/Devolutions/devolutions-gateway/commit/1eb4d476253648db155d8c7f312d869f1bad5ca5))
+- _dgw,agent_: route JMUX channels through connected agents ([#1974](https://github.com/Devolutions/devolutions-gateway/issues/1974)) ([fde0daff75](https://github.com/Devolutions/devolutions-gateway/commit/fde0daff7566f6d34afd38cf4604f07d776e938a))
 
-- _dgw,agent_: route JMUX channels through agents ([#1974](https://github.com/Devolutions/devolutions-gateway/issues/1974)) ([fde0daff75](https://github.com/Devolutions/devolutions-gateway/commit/fde0daff7566f6d34afd38cf4604f07d776e938a))
-
-  Routes each JMUX channel through a connected Agent Tunnel when its
-  destination matches an advertised route. Direct TCP remains the fallback
-  only when no Agent route matches.
-
-  A matched Agent routing failure rejects only that channel and never
-  bypasses the selected route. Tunnel configuration is validated at load
-  time, and tunneled streams preserve TCP half-close behavior.
-
-  Agent-routed JMUX connection attempts do not currently produce Gateway
-  traffic-audit events because the selected target IP is unavailable to
-  the Gateway.
+  Matching Agent Tunnel routes carry JMUX channels without falling back to direct TCP when the selected Agent route fails.
 
 ### Bug Fixes
 
-- _agent_: advertise PowerShell DVC execution only when PowerShell is available ([#1867](https://github.com/Devolutions/devolutions-gateway/issues/1867)) ([27ffa7906e](https://github.com/Devolutions/devolutions-gateway/commit/27ffa7906e27aa6d4e0bd8775034c44b87961628))
+- _agent_: report and establish PowerShell DVC availability reliably ([#1867](https://github.com/Devolutions/devolutions-gateway/issues/1867)) ([27ffa7906e](https://github.com/Devolutions/devolutions-gateway/commit/27ffa7906e27aa6d4e0bd8775034c44b87961628)) ([4528d093e8](https://github.com/Devolutions/devolutions-gateway/commit/4528d093e8775fc190d517037277a2c882602912))
 
-- _agent_: verify policy file owner and DACL before trusting it ([#1870](https://github.com/Devolutions/devolutions-gateway/issues/1870)) ([d1bcc02e80](https://github.com/Devolutions/devolutions-gateway/commit/d1bcc02e80a50a76b3c174129597c7f4842f9f0a))
+  The Agent no longer advertises unavailable PowerShell execution, and transient DVC opens can retry until the negotiation deadline.
 
-- _agent_: authenticate and select the WTS session by SID ([#1871](https://github.com/Devolutions/devolutions-gateway/issues/1871)) ([48f9b0c4b7](https://github.com/Devolutions/devolutions-gateway/commit/48f9b0c4b768ea72a9f561dba7b7988ddbc79dd9))
+- _dgw,agent_: make Agent Tunnel DNS route matching explicit ([#1884](https://github.com/Devolutions/devolutions-gateway/issues/1884)) ([29ec5ea5a2](https://github.com/Devolutions/devolutions-gateway/commit/29ec5ea5a2047f6b56d7d5a2a33ddb25a7e0174b)) ([#1886](https://github.com/Devolutions/devolutions-gateway/issues/1886)) ([0ec200ad5d](https://github.com/Devolutions/devolutions-gateway/commit/0ec200ad5d383fd648e741e0a303c7ed60405810))
 
-- _agent_: create broker temp script atomically with target SDDL ([#1873](https://github.com/Devolutions/devolutions-gateway/issues/1873)) ([0e2f9a485c](https://github.com/Devolutions/devolutions-gateway/commit/0e2f9a485c9670bdd750a921607f3cebc487ffc9))
+  Plain domains match only themselves, while wildcard domains match subdomains; mixed old and new routing semantics now fail clearly.
 
-- _agent_: never honor SkipBrokerSignatureValidation in release builds ([#1872](https://github.com/Devolutions/devolutions-gateway/issues/1872)) ([27f7fc9377](https://github.com/Devolutions/devolutions-gateway/commit/27f7fc9377e939bd2f109246909d506169acff8a))
+- _dgw_: keep both credential-injection CredSSP legs on the same protocol ([#1862](https://github.com/Devolutions/devolutions-gateway/issues/1862)) ([6ccf248c58](https://github.com/Devolutions/devolutions-gateway/commit/6ccf248c58cc5bf71a33a8e6b070648b7c65a1f5)) ([DVLS-14697](https://devolutions.atlassian.net/browse/DVLS-14697))
 
-- _agent_: connect tunnel targets matched by an advertised domain ([#1884](https://github.com/Devolutions/devolutions-gateway/issues/1884)) ([29ec5ea5a2](https://github.com/Devolutions/devolutions-gateway/commit/29ec5ea5a2047f6b56d7d5a2a33ddb25a7e0174b))
+  Both connections now use one Kerberos-or-NTLM decision, preventing handshake failures when their authentication protocols disagree.
 
-  Enables agent tunnels to connect targets matched by advertised DNS domains and improves connection refusal diagnostics.
+- _dgw_: request credential-injection Kerberos tickets for the Gateway hostname ([#1856](https://github.com/Devolutions/devolutions-gateway/issues/1856)) ([8e5dc9142b](https://github.com/Devolutions/devolutions-gateway/commit/8e5dc9142b80035c366264ada68f0bad5061c947))
 
-- _dgw_: decide credential-injection CredSSP protocol once for both legs ([#1862](https://github.com/Devolutions/devolutions-gateway/issues/1862)) ([6ccf248c58](https://github.com/Devolutions/devolutions-gateway/commit/6ccf248c58cc5bf71a33a8e6b070648b7c65a1f5)) ([DVLS-14697](https://devolutions.atlassian.net/browse/DVLS-14697))
+- _agent_: report only available package managers as capabilities ([#1901](https://github.com/Devolutions/devolutions-gateway/issues/1901)) ([d71feadfca](https://github.com/Devolutions/devolutions-gateway/commit/d71feadfca74d2285511fcb3bfc6d799f6d2754a))
 
-  Both credential-injection CredSSP legs now use one Kerberos-or-NTLM decision, preventing handshake failures when the client-facing and target-facing protocols disagree.
-
-- _dgw_: target Gateway hostname when using the credential-injection fake KDC proxy ([#1856](https://github.com/Devolutions/devolutions-gateway/issues/1856)) ([8e5dc9142b](https://github.com/Devolutions/devolutions-gateway/commit/8e5dc9142b80035c366264ada68f0bad5061c947))
-
-  Updates the credential-injection fake KDC to issue Kerberos tickets for the Gateway hostname rather than the downstream RDP host.
-
-- _agent_: enforce client identity for user-scope execution when broker is not SYSTEM ([#1892](https://github.com/Devolutions/devolutions-gateway/issues/1892)) ([1fe893d2b1](https://github.com/Devolutions/devolutions-gateway/commit/1fe893d2b16211d4f62cf308a7f2f5c0f5b09613))
-
-- _agent_: harden package broker pipe against connection floods ([#1902](https://github.com/Devolutions/devolutions-gateway/issues/1902)) ([23a97845f8](https://github.com/Devolutions/devolutions-gateway/commit/23a97845f847664f675227bb0fd39ae33a7476ec))
-
-- _agent_: restrict pre/post operation commands to non-elevated execution ([#1903](https://github.com/Devolutions/devolutions-gateway/issues/1903)) ([4c4cd8792f](https://github.com/Devolutions/devolutions-gateway/commit/4c4cd8792f87e663ba3c11bd61af305bbdaca050))
-
-- _agent_: probe package manager availability instead of hardcoding capabilities ([#1901](https://github.com/Devolutions/devolutions-gateway/issues/1901)) ([d71feadfca](https://github.com/Devolutions/devolutions-gateway/commit/d71feadfca74d2285511fcb3bfc6d799f6d2754a))
-
-- _agent_: verify DACL and owner of package manager binaries before elevated execution ([#1889](https://github.com/Devolutions/devolutions-gateway/issues/1889)) ([4e10a490f6](https://github.com/Devolutions/devolutions-gateway/commit/4e10a490f6a365160d364b32827c9d5a838d33d5))
-
-- _agent_: support app execution aliases for elevated broker executions ([#1907](https://github.com/Devolutions/devolutions-gateway/issues/1907)) ([d45b176d89](https://github.com/Devolutions/devolutions-gateway/commit/d45b176d8966917deead2e71cfc389bbc396fd71))
-
-- _agent_: allow DVC open retries to complete before negotiation times out ([4528d093e8](https://github.com/Devolutions/devolutions-gateway/commit/4528d093e8775fc190d517037277a2c882602912))
+- _agent_: support app execution aliases for elevated package operations ([#1907](https://github.com/Devolutions/devolutions-gateway/issues/1907)) ([d45b176d89](https://github.com/Devolutions/devolutions-gateway/commit/d45b176d8966917deead2e71cfc389bbc396fd71))
 
 - _webapp_: recover shadow playback after recording gaps ([#1916](https://github.com/Devolutions/devolutions-gateway/issues/1916)) ([ed74e60bb1](https://github.com/Devolutions/devolutions-gateway/commit/ed74e60bb170f28daa33411f27420ccb62f74a9f))
 
-  Fixes ShadowPlayer playback getting stuck after a gap in a recording
-  stream.
-
-  When screen updates resume, the viewer now continues playback from the
-  latest available video instead of remaining on an earlier buffered
-  segment.
-
-- _dgw,agent_: make DNS route matching explicit ([#1886](https://github.com/Devolutions/devolutions-gateway/issues/1886)) ([0ec200ad5d](https://github.com/Devolutions/devolutions-gateway/commit/0ec200ad5d383fd648e741e0a303c7ed60405810))
-
-  Makes Agent Tunnel DNS routing explicit and predictable:
-  - `example.com` matches only `example.com`.
-  - `*.example.com` matches subdomains, but not the bare parent.
-  - Domain detection suggests the explicit wildcard route instead of
-  silently widening a plain name.
-
-  This moves Agent Tunnel to protocol/ALPN v2 so mixed old/new semantics
-  fail clearly. The installer remains one-way and never imports stale
-  domains from `agent.json`.
+  Playback resumes from the latest available video when screen updates continue after a recording gap.
 
 - _webapp_: restore hostname suggestion contrast ([#1929](https://github.com/Devolutions/devolutions-gateway/issues/1929)) ([1dd9b44f99](https://github.com/Devolutions/devolutions-gateway/commit/1dd9b44f99fabba24928361b890162ceb2d62368)) ([DGW-337](https://devolutions.atlassian.net/browse/DGW-337))
 
-  The hostname suggestion list did not set its own text colour, so options
-  were painted with whatever colour the PrimeNG theme supplied. When that
-  colour was close to the panel background the suggestions were invisible
-  until the pointer moved over them.
-
-  The styles meant to prevent this had been written against PrimeNG 18
-  class names and stopped matching anything when the app moved to PrimeNG
-  20. They are now ported to the current class names and the suggestion
-  list is themed like every other dropdown, so options stay readable in
-  both light and dark themes.
-
-- _agent_: restrict private key permissions on Windows ([#1931](https://github.com/Devolutions/devolutions-gateway/issues/1931)) ([f87b5d7a74](https://github.com/Devolutions/devolutions-gateway/commit/f87b5d7a746cd618f1ce66ed34284e163921193c))
-
-  New Agent Tunnel private keys now use an access control list restricted to SYSTEM and Administrators instead of inheriting permissions from the data directory.
+  Hostname suggestions remain readable in light and dark themes.
 
 - _dgw_: reuse credential injection across reconnects ([#1900](https://github.com/Devolutions/devolutions-gateway/issues/1900)) ([316a53c5fe](https://github.com/Devolutions/devolutions-gateway/commit/316a53c5fed89d0a28235440c4f2dd21259bc104)) ([DVLS-14697](https://devolutions.atlassian.net/browse/DVLS-14697))
 
-  Gateway retains provisioned credential-injection mappings for the association token lifetime so native RDP reconnects can reuse the same credentials safely.
+  Native RDP reconnects can reuse provisioned credentials for the association token lifetime.
 
-- _webapp_: fix VNC form type error in non-secure contexts ([#1964](https://github.com/Devolutions/devolutions-gateway/issues/1964)) ([bd620363c2](https://github.com/Devolutions/devolutions-gateway/commit/bd620363c2a0eac781826f5e080b314de4c18e8b))
-
-- _dgw_: reject null event source handles ([#1972](https://github.com/Devolutions/devolutions-gateway/issues/1972)) ([ed89cc38b5](https://github.com/Devolutions/devolutions-gateway/commit/ed89cc38b52fa1b5fb336b673e93b42c6bb277ba))
-
-  Treats the null handle returned by RegisterEventSourceW as a
-  registration failure, preventing invalid event source handles from being
-  retained and used for Windows Event Log writes.
+- _webapp_: fix the VNC form in non-secure browser contexts ([#1964](https://github.com/Devolutions/devolutions-gateway/issues/1964)) ([bd620363c2](https://github.com/Devolutions/devolutions-gateway/commit/bd620363c2a0eac781826f5e080b314de4c18e8b))
 
 - _dgw,jetsocat_: flush JMUX messages promptly ([#1939](https://github.com/Devolutions/devolutions-gateway/pull/1939))
 
-  JMUX now flushes when the send queue drains, with a short coalescing window to prevent round-trip-dependent traffic from accumulating delay while retaining bulk-transfer throughput.
-
-  Jetsocat disables Nagle's algorithm on relay sockets so promptly flushed messages are not delayed again by TCP.
-
-### Performance
-
-- _jmux,jetsocat_: reuse sender flush timer ([#1909](https://github.com/Devolutions/devolutions-gateway/issues/1909)) ([9f9313db5e](https://github.com/Devolutions/devolutions-gateway/commit/9f9313db5ecf2c6807ecb64fc6756ee588042f88))
-
-  The JMUX sender created a new Tokio sleep future for every queued packet
-  before its debounce flush. Under sustained message traffic, that timer
-  churn adds avoidable runtime overhead.
-
-  Reuse and reset one pinned 10 ms timer instead. The sender retains its
-  trailing debounce behavior: it flushes 10 ms after the most recently
-  received message.
-
-  A saturated send-loop microbenchmark on Tokio 1.52.3 reduced median
-  timer-management cost from 221.3 ns to 121.6 ns per iteration. This
-  measures timer overhead only, not end-to-end JMUX throughput.
-
-- _dgw_: avoid cloning decoded frames ([#1955](https://github.com/Devolutions/devolutions-gateway/issues/1955)) ([83ad9af1ff](https://github.com/Devolutions/devolutions-gateway/commit/83ad9af1ffcad9ac6791fea59d5a59020acd4559))
-
-  Re-encoding cloned each decoded video frame after extracting it. Move
-  the sole frame out of the collection to avoid that allocation and copy.
-
-### Documentation
-
-- Document human-owned intent ([#1952](https://github.com/Devolutions/devolutions-gateway/issues/1952)) ([697a3eed60](https://github.com/Devolutions/devolutions-gateway/commit/697a3eed606e2aeefb810f694c6aa152fa3eb97c))
-
-  Explain how `INTENT.md` captures durable design decisions and how it
-  relates to agent instructions, source code, and tests.
-
-### Build
-
-- _agent_: update now-policy-api to 0.3.1 ([#1928](https://github.com/Devolutions/devolutions-gateway/issues/1928)) ([6bfe09d15a](https://github.com/Devolutions/devolutions-gateway/commit/6bfe09d15a6c7dc94e8040d86c5e02073fd5f4a5))
+  Round-trip-dependent traffic such as HTTP/2 uploads no longer accumulates the JMUX flush delay on every flow-control update.
 
 ## 2026.2.4 (2026-07-24)
 
