@@ -48,10 +48,10 @@ const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 ///
 /// Never reset by later messages, so a steady stream cannot postpone a flush indefinitely.
 /// Tokio's timer granularity is around a millisecond, so this bounds latency rather than
-/// providing fine control; the drain check below is what keeps latency low in practice.
+/// providing fine control; the drain check in `JmuxSenderTask` keeps latency low in practice.
 const JMUX_FLUSH_COALESCING_WINDOW: core::time::Duration = core::time::Duration::from_millis(1);
 
-/// Minimum spacing between flushes triggered by the send queue running dry.
+/// Minimum time since the last flush before a drained send queue triggers another one.
 ///
 /// Flushing every time the queue drains is ideal for latency but ruinous for throughput: a
 /// relay's producer is paced by the network, so under a bulk transfer the queue drains
@@ -447,53 +447,44 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
         let flush_deadline = tokio::time::sleep(JMUX_FLUSH_COALESCING_WINDOW);
         tokio::pin!(flush_deadline);
 
-        'outer: loop {
+        loop {
             tokio::select! {
-                msg = msg_to_send_rx.recv() => {
-                    let Some(mut msg) = msg else {
-                        break;
-                    };
+                biased;
 
-                    // Write out everything already queued before considering a flush, so that
-                    // bursts are coalesced into as few writes as possible.
-                    // INVARIANT: `msg` always holds a message that has not been encoded yet.
-                    loop {
-                        trace!(?msg, "Send channel message");
-
-                        buf.clear();
-                        msg.encode(&mut buf)?;
-
-                        jmux_writer.write_all(&buf).await?;
-
-                        if !needs_flush {
-                            flush_deadline
-                                .as_mut()
-                                .reset(tokio::time::Instant::now() + JMUX_FLUSH_COALESCING_WINDOW);
-                            needs_flush = true;
-                        }
-
-                        match msg_to_send_rx.try_recv() {
-                            Ok(next) => msg = next,
-                            Err(mpsc::error::TryRecvError::Empty) => break,
-                            Err(mpsc::error::TryRecvError::Disconnected) => break 'outer,
-                        }
-                    }
-
-                    // The queue ran dry, so there is nothing left to batch with: flush, unless
-                    // a flush just happened and more traffic is plainly still flowing.
-                    let flushed_recently = last_flush
-                        .is_some_and(|instant| instant.elapsed() < JMUX_FLUSH_MIN_SPACING);
-
-                    if !flushed_recently {
-                        jmux_writer.flush().await?;
-                        needs_flush = false;
-                        last_flush = Some(tokio::time::Instant::now());
-                    }
-                }
                 _ = flush_deadline.as_mut(), if needs_flush => {
                     jmux_writer.flush().await?;
                     needs_flush = false;
                     last_flush = Some(tokio::time::Instant::now());
+                }
+                msg = msg_to_send_rx.recv() => {
+                    let Some(msg) = msg else {
+                        break;
+                    };
+
+                    trace!(?msg, "Send channel message");
+
+                    buf.clear();
+                    msg.encode(&mut buf)?;
+
+                    jmux_writer.write_all(&buf).await?;
+
+                    if !needs_flush {
+                        flush_deadline
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + JMUX_FLUSH_COALESCING_WINDOW);
+                        needs_flush = true;
+                    }
+
+                    // Flush when the queue runs dry unless the deadline is already covering
+                    // bytes written shortly after the previous flush.
+                    let flushed_recently = last_flush
+                        .is_some_and(|instant| instant.elapsed() < JMUX_FLUSH_MIN_SPACING);
+
+                    if msg_to_send_rx.is_empty() && !flushed_recently {
+                        jmux_writer.flush().await?;
+                        needs_flush = false;
+                        last_flush = Some(tokio::time::Instant::now());
+                    }
                 }
             }
         }
