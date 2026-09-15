@@ -202,8 +202,7 @@ fn empty_policy() -> Value {
 
 fn policy_draft(id: &str, publisher: &str) -> Value {
     json!({
-        "$schema": "https://devolutions.net/schemas/now-policy-draft.schema.1.0.json",
-        "PolicyVersion": "1.0.0",
+        "PolicyFormatVersion": "1.0.0",
         "PolicyType": "PackageBrokerPolicy",
         "Metadata": { "Id": id, "Publisher": publisher },
         "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },

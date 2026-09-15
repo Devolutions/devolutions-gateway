@@ -7,7 +7,7 @@ use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/8";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/9";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -78,14 +78,9 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         ));
         return invalid_result(findings);
     }
-    check_constant(
-        raw,
-        "$schema",
-        "/$schema",
-        now_policy::POLICY_DRAFT_SCHEMA_URI,
-        PolicyFindingCode::UnsupportedSchema,
-        &mut findings,
-    );
+    if reject_legacy_policy_identity(raw, &mut findings) {
+        return invalid_result(findings);
+    }
     check_constant(
         raw,
         "PolicyType",
@@ -94,7 +89,7 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         PolicyFindingCode::UnsupportedPolicyType,
         &mut findings,
     );
-    check_policy_version(raw, &mut findings);
+    check_policy_format_version(raw, &mut findings);
     if has_error(&findings) {
         return invalid_result(findings);
     }
@@ -211,36 +206,58 @@ fn check_constant(
         )),
     }
 }
-fn check_policy_version(raw: &serde_json::Value, findings: &mut Findings) {
-    const PATH: &str = "/PolicyVersion";
-    match raw.get("PolicyVersion") {
+fn reject_legacy_policy_identity(raw: &serde_json::Value, findings: &mut Findings) -> bool {
+    let has_schema = raw.get("$schema").is_some();
+    if has_schema {
+        findings.push(error(
+            PolicyFindingCode::UnsupportedPolicyFormatVersion,
+            "/$schema",
+            "'$schema' is unsupported; remove it and use 'PolicyFormatVersion'",
+        ));
+    }
+    let has_policy_version = raw.get("PolicyVersion").is_some();
+    if has_policy_version {
+        findings.push(error(
+            PolicyFindingCode::UnsupportedPolicyFormatVersion,
+            "/PolicyVersion",
+            "'PolicyVersion' is unsupported; rename it to 'PolicyFormatVersion'",
+        ));
+    }
+    has_schema || has_policy_version
+}
+fn check_policy_format_version(raw: &serde_json::Value, findings: &mut Findings) {
+    const PATH: &str = "/PolicyFormatVersion";
+    match raw.get("PolicyFormatVersion") {
         None => findings.push(error(
             PolicyFindingCode::MissingRequiredField,
             PATH,
-            "missing required field 'PolicyVersion'",
+            "missing required field 'PolicyFormatVersion'",
         )),
         Some(serde_json::Value::String(value)) if value.len() > 128 => findings.push(error(
             PolicyFindingCode::InvalidFieldValue,
             PATH,
-            "PolicyVersion exceeds the maximum length of 128",
+            "PolicyFormatVersion exceeds the maximum length of 128",
         )),
         Some(serde_json::Value::String(value)) => match semver::Version::parse(value) {
             Ok(version) if version.major == 1 => {}
             Ok(version) => findings.push(error(
-                PolicyFindingCode::UnsupportedPolicyVersion,
+                PolicyFindingCode::UnsupportedPolicyFormatVersion,
                 PATH,
-                format!("unsupported PolicyVersion major '{}'; expected 1.x", version.major),
+                format!(
+                    "unsupported PolicyFormatVersion major '{}'; expected 1.x",
+                    version.major
+                ),
             )),
             Err(parse_error) => findings.push(error(
                 PolicyFindingCode::InvalidFieldValue,
                 PATH,
-                format!("PolicyVersion is not a valid semantic version: {parse_error}"),
+                format!("PolicyFormatVersion is not a valid semantic version: {parse_error}"),
             )),
         },
         Some(_) => findings.push(error(
             PolicyFindingCode::InvalidFieldType,
             PATH,
-            "'PolicyVersion' must be a string",
+            "'PolicyFormatVersion' must be a string",
         )),
     }
 }
@@ -351,11 +368,12 @@ fn check_raw_set_array(
         }
     }
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiskFailureReason {
     Unreadable,
     InsecureStorage,
     MalformedContent,
+    LegacyPolicyContract,
     UnsupportedFormat,
     FailedSemanticValidation,
     WatcherUnavailable,
@@ -367,11 +385,18 @@ pub(crate) fn disk_failure_finding(reason: DiskFailureReason) -> PolicyFinding {
         DiskFailureReason::MalformedContent => {
             "the configured policy file does not contain a policy matching the expected schema"
         }
+        DiskFailureReason::LegacyPolicyContract => {
+            "the configured policy file uses the unsupported legacy '$schema' or 'PolicyVersion' field; replace it with the canonical 'PolicyFormatVersion' contract"
+        }
         DiskFailureReason::UnsupportedFormat => "the configured policy path uses an unsupported format",
         DiskFailureReason::FailedSemanticValidation => "the configured policy file failed semantic validation",
         DiskFailureReason::WatcherUnavailable => "policy change monitoring is unavailable",
     };
-    error(PolicyFindingCode::SchemaViolation, "", message)
+    let code = match reason {
+        DiskFailureReason::LegacyPolicyContract => PolicyFindingCode::UnsupportedPolicyFormatVersion,
+        _ => PolicyFindingCode::SchemaViolation,
+    };
+    error(code, "", message)
 }
 fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, findings: &mut Findings) {
     if draft.rules.len() > MAX_RULES {
@@ -819,8 +844,7 @@ mod tests {
     use super::*;
     fn draft() -> serde_json::Value {
         json!({
-            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
-            "PolicyVersion": "1.0.0",
+            "PolicyFormatVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "policy-a", "Publisher": "Test" },
             "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
@@ -852,16 +876,15 @@ mod tests {
     #[test]
     fn constants_and_unknown_fields_are_rejected() {
         for (pointer, value, code) in [
-            ("/$schema", json!("wrong"), PolicyFindingCode::UnsupportedSchema),
             (
                 "/PolicyType",
                 json!("OtherPolicy"),
                 PolicyFindingCode::UnsupportedPolicyType,
             ),
             (
-                "/PolicyVersion",
+                "/PolicyFormatVersion",
                 json!("2.0.0"),
-                PolicyFindingCode::UnsupportedPolicyVersion,
+                PolicyFindingCode::UnsupportedPolicyFormatVersion,
             ),
         ] {
             let mut raw = draft();
@@ -871,6 +894,43 @@ mod tests {
         let mut raw = draft();
         raw["Unexpected"] = json!(true);
         assert!(has_code(&validate_draft(&raw), PolicyFindingCode::UnknownField));
+    }
+    #[test]
+    fn legacy_policy_identity_is_rejected_with_precise_diagnostics() {
+        for (legacy_field, expected_message) in [
+            (
+                "$schema",
+                "'$schema' is unsupported; remove it and use 'PolicyFormatVersion'",
+            ),
+            (
+                "PolicyVersion",
+                "'PolicyVersion' is unsupported; rename it to 'PolicyFormatVersion'",
+            ),
+        ] {
+            let mut raw = draft();
+            raw[legacy_field] = json!("1.0.0");
+            let result = validate_draft(&raw);
+            assert!(!result.is_valid);
+            assert_eq!(result.findings.len(), 1);
+            assert_eq!(
+                result.findings[0].code,
+                PolicyFindingCode::UnsupportedPolicyFormatVersion
+            );
+            assert_eq!(result.findings[0].message, expected_message);
+        }
+    }
+    #[test]
+    fn compatible_policy_format_version_is_preserved() {
+        let mut raw = draft();
+        raw["PolicyFormatVersion"] = json!("1.7.3");
+        let result = validate_draft(&raw);
+        assert!(result.is_valid);
+        assert_eq!(
+            serde_json::to_value(result.canonical_draft)
+                .expect("serialize canonical draft")
+                .pointer("/PolicyFormatVersion"),
+            Some(&json!("1.7.3"))
+        );
     }
     #[test]
     fn structural_bounds_and_duplicate_ids_are_rejected() {

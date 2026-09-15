@@ -91,8 +91,7 @@ mod tests {
     use crate::policy_watcher::{WatcherFailure, fail_closed};
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
-            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
-            "PolicyVersion": "1.0.0",
+            "PolicyFormatVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": id, "Publisher": "Test" },
             "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },

@@ -41,6 +41,7 @@ use responses::{
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
 };
 
+// The unit value marks the scope in which an authenticated policy management request is dispatched.
 tokio::task_local! {
     static POLICY_MANAGEMENT_AUTHENTICATED: ();
 }
@@ -659,8 +660,7 @@ mod tests {
     use axum::response::Response;
     use chrono::Utc;
     use now_policy::{
-        PackageBrokerPolicy, PolicyEnforcement, PolicyMetadata, PolicySchemaUri, ResourceId, RulePrecedence,
-        SemanticVersion,
+        PackageBrokerPolicy, PolicyEnforcement, PolicyFormatVersion, PolicyMetadata, ResourceId, RulePrecedence,
     };
     use now_policy_api as api;
     use tower_service::Service as _;
@@ -705,8 +705,7 @@ mod tests {
     /// The most permissive policy possible: default Allow, no rules, audit mode on.
     fn permissive_policy() -> PolicyDocument {
         PolicyDocument {
-            _schema: PolicySchemaUri,
-            policy_version: SemanticVersion::from("1.0.0"),
+            policy_format_version: PolicyFormatVersion::current(),
             policy_type: PackageBrokerPolicy,
             metadata: PolicyMetadata {
                 id: ResourceId::from("test-policy"),
@@ -909,8 +908,7 @@ mod tests {
         assert_eq!(management.status(), StatusCode::OK);
 
         let draft = serde_json::json!({
-            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
-            "PolicyVersion": "1.0.0",
+            "PolicyFormatVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "created", "Publisher": "Test" },
             "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },

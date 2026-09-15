@@ -728,13 +728,8 @@ fn observe_file(_source: PolicyConfigurationSource, configured_path: &Path) -> O
         Ok(policy) => policy,
         Err(error) => {
             tracing::warn!(error = %error, "Configured policy parsing failed");
-            return invalid_observation(
-                display_path,
-                capability,
-                read_only_reason,
-                validation::DiskFailureReason::MalformedContent,
-                hasher,
-            );
+            let failure = disk_parse_failure_reason(&bytes);
+            return invalid_observation(display_path, capability, read_only_reason, failure, hasher);
         }
     };
     let committed_validation = validation::validate_committed_policy(&policy);
@@ -1043,6 +1038,22 @@ impl TestStorage {
     }
 }
 
+fn disk_parse_failure_reason(content: &[u8]) -> validation::DiskFailureReason {
+    if serde_json::from_slice::<serde_json::Value>(content)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_object()
+                .map(|object| object.contains_key("$schema") || object.contains_key("PolicyVersion"))
+        })
+        == Some(true)
+    {
+        validation::DiskFailureReason::LegacyPolicyContract
+    } else {
+        validation::DiskFailureReason::MalformedContent
+    }
+}
+
 #[cfg(test)]
 fn clone_observation(observation: &Observation) -> Observation {
     Observation {
@@ -1053,5 +1064,58 @@ fn clone_observation(observation: &Observation) -> Observation {
         read_only_reason: observation.read_only_reason,
         configured_path: observation.configured_path.clone(),
         fingerprint: observation.fingerprint.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_policy_identity_has_a_precise_disk_diagnostic() {
+        for content in [
+            br#"{"$schema":"legacy"}"#.as_slice(),
+            br#"{"PolicyVersion":"1.0.0"}"#.as_slice(),
+        ] {
+            assert_eq!(
+                disk_parse_failure_reason(content),
+                validation::DiskFailureReason::LegacyPolicyContract
+            );
+        }
+        assert_eq!(
+            disk_parse_failure_reason(br#"{"PolicyFormatVersion":"broken"}"#),
+            validation::DiskFailureReason::MalformedContent
+        );
+    }
+
+    #[test]
+    fn committed_policy_reader_rejects_legacy_identity_fields() {
+        let current: serde_json::Value =
+            serde_json::from_str(include_str!("../assets/samples/corporate-allowlist.policy.json"))
+                .expect("sample policy is valid JSON");
+        for (legacy_field, legacy_value) in [
+            ("$schema", serde_json::json!("legacy")),
+            ("PolicyVersion", serde_json::json!("1.0.0")),
+        ] {
+            let mut legacy = current.clone();
+            legacy[legacy_field] = legacy_value;
+            let error = serde_json::from_value::<PolicyDocument>(legacy).expect_err("legacy field must be rejected");
+            assert!(error.to_string().contains(legacy_field), "{error}");
+        }
+    }
+
+    #[test]
+    fn committed_policy_reader_preserves_compatible_format_version() {
+        let mut current: serde_json::Value =
+            serde_json::from_str(include_str!("../assets/samples/corporate-allowlist.policy.json"))
+                .expect("sample policy is valid JSON");
+        current["PolicyFormatVersion"] = serde_json::json!("1.7.3");
+        let policy = serde_json::from_value::<PolicyDocument>(current).expect("compatible format version");
+        assert_eq!(
+            serde_json::to_value(policy)
+                .expect("serialize policy")
+                .pointer("/PolicyFormatVersion"),
+            Some(&serde_json::json!("1.7.3"))
+        );
     }
 }

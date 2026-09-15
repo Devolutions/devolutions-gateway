@@ -31,9 +31,9 @@ hmac = "0.12"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
 notify = { version = "7", default-features = false }
-now-policy = "0.3"
-now-policy-api = "0.4"
-now-policy-server-template = "0.4"
+now-policy = "0.4"
+now-policy-api = "0.5"
+now-policy-server-template = "0.5"
 parking_lot = "0.12"
 regex = "1"
 semver = "1"
