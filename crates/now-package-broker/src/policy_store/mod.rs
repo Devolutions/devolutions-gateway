@@ -1014,15 +1014,16 @@ mod storage_tests {
         let before = store.management_snapshot().store_token;
         let result = store.replace(request).await.expect("compatible format is writable");
         assert_eq!(
-            serde_json::to_value(&result.policy).unwrap()["PolicyFormatVersion"],
+            serde_json::to_value(&result.policy).expect("serialize committed policy")["PolicyFormatVersion"],
             "1.7.3"
         );
         assert_ne!(before, result.management.store_token);
         let reloaded = store.reload_from_disk(ReloadCause::ExternalChange).await;
         assert_eq!(reloaded.store_token, result.management.store_token);
         assert_eq!(
-            serde_json::to_value(store.active_policy().expect("active policy").as_ref()).unwrap(),
-            serde_json::to_value(result.policy).unwrap()
+            serde_json::to_value(store.active_policy().expect("active policy").as_ref())
+                .expect("serialize reloaded policy"),
+            serde_json::to_value(result.policy).expect("serialize committed policy")
         );
     }
 

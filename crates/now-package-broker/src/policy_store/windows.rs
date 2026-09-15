@@ -4182,7 +4182,10 @@ mod tests {
             let mut final_file = match create_secure_transaction_file(&final_path) {
                 Ok(file) => file,
                 Err(error) => {
-                    eprintln!("Skipping administrator-owned repair recovery fixtures: {error:#}");
+                    tracing::warn!(
+                        error = %format!("{error:#}"),
+                        "Skipping administrator-owned repair recovery fixtures"
+                    );
                     return;
                 }
             };
