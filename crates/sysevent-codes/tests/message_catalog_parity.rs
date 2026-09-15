@@ -53,6 +53,54 @@ fn every_event_code_is_defined_once_in_every_catalog() {
 }
 
 #[test]
+fn every_catalog_message_terminates_each_translation() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for catalog in MESSAGE_CATALOGS {
+        let path = manifest_dir.join(catalog);
+        let content = std::fs::read_to_string(&path).expect("read message catalog");
+        assert!(
+            content.starts_with('\u{feff}'),
+            "{}: mc.exe requires a UTF-8 BOM to avoid decoding translations as ANSI",
+            path.display()
+        );
+        for (_, code) in declared_event_codes() {
+            let mut lines = message_block(&content, code).lines();
+            let mut languages = Vec::new();
+            while let Some(line) = lines.next() {
+                let Some(language) = line.strip_prefix("Language=") else {
+                    continue;
+                };
+                languages.push(language);
+                let mut terminated = false;
+                for text in lines.by_ref() {
+                    if text == "." {
+                        terminated = true;
+                        break;
+                    }
+                    assert!(
+                        !text.starts_with("Language="),
+                        "{}: MessageId={code} {language} lacks a message terminator",
+                        path.display()
+                    );
+                }
+                assert!(
+                    terminated,
+                    "{}: MessageId={code} {language} lacks a message terminator",
+                    path.display()
+                );
+            }
+            languages.sort_unstable();
+            assert_eq!(
+                languages,
+                ["English", "French", "German"],
+                "{}: MessageId={code} must define each translation once",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
 fn policy_catalog_insertions_match_structured_field_order() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
 
