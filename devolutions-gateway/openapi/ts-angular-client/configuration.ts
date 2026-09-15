@@ -87,6 +87,15 @@ export class Configuration {
             this.credentials = {};
         }
 
+        // init default enrollment_token credential
+        if (!this.credentials['enrollment_token']) {
+            this.credentials['enrollment_token'] = () => {
+                return typeof this.accessToken === 'function'
+                    ? this.accessToken()
+                    : this.accessToken;
+            };
+        }
+
         // init default jrec_token credential
         if (!this.credentials['jrec_token']) {
             this.credentials['jrec_token'] = () => {

@@ -81,7 +81,6 @@ async fn up_enrollment_against_real_gateway() {
     let config_handle = DgwConfig::builder()
         .disable_token_validation(true)
         .agent_tunnel(AgentTunnelConfig::builder().build())
-        .enable_unstable(true)
         .build()
         .init()
         .expect("init gateway config");

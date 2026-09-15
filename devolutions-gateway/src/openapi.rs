@@ -38,6 +38,10 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::monitoring::handle_drain_log,
         crate::api::traffic::post_traffic_claim,
         crate::api::traffic::post_traffic_ack,
+        crate::api::tunnel::enroll_agent,
+        crate::api::tunnel::list_agents,
+        crate::api::tunnel::get_agent,
+        crate::api::tunnel::delete_agent,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -99,6 +103,11 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::traffic::TrafficEventResponse,
         crate::api::traffic::EventOutcomeResponse,
         crate::api::traffic::TransportProtocolResponse,
+        crate::api::tunnel::EnrollRequest,
+        crate::api::tunnel::EnrollResponse,
+        crate::api::tunnel::AgentDomainAdvertisement,
+        crate::api::tunnel::AgentStatus,
+        crate::api::tunnel::AgentInfo,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -214,6 +223,17 @@ impl Modify for SecurityAddon {
                     .description(Some(
                         "Token allowing usage of the network exploration endpoints".to_owned(),
                     ))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "enrollment_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some("Single-use token authorizing Agent Tunnel enrollment".to_owned()))
                     .build(),
             ),
         );
@@ -393,7 +413,11 @@ struct PreflightOperation {
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
-    /// Minimum persistence duration in seconds for the data provisioned via this operation.
+    /// Retention duration in seconds for data provisioned by this operation.
+    ///
+    /// For "provision-credentials", this is the maximum staging time before the first credential
+    /// checkout. After checkout, Gateway retains the credentials for later connections authorized
+    /// for the same association.
     ///
     /// Optional parameter for "provision-token", "provision-credentials", and
     /// "provision-connection-options" kinds.

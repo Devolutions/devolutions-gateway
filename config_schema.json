@@ -108,6 +108,10 @@
       "$ref": "#/definitions/ProxyConf",
       "description": "HTTP/SOCKS proxy configuration for outbound requests."
     },
+    "AgentTunnel": {
+      "$ref": "#/definitions/AgentTunnelConf",
+      "description": "QUIC-based agent tunnel configuration."
+    },
     "LogFile": {
       "type": "string",
       "description": "Path to the log file."
@@ -508,6 +512,24 @@
       },
       "additionalProperties": false
     },
+    "AgentTunnelConf": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the agent tunnel listener is enabled."
+        },
+        "ListenPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 4433,
+          "description": "UDP port for the QUIC listener."
+        }
+      },
+      "additionalProperties": false
+    },
     "DebugConf": {
       "type": "object",
       "properties": {
@@ -536,11 +558,6 @@
         "lib_xmf_path": {
           "type": "string",
           "description": "Path to lib XMF files."
-        },
-        "kerberos_credential_injection": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether to enable proxy-based RDP credential injection against Kerberos-enforced targets."
         },
         "enable_unstable": {
           "type": "boolean",

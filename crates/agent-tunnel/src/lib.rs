@@ -6,6 +6,7 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod authorization;
 pub mod cert;
 pub mod listener;
 pub mod registry;

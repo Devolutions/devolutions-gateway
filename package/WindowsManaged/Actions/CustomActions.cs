@@ -329,6 +329,25 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult ConfigureAgentTunnel(Session session)
+        {
+            string command;
+
+            try
+            {
+                command = $"$AgentTunnel = New-DGatewayAgentTunnelConfig -Enabled -ListenPort {session.Get(GatewayProperties.agentTunnelPort)}; Set-DGatewayConfig -AgentTunnel $AgentTunnel";
+                command = FormatPowerShellCommand(session, command);
+            }
+            catch (Exception e)
+            {
+                session.Log($"command {nameof(ConfigureAgentTunnel)} execution failure: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ExecuteCommand(session, command);
+        }
+
+        [CustomAction]
         public static ActionResult ConfigurePublicKey(Session session)
         {
             string command;

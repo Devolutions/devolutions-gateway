@@ -76,7 +76,7 @@
         'New-DGatewayProvisionerKeyPair', 'Import-DGatewayProvisionerKey',
         'New-DGatewayDelegationKeyPair', 'Import-DGatewayDelegationKey',
         'New-DGatewayToken',
-        'New-DGatewayWebAppConfig',
+        'New-DGatewayWebAppConfig', 'New-DGatewayAgentTunnelConfig',
         'Set-DGatewayUser', 'Remove-DGatewayUser', 'Get-DGatewayUser',
         'Start-DGateway', 'Stop-DGateway', 'Restart-DGateway',
         'Get-DGatewayVersion', 'Get-DGatewayPackage',

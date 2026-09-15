@@ -239,6 +239,37 @@ jobs:
         shell: pwsh
         run: sccache --show-stats
 
+  agent-tunnel-e2e:
+    name: agent tunnel end-to-end test
+    needs: [preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
+      - name: Configure runner
+        run: docker info
+
+      - name: Test agent tunnel
+        shell: pwsh
+        run: cargo test --locked -p testsuite --test integration_tests cli::agent::tunnel::docker_isolates_real_agent_dns_and_ip_routes -- --ignored --exact --nocapture
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
+
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
     needs: [preflight]
@@ -1205,7 +1236,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '4F49964CC9CBAC2B5D87BDC8F9526012E9C4B243D8B7D0C0BB51F254A721CA2E'
+          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1239,6 +1270,65 @@ jobs:
           psexec -accepteula -s pwsh.exe $scriptPath
           Get-Content -Path ./crates/pedm-simulator/pedm-simulator_run-expect-elevation.out
 
+  agent-policy-e2e:
+    name: Agent policy end-to-end test
+    runs-on: windows-2022
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
+      # Keep this installation aligned with the PEDM simulator job.
+      - name: Install PsExec
+        shell: pwsh
+        run: |
+          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
+          $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
+          $actualHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw "PSTools.zip checksum mismatch: expected $expectedHash, got $actualHash"
+          }
+          Expand-Archive -Path $zipPath -DestinationPath $toolsDir
+          Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
+
+      - name: Build Agent policy test executables
+        shell: pwsh
+        run: |
+          cargo build --locked -p devolutions-agent --features dev-skip-broker-signature
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          cargo build --locked -p agent-policy-tester
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Run Agent policy tester as LocalSystem
+        shell: pwsh
+        run: |
+          $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-as-system.ps1"
+          psexec -accepteula -s pwsh.exe -NoProfile -File $scriptPath
+          $exitCode = $LASTEXITCODE
+          Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester.out
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
+
   secure-memory-verifier:
     name: secure-memory-verifier
     runs-on: windows-2022
@@ -1267,7 +1357,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

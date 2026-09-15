@@ -89,7 +89,7 @@ impl VideoBlock {
 
     // We only handle non-lacing frames for now
     pub(crate) fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
-        let frame: Vec<_> = match &self.block_tag {
+        let mut frames: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(data)?;
                 simple_block
@@ -120,8 +120,8 @@ impl VideoBlock {
             }
         };
 
-        assert!(frame.len() == 1);
-        Ok(frame[0].clone())
+        assert!(frames.len() == 1);
+        Ok(frames.pop().expect("frame length was asserted"))
     }
 }
 
@@ -208,7 +208,22 @@ pub(crate) fn is_vp9_key_frame(buffer: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_vp9_key_frame;
+    use cadeau::xmf::vpx::VpxCodec;
+    use webm_iterable::matroska_spec::{MatroskaSpec, SimpleBlock};
+
+    use super::{VideoBlock, is_vp9_key_frame};
+
+    #[test]
+    fn get_frame_returns_simple_block_frame() {
+        let expected_frame = vec![0x00, 0x01, 0x02];
+        let tag: MatroskaSpec = SimpleBlock::new_uncheked(&expected_frame, 1, 0, false, None, false, true).into();
+        let video_block = VideoBlock::new(tag, None, VpxCodec::VP8).expect("simple block should be valid");
+
+        assert_eq!(
+            video_block.get_frame().expect("frame should be available"),
+            expected_frame
+        );
+    }
 
     #[test]
     fn vp9_empty_buffer_is_not_keyframe() {

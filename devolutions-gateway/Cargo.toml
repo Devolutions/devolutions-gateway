@@ -36,6 +36,7 @@ network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel" }
+agent-tunnel-libsql = { path = "../crates/agent-tunnel-libsql" }
 ironrdp-pdu = { version = "0.9", features = ["std"] }
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
@@ -123,7 +124,7 @@ dlopen = "0.1"
 dlopen_derive = "0.1"
 
 # Video processing for session recording
-cadeau = { version = "0.5", features = ["dlopen"] }
+cadeau = { version = "0.5.2", features = ["dlopen"] }
 
 # Dependencies required for PCAP support
 # QUESTION: should we keep that built-in?

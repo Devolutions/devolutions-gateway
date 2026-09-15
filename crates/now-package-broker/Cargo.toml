@@ -30,9 +30,9 @@ hex = "0.4"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
 notify = { version = "7", default-features = false }
-now-policy = "0.2"
-now-policy-api = { version = "0.3", features = ["policy-compat"] }
-now-policy-server-template = { version = "0.3", features = ["policy-compat"] }
+now-policy = "0.3"
+now-policy-api = "0.4"
+now-policy-server-template = "0.4"
 parking_lot = "0.12"
 regex = "1"
 semver = "1"
@@ -66,6 +66,5 @@ features = [
 
 [target.'cfg(windows)'.dev-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 tempfile = "3"
 tokio = { version = "1.52", features = ["rt-multi-thread"] }

@@ -49,6 +49,7 @@
                 <String Id="ViewErrorsButton">View configuration issues</String>
                 <String Id="ViewLogButton">View Log</String>
                     <!-- propertyGroups -->
+                <String Id="Group_AgentTunnel">Agent Tunnel</String>
                 <String Id="Group_Certificate">Certificate</String>
                 <String Id="Group_EncryptionKeys">Encryption Keys</String>
                 <String Id="Group_ExternalAccess">External Access</String>
@@ -94,6 +95,7 @@
                 <String Id="StoreName_TrustedPublisher">Trusted Publishers</String>
                     <!-- properties -->
                 <String Id="Property_AccessUri">Access URI</String>
+                <String Id="Property_AgentTunnelPort">UDP Port</String>
                 <String Id="Property_AuthenticationMode">Authentication Mode</String>
                 <String Id="Property_CertificateFile">Certificate File</String>
                 <String Id="Property_CertificateLocation">Certificate Location</String>
@@ -104,6 +106,7 @@
                 <String Id="Property_CertificateStore">Certificate Store</String>
                 <String Id="Property_DevolutionsServerUrl">Devolutions Server URL</String>
                 <String Id="Property_Directory">Directory</String>
+                <String Id="Property_EnableAgentTunnel">Enabled</String>
                 <String Id="Property_HttpListener">HTTP Listener</String>
                 <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
                 <String Id="Property_NewKeyPair">A new key pair will be generated</String>
@@ -152,12 +155,14 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
                     <!-- dialogs.customize -->
+                <String Id="AgentTunnelUdpPort">UDP port</String>
                 <String Id="ConfigurationOptions">Configuration Options</String>
                 <String Id="ConfigureTheGatewayInstallation">Configure the Gateway installation</String>
                 <String Id="CustomInstallDlgDescription">Choose how to configure [ProductName].</String>
                 <String Id="CustomInstallDlgInfoLabel">The Setup Wizard will generate a configuration which you can update later; or you can provide configuration information now.</String>
                 <String Id="CustomInstallDlgTitle">Configuration</String>
                 <String Id="EnableAccessOverTheInternetUsingNgrok">Enable access over the internet using ngrok</String>
+                <String Id="EnableAgentTunnel">Enable Agent Tunnel</String>
                 <String Id="EnableTheGatewayWebInterface">Enable the Gateway web interface</String>
                 <String Id="GenerateASelfSignedHttpsCertificate">Generate a self-signed HTTPS certificate</String>
                 <String Id="GenerateEncryptionKeys">Generate encryption keys</String>

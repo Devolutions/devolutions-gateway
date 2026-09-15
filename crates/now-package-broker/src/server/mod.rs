@@ -5,14 +5,19 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use axum::extract::Request;
+use axum::http::{Method, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use now_policy::PolicyDocument;
 use now_policy_api::{
     CancelRequest, CancelResponse, CancelResponseKind, CapabilitiesResponse, CapabilitiesResponseKind, Decision,
     DecisionInfo, Elevation, ErrorCode, ErrorResponse, EvaluationResponse, EvaluationResponseKind, ExecutionResponse,
     ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName,
-    OperationStatus, OperationSubmission, PackageRequest, Scope, StatusRequest, StatusResponse, StatusResponseKind,
-    Transport,
+    OperationStatus, OperationSubmission, PackageRequest, PolicyManagementResponse, PolicyReplacementRequest,
+    PolicyReplacementResponse, PolicyResponse, PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse,
+    Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
 use tracing::{info, trace, warn};
@@ -98,6 +103,17 @@ struct EvaluatedRequest {
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection { state, client });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
+        .layer(middleware::from_fn(restrict_phase_one_policy_routes))
+}
+
+async fn restrict_phase_one_policy_routes(request: Request, next: Next) -> Response {
+    match (request.method(), request.uri().path()) {
+        (_, "/v1/policy/management" | "/v1/policy/validate") => StatusCode::NOT_FOUND.into_response(),
+        (method, "/v1/policy") if method != Method::GET && method != Method::HEAD => {
+            (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "GET, HEAD")]).into_response()
+        }
+        _ => next.run(request).await,
+    }
 }
 
 struct BrokerConnection {
@@ -113,6 +129,44 @@ impl PackageBrokerServer for BrokerConnection {
 
     async fn capabilities(&self) -> CapabilitiesResponse {
         self.state.capabilities(self.client.user_sid()).await
+    }
+
+    async fn active_policy(&self) -> Result<PolicyResponse, ErrorResponse> {
+        self.client
+            .validate_connection(self.state.skip_signature_validation)
+            .map_err(|error| {
+                warn!(error = format!("{error:#}"), "Rejected package broker policy request");
+                error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
+            })?;
+
+        self.state.policy_response()
+    }
+
+    async fn policy_management(&self) -> Result<PolicyManagementResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy management is unavailable",
+        ))
+    }
+
+    async fn validate_policy(
+        &self,
+        _request: PolicyValidationRequest,
+    ) -> Result<PolicyValidationResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy validation is unavailable",
+        ))
+    }
+
+    async fn replace_policy(
+        &self,
+        _request: PolicyReplacementRequest,
+    ) -> Result<PolicyReplacementResponse, ErrorResponse> {
+        Err(error_response(
+            ErrorCode::UnsupportedEndpoint,
+            "policy replacement is unavailable",
+        ))
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
@@ -163,6 +217,28 @@ impl PackageBrokerServer for BrokerConnection {
 }
 
 impl BrokerState {
+    fn active_policy_snapshot(&self) -> Option<Arc<PolicyDocument>> {
+        let guard = self.policy.read().expect("policy lock poisoned");
+        guard.as_ref().map(Arc::clone)
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
+    fn policy_response(&self) -> Result<PolicyResponse, ErrorResponse> {
+        let policy = self
+            .active_policy_snapshot()
+            .ok_or_else(|| error_response(ErrorCode::NotFound, "active policy is unavailable"))?;
+
+        Ok(PolicyResponse {
+            response_kind: PolicyResponseKind,
+            response_version: api_version(),
+            server: server_context(),
+            policy: (*policy).clone(),
+        })
+    }
+
     async fn health(&self) -> HealthResponse {
         let policy_guard = self.policy.read().expect("policy lock poisoned");
         let (status, policy_id) = match policy_guard.as_ref() {
@@ -394,6 +470,10 @@ impl BrokerState {
         })
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
@@ -419,18 +499,9 @@ impl BrokerState {
         }
 
         let received_at = Utc::now();
-        let policy = {
-            let guard = self.policy.read().expect("policy lock poisoned");
-            match guard.as_ref() {
-                Some(policy) => Arc::clone(policy),
-                None => {
-                    return Err(error_response(
-                        ErrorCode::BrokerPaused,
-                        "policy file is unavailable or corrupted",
-                    ));
-                }
-            }
-        };
+        let policy = self
+            .active_policy_snapshot()
+            .ok_or_else(|| error_response(ErrorCode::BrokerPaused, "active policy is unavailable"))?;
 
         if let Some(reason) = policy_validity_failure(&policy, received_at) {
             warn!(%reason, "Rejecting request: policy outside validity window");
@@ -458,7 +529,10 @@ impl BrokerState {
         let effective_decision = if audit_mode {
             Decision::Allow
         } else {
-            decision.decision.into()
+            match decision.decision {
+                now_policy::Decision::Allow => Decision::Allow,
+                now_policy::Decision::Deny => Decision::Deny,
+            }
         };
 
         let reason = if audit_mode && decision.decision != now_policy::Decision::Allow {
@@ -521,12 +595,15 @@ mod tests {
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request, StatusCode};
     use chrono::Utc;
     use now_policy::{
         PackageBrokerPolicy, PolicyEnforcement, PolicyMetadata, PolicySchemaUri, ResourceId, RulePrecedence,
         SemanticVersion,
     };
     use now_policy_api as api;
+    use tower_service::Service as _;
 
     use super::*;
     use crate::executor::{ExecutionOutput, OperationCanceled, ProcessStartedCallback};
@@ -599,6 +676,127 @@ mod tests {
             skip_signature_validation: true,
             manager_probe_cache: Default::default(),
         }
+    }
+
+    fn shared_state(policy: Option<PolicyDocument>) -> Arc<BrokerState> {
+        let mut state = state();
+        state.policy = RwLock::new(policy.map(Arc::new));
+        Arc::new(state)
+    }
+
+    async fn route_request(state: Arc<BrokerState>, method: Method, uri: &str) -> Response {
+        let client = PipeClient::from_current_process().expect("capture current test process");
+        let mut router = build_router_for_client(state, client);
+        router
+            .call(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("valid test request"),
+            )
+            .await
+            .expect("router is infallible")
+    }
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        serde_json::from_slice(&body).expect("response is valid JSON")
+    }
+
+    #[tokio::test]
+    async fn policy_route_rejects_unsigned_client() {
+        let mut state = state();
+        state.skip_signature_validation = false;
+        let response = route_request(Arc::new(state), Method::GET, "/v1/policy").await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = response_json(response).await;
+        let error: ErrorResponse = serde_json::from_value(body.clone()).expect("deserialize error response");
+        assert_eq!(error.code, ErrorCode::Unauthorized);
+        assert_eq!(error.message, "pipe client authentication failed");
+        assert!(body.get("Policy").is_none());
+    }
+
+    #[test]
+    fn policy_response_returns_not_found_when_unavailable() {
+        let Err(error) = shared_state(None).policy_response() else {
+            panic!("expected unavailable policy response");
+        };
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.message, "active policy is unavailable");
+    }
+
+    #[tokio::test]
+    async fn phase_one_router_does_not_expose_policy_management_routes() {
+        for (method, uri, expected_status) in [
+            (Method::GET, "/v1/policy/management", StatusCode::NOT_FOUND),
+            (Method::POST, "/v1/policy/validate", StatusCode::NOT_FOUND),
+            (Method::PUT, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
+            (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
+        ] {
+            let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
+            assert_eq!(response.status(), expected_status, "{uri}");
+            if expected_status == StatusCode::METHOD_NOT_ALLOWED {
+                assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET, HEAD");
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_policy_replacement_returns_only_complete_snapshots() {
+        let policy_a = permissive_policy();
+        let mut policy_b =
+            now_policy::schema::parse_policy_json(include_str!("../assets/samples/corporate-allowlist.policy.json"))
+                .expect("sample policy is valid");
+        policy_b.metadata.id = ResourceId::from("replacement-policy");
+        policy_b.metadata.revision = 42;
+
+        let current_policy_json = serde_json::to_value(&policy_a).unwrap();
+        let replacement_policy_json = serde_json::to_value(&policy_b).unwrap();
+        let policy_a = Arc::new(policy_a);
+        let policy_b = Arc::new(policy_b);
+        let state = shared_state(None);
+        *state.policy.write().expect("policy lock") = Some(Arc::clone(&policy_a));
+
+        const READER_COUNT: usize = 4;
+        const ITERATIONS: usize = 1_000;
+        let barrier = Arc::new(std::sync::Barrier::new(READER_COUNT + 1));
+
+        std::thread::scope(|scope| {
+            for _ in 0..READER_COUNT {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                let current_policy_json = &current_policy_json;
+                let replacement_policy_json = &replacement_policy_json;
+                scope.spawn(move || {
+                    barrier.wait();
+                    for _ in 0..ITERATIONS {
+                        let response = state.policy_response().expect("active policy response");
+                        let actual = serde_json::to_value(response.policy).unwrap();
+                        assert!(
+                            actual == *current_policy_json || actual == *replacement_policy_json,
+                            "response mixed two policy snapshots"
+                        );
+                        std::thread::yield_now();
+                    }
+                });
+            }
+
+            barrier.wait();
+            for index in 0..ITERATIONS {
+                let replacement = if index % 2 == 0 {
+                    Arc::clone(&policy_b)
+                } else {
+                    Arc::clone(&policy_a)
+                };
+                *state.policy.write().expect("policy lock") = Some(replacement);
+                std::thread::yield_now();
+            }
+        });
     }
 
     fn request() -> PackageRequest {
@@ -703,6 +901,14 @@ mod tests {
             panic!("expected request to be evaluated");
         };
         assert!(evaluated.would_execute);
+    }
+
+    #[test]
+    fn package_evaluation_without_policy_remains_paused() {
+        let Err(error) = shared_state(None).evaluate_request(&request()) else {
+            panic!("expected unavailable policy to pause package evaluation");
+        };
+        assert_eq!(error.code, ErrorCode::BrokerPaused);
     }
 
     fn make_state(available: Vec<ManagerName>) -> (Arc<BrokerState>, Arc<FakeExecutor>) {

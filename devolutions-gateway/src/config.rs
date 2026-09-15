@@ -1252,7 +1252,7 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
 
-        /// (Unstable) Agent tunnel configuration (QUIC-based agent tunnel)
+        /// QUIC-based agent tunnel configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub agent_tunnel: Option<AgentTunnelConf>,
 
@@ -1351,7 +1351,7 @@ pub mod dto {
         }
     }
 
-    /// (Unstable) QUIC-based agent tunnel configuration
+    /// QUIC-based agent tunnel configuration
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct AgentTunnelConf {
@@ -1360,12 +1360,12 @@ pub mod dto {
         pub enabled: bool,
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
-        pub listen_port: u16,
+        pub listen_port: std::num::NonZeroU16,
     }
 
     impl AgentTunnelConf {
-        fn default_listen_port() -> u16 {
-            4433
+        fn default_listen_port() -> std::num::NonZeroU16 {
+            std::num::NonZeroU16::new(4433).expect("default port is non-zero")
         }
     }
 
@@ -1418,15 +1418,6 @@ pub mod dto {
         #[serde(default = "ws_keep_alive_interval_default_value")]
         pub ws_keep_alive_interval: u64,
 
-        /// Enable proxy-based RDP credential injection against Kerberos-enforced targets
-        ///
-        /// Turns on the in-process KDC acceptor the Gateway presents to the client when injecting
-        /// credentials for accounts that can't fall back to NTLM (e.g. AD Protected Users).
-        /// Target-side KDC routing is not configured here. Off by default; still requires
-        /// `enable_unstable`.
-        #[serde(default)]
-        pub kerberos_credential_injection: bool,
-
         /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
@@ -1444,7 +1435,6 @@ pub mod dto {
                 capture_path: None,
                 lib_xmf_path: None,
                 enable_unstable: false,
-                kerberos_credential_injection: false,
                 ws_keep_alive_interval: ws_keep_alive_interval_default_value(),
             }
         }
@@ -1459,7 +1449,6 @@ pub mod dto {
                 && self.capture_path.is_none()
                 && self.lib_xmf_path.is_none()
                 && !self.enable_unstable
-                && !self.kerberos_credential_injection
                 && self.ws_keep_alive_interval == ws_keep_alive_interval_default_value()
         }
     }

@@ -286,6 +286,9 @@ pub enum RecordingFileType {
 }
 
 impl RecordingFileType {
+    pub const WEBM_CONTENT_TYPE: &'static str = "video/webm";
+    pub const TRP_CONTENT_TYPE: &'static str = "application/octet-stream";
+    pub const ASCIICAST_CONTENT_TYPE: &'static str = "application/x-asciicast";
     pub const SLOG_CONTENT_TYPE: &'static str = "application/x-ndjson";
 
     pub const fn format_name(self) -> &'static str {
@@ -316,10 +319,12 @@ impl RecordingFileType {
         }
     }
 
-    pub const fn content_type(self) -> Option<&'static str> {
+    pub const fn content_type(self) -> &'static str {
         match self {
-            RecordingFileType::SessionRecordingLog => Some(Self::SLOG_CONTENT_TYPE),
-            RecordingFileType::WebM | RecordingFileType::TRP | RecordingFileType::Asciicast => None,
+            RecordingFileType::WebM => Self::WEBM_CONTENT_TYPE,
+            RecordingFileType::TRP => Self::TRP_CONTENT_TYPE,
+            RecordingFileType::Asciicast => Self::ASCIICAST_CONTENT_TYPE,
+            RecordingFileType::SessionRecordingLog => Self::SLOG_CONTENT_TYPE,
         }
     }
 }
@@ -1174,26 +1179,26 @@ fn validate_token_impl(
             }
         }
 
-        // SCOPE, NETSCAN, JMUX, and ENROLLMENT tokens can never be reused.
+        // SCOPE, NETSCAN, and JMUX tokens can never be reused.
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Enrollment(EnrollmentTokenClaims { jti: id, exp, .. }) => {
-            match token_cache.lock().entry(id) {
-                Entry::Occupied(_) => {
-                    return Err(TokenError::UnexpectedReplay {
-                        reason: "never allowed for this use case",
-                    });
-                }
-                Entry::Vacant(bucket) => {
-                    bucket.insert(TokenSource {
-                        ip: source_ip,
-                        expiration_timestamp: exp,
-                        last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    });
-                }
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+            Entry::Occupied(_) => {
+                return Err(TokenError::UnexpectedReplay {
+                    reason: "never allowed for this use case",
+                });
             }
-        }
+            Entry::Vacant(bucket) => {
+                bucket.insert(TokenSource {
+                    ip: source_ip,
+                    expiration_timestamp: exp,
+                    last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
+                });
+            }
+        },
+
+        // Enrollment retry and replay state is persisted by the Agent authorization store.
+        AccessTokenClaims::Enrollment(_) => {}
 
         // JREC push tokens may be re-used as long as recording is considered as ongoing
         AccessTokenClaims::Jrec(JrecTokenClaims {
@@ -1277,6 +1282,24 @@ fn extract_uuid(token: &str, field: &str) -> anyhow::Result<Uuid> {
 
 pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jti").context("extract jti")
+}
+
+/// Extract the JWT `exp` claim without verifying the signature.
+pub fn extract_exp(token: &str) -> anyhow::Result<i64> {
+    let payload = extract_payload(token)?;
+    let exp = payload.get("exp").context("exp is missing from the token")?;
+    exp.as_i64()
+        .or_else(|| exp.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .context("exp is malformed")
+}
+
+/// Latest instant at which Gateway will still accept a token with this `exp`.
+///
+/// Includes the hardcoded JWT clock-skew leeway.
+pub(crate) fn token_acceptance_deadline(exp: i64) -> anyhow::Result<time::OffsetDateTime> {
+    let timestamp = exp.saturating_add(i64::from(LEEWAY_SECS));
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .context("token expiration is outside the supported timestamp range")
 }
 
 pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
@@ -1889,5 +1912,19 @@ mod tests {
 
         assert_ne!(claims.jti, Uuid::nil());
         assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
+    }
+
+    #[test]
+    fn recording_file_types_have_concrete_content_types() {
+        let expected = [
+            (RecordingFileType::WebM, "video/webm"),
+            (RecordingFileType::TRP, "application/octet-stream"),
+            (RecordingFileType::Asciicast, "application/x-asciicast"),
+            (RecordingFileType::SessionRecordingLog, "application/x-ndjson"),
+        ];
+
+        for (recording_file_type, expected_content_type) in expected {
+            assert_eq!(recording_file_type.content_type(), expected_content_type);
+        }
     }
 }

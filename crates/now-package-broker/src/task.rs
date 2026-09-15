@@ -20,7 +20,7 @@ pub struct BrokerTaskConfig {
     /// Named pipe name to listen on.
     pub pipe_name: String,
     /// Path to the policy file. If `None`, uses the default location.
-    /// Supports `.json`, `.yaml`, and `.yml` extensions.
+    /// Supports `.json` files.
     pub policy_path: Option<String>,
     /// Skip Authenticode signature validation for the broker client executable.
     pub skip_signature_validation: bool,

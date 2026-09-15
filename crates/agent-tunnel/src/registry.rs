@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use agent_tunnel_proto::{DomainAdvertisement, current_time_millis};
+use agent_tunnel_proto::{AGENT_OFFLINE_TIMEOUT_SECS, DomainAdvertisement, current_time_millis};
 use ipnetwork::Ipv4Network;
 use parking_lot::RwLock;
 use serde::Serialize;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::routing::RouteTarget;
 
 /// Duration after which an agent is considered offline if no heartbeat has been received.
-pub const AGENT_OFFLINE_TIMEOUT: Duration = Duration::from_secs(90);
+pub const AGENT_OFFLINE_TIMEOUT: Duration = Duration::from_secs(AGENT_OFFLINE_TIMEOUT_SECS);
 
 /// Tracks route advertisements received from an agent.
 ///

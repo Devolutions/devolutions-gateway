@@ -38,6 +38,10 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.gbConfigure = new System.Windows.Forms.GroupBox();
             this.tableLayoutPanel3 = new System.Windows.Forms.TableLayoutPanel();
+            this.chkEnableAgentTunnel = new System.Windows.Forms.CheckBox();
+            this.flowAgentTunnelPort = new System.Windows.Forms.FlowLayoutPanel();
+            this.lblAgentTunnelPort = new System.Windows.Forms.Label();
+            this.txtAgentTunnelPort = new System.Windows.Forms.TextBox();
             this.chkWebApp = new System.Windows.Forms.CheckBox();
             this.chkGenerateCertificate = new System.Windows.Forms.CheckBox();
             this.chkGenerateKeyPair = new System.Windows.Forms.CheckBox();
@@ -62,6 +66,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.SuspendLayout();
             this.gbConfigure.SuspendLayout();
             this.tableLayoutPanel3.SuspendLayout();
+            this.flowAgentTunnelPort.SuspendLayout();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -130,15 +135,18 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.ColumnCount = 2;
             this.tableLayoutPanel3.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel3.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel3.Controls.Add(this.chkWebApp, 0, 2);
-            this.tableLayoutPanel3.Controls.Add(this.chkGenerateCertificate, 0, 3);
-            this.tableLayoutPanel3.Controls.Add(this.chkGenerateKeyPair, 0, 4);
+            this.tableLayoutPanel3.Controls.Add(this.chkEnableAgentTunnel, 0, 1);
+            this.tableLayoutPanel3.Controls.Add(this.flowAgentTunnelPort, 0, 2);
+            this.tableLayoutPanel3.Controls.Add(this.chkWebApp, 0, 3);
+            this.tableLayoutPanel3.Controls.Add(this.chkGenerateCertificate, 0, 4);
+            this.tableLayoutPanel3.Controls.Add(this.chkGenerateKeyPair, 0, 5);
             this.tableLayoutPanel3.Controls.Add(this.chkConfigureNgrok, 0, 0);
             this.tableLayoutPanel3.Controls.Add(this.lnkNgrok, 1, 0);
             this.tableLayoutPanel3.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableLayoutPanel3.Location = new System.Drawing.Point(3, 16);
             this.tableLayoutPanel3.Name = "tableLayoutPanel3";
-            this.tableLayoutPanel3.RowCount = 6;
+            this.tableLayoutPanel3.RowCount = 7;
+            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -147,6 +155,53 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel3.Size = new System.Drawing.Size(458, 146);
             this.tableLayoutPanel3.TabIndex = 0;
+            //
+            // chkEnableAgentTunnel
+            //
+            this.chkEnableAgentTunnel.AutoSize = true;
+            this.tableLayoutPanel3.SetColumnSpan(this.chkEnableAgentTunnel, 2);
+            this.chkEnableAgentTunnel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.chkEnableAgentTunnel.Enabled = false;
+            this.chkEnableAgentTunnel.Location = new System.Drawing.Point(10, 26);
+            this.chkEnableAgentTunnel.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
+            this.chkEnableAgentTunnel.Name = "chkEnableAgentTunnel";
+            this.chkEnableAgentTunnel.Size = new System.Drawing.Size(445, 17);
+            this.chkEnableAgentTunnel.TabIndex = 2;
+            this.chkEnableAgentTunnel.Text = "[EnableAgentTunnel]";
+            this.chkEnableAgentTunnel.UseVisualStyleBackColor = true;
+            this.chkEnableAgentTunnel.CheckedChanged += new System.EventHandler(this.chkEnableAgentTunnel_CheckedChanged);
+            //
+            // flowAgentTunnelPort
+            //
+            this.flowAgentTunnelPort.AutoSize = true;
+            this.tableLayoutPanel3.SetColumnSpan(this.flowAgentTunnelPort, 2);
+            this.flowAgentTunnelPort.Controls.Add(this.lblAgentTunnelPort);
+            this.flowAgentTunnelPort.Controls.Add(this.txtAgentTunnelPort);
+            this.flowAgentTunnelPort.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.flowAgentTunnelPort.Location = new System.Drawing.Point(30, 46);
+            this.flowAgentTunnelPort.Margin = new System.Windows.Forms.Padding(30, 0, 3, 0);
+            this.flowAgentTunnelPort.Name = "flowAgentTunnelPort";
+            this.flowAgentTunnelPort.Size = new System.Drawing.Size(425, 26);
+            this.flowAgentTunnelPort.TabIndex = 3;
+            this.flowAgentTunnelPort.WrapContents = false;
+            //
+            // lblAgentTunnelPort
+            //
+            this.lblAgentTunnelPort.AutoSize = true;
+            this.lblAgentTunnelPort.Location = new System.Drawing.Point(0, 6);
+            this.lblAgentTunnelPort.Margin = new System.Windows.Forms.Padding(0, 6, 3, 0);
+            this.lblAgentTunnelPort.Name = "lblAgentTunnelPort";
+            this.lblAgentTunnelPort.Size = new System.Drawing.Size(54, 13);
+            this.lblAgentTunnelPort.TabIndex = 0;
+            this.lblAgentTunnelPort.Text = "[AgentTunnelUdpPort]";
+            //
+            // txtAgentTunnelPort
+            //
+            this.txtAgentTunnelPort.Enabled = false;
+            this.txtAgentTunnelPort.Location = new System.Drawing.Point(60, 3);
+            this.txtAgentTunnelPort.Name = "txtAgentTunnelPort";
+            this.txtAgentTunnelPort.Size = new System.Drawing.Size(50, 20);
+            this.txtAgentTunnelPort.TabIndex = 1;
             // 
             // chkWebApp
             // 
@@ -154,11 +209,11 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.SetColumnSpan(this.chkWebApp, 2);
             this.chkWebApp.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkWebApp.Enabled = false;
-            this.chkWebApp.Location = new System.Drawing.Point(10, 26);
+            this.chkWebApp.Location = new System.Drawing.Point(10, 75);
             this.chkWebApp.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
             this.chkWebApp.Name = "chkWebApp";
             this.chkWebApp.Size = new System.Drawing.Size(445, 17);
-            this.chkWebApp.TabIndex = 2;
+            this.chkWebApp.TabIndex = 4;
             this.chkWebApp.Text = "[EnableTheGatewayWebInterface]";
             this.chkWebApp.UseVisualStyleBackColor = true;
             this.chkWebApp.CheckedChanged += new System.EventHandler(this.chkWebApp_CheckedChanged);
@@ -169,11 +224,11 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.SetColumnSpan(this.chkGenerateCertificate, 2);
             this.chkGenerateCertificate.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkGenerateCertificate.Enabled = false;
-            this.chkGenerateCertificate.Location = new System.Drawing.Point(30, 49);
+            this.chkGenerateCertificate.Location = new System.Drawing.Point(30, 98);
             this.chkGenerateCertificate.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
             this.chkGenerateCertificate.Name = "chkGenerateCertificate";
             this.chkGenerateCertificate.Size = new System.Drawing.Size(425, 17);
-            this.chkGenerateCertificate.TabIndex = 3;
+            this.chkGenerateCertificate.TabIndex = 5;
             this.chkGenerateCertificate.Text = "[GenerateASelfSignedHttpsCertificate]";
             this.chkGenerateCertificate.UseVisualStyleBackColor = true;
             // 
@@ -183,11 +238,11 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.SetColumnSpan(this.chkGenerateKeyPair, 2);
             this.chkGenerateKeyPair.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkGenerateKeyPair.Enabled = false;
-            this.chkGenerateKeyPair.Location = new System.Drawing.Point(30, 72);
+            this.chkGenerateKeyPair.Location = new System.Drawing.Point(30, 121);
             this.chkGenerateKeyPair.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
             this.chkGenerateKeyPair.Name = "chkGenerateKeyPair";
             this.chkGenerateKeyPair.Size = new System.Drawing.Size(425, 17);
-            this.chkGenerateKeyPair.TabIndex = 4;
+            this.chkGenerateKeyPair.TabIndex = 6;
             this.chkGenerateKeyPair.Text = "[GenerateEncryptionKeys]";
             this.chkGenerateKeyPair.UseVisualStyleBackColor = true;
             // 
@@ -405,6 +460,8 @@ namespace WixSharpSetup.Dialogs
             this.gbConfigure.ResumeLayout(false);
             this.tableLayoutPanel3.ResumeLayout(false);
             this.tableLayoutPanel3.PerformLayout();
+            this.flowAgentTunnelPort.ResumeLayout(false);
+            this.flowAgentTunnelPort.PerformLayout();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -432,6 +489,10 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
+        private System.Windows.Forms.CheckBox chkEnableAgentTunnel;
+        private System.Windows.Forms.FlowLayoutPanel flowAgentTunnelPort;
+        private System.Windows.Forms.Label lblAgentTunnelPort;
+        private System.Windows.Forms.TextBox txtAgentTunnelPort;
         private System.Windows.Forms.CheckBox chkWebApp;
         private System.Windows.Forms.GroupBox gbConfigure;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel3;

@@ -1,0 +1,610 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use agent_tunnel::AgentTunnelHandle;
+use agent_tunnel::registry::AgentRegistry;
+use agent_tunnel_proto::{
+    CertRenewalResult, ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, DomainName,
+};
+use devolutions_gateway::recording::recording_message_channel;
+use devolutions_gateway::session::SessionManagerTask;
+use devolutions_gateway::subscriber::subscriber_channel;
+use devolutions_gateway::target_addr::TargetAddr;
+use devolutions_gateway::token::{ApplicationProtocol, JmuxTokenClaims, RecordingPolicy, SessionTtl};
+use devolutions_gateway::traffic_audit::TrafficAuditHandle;
+use devolutions_gateway::upstream::{ConnectedUpstream, UpstreamLeg, connect_upstream};
+use devolutions_gateway_task::{ShutdownHandle, Task};
+use jmux_proto::{Bytes, BytesMut, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
+use nonempty::NonEmpty;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use uuid::Uuid;
+
+use super::common::{
+    accept_session_request, advertise_routes, bind_test_listener, generate_csr_with_cn, generate_csr_with_key,
+    start_echo_server, wait_for_route_advertised,
+};
+
+fn target(host: &str, port: u16) -> TargetAddr {
+    TargetAddr::from_components("tcp", host, port).expect("build target address")
+}
+
+async fn send_jmux_message(writer: &mut (impl AsyncWrite + Unpin), message: Message) {
+    let mut bytes = BytesMut::new();
+    message.encode(&mut bytes).expect("encode JMUX message");
+    writer.write_all(&bytes).await.expect("send JMUX message");
+}
+
+async fn receive_jmux_message(reader: &mut (impl AsyncRead + Unpin)) -> Message {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut header = [0; Header::SIZE];
+        reader.read_exact(&mut header).await.expect("read JMUX header");
+        let header = Header::decode(Bytes::copy_from_slice(&header)).expect("decode JMUX header");
+        let body_size = usize::from(header.size)
+            .checked_sub(Header::SIZE)
+            .expect("JMUX message size smaller than header");
+        let mut body = vec![0; body_size];
+        reader.read_exact(&mut body).await.expect("read JMUX body");
+
+        let mut bytes = BytesMut::with_capacity(usize::from(header.size));
+        header.encode(&mut bytes);
+        bytes.extend_from_slice(&body);
+        Message::decode(bytes.freeze()).expect("decode JMUX message")
+    })
+    .await
+    .expect("JMUX response timed out")
+}
+
+async fn advertise_domain(
+    connection: &quinn::Connection,
+    registry: &AgentRegistry,
+    agent_id: Uuid,
+    epoch: u64,
+    domain: &str,
+) -> ControlStream<quinn::SendStream, quinn::RecvStream> {
+    advertise_routes(
+        connection,
+        registry,
+        agent_id,
+        epoch,
+        vec![],
+        vec![DomainAdvertisement {
+            domain: DomainName::new(domain),
+            auto_detected: false,
+        }],
+    )
+    .await
+}
+
+async fn set_route_order(registry: &AgentRegistry, older: Uuid, newer: Uuid) {
+    registry
+        .get(&older)
+        .await
+        .expect("find older agent")
+        .set_received_at_for_test(std::time::UNIX_EPOCH + Duration::from_secs(1));
+    registry
+        .get(&newer)
+        .await
+        .expect("find newer agent")
+        .set_received_at_for_test(std::time::UNIX_EPOCH + Duration::from_secs(2));
+}
+
+async fn connect(
+    handle: AgentTunnelHandle,
+    target: TargetAddr,
+    explicit_agent_id: Option<Uuid>,
+    session_id: Uuid,
+) -> anyhow::Result<ConnectedUpstream> {
+    connect_upstream(&NonEmpty::new(target), explicit_agent_id, session_id, Some(&handle)).await
+}
+
+async fn assert_round_trip(mut upstream: UpstreamLeg, payload: &[u8]) {
+    upstream.write_all(payload).await.expect("write upstream payload");
+    let mut response = vec![0; payload.len()];
+    upstream
+        .read_exact(&mut response)
+        .await
+        .expect("read upstream response");
+    assert_eq!(response, payload);
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_routes_wildcard_domain_without_subnets() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("test-agent").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "*.echo.test").await;
+
+    let session_id = Uuid::new_v4();
+    let expected_target = format!("service.echo.test:{}", echo_addr.port());
+    let handle = listener.handle.clone();
+    let connect_task = tokio::spawn(connect(
+        handle,
+        target("service.echo.test", echo_addr.port()),
+        None,
+        session_id,
+    ));
+
+    let mut session = accept_session_request(&connection, session_id, &expected_target).await;
+
+    let mut tcp_stream = TcpStream::connect(echo_addr).await.expect("connect to echo server");
+    session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("send connection success");
+
+    let connected = tokio::time::timeout(Duration::from_secs(5), connect_task)
+        .await
+        .expect("upstream connection timed out")
+        .expect("upstream task panicked")
+        .expect("connect through agent");
+    assert!(matches!(connected.leg, UpstreamLeg::Tunnel(_)));
+
+    let payload = b"agent tunnel payload";
+    let (mut tunnel_read, mut tunnel_write) = tokio::io::split(connected.leg);
+    tunnel_write.write_all(payload).await.expect("write tunnel payload");
+
+    let (mut session_send, mut session_recv) = session.into_inner();
+    let mut relay = vec![0; payload.len()];
+    session_recv.read_exact(&mut relay).await.expect("read agent payload");
+    tcp_stream.write_all(&relay).await.expect("write echo payload");
+    tcp_stream.read_exact(&mut relay).await.expect("read echo payload");
+    session_send.write_all(&relay).await.expect("write agent response");
+
+    let mut response = vec![0; payload.len()];
+    tunnel_read
+        .read_exact(&mut response)
+        .await
+        .expect("read tunnel response");
+    assert_eq!(response, payload);
+
+    connection.close(0u32.into(), b"test done");
+    echo_task.abort();
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_falls_back_to_direct_tcp_without_a_route() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("unmatched-agent").await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "unused.example").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
+
+    let connected = connect(
+        listener.handle.clone(),
+        target("127.0.0.1", echo_addr.port()),
+        None,
+        Uuid::new_v4(),
+    )
+    .await
+    .expect("connect directly");
+    assert!(matches!(connected.leg, UpstreamLeg::Tcp(_)));
+    assert_round_trip(connected.leg, b"direct payload").await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), connection.accept_bi())
+            .await
+            .is_err()
+    );
+
+    connection.close(0u32.into(), b"test done");
+    echo_task.abort();
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_uses_explicit_agent_without_a_matching_route() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("explicit-agent").await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "unused.example").await;
+    let (echo_addr, echo_task) = start_echo_server().await;
+    let session_id = Uuid::new_v4();
+    let target_addr = format!("127.0.0.1:{}", echo_addr.port());
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("127.0.0.1", echo_addr.port()),
+        Some(agent_id),
+        session_id,
+    ));
+
+    let mut session = accept_session_request(&connection, session_id, &target_addr).await;
+    let tcp_stream = TcpStream::connect(echo_addr).await.expect("connect to echo server");
+    session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("send connection success");
+    let connected = connect_task
+        .await
+        .expect("upstream task panicked")
+        .expect("connect through explicit agent");
+    let relay_task = tokio::spawn(async move {
+        let (mut send, mut recv) = session.into_inner();
+        let (mut read, mut write) = tcp_stream.into_split();
+        tokio::try_join!(
+            tokio::io::copy(&mut recv, &mut write),
+            tokio::io::copy(&mut read, &mut send)
+        )
+    });
+    assert_round_trip(connected.leg, b"explicit payload").await;
+
+    relay_task.abort();
+    connection.close(0u32.into(), b"test done");
+    echo_task.abort();
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_tries_the_next_matching_agent() {
+    let listener = bind_test_listener().await;
+    let (fallback_id, fallback_connection) = listener.connect_agent("fallback-agent").await;
+    let _fallback_ctrl = advertise_domain(
+        &fallback_connection,
+        listener.handle.registry(),
+        fallback_id,
+        1,
+        "service.example",
+    )
+    .await;
+    let (first_id, first_connection) = listener.connect_agent("first-agent").await;
+    let _first_ctrl = advertise_domain(
+        &first_connection,
+        listener.handle.registry(),
+        first_id,
+        1,
+        "service.example",
+    )
+    .await;
+    set_route_order(listener.handle.registry(), fallback_id, first_id).await;
+    let session_id = Uuid::new_v4();
+    let target_addr = "service.example:443";
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("service.example", 443),
+        None,
+        session_id,
+    ));
+
+    let mut first_session = accept_session_request(&first_connection, session_id, target_addr).await;
+    first_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let mut fallback_session = accept_session_request(&fallback_connection, session_id, target_addr).await;
+    fallback_session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("send connection success");
+    let connected = connect_task
+        .await
+        .expect("upstream task panicked")
+        .expect("connect through fallback agent");
+    assert!(matches!(connected.leg, UpstreamLeg::Tunnel(_)));
+
+    first_connection.close(0u32.into(), b"test done");
+    fallback_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_connect_upstream_does_not_bypass_failed_agent_routes() {
+    let listener = bind_test_listener().await;
+    let (first_id, first_connection) = listener.connect_agent("first-agent").await;
+    let _first_ctrl = advertise_routes(
+        &first_connection,
+        listener.handle.registry(),
+        first_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    let (second_id, second_connection) = listener.connect_agent("second-agent").await;
+    let _second_ctrl = advertise_routes(
+        &second_connection,
+        listener.handle.registry(),
+        second_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    set_route_order(listener.handle.registry(), first_id, second_id).await;
+    let direct_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
+    let target_port = direct_listener.local_addr().expect("read direct target address").port();
+    let session_id = Uuid::new_v4();
+    let target_addr = format!("127.0.0.1:{target_port}");
+    let connect_task = tokio::spawn(connect(
+        listener.handle.clone(),
+        target("127.0.0.1", target_port),
+        None,
+        session_id,
+    ));
+
+    let mut second_session = accept_session_request(&second_connection, session_id, &target_addr).await;
+    second_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let mut first_session = accept_session_request(&first_connection, session_id, &target_addr).await;
+    first_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("send connection error");
+    let error = match connect_task.await.expect("upstream task panicked") {
+        Ok(_) => panic!("all routed connections should fail"),
+        Err(error) => error,
+    };
+    assert!(format!("{error:#}").contains("connection refused"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), direct_listener.accept())
+            .await
+            .is_err()
+    );
+
+    first_connection.close(0u32.into(), b"test done");
+    second_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("jmux-agent").await;
+    let _ctrl = advertise_routes(
+        &connection,
+        listener.handle.registry(),
+        agent_id,
+        1,
+        vec!["127.0.0.0/8".parse().expect("parse test subnet")],
+        vec![],
+    )
+    .await;
+    let direct_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
+    let target_port = direct_listener.local_addr().expect("read direct target address").port();
+    let target = target("127.0.0.1", target_port);
+    let session_id = Uuid::new_v4();
+
+    let (recordings, _recording_rx) = recording_message_channel();
+    let session_manager = SessionManagerTask::init(recordings);
+    let sessions = session_manager.handle();
+    let (session_shutdown, session_shutdown_signal) = ShutdownHandle::new();
+    let session_task = tokio::spawn(session_manager.run(session_shutdown_signal));
+    let (subscriber_tx, _subscriber_rx) = subscriber_channel();
+    let (traffic_audit_handle, _traffic_audit_rx) = TrafficAuditHandle::new();
+    let claims = JmuxTokenClaims {
+        jet_aid: session_id,
+        hosts: NonEmpty::new(target.clone()),
+        jet_ap: ApplicationProtocol::unknown(),
+        jet_rec: RecordingPolicy::None,
+        jet_ttl: SessionTtl::Unlimited,
+        exp: i64::MAX,
+        jti: Uuid::new_v4(),
+    };
+    let (proxy_stream, mut peer_stream) = tokio::io::duplex(8192);
+    let proxy_task = tokio::spawn(devolutions_gateway::jmux::handle(
+        proxy_stream,
+        claims,
+        sessions,
+        subscriber_tx,
+        traffic_audit_handle,
+        Some(Arc::new(listener.handle.clone())),
+    ));
+
+    send_jmux_message(
+        &mut peer_stream,
+        Message::open(
+            LocalChannelId::from(20),
+            4096,
+            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
+        ),
+    )
+    .await;
+    let mut routed_session = tokio::time::timeout(
+        Duration::from_secs(5),
+        accept_session_request(&connection, session_id, target.as_addr()),
+    )
+    .await
+    .expect("routed JMUX request timed out");
+    routed_session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("accept routed JMUX request");
+    let Message::OpenSuccess(success) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected OPEN SUCCESS");
+    };
+    assert_eq!(success.recipient_channel_id, 20);
+
+    let local_id = DistantChannelId::from(success.sender_channel_id);
+    send_jmux_message(&mut peer_stream, Message::data(local_id, Bytes::from_static(b"ping"))).await;
+    let (mut routed_send, mut routed_recv) = routed_session.into_inner();
+    let mut request = [0; 4];
+    routed_recv
+        .read_exact(&mut request)
+        .await
+        .expect("read routed JMUX payload");
+    assert_eq!(&request, b"ping");
+    routed_send
+        .write_all(b"pong")
+        .await
+        .expect("write routed JMUX response");
+    let Message::Data(response) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected CHANNEL DATA");
+    };
+    assert_eq!(response.recipient_channel_id, 20);
+    assert_eq!(response.transfer_data, b"pong"[..]);
+
+    send_jmux_message(
+        &mut peer_stream,
+        Message::open(
+            LocalChannelId::from(21),
+            4096,
+            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
+        ),
+    )
+    .await;
+    let mut failed_session = tokio::time::timeout(
+        Duration::from_secs(5),
+        accept_session_request(&connection, session_id, target.as_addr()),
+    )
+    .await
+    .expect("failed routed JMUX request timed out");
+    failed_session
+        .send_response(&ConnectResponse::error("connection refused"))
+        .await
+        .expect("reject routed JMUX request");
+    let Message::OpenFailure(failure) = receive_jmux_message(&mut peer_stream).await else {
+        panic!("expected OPEN FAILURE");
+    };
+    assert_eq!(failure.recipient_channel_id, 21);
+    assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), direct_listener.accept())
+            .await
+            .is_err(),
+        "matched Agent route must not fall back to direct TCP"
+    );
+
+    proxy_task.abort();
+    session_shutdown.signal();
+    session_task
+        .await
+        .expect("session manager task panicked")
+        .expect("session manager shutdown");
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_listener_rejects_certificate_renewal_key_rotation() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("key-rotation-agent").await;
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
+
+    ctrl.send(&ControlMessage::route_advertise(1, vec![], vec![]))
+        .await
+        .expect("send route advertisement");
+    wait_for_route_advertised(listener.handle.registry(), agent_id, 1).await;
+
+    let (_, csr_pem) = generate_csr_with_cn("evil-impersonator");
+    ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+        .await
+        .expect("send renewal request");
+
+    let response = tokio::time::timeout(Duration::from_secs(5), ctrl.recv())
+        .await
+        .expect("renewal response timed out")
+        .expect("receive renewal response");
+    match response {
+        ControlMessage::CertRenewalResponse {
+            result: CertRenewalResult::Error { reason },
+            ..
+        } => {
+            assert!(
+                reason.contains("key rotation"),
+                "renewal error should explain that key rotation is rejected: {reason}"
+            );
+        }
+        other => panic!("expected renewal key rotation to fail, got {other:?}"),
+    }
+
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_listener_renews_certificate_with_accepted_key() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection, key_pair) = listener.connect_agent_with_key("renewal-agent").await;
+    let expected_ca = listener.handle.ca_manager().ca_cert_pem().to_owned();
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
+
+    ctrl.send(&ControlMessage::route_advertise(1, vec![], vec![]))
+        .await
+        .expect("send route advertisement");
+    wait_for_route_advertised(listener.handle.registry(), agent_id, 1).await;
+
+    let csr_pem = generate_csr_with_key("renewal-agent", &key_pair);
+    ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+        .await
+        .expect("send renewal request");
+
+    let response = tokio::time::timeout(Duration::from_secs(5), ctrl.recv())
+        .await
+        .expect("renewal response timed out")
+        .expect("receive renewal response");
+    match response {
+        ControlMessage::CertRenewalResponse {
+            result:
+                CertRenewalResult::Success {
+                    client_cert_pem: _,
+                    gateway_ca_cert_pem,
+                },
+            ..
+        } => assert_eq!(gateway_ca_cert_pem, expected_ca),
+        other => panic!("expected successful renewal, got {other:?}"),
+    }
+
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+async fn assert_admission_rejected(connection: &quinn::Connection) {
+    let reason = tokio::time::timeout(Duration::from_secs(5), connection.closed())
+        .await
+        .expect("listener should close the unauthorized connection");
+    match reason {
+        quinn::ConnectionError::ApplicationClosed(close) => {
+            assert_eq!(
+                close.reason.as_ref(),
+                b"agent-not-accepted",
+                "unexpected close reason: {close:?}"
+            );
+        }
+        other => panic!("expected application close from the admission gate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn gateway_listener_rejects_unknown_agent_id() {
+    let listener = bind_test_listener().await;
+    let agent_id = Uuid::new_v4();
+    let (key_pair, csr_pem) = generate_csr_with_cn("unenrolled-agent");
+    let signed = listener
+        .handle
+        .ca_manager()
+        .sign_agent_csr(agent_id, "unenrolled-agent", &csr_pem, None)
+        .expect("sign unenrolled agent csr");
+
+    let connection = listener.connect_signed(&signed, &key_pair).await;
+
+    assert_admission_rejected(&connection).await;
+    assert!(
+        listener.handle.registry().agent_info(&agent_id).await.is_none(),
+        "rejected agent must never be registered"
+    );
+
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_listener_rejects_accepted_agent_id_with_wrong_key() {
+    let listener = bind_test_listener().await;
+    let (agent_id, accepted_connection) = listener.connect_agent("spki-mismatch-agent").await;
+
+    let (wrong_key_pair, csr_pem) = generate_csr_with_cn("spki-mismatch-agent");
+    let signed = listener
+        .handle
+        .ca_manager()
+        .sign_agent_csr(agent_id, "spki-mismatch-agent", &csr_pem, None)
+        .expect("sign csr with a different key");
+
+    let rejected_connection = listener.connect_signed(&signed, &wrong_key_pair).await;
+
+    assert_admission_rejected(&rejected_connection).await;
+    assert!(
+        accepted_connection.close_reason().is_none(),
+        "rejected connection must not supersede the accepted one"
+    );
+
+    accepted_connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}

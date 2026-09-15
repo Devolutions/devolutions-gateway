@@ -278,6 +278,13 @@ Stable options are:
 
     See the [Cookbook](./docs/COOKBOOK.md) for configuration examples.
 
+- **AgentTunnel** (_Object_): QUIC-based agent tunnel configuration.
+    When enabled, Gateway starts the listener at startup and fails startup if it cannot initialize or bind.
+
+    * **Enabled** (_Boolean_): Whether the agent tunnel listener is enabled (default is `false`).
+
+    * **ListenPort** (_Integer_): UDP port for the QUIC listener (default is `4433`).
+
 - **VerbosityProfile** (_String_): Logging verbosity profile (pre-defined tracing directives).
 
     Possible values:

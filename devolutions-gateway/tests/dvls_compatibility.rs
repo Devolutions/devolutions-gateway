@@ -11,7 +11,7 @@ use picky::key::{PrivateKey, PublicKey};
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use uuid::{Uuid, uuid};
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDkrPiL/5dmGIT5
@@ -110,6 +110,141 @@ fn pub_key() -> PublicKey {
 #[fixture]
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
+mod as_of_v2026_3_0_0 {
+    use super::*;
+
+    const CTY_JREC: &str = "JREC";
+
+    #[derive(Clone, Copy, Serialize, Debug)]
+    #[serde(rename_all = "lowercase")]
+    enum DvlsRecordingOperation {
+        Push,
+        Pull,
+    }
+
+    #[derive(Clone, Serialize, Debug)]
+    struct DvlsJrecClaims {
+        jet_aid: Uuid,
+        jet_rop: DvlsRecordingOperation,
+        jet_gw_id: Uuid,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jet_reuse: Option<u32>,
+        nbf: i64,
+        exp: i64,
+        jti: Uuid,
+    }
+
+    fn dvls_recording_operation() -> impl Strategy<Value = DvlsRecordingOperation> {
+        prop_oneof![Just(DvlsRecordingOperation::Push), Just(DvlsRecordingOperation::Pull),]
+    }
+
+    fn dvls_reuse_policy() -> impl Strategy<Value = Option<u32>> {
+        prop_oneof![Just(None), (0u32..=900u32).prop_map(Some),]
+    }
+
+    fn dvls_jrec_claims(now: i64) -> impl Strategy<Value = DvlsJrecClaims> {
+        (
+            uuid_typed(),
+            dvls_recording_operation(),
+            uuid_typed(),
+            dvls_reuse_policy(),
+            uuid_typed(),
+        )
+            .prop_map(move |(jet_aid, jet_rop, jet_gw_id, jet_reuse, jti)| DvlsJrecClaims {
+                jet_aid,
+                jet_rop,
+                jet_gw_id,
+                jet_reuse,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            })
+    }
+
+    #[rstest]
+    fn jrec_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jrec_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_JREC.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl,
+                &active_recordings,
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
+        });
+    }
+
+    #[rstest]
+    #[case::push(DvlsJrecClaims {
+        jet_aid: uuid!("3e7c1854-f1eb-42d2-b9cb-9303036e50da"),
+        jet_rop: DvlsRecordingOperation::Push,
+        jet_gw_id: uuid!("ccbaad3f-4627-4666-8bb5-cb6a1a7db815"),
+        jet_reuse: None,
+        nbf: 1_700_000_000,
+        exp: 4_102_444_800,
+        jti: uuid!("2dd6fb87-5340-4a85-9e96-d383ebef8a41"),
+    })]
+    #[case::pull(DvlsJrecClaims {
+        jet_aid: uuid!("3e7c1854-f1eb-42d2-b9cb-9303036e50da"),
+        jet_rop: DvlsRecordingOperation::Pull,
+        jet_gw_id: uuid!("ccbaad3f-4627-4666-8bb5-cb6a1a7db815"),
+        jet_reuse: None,
+        nbf: 1_700_000_000,
+        exp: 4_102_444_800,
+        jti: uuid!("01f2b129-bfbf-44fb-8b6e-5cbaf7a71300"),
+    })]
+    #[case::push_with_reuse(DvlsJrecClaims {
+        jet_aid: uuid!("3e7c1854-f1eb-42d2-b9cb-9303036e50da"),
+        jet_rop: DvlsRecordingOperation::Push,
+        jet_gw_id: uuid!("ccbaad3f-4627-4666-8bb5-cb6a1a7db815"),
+        jet_reuse: Some(300),
+        nbf: 1_700_000_000,
+        exp: 4_102_444_800,
+        jti: uuid!("7de3320f-9760-4f6e-b2f4-b9e3f64f0f43"),
+    })]
+    #[case::push_disallow_reuse(DvlsJrecClaims {
+        jet_aid: uuid!("3e7c1854-f1eb-42d2-b9cb-9303036e50da"),
+        jet_rop: DvlsRecordingOperation::Push,
+        jet_gw_id: uuid!("ccbaad3f-4627-4666-8bb5-cb6a1a7db815"),
+        jet_reuse: Some(0),
+        nbf: 1_700_000_000,
+        exp: 4_102_444_800,
+        jti: uuid!("8a5a88fc-1184-4417-b70d-a9c2f9ec92a9"),
+    })]
+    fn samples(
+        #[case] claims: DvlsJrecClaims,
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+    ) {
+        let jet_gw_id = claims.jet_gw_id;
+        encode_decode_round_trip(
+            &pub_key,
+            &priv_key,
+            claims,
+            Some(CTY_JREC.to_owned()),
+            Some(jet_gw_id),
+            &token_cache,
+            &jrl,
+            &active_recordings,
+        )
+        .unwrap();
+    }
 }
 
 mod as_of_v2025_2_6_0 {

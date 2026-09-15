@@ -1,0 +1,9 @@
+@use '../../../../../../../assets/css/style/mixins' as *;
+@use "../../../../../../../assets/css/style/variables" as *;
+@use "../../../../../../../assets/css/theme/theme-mode-variables" as *;
+
+.gateway-form-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

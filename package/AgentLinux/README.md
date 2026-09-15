@@ -29,7 +29,6 @@ docker run --rm `
 | `PSU_APP_TOKEN` | Empty |
 | `PSU_AGENT_ID` | `devolutions-agent-linux` |
 | `PSU_DISPLAY_NAME` | `Devolutions Agent Linux` |
-| `PSU_HUBS` | Empty |
 | `PSU_POWERSHELL_EXECUTABLE` | `/var/lib/devolutions-agent/.pwsh/bin/pwsh` |
 
 Build one image locally:

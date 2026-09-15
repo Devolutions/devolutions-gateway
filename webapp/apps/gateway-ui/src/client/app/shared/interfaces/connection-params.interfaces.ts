@@ -56,6 +56,7 @@ export interface IronARDConnectionParameters {
   ardQualityMode?: string;
   wheelSpeedFactor: number;
   sessionId?: string;
+  ardOnlyInputEncryption: boolean;
 }
 
 export interface TelnetConnectionParameters {

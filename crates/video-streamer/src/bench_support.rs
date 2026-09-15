@@ -3,13 +3,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use webm_iterable::WebmIterator;
-use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 use crate::StreamingConfig;
 use crate::reopenable::Reopenable;
-use crate::streamer::iter::{IteratorError, WebmPositionedIterator};
+use crate::streamer::iter::WebmPositionedIterator;
 use crate::streamer::tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 
 #[derive(Debug, Clone)]
@@ -71,21 +69,20 @@ where
 {
     let started_at = Instant::now();
 
-    let mut webm_itr = WebmPositionedIterator::new(WebmIterator::new(
-        input_stream,
-        &[MatroskaSpec::BlockGroup(Master::Start)],
-    ));
+    let mut webm_itr = WebmPositionedIterator::new(input_stream, cadeau::xmf::vpx::VpxCodec::VP8);
 
     let mut headers = vec![];
-    while let Some(tag) = webm_itr.next() {
-        let tag = tag?;
-        if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            break;
+    loop {
+        match webm_itr.next() {
+            Some(Ok(MatroskaSpec::Cluster(Master::Start))) => break,
+            Some(Ok(tag)) => headers.push(tag),
+            Some(Err(error)) => return Err(error.into()),
+            None => anyhow::bail!("recording ended before the first cluster"),
         }
-        headers.push(tag);
     }
 
     let encode_writer_config = EncodeWriterConfig::try_from((headers.as_slice(), &config))?;
+    webm_itr.set_codec(encode_writer_config.codec);
 
     let mut sink = CountingWriter::default();
     let mut header_writer = HeaderWriter::new(&mut sink);
@@ -156,7 +153,6 @@ where
                     WriterResult::Continue => {}
                 }
             }
-            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. }))) => break,
             Some(Err(e)) => return Err(e).context("webm iterator error"),
             None => break,
         }

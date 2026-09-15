@@ -136,6 +136,36 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.LoginLimitRate | Should -Be 8
 			}
 
+			It 'Sets agent tunnel configuration' {
+				$AgentTunnel = New-DGatewayAgentTunnelConfig -ListenPort 8443
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $false
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 8443
+
+				$AgentTunnel = New-DGatewayAgentTunnelConfig -Enabled -ListenPort 9443
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -AgentTunnel $AgentTunnel
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.Enabled | Should -Be $true
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).AgentTunnel.ListenPort | Should -Be 9443
+
+				{ New-DGatewayAgentTunnelConfig -ListenPort 0 } | Should -Throw
+			}
+
+			It 'Preserves the default agent tunnel port when updating an empty configuration' {
+				$EmptyAgentTunnelConfigPath = Join-Path $TestDrive 'EmptyAgentTunnel'
+				New-Item -Path $EmptyAgentTunnelConfigPath -ItemType 'Directory' | Out-Null
+				$ConfigFile = Join-Path $EmptyAgentTunnelConfigPath $DGatewayConfigFileName
+				[System.IO.File]::WriteAllText(
+					$ConfigFile,
+					'{"Hostname":"gateway.local","AgentTunnel":{}}',
+					$(New-Object System.Text.UTF8Encoding $False)
+				)
+
+				Set-DGatewayConfig -ConfigPath:$EmptyAgentTunnelConfigPath -Hostname 'updated.gateway.local'
+
+				$SavedConfig = Get-Content -Path $ConfigFile -Encoding UTF8 | ConvertFrom-Json
+				$SavedConfig.AgentTunnel.ListenPort | Should -Be 4433
+			}
+
 			It 'Sets basic standalone configuration' {
 				$Hostname = "localhost"
 				$HttpListener = New-DGatewayListener 'http://*:7172' 'http://*:7172'

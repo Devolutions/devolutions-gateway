@@ -90,8 +90,11 @@ export class VncFormComponent extends BaseComponent implements OnInit {
         error: (error) => console.error('Error fetching dropdown options', error),
       });
 
+    // Enable the extended clipboard option only if the modern Clipboard API is available (`read` and `write` methods).
+    // But when running in non-secure contexts, `navigator.clipboard` is undefined, so we need to check the secure context first.
     this.showExtendedClipboardCheckbox =
-      !!(navigator.clipboard.read && navigator.clipboard.write) && window.isSecureContext;
+      window.isSecureContext && !!(navigator.clipboard.read && navigator.clipboard.write);
+    // Enable the auto clipboard option only for Blink-based browsers (e.g., Chrome, Edge) running in secure context.
     this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink' && window.isSecureContext;
   }
 
