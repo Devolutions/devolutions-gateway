@@ -38,7 +38,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use sha2::{Digest as _, Sha256};
-use windows::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_ALL, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
+};
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
@@ -50,8 +52,8 @@ use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
-    FileAttributeTagInfo, GetFileInformationByHandleEx, GetFinalPathNameByHandleW, READ_CONTROL, WRITE_DAC,
-    WRITE_OWNER,
+    FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -79,6 +81,8 @@ const DIRECTORY_TAMPER_MASK: u32 = FILE_DELETE_CHILD.0 /* delete or rename child
 
 /// Additional rights that allow retargeting an ancestor that is itself a reparse point.
 const REPARSE_POINT_TAMPER_MASK: u32 = FILE_WRITE_DATA.0 | GENERIC_WRITE.0;
+const VOLUME_GUID_FINAL_PATH_FLAGS: GETFINALPATHNAMEBYHANDLE_FLAGS =
+    GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_GUID.0);
 
 /// Access rights on the directory hosting a verified executable that allow tampering with
 /// its execution. On top of [`DIRECTORY_TAMPER_MASK`], create rights are rejected: a
@@ -296,6 +300,38 @@ impl VerifiedExecutable {
     }
 }
 
+/// Security guard for an executable file already retained by its caller.
+///
+/// The caller must open the file without write or delete sharing, then keep both that handle
+/// and this guard alive.
+/// The handle binds later checks to the same object and blocks new writers, while the guard
+/// pins each verified ancestor against rename or reparse-point substitution.
+#[derive(Debug)]
+pub(crate) struct RetainedExecutableSecurity {
+    _ancestor_handles: Vec<File>,
+}
+
+/// Verify trusted-writer security for an already-retained executable and pin its ancestors.
+pub(crate) fn verify_retained_executable_security(
+    file: &File,
+    subject: &str,
+) -> anyhow::Result<RetainedExecutableSecurity> {
+    let path = final_path_from_handle(file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+
+    verify_handle_security(
+        file,
+        subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        WRITE_ACCESS_MASK,
+    )?;
+
+    let ancestor_handles = retain_executable_ancestor_directories(&path, subject)?;
+
+    Ok(RetainedExecutableSecurity {
+        _ancestor_handles: ancestor_handles,
+    })
+}
+
 /// Verify that a resolved package-manager executable which will be launched with an
 /// elevated or machine-scope token cannot be tampered with by untrusted principals.
 ///
@@ -321,8 +357,6 @@ pub(crate) fn verify_elevated_executable_security(
         return Ok(None);
     }
 
-    let subject = format!("elevated package-manager executable '{}'", path.display());
-
     // App execution aliases (Microsoft Store shims such as the per-user `winget.exe`)
     // are reparse points that cannot be opened for read, so they cannot be verified or
     // pinned directly. `CreateProcess` resolves them internally, but the broker must
@@ -337,6 +371,7 @@ pub(crate) fn verify_elevated_executable_security(
         None => None,
     };
     let path = alias_target.as_deref().unwrap_or(path);
+    let subject = format!("elevated package-manager executable '{}'", path.display());
 
     // Share only read access: while this handle is alive the file cannot be opened for
     // write or delete (rename), and this open fails if such a handle already exists.
@@ -359,7 +394,15 @@ pub(crate) fn verify_elevated_executable_security(
         WRITE_ACCESS_MASK,
     )?;
 
-    verify_ancestor_directories(&final_path, &subject)?;
+    // Preserve compatibility for existing package-manager installations under secured
+    // junctions or mount points. The stricter caller guard below rejects and pins reparses.
+    verify_directory_chain(
+        final_path.parent(),
+        &subject,
+        TrustedWriters::AdminOrTrustedInstaller,
+        TrustedWriters::AdminOrTrustedInstaller,
+        false,
+    )?;
 
     Ok(Some(VerifiedExecutable {
         _file: file,
@@ -544,14 +587,47 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// file when the image is finally loaded. Create rights higher up are harmless (and are
 /// granted to unprivileged users on stock drive roots), since they cannot redirect an
 /// existing path component.
-fn verify_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<()> {
-    verify_directory_chain(
-        path.parent(),
-        subject,
-        TrustedWriters::AdminOrTrustedInstaller,
-        TrustedWriters::AdminOrTrustedInstaller,
-        false,
-    )
+/// Each ancestor must not itself be a reparse point and must resolve to its own path.
+/// The returned handles pin the verified chain and must be kept alive by the caller.
+fn retain_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
+    let mut handles = Vec::new();
+    let mut current = path.parent();
+    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
+
+    while let Some(dir) = current {
+        let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
+        let handle = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(dir)
+            .with_context(|| format!("failed to open {dir_subject}"))?;
+
+        if is_reparse_point(&handle).with_context(|| format!("failed to inspect {dir_subject}"))? {
+            bail!("{dir_subject} is a reparse point");
+        }
+
+        let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {dir_subject}"))?;
+        if !windows_paths_equal(&resolved, dir) {
+            bail!(
+                "{dir_subject} resolved to an unexpected location '{}'; refusing to trust a retargeted ancestor",
+                resolved.display()
+            );
+        }
+
+        verify_handle_security(
+            &handle,
+            &dir_subject,
+            TrustedWriters::AdminOrTrustedInstaller,
+            tamper_mask,
+        )?;
+
+        handles.push(handle);
+        tamper_mask = DIRECTORY_TAMPER_MASK;
+        current = dir.parent();
+    }
+
+    Ok(handles)
 }
 
 fn verify_directory_chain(
@@ -607,14 +683,30 @@ fn is_reparse_point(file: &File) -> anyhow::Result<bool> {
 /// Resolve the normalized final path of an open file from its handle.
 fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
     let handle = HANDLE(file.as_raw_handle());
+    match final_path_name(handle, FILE_NAME_NORMALIZED) {
+        Ok(path) => Ok(final_path_from_wide(&path, false)),
+        Err(error) if should_retry_final_path_with_volume_guid(&error) => {
+            let path = final_path_name(handle, VOLUME_GUID_FINAL_PATH_FLAGS)
+                .context("GetFinalPathNameByHandleW failed for volume GUID path")?;
+            Ok(final_path_from_wide(&path, true))
+        }
+        Err(error) => Err(error).context("GetFinalPathNameByHandleW failed"),
+    }
+}
+
+fn should_retry_final_path_with_volume_guid(error: &windows::core::Error) -> bool {
+    error.code() == ERROR_PATH_NOT_FOUND.to_hresult()
+}
+
+fn final_path_name(handle: HANDLE, flags: GETFINALPATHNAMEBYHANDLE_FLAGS) -> windows::core::Result<Vec<u16>> {
     let mut buffer = vec![0u16; 512];
 
     loop {
         // SAFETY: `handle` is a valid open file handle and `buffer` is a live mutable slice.
-        let len = unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, FILE_NAME_NORMALIZED) };
+        let len = unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, flags) };
 
         if len == 0 {
-            return Err(windows::core::Error::from_win32()).context("GetFinalPathNameByHandleW failed");
+            return Err(windows::core::Error::from_win32());
         }
 
         let len = usize::try_from(len).expect("u32 fits in usize on Windows");
@@ -623,10 +715,18 @@ fn final_path_from_handle(file: &File) -> anyhow::Result<PathBuf> {
         // otherwise it is the required buffer size (including the null terminator).
         if len < buffer.len() {
             buffer.truncate(len);
-            return Ok(dos_path_from_wide(&buffer));
+            return Ok(buffer);
         }
 
         buffer.resize(len, 0);
+    }
+}
+
+fn final_path_from_wide(wide: &[u16], preserve_verbatim_prefix: bool) -> PathBuf {
+    if preserve_verbatim_prefix {
+        PathBuf::from(OsString::from_wide(wide))
+    } else {
+        dos_path_from_wide(wide)
     }
 }
 
@@ -855,6 +955,38 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn final_path_retries_only_when_dos_volume_resolution_is_unavailable() {
+        let path_not_found = windows::core::Error::from_hresult(ERROR_PATH_NOT_FOUND.to_hresult());
+        let access_denied =
+            windows::core::Error::from_hresult(windows::Win32::Foundation::ERROR_ACCESS_DENIED.to_hresult());
+
+        assert!(should_retry_final_path_with_volume_guid(&path_not_found));
+        assert!(!should_retry_final_path_with_volume_guid(&access_denied));
+        assert_eq!(VOLUME_GUID_FINAL_PATH_FLAGS.0, 1);
+    }
+
+    #[test]
+    fn volume_guid_final_path_preserves_verbatim_prefix_and_root() {
+        let raw = r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\Program Files\Client\client.exe";
+        let wide: Vec<u16> = raw.encode_utf16().collect();
+        let path = final_path_from_wide(&wide, true);
+        let root = Path::new(r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\");
+
+        assert_eq!(path, Path::new(raw));
+        assert!(path.starts_with(root));
+        assert_eq!(path.ancestors().last(), Some(root));
+    }
+
+    #[test]
+    fn final_path_resolves_current_executable_on_mounted_volume() {
+        let executable = std::env::current_exe().expect("current executable");
+        let file = File::open(&executable).expect("open current executable");
+        let resolved = final_path_from_handle(&file).expect("resolve current executable path");
+
+        assert!(windows_paths_equal(&resolved, &executable));
+    }
 
     /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
     struct SddlDescriptor {
@@ -1117,9 +1249,10 @@ mod tests {
     }
 
     #[test]
-    fn winget_app_exec_alias_passes_elevated_verification() {
-        // Opportunistic end-to-end check: the alias itself cannot be opened for read,
-        // so verification must transparently target the real WindowsApps binary.
+    fn winget_app_exec_alias_uses_resolved_target_security() {
+        // Opportunistic end-to-end check: the alias itself cannot be opened for read, so
+        // verification must transparently target the real WindowsApps binary. A locally
+        // modified WindowsApps ACL is expected to fail the same strict security check.
         let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
             return;
         };
@@ -1127,6 +1260,8 @@ mod tests {
         if !alias.exists() {
             return;
         }
+        let resolved = resolve_app_exec_alias(&alias).expect("winget alias must resolve");
+        let resolved_target = resolved.target.display().to_string();
 
         match verify_elevated_executable_security(&alias, true) {
             Ok(guard) => {
@@ -1135,10 +1270,15 @@ mod tests {
             }
             // Non-elevated test runs cannot open `Program Files\WindowsApps` ancestors for
             // READ_CONTROL; the agent service (SYSTEM) can. Everything up to the ancestor
-            // walk — alias resolution and file-level verification — must have succeeded.
+            // walk must have succeeded unless the resolved target itself has an insecure
+            // owner or write grant.
             Err(error) => {
+                let message = error.to_string();
                 assert!(
-                    error.to_string().contains("ancestor directory"),
+                    message.contains(&resolved_target)
+                        && (message.contains("ancestor directory")
+                            || message.contains("owner")
+                            || message.contains("DACL grants write access")),
                     "unexpected error: {error:#}"
                 );
             }
