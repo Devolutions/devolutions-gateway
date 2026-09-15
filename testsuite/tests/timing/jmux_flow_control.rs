@@ -7,8 +7,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
-const WINDOW_SIZE: usize = 64 * 1024;
-const MEASURED_WINDOWS: usize = 256;
+const WINDOW_SIZE: usize = 4 * 1024;
+const MEASURED_WINDOWS: usize = 512;
 const CREDIT: u8 = 1;
 const HANG_TIMEOUT: Duration = Duration::from_secs(20);
 const TRANSFER_BUDGET: Duration = Duration::from_secs(2);
@@ -101,7 +101,7 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
 /// Reproduces the round-trip bottleneck seen in VMware HTTP/2 uploads without embedding an HTTP stack.
 ///
 /// HTTP/2 commonly limits an upload to about 64 KiB before the server returns a small flow-control update.
-/// This test models that dependency by waiting for one byte of credit after every 64 KiB sent through jetsocat.
+/// This test amplifies that dependency by waiting for one byte of credit after every 4 KiB sent through jetsocat.
 /// The old JMUX sender delayed each credit behind its flush timer, so the accumulated delay exceeds the transfer budget.
 #[rstest]
 #[case::tcp(false)]
