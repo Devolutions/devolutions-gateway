@@ -111,7 +111,7 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         }
     }
 }
-pub(super) fn validate_committed_policy(policy: &now_policy::PolicyDocument) -> PolicyValidationResult {
+pub(crate) fn validate_committed_policy(policy: &now_policy::PolicyDocument) -> PolicyValidationResult {
     let raw = serde_json::to_value(policy.to_draft()).expect("committed policy draft serializes");
     validate_draft(&raw)
 }

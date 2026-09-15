@@ -15,7 +15,7 @@ use now_policy_api::{
 };
 
 mod receipt;
-mod validation;
+pub(crate) mod validation;
 mod windows;
 
 #[derive(Clone, Copy, Debug)]

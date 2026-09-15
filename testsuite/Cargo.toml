@@ -15,6 +15,10 @@ name = "integration_tests"
 path = "tests/main.rs"
 harness = true
 
+[[test]]
+name = "installer_policy_migration"
+path = "tests/installer_policy_migration.rs"
+
 [dependencies]
 anyhow = "1.0"
 assert_cmd = "2.2"
@@ -65,6 +69,7 @@ uuid = { version = "1", features = ["v4"] }
 sysevent-syslog.path = "../crates/sysevent-syslog"
 
 [target.'cfg(windows)'.dev-dependencies]
+now-package-broker.path = "../crates/now-package-broker"
 sysevent-winevent.path = "../crates/sysevent-winevent"
 
 [lints]

@@ -7,6 +7,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -15,6 +16,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Threading.Tasks;
 
 [assembly: InternalsVisibleTo("DevolutionsAgent.Installer.Tests")]
 
@@ -42,11 +44,90 @@ public static class PackageBrokerPolicyActions
     private static string LegacyPolicyPath =>
         Path.Combine(ProgramDataDirectory, "package-broker-policy.json");
 
+    private static string AuthorityMarkerPath(string destination) =>
+        Path.Combine(Path.GetDirectoryName(destination), ".package-broker-managed-authority.v1");
+
     private static uint PackageBrokerSecurityInformation =>
         WinAPI.OWNER_SECURITY_INFORMATION |
         WinAPI.GROUP_SECURITY_INFORMATION |
         WinAPI.DACL_SECURITY_INFORMATION |
         WinAPI.PROTECTED_DACL_SECURITY_INFORMATION;
+
+    internal static byte[] ConvertWithInstalledAgent(string installDirectory, byte[] input)
+    {
+        string executable = Path.Combine(installDirectory, Includes.EXECUTABLE_NAME);
+        if (!TryValidateLocalFilePath(executable, ".exe", out string diagnostic))
+        {
+            throw new InvalidOperationException($"unsafe installed Agent path: {diagnostic}");
+        }
+        using PinnedPath agent = PinPathWithoutReparse(
+            executable, false, false, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL,
+            verifyTrustedAncestors: true);
+        VerifyLegacyPolicySourceSecurity(SecurityFromHandle(agent.Leaf, false));
+        using Process process = new()
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = executable,
+                Arguments = "installer-policy-convert",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = new UTF8Encoding(false, true),
+                StandardErrorEncoding = new UTF8Encoding(false, true),
+            }
+        };
+        process.Start();
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        Task write = Task.Run(async () =>
+        {
+            await process.StandardInput.BaseStream.WriteAsync(input, 0, input.Length);
+            process.StandardInput.Close();
+        });
+        if (!Task.WaitAll(new Task[] { output, error, write }, 30000) || !process.WaitForExit(30000))
+        {
+            process.Kill();
+            throw new InvalidOperationException("installed Agent policy converter timed out");
+        }
+        if (process.ExitCode != 0 || output.Result.Length == 0)
+        {
+            throw new InvalidOperationException($"installed Agent rejected policy conversion: {error.Result}");
+        }
+        return new UTF8Encoding(false, true).GetBytes(output.Result);
+    }
+
+    internal static string PreserveLegacyBackup(string path, byte[] original, string digest)
+    {
+        using (PinnedPath existing = PinPathWithoutReparse(
+            path, false, true, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL))
+        {
+            if (existing.Leaf != null)
+            {
+                VerifyPackageBrokerSecurity(SecurityFromHandle(existing.Leaf, false));
+                if (FileContentDigest(existing.Leaf) != digest)
+                {
+                    throw new InvalidOperationException("legacy backup collision; preserving both originals");
+                }
+                return FileIdentity(existing.Leaf);
+            }
+        }
+        using (FileStream backup = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            backup.Write(original, 0, original.Length);
+            backup.Flush(true);
+        }
+        SetFileSecurity(path, Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL);
+        using PinnedPath pinned = PinPathWithoutReparse(path, false, false, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+        VerifyPackageBrokerSecurity(SecurityFromHandle(pinned.Leaf, false));
+        if (FileContentDigest(pinned.Leaf) != digest)
+        {
+            throw new InvalidOperationException("legacy backup digest changed");
+        }
+        return FileIdentity(pinned.Leaf);
+    }
 
     [CustomAction]
     public static ActionResult EnsureProgramDataPackageBrokerDirectory(Session session)
@@ -69,18 +150,35 @@ public static class PackageBrokerPolicyActions
     [CustomAction]
     public static ActionResult MigrateLegacyPackageBrokerPolicy(Session session)
     {
-        string destination = DestinationPolicyPath;
-        string sourcePath = LegacyPolicyPath;
+        LogLegacyYamlMigrationRequired(session, DestinationPolicyPath);
+        return MigrateLegacyPolicy(
+            session.Log,
+            LegacyPolicyPath,
+            DestinationPolicyPath,
+            MigrationMarkerPath(session),
+            input => ConvertWithInstalledAgent(session.CustomActionData[AgentProperties.InstallDir], input));
+    }
+
+    internal static ActionResult MigrateLegacyPolicy(
+        Action<string> log,
+        string sourcePath,
+        string destination,
+        string marker,
+        Func<byte[], byte[]> convert)
+    {
         string temporary = Path.Combine(
-            ProgramDataPackageBrokerDirectory,
+            Path.GetDirectoryName(destination),
             $".package-broker-policy.migration-{Guid.NewGuid():N}.tmp");
-        string marker = MigrationMarkerPath(session);
+        string authorityTemporary = temporary + ".authority";
         bool migrationStarted = false;
         MigrationRecord? migrationRecord = null;
 
         try
         {
-            LogLegacyYamlMigrationRequired(session, destination);
+            if (!sourcePath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("only a legacy JSON policy is eligible for migration");
+            }
             using PinnedPath destinationPath = PinPathWithoutReparse(
                 destination,
                 leafIsDirectory: false,
@@ -89,8 +187,26 @@ public static class PackageBrokerPolicyActions
             if (destinationPath.Leaf != null)
             {
                 VerifyPackageBrokerSecurity(SecurityFromHandle(destinationPath.Leaf, isDirectory: false));
-                session.Log($"package broker policy already exists at {destination}; legacy migration skipped");
+                log($"package broker policy already exists at {destination}; legacy migration skipped");
                 return ActionResult.Success;
+            }
+
+            bool authorityPresent;
+            using (PinnedPath authority = PinPathWithoutReparse(
+                AuthorityMarkerPath(destination), false, true, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL))
+            {
+                authorityPresent = authority.Leaf != null;
+            }
+            if (authorityPresent)
+            {
+                RollbackLegacyPolicy(log, sourcePath, destination, marker);
+                using PinnedPath authority = PinPathWithoutReparse(
+                    AuthorityMarkerPath(destination), false, true, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+                if (authority.Leaf != null)
+                {
+                    log("managed policy authority already exists; preserving legacy policy for manual recovery");
+                    return ActionResult.Failure;
+                }
             }
 
             using PinnedPath source = PinPathWithoutReparse(
@@ -107,7 +223,7 @@ public static class PackageBrokerPolicyActions
                 SecurityFromHandle(source.Leaf, isDirectory: false),
                 out string sourceSecurityDiagnostic))
             {
-                session.Log(
+                log(
                     $"skipping automatic package broker policy migration from {sourcePath}: " +
                     $"{sourceSecurityDiagnostic}. The source was left untouched and no destination was created. " +
                     "Restrict the source owner and write access to SYSTEM/Administrators, then validate and migrate it manually.");
@@ -116,11 +232,49 @@ public static class PackageBrokerPolicyActions
 
             string sourceIdentity = FileIdentity(source.Leaf);
             string sourceDigest = FileContentDigest(source.Leaf);
+            string sourceSecurity = SecurityFromHandle(source.Leaf, isDirectory: false)
+                .GetSecurityDescriptorSddlForm(AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
+            byte[] original;
             migrationStarted = true;
             using (FileStream sourceStream = OpenPinnedFileStream(source.Leaf))
+            {
+                if (sourceStream.Length > 1024 * 1024)
+                {
+                    throw new InvalidOperationException("legacy policy exceeds the migration size limit");
+                }
+                using MemoryStream content = new();
+                sourceStream.CopyTo(content);
+                original = content.ToArray();
+            }
+            // A conversion failure must abort the upgrade, not activate Missing/default.
+            byte[] converted = convert(original);
+            bool preserveSource = !original.SequenceEqual(converted);
+            string backupIdentity = null;
+            if (preserveSource)
+            {
+                backupIdentity = PreserveLegacyBackup(marker + ".original", original, sourceDigest);
+            }
+            string authorityIdentity = PreserveLegacyBackup(
+                authorityTemporary, Array.Empty<byte>(), EmptyContentDigest);
+            using (PinnedPath previousMarker = PinPathWithoutReparse(
+                marker, false, true, WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.READ_CONTROL))
+            {
+                if (previousMarker.Leaf != null)
+                {
+                    VerifyPackageBrokerSecurity(SecurityFromHandle(previousMarker.Leaf, false));
+                    MigrationRecord previous = ReadMigrationMarker(previousMarker.Leaf);
+                    if (!FileIdentityAndDigestMatch(source.Leaf, previous.SourceIdentity, previous.SourceDigest) ||
+                        previous.SourceSecurity != sourceSecurity ||
+                        previous.BackupIdentity != backupIdentity)
+                    {
+                        throw new InvalidOperationException("interrupted migration evidence changed; manual recovery required");
+                    }
+                    DeleteFileByHandle(previousMarker.Leaf);
+                }
+            }
             using (FileStream target = new(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             {
-                sourceStream.CopyTo(target);
+                target.Write(converted, 0, converted.Length);
                 target.Flush(true);
             }
 
@@ -136,16 +290,23 @@ public static class PackageBrokerPolicyActions
                     sourceIdentity,
                     sourceDigest,
                     FileIdentity(temporaryPath.Leaf),
-                    FileContentDigest(temporaryPath.Leaf));
+                    FileContentDigest(temporaryPath.Leaf),
+                    sourceSecurity,
+                    backupIdentity,
+                    authorityIdentity);
             }
 
             MigrationRecord record = migrationRecord.Value;
             using PinnedPath markerPath = WriteMigrationMarker(marker, record);
+            if (MoveFileNoReplace(authorityTemporary, AuthorityMarkerPath(destination)) ==
+                NoReplaceMoveResult.DestinationExists)
+            {
+                throw new InvalidOperationException(
+                    "managed policy authority appeared during migration; preserving source and recovery evidence");
+            }
             if (MoveFileNoReplace(temporary, destination) == NoReplaceMoveResult.DestinationExists)
             {
-                VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
-                DeleteFileByHandle(markerPath.Leaf);
-                session.Log(
+                log(
                     $"package broker policy appeared at {destination} during migration; " +
                     "the external destination and legacy source were preserved");
                 return ActionResult.Success;
@@ -165,36 +326,38 @@ public static class PackageBrokerPolicyActions
                 throw new InvalidOperationException("migrated package broker policy identity changed unexpectedly");
             }
 
-            session.Log($"migrated legacy package broker policy from {sourcePath} to {destination}");
+            log($"migrated legacy package broker policy from {sourcePath} to {destination}");
             return ActionResult.Success;
         }
         catch (Exception error)
         {
             if (!migrationStarted)
             {
-                session.Log(
+                log(
                     $"skipping automatic package broker policy migration because its paths could not be trusted: {error}");
                 return ActionResult.Success;
             }
-            session.Log($"failed to migrate legacy package broker policy: {error}");
+            log($"failed to migrate legacy package broker policy; source preserved, manual remediation required: {error}");
             return ActionResult.Failure;
         }
         finally
         {
             TryDeleteTemporaryFile(
-                session,
+                log,
                 temporary,
                 migrationRecord?.DestinationIdentity,
                 migrationRecord?.DestinationDigest);
+            TryDeleteTemporaryFile(log, authorityTemporary, migrationRecord?.AuthorityIdentity, EmptyContentDigest);
         }
     }
 
     [CustomAction]
     public static ActionResult RollbackLegacyPackageBrokerPolicyMigration(Session session)
-    {
-        string marker = MigrationMarkerPath(session);
-        string destination = DestinationPolicyPath;
+        => RollbackLegacyPolicy(session.Log, LegacyPolicyPath, DestinationPolicyPath, MigrationMarkerPath(session));
 
+    internal static ActionResult RollbackLegacyPolicy(
+        Action<string> log, string sourcePath, string destination, string marker)
+    {
         try
         {
             using PinnedPath markerPath = PinPathWithoutReparse(
@@ -209,28 +372,75 @@ public static class PackageBrokerPolicyActions
 
             VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
             MigrationRecord record = ReadMigrationMarker(markerPath.Leaf);
+            using PinnedPath source = PinPathWithoutReparse(
+                sourcePath, false, true, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+            using PinnedPath backup = record.BackupIdentity == null ? null : PinPathWithoutReparse(
+                marker + ".original", false, false, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+            if (source.Leaf == null ||
+                !FileIdentityAndDigestMatch(source.Leaf, record.SourceIdentity, record.SourceDigest))
+            {
+                throw new InvalidOperationException("legacy rollback source changed; preserving all copies for manual recovery");
+            }
+            FileSystemSecurity sourceSecurity = SecurityFromHandle(source.Leaf, false);
+            VerifyLegacyPolicySourceSecurity(sourceSecurity);
+            if (record.SourceSecurity != null && record.SourceSecurity != sourceSecurity.GetSecurityDescriptorSddlForm(
+                AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access))
+            {
+                throw new InvalidOperationException("legacy rollback source security changed; manual recovery required");
+            }
+            if (record.BackupIdentity != null)
+            {
+                VerifyPackageBrokerSecurity(SecurityFromHandle(backup.Leaf, false));
+                if (!FileIdentityAndDigestMatch(backup.Leaf, record.BackupIdentity, record.SourceDigest))
+                {
+                    throw new InvalidOperationException("legacy rollback evidence changed; preserving all copies for manual recovery");
+                }
+            }
 
             using PinnedPath destinationPath = PinPathWithoutReparse(
                 destination,
                 leafIsDirectory: false,
                 allowMissingLeaf: true,
                 leafAccess: WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.FILE_READ_ATTRIBUTES | WinAPI.READ_CONTROL);
-            if (destinationPath.Leaf != null &&
+            bool destinationOwned = destinationPath.Leaf == null ||
                 FileIdentityAndDigestMatch(
                     destinationPath.Leaf,
                     record.DestinationIdentity,
-                    record.DestinationDigest))
+                    record.DestinationDigest);
+            if (!destinationOwned)
+            {
+                log("managed policy changed after migration; preserving destination and authority during rollback");
+                return ActionResult.Success;
+            }
+            using PinnedPath authority = record.AuthorityIdentity == null ? null : PinPathWithoutReparse(
+                AuthorityMarkerPath(destination), false, true, WinAPI.GENERIC_READ | WinAPI.DELETE | WinAPI.READ_CONTROL);
+            if (authority?.Leaf != null)
+            {
+                VerifyPackageBrokerSecurity(SecurityFromHandle(authority.Leaf, false));
+                if (!FileIdentityAndDigestMatch(authority.Leaf, record.AuthorityIdentity, EmptyContentDigest))
+                {
+                    throw new InvalidOperationException("managed authority changed; manual rollback required");
+                }
+            }
+            if (destinationPath.Leaf != null)
             {
                 VerifyPackageBrokerSecurity(SecurityFromHandle(destinationPath.Leaf, isDirectory: false));
                 DeleteFileByHandle(destinationPath.Leaf);
             }
+            if (authority?.Leaf != null)
+            {
+                DeleteFileByHandle(authority.Leaf);
+            }
 
-            VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
-            DeleteFileByHandle(markerPath.Leaf);
+            if (record.BackupIdentity == null)
+            {
+                VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
+                DeleteFileByHandle(markerPath.Leaf);
+            }
         }
         catch (Exception error)
         {
-            session.Log($"failed to roll back legacy package broker policy migration: {error}");
+            log($"failed to roll back legacy package broker policy migration: {error}");
         }
 
         return ActionResult.Success;
@@ -240,7 +450,7 @@ public static class PackageBrokerPolicyActions
     public static ActionResult CommitLegacyPackageBrokerPolicyMigration(Session session) =>
         RunBestEffortCommit(
             session.Log,
-            () => CommitLegacyPackageBrokerPolicyMigrationCore(session));
+            () => CommitLegacyPolicy(session.Log, LegacyPolicyPath, DestinationPolicyPath, MigrationMarkerPath(session)));
 
     internal static ActionResult RunBestEffortCommit(Action<string> log, Action commit)
     {
@@ -256,10 +466,8 @@ public static class PackageBrokerPolicyActions
         return ActionResult.Success;
     }
 
-    private static void CommitLegacyPackageBrokerPolicyMigrationCore(Session session)
+    internal static void CommitLegacyPolicy(Action<string> log, string sourcePath, string destination, string marker)
     {
-        string marker = MigrationMarkerPath(session);
-        string sourcePath = LegacyPolicyPath;
         using PinnedPath markerPath = PinPathWithoutReparse(
             marker,
             leafIsDirectory: false,
@@ -272,6 +480,30 @@ public static class PackageBrokerPolicyActions
 
         VerifyPackageBrokerSecurity(SecurityFromHandle(markerPath.Leaf, isDirectory: false));
         MigrationRecord record = ReadMigrationMarker(markerPath.Leaf);
+        if (record.BackupIdentity != null)
+        {
+            log("preserving the legacy policy, protected original and migration evidence for Agent downgrade recovery");
+            return;
+        }
+        using PinnedPath published = PinPathWithoutReparse(
+            destination, false, true, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+        if (published.Leaf == null ||
+            !FileIdentityAndDigestMatch(published.Leaf, record.DestinationIdentity, record.DestinationDigest))
+        {
+            log("migration did not publish the current managed policy; preserving source and evidence");
+            return;
+        }
+        VerifyPackageBrokerSecurity(SecurityFromHandle(published.Leaf, false));
+        using PinnedPath authority = record.AuthorityIdentity == null ? null : PinPathWithoutReparse(
+            AuthorityMarkerPath(destination), false, false, WinAPI.GENERIC_READ | WinAPI.READ_CONTROL);
+        if (authority != null)
+        {
+            VerifyPackageBrokerSecurity(SecurityFromHandle(authority.Leaf, false));
+            if (!FileIdentityAndDigestMatch(authority.Leaf, record.AuthorityIdentity, EmptyContentDigest))
+            {
+                throw new InvalidOperationException("managed authority changed before migration commit");
+            }
+        }
 
         bool sourceChanged;
         bool removeSource;
@@ -291,7 +523,7 @@ public static class PackageBrokerPolicyActions
                     source.Leaf,
                     out string configuredDiagnostic))
             {
-                session.Log(
+                log(
                     $"preserving the configured legacy package broker policy during commit: {configuredDiagnostic}");
                 removeSource = false;
             }
@@ -300,7 +532,7 @@ public static class PackageBrokerPolicyActions
                     SecurityFromHandle(source.Leaf, isDirectory: false),
                     out string sourceSecurityDiagnostic))
             {
-                session.Log(
+                log(
                     $"preserving the legacy package broker policy during commit: {sourceSecurityDiagnostic}");
                 removeSource = false;
             }
@@ -313,13 +545,13 @@ public static class PackageBrokerPolicyActions
         {
             if (sourceChanged)
             {
-                session.Log(
+                log(
                     "legacy package broker policy changed after migration; preserving the current source");
             }
             return;
         }
 
-        TryDeleteLegacyPolicySource(session, sourcePath, record);
+        TryDeleteLegacyPolicySource(log, sourcePath, record);
     }
 
     internal static void EnsureSecureDirectoryTree(string programData, string target)
@@ -536,7 +768,10 @@ public static class PackageBrokerPolicyActions
         }
     }
 
-    internal static bool TryValidateConfiguredLocalPolicyPath(string path, out string diagnostic)
+    internal static bool TryValidateConfiguredLocalPolicyPath(string path, out string diagnostic) =>
+        TryValidateLocalFilePath(path, ".json", out diagnostic);
+
+    private static bool TryValidateLocalFilePath(string path, string extension, out string diagnostic)
     {
         diagnostic = null;
         string root;
@@ -583,9 +818,9 @@ public static class PackageBrokerPolicyActions
             diagnostic = "PackageBroker.PolicyPath has an unsafe local path shape";
             return false;
         }
-        if (!string.Equals(Path.GetExtension(relative), ".json", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(Path.GetExtension(relative), extension, StringComparison.OrdinalIgnoreCase))
         {
-            diagnostic = "PackageBroker.PolicyPath must name a JSON file";
+            diagnostic = $"local path must name a {extension} file";
             return false;
         }
 
@@ -657,7 +892,8 @@ public static class PackageBrokerPolicyActions
         string path,
         bool leafIsDirectory,
         bool allowMissingLeaf,
-        uint leafAccess)
+        uint leafAccess,
+        bool verifyTrustedAncestors = false)
     {
         string fullPath = Path.GetFullPath(path);
         string root = Path.GetPathRoot(fullPath);
@@ -681,11 +917,15 @@ public static class PackageBrokerPolicyActions
                 SafeFileHandle ancestorHandle = OpenPathWithoutReparse(
                     ancestor,
                     isDirectory: true,
-                    WinAPI.FILE_READ_ATTRIBUTES,
+                    WinAPI.FILE_READ_ATTRIBUTES | (verifyTrustedAncestors ? WinAPI.READ_CONTROL : 0),
                     WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE,
                     allowMissing: false);
-                VerifyResolvedPath(ancestorHandle, ancestor);
                 handles.Add(ancestorHandle);
+                VerifyResolvedPath(ancestorHandle, ancestor);
+                if (verifyTrustedAncestors)
+                {
+                    VerifyTrustedDirectorySecurity(SecurityFromHandle(ancestorHandle, true));
+                }
             }
 
             uint shareMode = (leafAccess & WinAPI.GENERIC_READ) != 0
@@ -770,7 +1010,27 @@ public static class PackageBrokerPolicyActions
 
     internal static MigrationRecord ReadMigrationMarkerJson(string markerJson)
     {
-        JObject document = JObject.Parse(markerJson);
+        if (ContainsNonStrictJsonSyntax(markerJson))
+        {
+            throw new InvalidOperationException("package broker migration marker is not strict JSON");
+        }
+        using JsonTextReader reader = new(new StringReader(markerJson)) { DateParseHandling = DateParseHandling.None };
+        JObject document = JObject.Load(reader, new JsonLoadSettings
+        {
+            DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error,
+            CommentHandling = CommentHandling.Load,
+        });
+        string[] fields =
+        {
+            "SourceIdentity", "SourceDigest", "DestinationIdentity", "DestinationDigest",
+            "SourceSecurity", "BackupIdentity", "AuthorityIdentity",
+        };
+        if (reader.Read() || document.Properties().Any(property =>
+            !fields.Contains(property.Name) ||
+            (property.Value.Type != JTokenType.String && property.Value.Type != JTokenType.Null)))
+        {
+            throw new InvalidOperationException("package broker migration marker has unexpected content");
+        }
         string sourceIdentity = document.Value<string>("SourceIdentity");
         string sourceDigest = document.Value<string>("SourceDigest");
         string destinationIdentity = document.Value<string>("DestinationIdentity");
@@ -782,7 +1042,14 @@ public static class PackageBrokerPolicyActions
         {
             throw new InvalidOperationException("package broker migration marker is incomplete");
         }
-        return new MigrationRecord(sourceIdentity, sourceDigest, destinationIdentity, destinationDigest);
+        if (document.Value<string>("BackupIdentity") != null &&
+            string.IsNullOrEmpty(document.Value<string>("SourceSecurity")))
+        {
+            throw new InvalidOperationException("converted policy backup has no source security evidence");
+        }
+        return new MigrationRecord(sourceIdentity, sourceDigest, destinationIdentity, destinationDigest,
+            document.Value<string>("SourceSecurity"), document.Value<string>("BackupIdentity"),
+            document.Value<string>("AuthorityIdentity"));
     }
 
     private static string MigrationMarkerPath(Session session) =>
@@ -804,6 +1071,15 @@ public static class PackageBrokerPolicyActions
         }
 
         throw new Win32Exception(error, $"failed to move {source} to {destination} without replacement");
+    }
+
+    private static string EmptyContentDigest
+    {
+        get
+        {
+            using SHA256 sha256 = SHA256.Create();
+            return Convert.ToBase64String(sha256.ComputeHash(Array.Empty<byte>()));
+        }
     }
 
     private static PinnedPath WriteMigrationMarker(string marker, MigrationRecord record)
@@ -1267,7 +1543,7 @@ public static class PackageBrokerPolicyActions
     }
 
     private static void TryDeleteTemporaryFile(
-        Session session,
+        Action<string> log,
         string path,
         string expectedIdentity,
         string expectedDigest)
@@ -1284,7 +1560,7 @@ public static class PackageBrokerPolicyActions
             if (expectedIdentity != null &&
                 !FileIdentityAndDigestMatch(temporary.Leaf, expectedIdentity, expectedDigest))
             {
-                session.Log(
+                log(
                     $"package broker policy migration temporary path {path} was replaced; preserving the current file");
                 return;
             }
@@ -1292,7 +1568,7 @@ public static class PackageBrokerPolicyActions
         }
         catch (Exception error)
         {
-            session.Log($"failed to remove package broker policy migration temporary file {path}: {error}");
+            log($"failed to remove package broker policy migration temporary file {path}: {error}");
         }
     }
 
@@ -1345,12 +1621,6 @@ public static class PackageBrokerPolicyActions
         }
     }
 
-    private static bool TryDeleteLegacyPolicySource(
-        Session session,
-        string sourcePath,
-        MigrationRecord record) =>
-        TryDeleteLegacyPolicySource(session.Log, sourcePath, record);
-
     internal sealed class PinnedPath : IDisposable
     {
         private readonly IReadOnlyList<SafeFileHandle> handles;
@@ -1378,18 +1648,27 @@ public static class PackageBrokerPolicyActions
             string sourceIdentity,
             string sourceDigest,
             string destinationIdentity,
-            string destinationDigest)
+            string destinationDigest,
+            string sourceSecurity = null,
+            string backupIdentity = null,
+            string authorityIdentity = null)
         {
             SourceIdentity = sourceIdentity;
             SourceDigest = sourceDigest;
             DestinationIdentity = destinationIdentity;
             DestinationDigest = destinationDigest;
+            SourceSecurity = sourceSecurity;
+            BackupIdentity = backupIdentity;
+            AuthorityIdentity = authorityIdentity;
         }
 
         internal string SourceIdentity { get; }
         internal string SourceDigest { get; }
         internal string DestinationIdentity { get; }
         internal string DestinationDigest { get; }
+        internal string SourceSecurity { get; }
+        internal string BackupIdentity { get; }
+        internal string AuthorityIdentity { get; }
 
         internal string ToJson() =>
             new JObject
@@ -1398,6 +1677,9 @@ public static class PackageBrokerPolicyActions
                 ["SourceDigest"] = SourceDigest,
                 ["DestinationIdentity"] = DestinationIdentity,
                 ["DestinationDigest"] = DestinationDigest,
+                ["SourceSecurity"] = SourceSecurity,
+                ["BackupIdentity"] = BackupIdentity,
+                ["AuthorityIdentity"] = AuthorityIdentity,
             }.ToString(Formatting.None, Array.Empty<JsonConverter>());
     }
 

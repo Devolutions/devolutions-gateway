@@ -167,13 +167,13 @@ internal static class AgentActions
         new Id($"CA.{nameof(migrateLegacyPackageBrokerPolicy)}"),
         PackageBrokerPolicyActions.MigrateLegacyPackageBrokerPolicy,
         Return.check,
-        When.After, new Step(ensureProgramDataPackageBrokerDirectory.Id),
+        When.After, Step.InstallFiles,
         Condition.NOT_BeingRemoved,
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
         Impersonate = false,
-        UsesProperties = UseProperties(new[] { AgentProperties.installId }),
+        UsesProperties = $"{UseProperties(new[] { AgentProperties.installId })},{AgentProperties.InstallDir}",
     };
 
     private static readonly ElevatedManagedAction rollbackLegacyPackageBrokerPolicyMigration = new(

@@ -16,6 +16,8 @@ pub mod event_channel;
 #[cfg(windows)]
 pub mod executor;
 #[cfg(windows)]
+pub mod installer_policy_migration;
+#[cfg(windows)]
 pub mod operation_tracker;
 #[cfg(windows)]
 pub mod pipe;

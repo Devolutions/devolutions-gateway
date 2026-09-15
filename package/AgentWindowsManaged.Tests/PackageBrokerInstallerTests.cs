@@ -20,6 +20,293 @@ namespace DevolutionsAgent.Installer.Tests;
 
 public sealed class PackageBrokerInstallerTests
 {
+    private const string CurrentPolicy =
+        """{"PolicyFormatVersion":"1.7.3","PolicyType":"PackageBrokerPolicy","Metadata":{"Id":"policy-a","Publisher":"Test","Revision":17,"PublishedAt":"2026-01-01T00:00:00Z"},"Enforcement":{"DefaultDecision":"Deny","RulePrecedence":"PriorityThenDeny"},"Rules":[]}""";
+    private static string LegacyPolicy => CurrentPolicy.Replace(
+        "\"PolicyFormatVersion\":",
+        "\"$schema\":\"https://devolutions.net/schemas/now-policy.schema.1.0.json\",\"PolicyVersion\":");
+
+    [SystemFact]
+    public void TransactionTestsRunAsLocalSystem()
+    {
+        Assert.Equal("S-1-5-18", WindowsIdentity.GetCurrent().User.Value);
+    }
+
+    [SystemFact]
+    public void InstalledAgentConverterUsesAuthoritativeContractBeforePublication()
+    {
+        using TempDirectory temp = new();
+        Directory.SetAccessControl(temp.Path,
+            DirectorySecurity(DevolutionsAgent.Resources.Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL));
+        string builtAgent = Environment.GetEnvironmentVariable("DEVOLUTIONS_AGENT_MIGRATION_TEST_EXE") ??
+            Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                @"..\..\..\..\..\target\debug\devolutions-agent.exe"));
+        string staged = Path.Combine(temp.Path, DevolutionsAgent.Resources.Includes.EXECUTABLE_NAME);
+        File.Copy(builtAgent, staged);
+        File.SetAccessControl(staged, Security(DevolutionsAgent.Resources.Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL));
+        Assert.Equal(CurrentPolicy, Encoding.UTF8.GetString(
+            PackageBrokerPolicyActions.ConvertWithInstalledAgent(temp.Path, Encoding.UTF8.GetBytes(LegacyPolicy))));
+        Assert.Equal(CurrentPolicy, Encoding.UTF8.GetString(
+            PackageBrokerPolicyActions.ConvertWithInstalledAgent(temp.Path, Encoding.UTF8.GetBytes(CurrentPolicy))));
+        Assert.Throws<InvalidOperationException>(() =>
+            PackageBrokerPolicyActions.ConvertWithInstalledAgent(temp.Path, Encoding.UTF8.GetBytes("{}")));
+    }
+
+    [Theory]
+    [InlineData(".yaml")]
+    [InlineData(".yml")]
+    public void MigrationNeverReadsOrConvertsYaml(string extension)
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy" + extension);
+        string destination = Path.Combine(temp.Path, "managed.json");
+        File.WriteAllText(source, "PolicyVersion: 1.0.0");
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ => throw new Exception("converter must not run")));
+        Assert.Equal("PolicyVersion: 1.0.0", File.ReadAllText(source));
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public void MigrationPreservesUntrustedSourceWithoutCallingConverter()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        File.WriteAllText(source, LegacyPolicy);
+        FileSecurity security = new FileInfo(source).GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.WriteData, AccessControlType.Allow));
+        File.SetAccessControl(source, security);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ => throw new Exception("converter must not run")));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public void MigrationPreservesReparseSourceWithoutCallingConverter()
+    {
+        using TempDirectory temp = new();
+        string target = Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName;
+        string sentinel = Path.Combine(target, "untouched");
+        File.WriteAllText(sentinel, LegacyPolicy);
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        CreateDirectoryJunction(source, target);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ => throw new Exception("converter must not run")));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(sentinel));
+        Assert.False(File.Exists(destination));
+        Directory.Delete(source);
+    }
+
+    [SystemFact]
+    public void ConvertedMigrationCommitAndRepeatPreserveOriginalAndEvidence()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, LegacyPolicy);
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(marker + ".original"));
+        PackageBrokerPolicyActions.MigrationRecord record =
+            PackageBrokerPolicyActions.ReadMigrationMarkerJson(File.ReadAllText(marker));
+        using (PackageBrokerPolicyActions.PinnedPath pinned = PinFile(source, WinAPI.GENERIC_READ))
+        {
+            Assert.True(PackageBrokerPolicyActions.FileIdentityAndDigestMatch(
+                pinned.Leaf, record.SourceIdentity, record.SourceDigest));
+        }
+        Assert.NotNull(record.SourceSecurity);
+        Assert.NotNull(record.BackupIdentity);
+        Assert.NotNull(record.AuthorityIdentity);
+        PackageBrokerPolicyActions.VerifyPackageBrokerSecurity(new FileInfo(marker + ".original").GetAccessControl());
+        PackageBrokerPolicyActions.CommitLegacyPolicy(_ => { }, source, destination, marker);
+        PackageBrokerPolicyActions.CommitLegacyPolicy(_ => { }, source, destination, marker);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, marker, _ => throw new Exception("existing destination")));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+        Assert.True(File.Exists(marker));
+        Assert.True(File.Exists(marker + ".original"));
+    }
+
+    [SystemFact]
+    public void RollbackRestoresLegacyArbitrationAndMigrationCanRepeat()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, LegacyPolicy);
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.RollbackLegacyPolicy(
+            _ => { }, source, destination, marker));
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(Path.Combine(temp.Path, ".package-broker-managed-authority.v1")));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(marker + ".original"));
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.RollbackLegacyPolicy(
+            _ => { }, source, destination, marker));
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+    }
+
+    [SystemFact]
+    public void InterruptedPublicationRecoversOnlyOwnedAuthority()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, LegacyPolicy);
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        File.Delete(destination);
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+    }
+
+    [SystemFact]
+    public void InvalidLegacyPolicyFailsUpgradeAndPreservesSource()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        WriteTrusted(source, "{}");
+        Assert.Equal(ActionResult.Failure, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ => throw new InvalidOperationException("invalid legacy policy")));
+        Assert.Equal("{}", File.ReadAllText(source));
+        Assert.False(File.Exists(destination));
+    }
+
+    [SystemFact]
+    public void ExistingNewDestinationAndPublicationCollisionArePreserved()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        WriteTrusted(source, LegacyPolicy);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ =>
+            {
+                WriteTrusted(destination, CurrentPolicy);
+                return Encoding.UTF8.GetBytes(CurrentPolicy);
+            }));
+        PackageBrokerPolicyActions.RollbackLegacyPolicy(_ => { }, source, destination, destination + ".marker");
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, destination + ".marker",
+            _ => throw new Exception("existing destination must not be converted")));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+    }
+
+    [SystemFact]
+    public void ChangedSourcePreventsDestructiveRollback()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, LegacyPolicy);
+        Assert.Equal(ActionResult.Success, MigrateFixture(source, destination, marker));
+        File.WriteAllText(source, "changed");
+        PackageBrokerPolicyActions.RollbackLegacyPolicy(_ => { }, source, destination, marker);
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.Equal("changed", File.ReadAllText(source));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(marker + ".original"));
+    }
+
+    [SystemFact]
+    public void PreexistingAuthorityPreventsLegacyResurrection()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        WriteTrusted(source, LegacyPolicy);
+        WriteTrusted(Path.Combine(temp.Path, ".package-broker-managed-authority.v1"), "");
+        Assert.Equal(ActionResult.Failure, MigrateFixture(source, destination, destination + ".marker"));
+        Assert.False(File.Exists(destination));
+        Assert.Equal(LegacyPolicy, File.ReadAllText(source));
+    }
+
+    [SystemFact]
+    public void AuthorityCollisionCannotCommitSourceDeletion()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, CurrentPolicy);
+        Assert.Equal(ActionResult.Failure, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, marker, input =>
+            {
+                WriteTrusted(Path.Combine(temp.Path, ".package-broker-managed-authority.v1"), "");
+                return input;
+            }));
+        PackageBrokerPolicyActions.CommitLegacyPolicy(_ => { }, source, destination, marker);
+        Assert.Equal(CurrentPolicy, File.ReadAllText(source));
+        Assert.False(File.Exists(destination));
+        Assert.True(File.Exists(marker));
+    }
+
+    [SystemFact]
+    public void DestinationCollisionCannotCommitSourceDeletion()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, CurrentPolicy);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, marker, input =>
+            {
+                WriteTrusted(destination, CurrentPolicy);
+                return input;
+            }));
+        PackageBrokerPolicyActions.CommitLegacyPolicy(_ => { }, source, destination, marker);
+        Assert.Equal(CurrentPolicy, File.ReadAllText(source));
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.True(File.Exists(marker));
+    }
+
+    [SystemFact]
+    public void UnchangedInputRollbackPreservesLastSurvivingPolicy()
+    {
+        using TempDirectory temp = new();
+        string source = Path.Combine(temp.Path, "policy.json");
+        string destination = Path.Combine(temp.Path, "managed.json");
+        string marker = destination + ".marker";
+        WriteTrusted(source, CurrentPolicy);
+        Assert.Equal(ActionResult.Success, PackageBrokerPolicyActions.MigrateLegacyPolicy(
+            _ => { }, source, destination, marker, input => input));
+        File.Delete(source);
+        PackageBrokerPolicyActions.RollbackLegacyPolicy(_ => { }, source, destination, marker);
+        Assert.Equal(CurrentPolicy, File.ReadAllText(destination));
+        Assert.True(File.Exists(marker));
+        Assert.True(File.Exists(Path.Combine(temp.Path, ".package-broker-managed-authority.v1")));
+    }
+
+    private static ActionResult MigrateFixture(string source, string destination, string marker) =>
+        PackageBrokerPolicyActions.MigrateLegacyPolicy(_ => { }, source, destination, marker, input =>
+        {
+            Assert.Equal(LegacyPolicy, Encoding.UTF8.GetString(input));
+            return Encoding.UTF8.GetBytes(CurrentPolicy);
+        });
+
+    private static void WriteTrusted(string path, string content)
+    {
+        File.WriteAllText(path, content);
+        File.SetAccessControl(path, Security(DevolutionsAgent.Resources.Includes.PROGRAM_DATA_PACKAGE_BROKER_FILE_SDDL));
+    }
+
     [Fact]
     public void DedicatedPolicyAclAcceptsOnlySystemAndAdministrators()
     {
@@ -30,6 +317,17 @@ public sealed class PackageBrokerInstallerTests
         PackageBrokerPolicyActions.VerifySecurityDescriptor(
             security,
             DevolutionsAgent.Resources.Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL);
+    }
+
+    public sealed class SystemFactAttribute : FactAttribute
+    {
+        public SystemFactAttribute()
+        {
+            if (!WindowsIdentity.GetCurrent().IsSystem)
+            {
+                Skip = "Requires LocalSystem, matching the MSI custom-action token and SYSTEM-owned backup ACL";
+            }
+        }
     }
 
     [Theory]
@@ -613,7 +911,7 @@ public sealed class PackageBrokerInstallerTests
         Assert.Equal(When.After, migrate.When);
         Assert.Equal(When.After, commit.When);
         Assert.Equal(migrate.Id, rollback.Step.ToString());
-        Assert.Equal(ensure.Id, migrate.Step.ToString());
+        Assert.Equal(Step.InstallFiles.ToString(), migrate.Step.ToString());
         Assert.Contains("createProgramDataDirectory", ensure.Step.ToString());
         Assert.Equal(migrate.Id, commit.Step.ToString());
         Assert.Equal(Condition.NOT_BeingRemoved.ToString(), ensure.Condition.ToString());
