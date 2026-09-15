@@ -33,4 +33,4 @@ bitvec = "1.0"
 # Test infrastructure for socket manipulation.
 socket2 = "0.5"
 # Enable extra tokio features.
-tokio = { version = "1.52", features = ["rt-multi-thread"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "test-util"] }

@@ -1350,3 +1350,59 @@ fn is_really_an_error(original_error: &(dyn std::error::Error + 'static)) -> boo
 
     true
 }
+
+#[cfg(test)]
+mod sender_tests {
+    use bytes::BytesMut;
+    use tokio::io::AsyncReadExt as _;
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn sender_flushes_a_drained_queue_immediately() {
+        let (writer, mut reader) = tokio::io::duplex(1024);
+        let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel(1);
+        let sender_task = tokio::spawn(
+            JmuxSenderTask {
+                jmux_writer: writer,
+                msg_to_send_rx,
+            }
+            .run(),
+        );
+
+        for id in [1, 2] {
+            if id > 1 {
+                tokio::time::advance(JMUX_FLUSH_MIN_SPACING).await;
+            }
+
+            let message = Message::open(
+                LocalChannelId::from(id),
+                MAXIMUM_PACKET_SIZE_IN_BYTES,
+                DestinationUrl::new("tcp", "127.0.0.1", 1),
+            );
+            let mut expected = BytesMut::new();
+            message.encode(&mut expected).expect("encode message");
+
+            msg_to_send_tx.send(message).await.expect("queue message");
+            let started_at = tokio::time::Instant::now();
+            let mut actual = vec![0; expected.len()];
+            tokio::time::timeout(core::time::Duration::from_secs(5), reader.read_exact(&mut actual))
+                .await
+                .expect("sender never flushed the message")
+                .expect("read flushed message");
+
+            assert_eq!(actual, expected);
+            assert_eq!(
+                started_at.elapsed(),
+                core::time::Duration::ZERO,
+                "sender waited on its flush deadline"
+            );
+        }
+
+        drop(msg_to_send_tx);
+        sender_task
+            .await
+            .expect("sender task panicked")
+            .expect("sender task failed");
+    }
+}
