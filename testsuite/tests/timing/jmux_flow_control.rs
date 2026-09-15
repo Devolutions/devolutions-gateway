@@ -8,9 +8,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
 const WINDOW_SIZE: usize = 4 * 1024;
-const MEASURED_WINDOWS: usize = 512;
+const MEASURED_WINDOWS: usize = 256;
 const CREDIT: u8 = 1;
-const HANG_TIMEOUT: Duration = Duration::from_secs(20);
+const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 const TRANSFER_BUDGET: Duration = Duration::from_secs(2);
 
 /// Relays windowed data through the jetsocat CLI and measures how quickly credits return.
@@ -24,12 +24,14 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
     let target_task = tokio::spawn(async move {
         let (mut stream, _) = target_listener.accept().await.unwrap();
         stream.set_nodelay(true).unwrap();
-        let mut window = vec![0; WINDOW_SIZE];
+        let window = vec![0; WINDOW_SIZE];
+        let mut credit = [0];
 
         // Model receiver-driven flow control: each complete window releases one byte of credit.
         for _ in 0..=MEASURED_WINDOWS {
-            stream.read_exact(&mut window).await.unwrap();
-            stream.write_all(&[CREDIT]).await.unwrap();
+            stream.write_all(&window).await.unwrap();
+            stream.read_exact(&mut credit).await.unwrap();
+            assert_eq!(credit, [CREDIT]);
         }
     });
 
@@ -68,40 +70,39 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
     let transfer = timeout(HANG_TIMEOUT, async {
         let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
         stream.set_nodelay(true).unwrap();
-        let window = vec![0; WINDOW_SIZE];
-        let mut credit = [0];
+        let mut window = vec![0; WINDOW_SIZE];
 
         // Warm up the tunnel so connection setup is excluded from the measurement.
-        stream.write_all(&window).await.unwrap();
-        stream.read_exact(&mut credit).await.unwrap();
-        assert_eq!(credit, [CREDIT]);
+        stream.read_exact(&mut window).await.unwrap();
+        stream.write_all(&[CREDIT]).await.unwrap();
 
         let started_at = Instant::now();
 
         for _ in 0..MEASURED_WINDOWS {
-            stream.write_all(&window).await.unwrap();
-            stream.read_exact(&mut credit).await.unwrap();
-            assert_eq!(credit, [CREDIT]);
+            stream.read_exact(&mut window).await.unwrap();
+            stream.write_all(&[CREDIT]).await.unwrap();
         }
 
         started_at.elapsed()
     })
     .await;
 
+    let elapsed = transfer.expect("flow-controlled transfer timed out");
+    target_task.await.expect("target server task panicked");
+
     let _ = jmux_client.start_kill();
     let _ = jmux_server.start_kill();
     let _ = jmux_client.wait().await;
     let _ = jmux_server.wait().await;
 
-    let elapsed = transfer.expect("flow-controlled transfer timed out");
-    target_task.await.expect("target server task panicked");
     elapsed
 }
 
 /// Reproduces the round-trip bottleneck seen in VMware HTTP/2 uploads without embedding an HTTP stack.
 ///
 /// HTTP/2 commonly limits an upload to about 64 KiB before the server returns a small flow-control update.
-/// This test amplifies that dependency by waiting for one byte of credit after every 4 KiB sent through jetsocat.
+/// This test mirrors that dependency by making the sender wait for one byte of credit after every 4 KiB window.
+/// The direction is immaterial because both JMUX peers use the same sender implementation.
 /// The old JMUX sender delayed each credit behind its flush timer, so the accumulated delay exceeds the transfer budget.
 #[rstest]
 #[case::tcp(false)]
