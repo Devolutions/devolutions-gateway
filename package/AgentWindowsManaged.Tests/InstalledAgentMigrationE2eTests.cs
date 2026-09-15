@@ -27,6 +27,14 @@ public sealed class InstalledAgentMigrationE2eTests
 
     public InstalledAgentMigrationE2eTests(ITestOutputHelper output) => this.output = output;
 
+    [Theory]
+    [InlineData("DevolutionsAgent.exe")]
+    [InlineData("devolutionsagent.exe")]
+    public void AgentExecutableNameComparisonIsCaseInsensitive(string fileName)
+    {
+        Assert.True(IsExpectedAgentExecutableName(fileName));
+    }
+
     [Fact]
     public void AgentJobTerminatesChildWhenScopeThrows()
     {
@@ -67,7 +75,7 @@ public sealed class InstalledAgentMigrationE2eTests
         string agent = Environment.GetEnvironmentVariable("DEVOLUTIONS_AGENT_MIGRATION_TEST_EXE");
         Assert.False(string.IsNullOrWhiteSpace(agent), "The SYSTEM runner must supply the built Agent executable");
         Assert.True(File.Exists(agent), agent);
-        Assert.Equal(Includes.EXECUTABLE_NAME, Path.GetFileName(agent), ignoreCase: true);
+        Assert.True(IsExpectedAgentExecutableName(Path.GetFileName(agent)), agent);
         using PackageBrokerPolicyActions.PinnedPath installedAgent =
             PackageBrokerPolicyActions.PinPathWithoutReparse(
                 agent, leafIsDirectory: false, allowMissingLeaf: false,
@@ -91,6 +99,7 @@ public sealed class InstalledAgentMigrationE2eTests
                 PackageBrokerPolicyActions.CreateDirectoryWithSecurity(
                     directory, Includes.PROGRAM_DATA_PACKAGE_BROKER_SDDL);
             }
+
             string source = Path.Combine(legacyDirectory, "package-broker-policy.json");
             string destination = Path.Combine(managedDirectory, "package-broker-policy.json");
             string marker = Path.Combine(managedDirectory, ".installer-e2e.migration");
@@ -204,6 +213,9 @@ public sealed class InstalledAgentMigrationE2eTests
         Assert.Equal("Active", (string)management["State"]);
         return policy;
     }
+
+    private static bool IsExpectedAgentExecutableName(string fileName) =>
+        string.Equals(Includes.EXECUTABLE_NAME, fileName, StringComparison.OrdinalIgnoreCase);
 
     private sealed class AgentProcess : IDisposable
     {
