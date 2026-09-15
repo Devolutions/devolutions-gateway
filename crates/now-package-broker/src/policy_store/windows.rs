@@ -2048,7 +2048,7 @@ fn observation_from_parts(
             // and could otherwise leak content fragments to any authenticated (but not
             // necessarily elevated) caller of `GET /v1/policy/management`.
             tracing::warn!(%parse_error, "Configured policy file content failed to parse");
-            return invalid_with(validation::DiskFailureReason::MalformedContent, hosting_dir);
+            return invalid_with(disk_parse_failure_reason(content), hosting_dir);
         }
     };
 
@@ -2082,6 +2082,22 @@ fn observation_from_parts(
         canonical_path: path.to_owned(),
         hosting_dir,
         retained_target,
+    }
+}
+
+fn disk_parse_failure_reason(content: &[u8]) -> validation::DiskFailureReason {
+    if serde_json::from_slice::<serde_json::Value>(content)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_object()
+                .map(|object| object.contains_key("$schema") || object.contains_key("PolicyVersion"))
+        })
+        == Some(true)
+    {
+        validation::DiskFailureReason::LegacyPolicyContract
+    } else {
+        validation::DiskFailureReason::MalformedContent
     }
 }
 
@@ -2932,7 +2948,7 @@ fn recover_interrupted_transaction(dir: &File, dir_path: &Path, final_leaf: &OsS
         verify_orphan_transaction_file(&new_file, &new_path)?;
         let final_file = open_optional_final_policy(&dir_path.join(final_leaf))?
             .context("orphan replacement has no original final")?;
-        verify_safe_existing_policy(&final_file, &dir_path.join(final_leaf))?;
+        verify_orphan_transaction_file(&final_file, &dir_path.join(final_leaf))?;
         delete_file_handle(&new_file).context("failed to retire orphan replacement")?;
         drop(new_file);
         return Ok(());
@@ -3014,7 +3030,8 @@ fn recover_marker_staging(final_path: &Path, marker_staging: File, new_file: Opt
             .context("prepared replacement changed during marker preparation")?;
         }
     } else {
-        verify_safe_existing_policy(&final_guard, final_path)?;
+        // Before marker publication the original is untouched, but Repair may have started with invalid content.
+        verify_orphan_transaction_file(&final_guard, final_path)?;
     }
     if let Some(new_file) = new_file {
         delete_file_handle(&new_file).context("failed to retire pre-marker replacement")?;
@@ -3030,17 +3047,6 @@ fn verify_orphan_transaction_file(file: &File, expected_path: &Path) -> anyhow::
     verify_transaction_file_path(file, expected_path)?;
     policy_security::verify_policy_file_path(file, expected_path)?;
     policy_security::verify_managed_policy_file_security(file)?;
-    Ok(())
-}
-
-fn verify_safe_existing_policy(file: &File, expected_path: &Path) -> anyhow::Result<()> {
-    verify_orphan_transaction_file(file, expected_path)?;
-    let policy = serde_json::from_slice::<PolicyDocument>(&read_file_from_start(file)?)
-        .context("existing final is not a policy document")?;
-    ensure!(
-        validation::validate_committed_policy(&policy).is_valid,
-        "existing final failed semantic validation"
-    );
     Ok(())
 }
 
@@ -3449,8 +3455,7 @@ mod tests {
 
     fn committed_policy_bytes(default_decision: &str) -> Vec<u8> {
         let draft: now_policy::PolicyDraftDocument = serde_json::from_value(serde_json::json!({
-            "$schema": now_policy::POLICY_DRAFT_SCHEMA_URI,
-            "PolicyVersion": "1.0.0",
+            "PolicyFormatVersion": "1.0.0",
             "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "recovery-test", "Publisher": "Test" },
             "Enforcement": { "DefaultDecision": default_decision, "RulePrecedence": "PriorityThenDeny" },
@@ -3463,6 +3468,84 @@ mod tests {
 
     fn valid_committed_policy_bytes() -> Vec<u8> {
         committed_policy_bytes("Deny")
+    }
+
+    fn observe_test_content(content: &[u8]) -> DiskObservation {
+        observation_from_parts(
+            Path::new(r"C:\policy.json"),
+            content,
+            VerifiedIdentity {
+                parent: test_identity(1),
+                dir_security_digest: test_security_digest(1),
+                ancestor_security_digest: test_security_digest(1),
+                target: test_identity(2),
+                security_digest: test_security_digest(1),
+            },
+            PolicyWriteCapability::Writable,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn legacy_policy_identity_has_a_precise_disk_diagnostic() {
+        let current: serde_json::Value = serde_json::from_slice(&valid_committed_policy_bytes()).unwrap();
+        for (legacy_field, legacy_value) in [
+            ("$schema", serde_json::json!("legacy")),
+            ("PolicyVersion", serde_json::json!("1.0.0")),
+        ] {
+            for retain_current_version in [false, true] {
+                let mut legacy = current.clone();
+                legacy[legacy_field] = legacy_value.clone();
+                if !retain_current_version {
+                    legacy.as_object_mut().unwrap().remove("PolicyFormatVersion");
+                }
+                let content = serde_json::to_vec(&legacy).unwrap();
+                let error = serde_json::from_slice::<PolicyDocument>(&content).expect_err("legacy field rejected");
+                assert!(error.to_string().contains(legacy_field), "{error}");
+                let observed = observe_test_content(&content);
+                assert_eq!(observed.state, PolicyManagementState::Invalid);
+                assert!(observed.policy.is_none());
+                assert_eq!(observed.write_capability, PolicyWriteCapability::Writable);
+                let expected = validation::disk_failure_finding(validation::DiskFailureReason::LegacyPolicyContract);
+                let finding = &observed.invalid_diagnostics.unwrap().findings[0];
+                assert_eq!(finding.code, expected.code);
+                assert_eq!(finding.message, expected.message);
+                assert_eq!(observe_test_content(&content).fingerprint, observed.fingerprint);
+            }
+        }
+        assert_eq!(
+            disk_parse_failure_reason(br#"{"PolicyFormatVersion":"broken"}"#),
+            validation::DiskFailureReason::MalformedContent
+        );
+    }
+
+    #[test]
+    fn committed_policy_observation_preserves_compatible_format_and_exact_content_digest() {
+        let mut current: serde_json::Value = serde_json::from_slice(&valid_committed_policy_bytes()).unwrap();
+        for version in ["1.0.0", "1.7.3"] {
+            current["PolicyFormatVersion"] = serde_json::json!(version);
+            let content = serde_json::to_vec(&current).unwrap();
+            let observation = observe_test_content(&content);
+            assert_eq!(observation.state, PolicyManagementState::Active);
+            let policy = observation.policy.unwrap();
+            assert_eq!(serde_json::to_value(&policy).unwrap()["PolicyFormatVersion"], version);
+            let draft = serde_json::to_value(policy.to_draft()).unwrap();
+            assert_eq!(draft["PolicyFormatVersion"], version);
+            assert_eq!(
+                observation.fingerprint.target_state().unwrap().1,
+                sha256_digest(&content)
+            );
+            let pretty = serde_json::to_vec_pretty(&current).unwrap();
+            assert_ne!(observation.fingerprint, observe_test_content(&pretty).fingerprint);
+        }
+        for version in ["0.9.0", "2.0.0", "broken"] {
+            current["PolicyFormatVersion"] = serde_json::json!(version);
+            let observed = observe_test_content(&serde_json::to_vec(&current).unwrap());
+            assert_eq!(observed.state, PolicyManagementState::Invalid);
+            assert!(observed.policy.is_none());
+        }
     }
 
     #[test]
@@ -4083,6 +4166,52 @@ mod tests {
         assert_eq!(std::fs::read(&final_path).unwrap(), original);
         assert!(!paths.marker_staging.exists());
         assert!(!paths.new.exists());
+    }
+
+    #[test]
+    fn interrupted_repair_preserves_invalid_original_and_retires_prepublication_remnants() {
+        use std::io::Write as _;
+
+        for original in [
+            b"malformed policy".as_slice(),
+            br#"{"$schema":"legacy","PolicyVersion":"1.0.0"}"#.as_slice(),
+        ] {
+            let dir = temp_dir();
+            let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+            let final_path = dir.path().join("policy.json");
+            let mut final_file = match create_secure_transaction_file(&final_path) {
+                Ok(file) => file,
+                Err(error) => {
+                    eprintln!("Skipping administrator-owned repair recovery fixtures: {error:#}");
+                    return;
+                }
+            };
+            final_file.write_all(original).unwrap();
+            final_file.sync_all().unwrap();
+            drop(final_file);
+            for stage_marker in [false, true] {
+                let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+                let mut replacement = create_secure_transaction_file(&paths.new).unwrap();
+                replacement.write_all(b"partial replacement").unwrap();
+                replacement.sync_all().unwrap();
+                drop(replacement);
+                if stage_marker {
+                    let mut staging = create_secure_transaction_file(&paths.marker_staging).unwrap();
+                    staging.write_all(br#"{"Version":"#).unwrap();
+                    staging.sync_all().unwrap();
+                }
+
+                recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap();
+
+                assert_eq!(std::fs::read(&final_path).unwrap(), original);
+                assert!(!paths.new.exists());
+                assert!(!paths.marker_staging.exists());
+                let observed = observe_test_content(original);
+                assert_eq!(observed.state, PolicyManagementState::Invalid);
+                assert_eq!(observed.write_capability, PolicyWriteCapability::Writable);
+                assert!(observed.policy.is_none());
+            }
+        }
     }
 
     #[test]

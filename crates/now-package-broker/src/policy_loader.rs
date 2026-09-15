@@ -4,6 +4,7 @@
 //! Supports JSON (`.json`) policies.
 //! Managed policies use `%PROGRAMDATA%/Devolutions/PackageBroker/`.
 //! `%PROGRAMDATA%/Devolutions/Agent/` remains the legacy compatibility location.
+//! Both locations require `PolicyFormatVersion`; legacy documents need installer migration before loading.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
