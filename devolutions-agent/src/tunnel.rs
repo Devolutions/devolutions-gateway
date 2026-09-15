@@ -723,6 +723,7 @@ async fn proxy_session_traffic(
         Ok::<_, anyhow::Error>(())
     };
 
+    // Keep both directions alive so one-sided EOF propagates as a half-close without cancelling reverse traffic.
     let (tunnel_to_target, target_to_tunnel) = tokio::join!(tunnel_to_target, target_to_tunnel);
     tunnel_to_target?;
     target_to_tunnel
