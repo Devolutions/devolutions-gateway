@@ -7,7 +7,6 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -220,6 +219,7 @@ public sealed class InstalledAgentMigrationE2eTests
     private sealed class AgentProcess : IDisposable
     {
         private readonly string executable;
+        private readonly string tester;
         private readonly string root;
         private readonly ITestOutputHelper output;
         private readonly string pipeName = $"Devolutions.Now.PackageBroker.installer-e2e.{Guid.NewGuid():N}";
@@ -231,6 +231,9 @@ public sealed class InstalledAgentMigrationE2eTests
         internal AgentProcess(string executable, string root, ITestOutputHelper output)
         {
             this.executable = executable;
+            tester = Environment.GetEnvironmentVariable("AGENT_POLICY_TESTER_E2E_EXE");
+            Assert.False(string.IsNullOrWhiteSpace(tester), "The SYSTEM runner must supply the policy tester executable");
+            Assert.True(File.Exists(tester), tester);
             this.root = root;
             this.output = output;
             JObject config = new()
@@ -288,30 +291,30 @@ public sealed class InstalledAgentMigrationE2eTests
 
         internal JObject Get(string path, int expectedStatus)
         {
-            using NamedPipeClientStream pipe = new(
-                ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            pipe.Connect(1000);
-            Task<string> request = Exchange(pipe, path);
-            if (Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(10))).GetAwaiter().GetResult() != request)
+            ProcessStartInfo start = new(tester, $"\"{tester}\" probe \"\\\\.\\pipe\\{pipeName}\" \"{path}\"")
             {
-                throw new TimeoutException($"timed out reading {path}");
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using Process client = Process.Start(start);
+            Task<string> stdout = client.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = client.StandardError.ReadToEndAsync();
+            if (!client.WaitForExit(10000))
+            {
+                client.Kill();
+                throw new TimeoutException($"timed out probing {path}");
             }
-            string response = request.GetAwaiter().GetResult();
-            int headerEnd = response.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-            Assert.True(headerEnd > 0, response);
-            Assert.Equal(expectedStatus.ToString(), response.Split(' ')[1]);
-            return JObject.Parse(response.Substring(headerEnd + 4));
-        }
-
-        private static async Task<string> Exchange(NamedPipeClientStream pipe, string path)
-        {
-            byte[] request = Encoding.ASCII.GetBytes(
-                $"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-            await pipe.WriteAsync(request, 0, request.Length).ConfigureAwait(false);
-            await pipe.FlushAsync().ConfigureAwait(false);
-            using MemoryStream response = new();
-            await pipe.CopyToAsync(response).ConfigureAwait(false);
-            return Encoding.UTF8.GetString(response.ToArray());
+            string standardOutput = stdout.GetAwaiter().GetResult();
+            string standardError = stderr.GetAwaiter().GetResult();
+            if (client.ExitCode != 0)
+            {
+                throw new IOException($"policy tester probe failed for {path}: {standardError}");
+            }
+            JObject response = JObject.Parse(standardOutput);
+            Assert.Equal(expectedStatus, (int)response["Status"]);
+            return response["Body"] as JObject;
         }
 
         internal void Stop()

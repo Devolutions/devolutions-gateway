@@ -20,6 +20,7 @@ $stagedResultsPath = Join-Path $stagingPath "installer-test-results"
 $exitCode = 1
 $previousTemp = $env:TEMP
 $previousTmp = $env:TMP
+$previousInstallerTester = $env:AGENT_POLICY_TESTER_E2E_EXE
 
 try {
     Set-Content -LiteralPath $outputPath -Value ""
@@ -107,6 +108,7 @@ public static class AgentPolicyTesterNativeDirectory
     Get-Acl -LiteralPath $stagedTesterPath | Format-List Owner, Sddl | Out-File $outputPath -Append
     & $stagedTesterPath $stagedAgentPath elevated 2>&1 | Out-File $outputPath -Append
     $exitCode = $LASTEXITCODE
+    $env:AGENT_POLICY_TESTER_E2E_EXE = $stagedTesterPath
     & (Join-Path $PSScriptRoot "run-installer-tests.ps1") `
         -ProjectPath $installerProject -TestOutputPath $stagedInstallerOutput `
         -AgentPath $stagedAgentPath -ResultsPath $stagedResultsPath -ArtifactResultsPath $resultsPath `
@@ -121,6 +123,7 @@ public static class AgentPolicyTesterNativeDirectory
 } finally {
     $env:TEMP = $previousTemp
     $env:TMP = $previousTmp
+    $env:AGENT_POLICY_TESTER_E2E_EXE = $previousInstallerTester
     for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $stagingPath); $attempt++) {
         try {
             Remove-Item -LiteralPath $stagingPath -Recurse -Force
