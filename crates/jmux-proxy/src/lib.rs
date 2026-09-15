@@ -1359,9 +1359,10 @@ impl StreamResolverTask {
                 Ok(stream) => {
                     // Nagle's algorithm is deliberately left enabled here. Disabling it
                     // costs about 25% of bulk throughput, because `DataWriterTask` writes
-                    // every ~4 kiB chunk straight to this socket with no buffering, so
-                    // each one would go out as its own undersized segment. Buffering
-                    // those writes first would make `TCP_NODELAY` affordable.
+                    // every ~4 kiB chunk straight to this socket with no buffering, so each
+                    // write can leave an undersized tail instead of coalescing it with the
+                    // next chunk. Buffering those writes first would make `TCP_NODELAY`
+                    // affordable.
                     channel.target_ip = Some(socket_addr.ip());
                     return Ok(Box::new(stream));
                 }
@@ -1457,8 +1458,41 @@ mod sender_tests {
 
     use super::*;
 
+    fn open_message(id: u32) -> (Message, BytesMut) {
+        let message = Message::open(
+            LocalChannelId::from(id),
+            MAXIMUM_PACKET_SIZE_IN_BYTES,
+            DestinationUrl::new("tcp", "127.0.0.1", 1),
+        );
+        let mut encoded = BytesMut::new();
+        message.encode(&mut encoded).expect("encode message");
+        (message, encoded)
+    }
+
+    async fn assert_immediate_flush(
+        msg_to_send_tx: &mpsc::Sender<Message>,
+        reader: &mut tokio::io::DuplexStream,
+        id: u32,
+    ) {
+        let (message, expected) = open_message(id);
+        msg_to_send_tx.send(message).await.expect("queue message");
+        let started_at = tokio::time::Instant::now();
+        let mut actual = vec![0; expected.len()];
+        tokio::time::timeout(core::time::Duration::from_secs(5), reader.read_exact(&mut actual))
+            .await
+            .expect("sender never flushed the message")
+            .expect("read flushed message");
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            started_at.elapsed(),
+            core::time::Duration::ZERO,
+            "sender waited on its flush deadline"
+        );
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn sender_flushes_a_drained_queue_immediately() {
+    async fn sender_flushes_a_drained_queue_with_bounded_coalescing() {
         let (writer, mut reader) = tokio::io::duplex(1024);
         let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel(1);
         let sender_task = tokio::spawn(
@@ -1469,34 +1503,32 @@ mod sender_tests {
             .run(),
         );
 
-        for id in [1, 2] {
-            if id > 1 {
-                tokio::time::advance(JMUX_FLUSH_MIN_SPACING).await;
-            }
+        assert_immediate_flush(&msg_to_send_tx, &mut reader, 1).await;
 
-            let message = Message::open(
-                LocalChannelId::from(id),
-                MAXIMUM_PACKET_SIZE_IN_BYTES,
-                DestinationUrl::new("tcp", "127.0.0.1", 1),
-            );
-            let mut expected = BytesMut::new();
-            message.encode(&mut expected).expect("encode message");
+        let (message, expected) = open_message(2);
+        msg_to_send_tx.send(message).await.expect("queue message");
+        let mut actual = vec![0; expected.len()];
+        let read = reader.read_exact(&mut actual);
+        tokio::pin!(read);
+        let before_deadline = JMUX_FLUSH_COALESCING_WINDOW
+            .checked_sub(core::time::Duration::from_nanos(1))
+            .expect("coalescing window is nonzero");
 
-            msg_to_send_tx.send(message).await.expect("queue message");
-            let started_at = tokio::time::Instant::now();
-            let mut actual = vec![0; expected.len()];
-            tokio::time::timeout(core::time::Duration::from_secs(5), reader.read_exact(&mut actual))
-                .await
-                .expect("sender never flushed the message")
-                .expect("read flushed message");
-
-            assert_eq!(actual, expected);
-            assert_eq!(
-                started_at.elapsed(),
-                core::time::Duration::ZERO,
-                "sender waited on its flush deadline"
-            );
+        tokio::select! {
+            biased;
+            result = &mut read => panic!("sender flushed within the minimum spacing: {result:?}"),
+            () = tokio::time::sleep(before_deadline) => {}
         }
+
+        tokio::time::advance(core::time::Duration::from_nanos(1)).await;
+        tokio::time::timeout(core::time::Duration::from_secs(5), &mut read)
+            .await
+            .expect("sender did not flush at the coalescing deadline")
+            .expect("read coalesced message");
+        assert_eq!(actual, expected);
+
+        tokio::time::advance(JMUX_FLUSH_MIN_SPACING).await;
+        assert_immediate_flush(&msg_to_send_tx, &mut reader, 3).await;
 
         drop(msg_to_send_tx);
         sender_task
