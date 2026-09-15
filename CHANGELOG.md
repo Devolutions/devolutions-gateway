@@ -102,7 +102,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _webapp_: fix the VNC form in non-secure browser contexts ([#1964](https://github.com/Devolutions/devolutions-gateway/issues/1964)) ([bd620363c2](https://github.com/Devolutions/devolutions-gateway/commit/bd620363c2a0eac781826f5e080b314de4c18e8b))
 
-- _dgw,jetsocat_: flush JMUX messages promptly ([#1939](https://github.com/Devolutions/devolutions-gateway/pull/1939))
+- _dgw,jetsocat_: flush JMUX messages promptly ([#1939](https://github.com/Devolutions/devolutions-gateway/pull/1939)) ([8ff9e59942](https://github.com/Devolutions/devolutions-gateway/commit/8ff9e599426684cced588253dfb9dc900cafef44))
 
   Round-trip-dependent traffic such as HTTP/2 uploads no longer accumulates the JMUX flush delay on every flow-control update.
 
