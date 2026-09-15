@@ -23,6 +23,7 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
     let target_port = target_listener.local_addr().unwrap().port();
     let target_task = tokio::spawn(async move {
         let (mut stream, _) = target_listener.accept().await.unwrap();
+        stream.set_nodelay(true).unwrap();
         let mut window = vec![0; WINDOW_SIZE];
 
         // Model receiver-driven flow control: each complete window releases one byte of credit.
@@ -66,6 +67,7 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
 
     let transfer = timeout(HANG_TIMEOUT, async {
         let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+        stream.set_nodelay(true).unwrap();
         let window = vec![0; WINDOW_SIZE];
         let mut credit = [0];
 
