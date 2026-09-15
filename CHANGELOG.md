@@ -55,7 +55,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _dgw_: stabilize Agent Tunnel and persist authorization ([#1958](https://github.com/Devolutions/devolutions-gateway/issues/1958)) ([0086a50237](https://github.com/Devolutions/devolutions-gateway/commit/0086a50237e2809bb091fa19fe491527f8724d19)) ([#1947](https://github.com/Devolutions/devolutions-gateway/issues/1947)) ([16a9cf7da4](https://github.com/Devolutions/devolutions-gateway/commit/16a9cf7da4a31394c72971ce0f61c3b76e3cfe0e))
 
-  Agent Tunnel is now a stable, opt-in feature in the OpenAPI contract and generated clients.
+  Agent Tunnel is now a stable, opt-in feature.
   Accepted Agent identities and authorized keys persist across Gateway restarts; Agents enrolled before stabilization must be enrolled again.
 
 - _installer_: configure Agent Tunnel during setup ([#1969](https://github.com/Devolutions/devolutions-gateway/issues/1969)) ([1b709918fe](https://github.com/Devolutions/devolutions-gateway/commit/1b709918fe38de7d4d6ea1d88beb3cf2446f7ae0))
