@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use now_policy_api::{PolicyManagementState, PolicyReplacementOperation};
+use now_policy_api::{InvalidPolicyDiagnostics, PolicyFindingCode, PolicyManagementState, PolicyReplacementOperation};
 #[cfg(not(test))]
 use sysevent::Severity;
 #[cfg(all(not(test), not(debug_assertions)))]
@@ -402,10 +402,24 @@ pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u
     ));
 }
 
-pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState) {
+pub(crate) fn external_change_rejected(
+    path: &Path,
+    state: PolicyManagementState,
+    diagnostics: Option<&InvalidPolicyDiagnostics>,
+) {
     let reason = match state {
         PolicyManagementState::Active => "active",
         PolicyManagementState::Missing => "missing",
+        PolicyManagementState::Invalid
+            if diagnostics.is_some_and(|diagnostics| {
+                diagnostics
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == PolicyFindingCode::UnsupportedPolicyFormatVersion)
+            }) =>
+        {
+            "legacy_policy_contract"
+        }
         PolicyManagementState::Invalid => "invalid",
     };
     RECORDER.record(sysevent_codes::policy_external_change_rejected(
@@ -470,6 +484,33 @@ mod tests {
                 Some(sysevent_codes::POLICY_WRITE_DENIED)
             ]
         );
+    }
+
+    #[test]
+    fn abandoned_clones_record_one_terminal_denial() {
+        let (audit, recorder) = test_audit();
+        let retained = audit.clone();
+        drop(audit);
+        assert_eq!(recorder.events().len(), 1);
+        drop(retained);
+        let events = recorder.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].event_code, Some(sysevent_codes::POLICY_WRITE_DENIED));
+        assert!(
+            events[1]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "request_rejected")
+        );
+    }
+
+    #[test]
+    fn audit_text_removes_control_characters_before_truncation() {
+        let value = format!("injected\r\n\t\0{}", "é".repeat(MAX_POLICY_ID_BYTES));
+        let bounded = bounded(value, MAX_POLICY_ID_BYTES);
+        assert!(bounded.len() <= MAX_POLICY_ID_BYTES);
+        assert!(bounded.ends_with("..."));
+        assert!(!bounded.chars().any(char::is_control));
     }
 
     #[test]
