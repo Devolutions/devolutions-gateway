@@ -208,8 +208,10 @@ jobs:
         include:
           - os: windows
             runner: windows-2022
+            target: x86_64-pc-windows-msvc
           - os: linux
             runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -230,6 +232,13 @@ jobs:
 
       - name: Tests
         run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
+        shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
+      - name: Timing-sensitive tests
+        run: |
+          cargo test --locked --target ${{ matrix.target }} -p testsuite --test integration_tests timing:: -- --ignored --test-threads=1
         shell: pwsh
         env:
           AWS_LC_SYS_NO_ASM: true
