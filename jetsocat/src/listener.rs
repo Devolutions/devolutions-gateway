@@ -288,7 +288,16 @@ where
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => processor(stream, addr),
+            Ok((stream, addr)) => {
+                // Disable Nagle's algorithm: the traffic relayed here is shaped by the
+                // application on the other side, and delaying a sub-MSS segment until the
+                // previous one is acknowledged only adds latency to its round trips.
+                if let Err(error) = stream.set_nodelay(true) {
+                    warn!(%error, %addr, "Couldn’t set TCP_NODELAY on accepted stream");
+                }
+
+                processor(stream, addr)
+            }
             Err(error) => {
                 error!(%error, "Couldn’t accept next TCP stream");
                 break;

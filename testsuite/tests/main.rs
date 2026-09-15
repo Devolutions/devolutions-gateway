@@ -7,3 +7,4 @@ mod cli;
 mod mcp_proxy;
 mod network_scanner;
 mod sysevent;
+mod timing;

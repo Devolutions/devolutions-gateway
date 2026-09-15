@@ -25,6 +25,25 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
     }
 }
 
+/// Connects to `addr` with Nagle's algorithm disabled.
+///
+/// jetsocat relays traffic whose write pattern is dictated by its peers, so holding back a
+/// sub-MSS segment until the previous one is acknowledged only adds latency to every round
+/// trip crossing the pipe. Coalescing already happens upstream, where JMUX messages are
+/// batched before being written out.
+pub(crate) async fn connect_nodelay<A>(addr: A) -> std::io::Result<TcpStream>
+where
+    A: tokio::net::ToSocketAddrs,
+{
+    let stream = TcpStream::connect(addr).await?;
+
+    if let Err(error) = stream.set_nodelay(true) {
+        warn!(%error, "Couldn’t set TCP_NODELAY");
+    }
+
+    Ok(stream)
+}
+
 macro_rules! impl_tcp_connect {
     ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, | $stream:ident | $operation:block) => {{
         use proxy_socks::{Socks4Stream, Socks5Stream};
@@ -34,15 +53,14 @@ macro_rules! impl_tcp_connect {
                 ty: ProxyType::Socks4,
                 addr: proxy_addr,
             }) => {
-                let $stream =
-                    Socks4Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr, "jetsocat").await?;
+                let $stream = Socks4Stream::connect(connect_nodelay(proxy_addr).await?, $req_addr, "jetsocat").await?;
                 $operation.await
             }
             Some(ProxyConfig {
                 ty: ProxyType::Socks5,
                 addr: proxy_addr,
             }) => {
-                let $stream = Socks5Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
+                let $stream = Socks5Stream::connect(connect_nodelay(proxy_addr).await?, $req_addr).await?;
                 $operation.await
             }
             Some(ProxyConfig {
@@ -50,11 +68,11 @@ macro_rules! impl_tcp_connect {
                 addr: proxy_addr,
             }) => {
                 // unknown SOCKS version, try SOCKS5 first and then SOCKS4
-                match Socks5Stream::connect(TcpStream::connect(&proxy_addr).await?, &$req_addr).await {
+                match Socks5Stream::connect(connect_nodelay(&proxy_addr).await?, &$req_addr).await {
                     Ok($stream) => $operation.await,
                     Err(_) => {
                         let $stream =
-                            Socks4Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr, "jetsocat").await?;
+                            Socks4Stream::connect(connect_nodelay(proxy_addr).await?, $req_addr, "jetsocat").await?;
                         $operation.await
                     }
                 }
@@ -67,14 +85,13 @@ macro_rules! impl_tcp_connect {
                 ty: ProxyType::Https,
                 addr: proxy_addr,
             }) => {
-                let $stream =
-                    proxy_http::ProxyStream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
+                let $stream = proxy_http::ProxyStream::connect(connect_nodelay(proxy_addr).await?, $req_addr).await?;
                 $operation.await
             }
             None => {
                 let dest_addr =
                     resolve_dest_addr($req_addr.to_dest_addr().with_context(|| "invalid target address")?).await?;
-                let $stream = TcpStream::connect(dest_addr).await?;
+                let $stream = connect_nodelay(dest_addr).await?;
                 $operation.await
             }
         };
