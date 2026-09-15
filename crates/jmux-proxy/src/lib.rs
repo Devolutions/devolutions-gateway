@@ -1452,7 +1452,7 @@ fn is_really_an_error(original_error: &(dyn std::error::Error + 'static)) -> boo
 }
 
 #[cfg(test)]
-mod sender_tests {
+mod tests {
     use bytes::BytesMut;
     use tokio::io::AsyncReadExt as _;
 
