@@ -67,7 +67,7 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
 
     wait_for_port_bound(proxy_port).await.expect("JMUX client proxy ready");
 
-    let transfer = timeout(HANG_TIMEOUT, async {
+    let transfer = timeout(HANG_TIMEOUT, async move {
         let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
         stream.set_nodelay(true).unwrap();
         let mut window = vec![0; WINDOW_SIZE];
@@ -83,19 +83,18 @@ async fn run_jmux_flow_control_case(use_websocket: bool) -> Duration {
             stream.write_all(&[CREDIT]).await.unwrap();
         }
 
-        started_at.elapsed()
+        let elapsed = started_at.elapsed();
+        target_task.await.expect("target server task panicked");
+        elapsed
     })
     .await;
-
-    let elapsed = transfer.expect("flow-controlled transfer timed out");
-    target_task.await.expect("target server task panicked");
 
     let _ = jmux_client.start_kill();
     let _ = jmux_server.start_kill();
     let _ = jmux_client.wait().await;
     let _ = jmux_server.wait().await;
 
-    elapsed
+    transfer.expect("flow-controlled transfer timed out")
 }
 
 /// Reproduces the round-trip bottleneck seen in VMware HTTP/2 uploads without embedding an HTTP stack.
