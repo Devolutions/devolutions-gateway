@@ -41,7 +41,7 @@ pub enum TunnelConf {
 
 #[derive(Debug, Clone)]
 pub struct EnabledTunnelConf {
-    gateway_endpoint: GatewayEndpoint,
+    pub gateway_endpoint: GatewayEndpoint,
     pub client_cert_path: Utf8PathBuf,
     pub client_key_path: Utf8PathBuf,
     pub gateway_ca_cert_path: Utf8PathBuf,
@@ -54,9 +54,19 @@ pub struct EnabledTunnelConf {
 }
 
 #[derive(Debug, Clone)]
-struct GatewayEndpoint {
+pub struct GatewayEndpoint {
     host: String,
     port: NonZeroU16,
+}
+
+impl GatewayEndpoint {
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port.get()
+    }
 }
 
 impl std::str::FromStr for GatewayEndpoint {
@@ -123,14 +133,6 @@ impl TunnelConf {
 }
 
 impl EnabledTunnelConf {
-    pub(crate) fn gateway_hostname(&self) -> &str {
-        self.gateway_endpoint().0
-    }
-
-    pub(crate) fn gateway_endpoint(&self) -> (&str, u16) {
-        (&self.gateway_endpoint.host, self.gateway_endpoint.port.get())
-    }
-
     fn from_dto(conf: dto::TunnelConf) -> anyhow::Result<Self> {
         let gateway_endpoint = conf
             .gateway_endpoint
@@ -1087,7 +1089,7 @@ mod tests {
         let conf = load_tunnel_json(valid_tunnel_json()).expect("load valid tunnel configuration");
         let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
 
-        assert_eq!(tunnel.gateway_hostname(), "::1");
+        assert_eq!(tunnel.gateway_endpoint.host(), "::1");
         assert_eq!(
             tunnel.server_spki_sha256.as_deref(),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -1102,8 +1104,8 @@ mod tests {
         let conf = load_tunnel_json(tunnel).expect("load legacy tunnel endpoint");
         let tunnel = conf.tunnel.as_enabled().expect("tunnel enabled");
 
-        assert_eq!(tunnel.gateway_hostname(), "::1");
-        assert_eq!(tunnel.gateway_endpoint().1, 4433);
+        assert_eq!(tunnel.gateway_endpoint.host(), "::1");
+        assert_eq!(tunnel.gateway_endpoint.port(), 4433);
     }
 
     #[test]

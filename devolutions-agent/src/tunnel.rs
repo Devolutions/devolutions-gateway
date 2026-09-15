@@ -440,13 +440,14 @@ async fn connect_to_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<(
     // -- DNS resolve --
 
     // Extract hostname for TLS server name validation.
-    let gateway_hostname = tunnel_conf.gateway_hostname();
+    let gateway_hostname = tunnel_conf.gateway_endpoint.host();
 
-    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
-        .await
-        .context("failed to resolve gateway endpoint")?
-        .next()
-        .context("no addresses resolved for gateway endpoint")?;
+    let gateway_addr =
+        tokio::net::lookup_host((tunnel_conf.gateway_endpoint.host(), tunnel_conf.gateway_endpoint.port()))
+            .await
+            .context("failed to resolve gateway endpoint")?
+            .next()
+            .context("no addresses resolved for gateway endpoint")?;
 
     info!(gateway_addr = %gateway_addr, %gateway_hostname, "Connecting to gateway");
 
@@ -498,11 +499,12 @@ pub async fn probe_connectivity(tunnel_conf: &crate::config::TunnelConf, timeout
 }
 
 async fn reach_gateway(tunnel_conf: &EnabledTunnelConf) -> anyhow::Result<()> {
-    let gateway_addr = tokio::net::lookup_host(tunnel_conf.gateway_endpoint())
-        .await
-        .context("failed to resolve gateway endpoint")?
-        .next()
-        .context("no addresses resolved for gateway endpoint")?;
+    let gateway_addr =
+        tokio::net::lookup_host((tunnel_conf.gateway_endpoint.host(), tunnel_conf.gateway_endpoint.port()))
+            .await
+            .context("failed to resolve gateway endpoint")?
+            .next()
+            .context("no addresses resolved for gateway endpoint")?;
 
     // Match the local bind family to the resolved gateway address (see connect_to_gateway).
     let bind_addr: SocketAddr = if gateway_addr.is_ipv4() {
