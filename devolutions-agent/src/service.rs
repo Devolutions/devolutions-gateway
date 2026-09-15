@@ -258,7 +258,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
         tasks.register(RemoteDesktopTask::new(conf_handle.clone()));
     }
 
-    if conf.tunnel.enabled {
+    if conf.tunnel.is_enabled() {
         tasks.register(TunnelTask::new(conf_handle.clone()));
     }
 

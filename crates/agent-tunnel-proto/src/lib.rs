@@ -29,6 +29,9 @@ pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 pub use stream::{ControlStream, FramedRecv, FramedSend, SessionStream};
 pub use version::{ALPN_PROTOCOL, CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};
 
+/// Maximum time the Gateway keeps an Agent route online without a liveness message.
+pub const AGENT_OFFLINE_TIMEOUT_SECS: u64 = 90;
+
 /// Current wall-clock time in milliseconds since UNIX epoch.
 pub fn current_time_millis() -> u64 {
     u64::try_from(

@@ -12,7 +12,10 @@ mod id_allocator;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::future::Future;
 use std::io;
+use std::net::IpAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -22,7 +25,6 @@ use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
@@ -52,6 +54,15 @@ pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
 pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;
 pub type ApiRequestSender = mpsc::Sender<JmuxApiRequest>;
 pub type ApiRequestReceiver = mpsc::Receiver<JmuxApiRequest>;
+
+// A supertrait is required because trait objects may include only one non-auto trait.
+trait TargetStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> TargetStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type ErasedTargetStream = Box<dyn TargetStream>;
+type TargetConnectorOverrideFuture = Pin<Box<dyn Future<Output = anyhow::Result<Option<ErasedTargetStream>>> + Send>>;
+type TargetConnectorOverride = Arc<dyn Fn(DestinationUrl) -> TargetConnectorOverrideFuture + Send + Sync>;
 
 #[derive(Debug)]
 pub enum JmuxApiRequest {
@@ -84,6 +95,7 @@ pub struct JmuxProxy {
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     traffic_callback: Option<TrafficCallback>,
+    target_connector_override: Option<TargetConnectorOverride>,
 }
 
 impl JmuxProxy {
@@ -98,6 +110,7 @@ impl JmuxProxy {
             jmux_reader,
             jmux_writer,
             traffic_callback: None,
+            target_connector_override: None,
         }
     }
 
@@ -113,11 +126,33 @@ impl JmuxProxy {
         self
     }
 
+    /// Overrides the default direct TCP connector when applicable.
+    ///
+    /// Return `Ok(Some(stream))` to use the override, `Ok(None)` to delegate to the default connector, or an error to reject the connection without falling back.
+    /// Connection attempts handled by the override do not emit outgoing traffic events because their resolved target IP is unknown.
+    #[must_use]
+    pub fn with_target_connector_override<C, F, S>(mut self, connector: C) -> Self
+    where
+        C: Fn(DestinationUrl) -> F + Send + Sync + 'static,
+        F: Future<Output = anyhow::Result<Option<S>>> + Send + 'static,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        self.target_connector_override = Some(Arc::new(move |destination_url| {
+            let connect = connector(destination_url);
+
+            Box::pin(async move {
+                connect
+                    .await
+                    .map(|stream| stream.map(|stream| Box::new(stream) as ErasedTargetStream))
+            })
+        }));
+        self
+    }
+
     /// Configures an outgoing-traffic callback for lifecycle event monitoring.
     ///
-    /// The provided callback will be invoked exactly once per outgoing stream at the end of its
-    /// lifecycle, providing comprehensive audit information including connection metadata,
-    /// byte counts, timing, and termination classification.
+    /// The provided callback is invoked exactly once at the end of each outgoing stream whose resolved target IP is known.
+    /// It provides connection metadata, byte counts, timing, and termination classification.
     ///
     /// # Event Emission
     ///
@@ -128,6 +163,7 @@ impl JmuxProxy {
     ///
     /// Events are **NOT** emitted for:
     /// - DNS resolution failures (no concrete IP address available)
+    /// - Connection attempts handled by a target connector override (no concrete IP address available)
     /// - Internal JMUX protocol errors before stream establishment
     ///
     /// For hostnames with multiple IP addresses, connection attempts follow a Happy Eyeballs
@@ -135,7 +171,7 @@ impl JmuxProxy {
     ///
     /// # Callback Contract
     ///
-    /// - **Exactly once**: Each traffic item generates precisely one event, protected by atomic guards
+    /// - **Exactly once**: Each eligible traffic item generates one event, protected by atomic guards
     /// - **At stream end**: Events are emitted during cleanup, not during operation
     /// - **Synchronous**: The callback is called synchronously from JMUX task contexts
     /// - **Thread safe**: Must be `Send + Sync + 'static` for multi-threaded access
@@ -186,6 +222,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_reader,
         jmux_writer,
         traffic_callback,
+        target_connector_override,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -206,6 +243,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         msg_to_send_tx,
         api_request_rx,
         traffic_callback,
+        target_connector_override,
         parent_span: span,
     }
     .spawn();
@@ -255,7 +293,7 @@ struct JmuxChannelCtx {
     // Traffic audit metadata
     target_host: String,
     /// Target server resolved address IP
-    target_ip: Option<std::net::IpAddr>,
+    target_ip: Option<IpAddr>,
     /// Target server port
     target_port: u16,
     /// Time the connection with target peer was established at
@@ -303,7 +341,7 @@ impl JmuxCtx {
     fn unregister(&mut self, id: LocalChannelId, traffic_callback: &Option<TrafficCallback>, is_abnormal_error: bool) {
         if let Some(channel) = self.channels.remove(&id) {
             // Emit audit event if we have a callback and haven't already emitted.
-            // For now, we only emit an event when the IP address is known = on the "server side".
+            // Streams without a known target IP do not emit an event.
             if let Some(callback) = traffic_callback
                 && let Some(target_ip) = channel.target_ip
                 && !channel.audit_emitted.swap(true, Ordering::SeqCst)
@@ -344,7 +382,6 @@ type DataReceiver = mpsc::Receiver<Bytes>;
 type DataSender = mpsc::Sender<Bytes>;
 type InternalMessageSender = mpsc::Sender<InternalMessage>;
 
-#[derive(Debug)]
 enum InternalMessage {
     Eof {
         id: LocalChannelId,
@@ -353,7 +390,13 @@ enum InternalMessage {
         // Boxing reduces enum size from 224 bytes to ~16 bytes
         // (clippy::large_enum_variant)
         channel: Box<JmuxChannelCtx>,
-        stream: TcpStream,
+        stream: ErasedTargetStream,
+    },
+    StreamResolutionFailed {
+        id: LocalChannelId,
+        distant_id: DistantChannelId,
+        reason_code: ReasonCode,
+        description: String,
     },
     AbnormalTermination {
         id: LocalChannelId,
@@ -427,6 +470,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
     traffic_callback: Option<TrafficCallback>,
+    target_connector_override: Option<TargetConnectorOverride>,
     parent_span: Span,
 }
 
@@ -448,6 +492,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         msg_to_send_tx,
         mut api_request_rx,
         traffic_callback,
+        target_connector_override,
         parent_span,
     } = task;
 
@@ -501,7 +546,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             error!(%error, "Couldn't send leftover bytes");
                         }
 
-                        let (reader, writer) = stream.into_split();
+                        let stream = Box::new(stream) as ErasedTargetStream;
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -626,7 +672,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!("Channel accepted");
                         });
 
-                        let (reader, writer) = stream.into_split();
+                        let (reader, writer) = tokio::io::split(stream);
 
                         DataWriterTask {
                             writer,
@@ -651,6 +697,18 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
                         .spawn(channel_span)
                         .detach();
+                    }
+                    InternalMessage::StreamResolutionFailed {
+                        id,
+                        distant_id,
+                        reason_code,
+                        description,
+                    } => {
+                        jmux_ctx.id_allocator.free(id);
+                        msg_to_send_tx
+                            .send(Message::open_failure(distant_id, reason_code, description))
+                            .await
+                            .context("couldn't send OPEN FAILURE message through mpsc channel")?;
                     }
                 }
             }
@@ -758,8 +816,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             channel,
                             destination_url: msg.destination_url,
                             internal_msg_tx: internal_msg_tx.clone(),
-                            msg_to_send_tx: msg_to_send_tx.clone(),
                             traffic_callback: traffic_callback.clone(),
+                            target_connector_override: target_connector_override.clone(),
                         }
                         .spawn()
                         .detach();
@@ -958,7 +1016,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 // ---------------------- //
 
 struct DataReaderTask {
-    reader: OwnedReadHalf,
+    reader: tokio::io::ReadHalf<ErasedTargetStream>,
     local_id: LocalChannelId,
     distant_id: DistantChannelId,
     window_size_updated: Arc<Notify>,
@@ -1087,7 +1145,7 @@ impl DataReaderTask {
 // ---------------------- //
 
 struct DataWriterTask {
-    writer: OwnedWriteHalf,
+    writer: tokio::io::WriteHalf<ErasedTargetStream>,
     data_rx: DataReceiver,
     /// Tracks bytes written into the stream.
     bytes_tx: Arc<AtomicU64>,
@@ -1123,6 +1181,8 @@ impl DataWriterTask {
 
                     bytes_tx.fetch_add(data.len() as u64, Ordering::SeqCst);
                 }
+
+                let _ = writer.shutdown().await;
             }
             .instrument(span),
         );
@@ -1137,8 +1197,14 @@ struct StreamResolverTask {
     channel: JmuxChannelCtx,
     destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
-    msg_to_send_tx: MessageSender,
     traffic_callback: Option<TrafficCallback>,
+    target_connector_override: Option<TargetConnectorOverride>,
+}
+
+struct StreamResolutionFailure {
+    error: anyhow::Error,
+    reason_code: ReasonCode,
+    description: String,
 }
 
 impl StreamResolverTask {
@@ -1162,96 +1228,130 @@ impl StreamResolverTask {
             mut channel,
             destination_url,
             internal_msg_tx,
-            msg_to_send_tx,
             traffic_callback,
+            target_connector_override,
         } = self;
 
         let scheme = destination_url.scheme();
         let host = destination_url.host();
         let port = destination_url.port();
 
-        match scheme {
-            "tcp" => {
-                // Perform DNS resolution first to get concrete IP addresses.
-                let socket_addrs = match tokio::net::lookup_host((host, port)).await {
-                    Ok(addrs) => addrs,
-                    Err(error) => {
-                        debug!(?error, "DNS resolution failed");
-                        // No event emission for DNS failures - cannot determine target IP.
-                        msg_to_send_tx
-                            .send(Message::open_failure(
-                                channel.distant_id,
-                                ReasonCode::from(error.kind()),
-                                error.to_string(),
-                            ))
-                            .await
-                            .context("couldn't send OPEN FAILURE message through mpsc channel")?;
-                        anyhow::bail!("couldn't resolve {host}:{port}: {error}");
-                    }
-                };
+        let resolution = if scheme != "tcp" {
+            let description = format!("unsupported scheme: {scheme}");
+            Err(StreamResolutionFailure {
+                error: anyhow::anyhow!(description.clone()),
+                reason_code: ReasonCode::GENERAL_FAILURE,
+                description,
+            })
+        } else if let Some(connector) = target_connector_override {
+            match connector(destination_url.clone()).await {
+                Ok(Some(stream)) => Ok(stream),
+                Ok(None) => Self::connect_direct(host, port, &mut channel, traffic_callback.as_ref()).await,
+                Err(error) => Err(StreamResolutionFailure {
+                    error: error.context(format!("couldn't connect to {host}:{port}")),
+                    reason_code: ReasonCode::GENERAL_FAILURE,
+                    description: "target connection failed".to_owned(),
+                }),
+            }
+        } else {
+            Self::connect_direct(host, port, &mut channel, traffic_callback.as_ref()).await
+        };
 
-                // Try connecting to each resolved address (Happy Eyeballs style).
-                let mut last_error = None;
+        match resolution {
+            Ok(stream) => {
+                channel.connect_at = SystemTime::now();
+                internal_msg_tx
+                    .send(InternalMessage::StreamResolved {
+                        channel: Box::new(channel),
+                        stream,
+                    })
+                    .await
+                    .ok()
+                    .context("couldn't send back resolved stream through internal mpsc channel")
+            }
+            Err(StreamResolutionFailure {
+                error,
+                reason_code,
+                description,
+            }) => {
+                internal_msg_tx
+                    .send(InternalMessage::StreamResolutionFailed {
+                        id: channel.local_id,
+                        distant_id: channel.distant_id,
+                        reason_code,
+                        description,
+                    })
+                    .await
+                    .ok()
+                    .context("couldn't report stream resolution failure through internal mpsc channel")?;
+                Err(error)
+            }
+        }
+    }
 
-                for socket_addr in socket_addrs {
-                    match TcpStream::connect(socket_addr).await {
-                        Ok(stream) => {
-                            // Update channel with resolved target IP and connect time.
-                            channel.target_ip = Some(socket_addr.ip());
-                            channel.connect_at = SystemTime::now();
+    async fn connect_direct(
+        host: &str,
+        port: u16,
+        channel: &mut JmuxChannelCtx,
+        traffic_callback: Option<&TrafficCallback>,
+    ) -> Result<ErasedTargetStream, StreamResolutionFailure> {
+        let socket_addrs = match tokio::net::lookup_host((host, port)).await {
+            Ok(addrs) => addrs,
+            Err(error) => {
+                debug!(?error, "DNS resolution failed");
+                // No event emission for DNS failures - cannot determine target IP.
+                return Err(StreamResolutionFailure {
+                    reason_code: ReasonCode::from(error.kind()),
+                    description: error.to_string(),
+                    error: anyhow::Error::new(error).context(format!("couldn't resolve {host}:{port}")),
+                });
+            }
+        };
 
-                            internal_msg_tx
-                                .send(InternalMessage::StreamResolved {
-                                    channel: Box::new(channel),
-                                    stream,
-                                })
-                                .await
-                                .context("couldn't send back resolved stream through internal mpsc channel")?;
+        let mut last_error = None;
 
-                            return Ok(());
-                        }
-                        Err(error) => {
-                            debug!(?error, ?socket_addr, "TcpStream::connect failed");
-                            last_error = Some((socket_addr, error));
-                        }
-                    }
+        for socket_addr in socket_addrs {
+            match TcpStream::connect(socket_addr).await {
+                Ok(stream) => {
+                    channel.target_ip = Some(socket_addr.ip());
+                    return Ok(Box::new(stream));
                 }
-
-                // All connection attempts failed - emit ConnectFailure for the last attempted address.
-                if let Some((failed_addr, error)) = last_error {
-                    // Emit ConnectFailure event - we always have a concrete IP at this point.
-                    if let Some(callback) = &traffic_callback {
-                        let connect_and_disconnect_time = SystemTime::now();
-
-                        callback(TrafficEvent {
-                            outcome: EventOutcome::ConnectFailure,
-                            protocol: TransportProtocol::Tcp,
-                            target_host: channel.target_host.clone(),
-                            target_ip: failed_addr.ip(),
-                            target_port: failed_addr.port(),
-                            connect_at: connect_and_disconnect_time,
-                            disconnect_at: connect_and_disconnect_time,
-                            active_duration: std::time::Duration::ZERO,
-                            bytes_tx: 0,
-                            bytes_rx: 0,
-                        });
-                    }
-
-                    msg_to_send_tx
-                        .send(Message::open_failure(
-                            channel.distant_id,
-                            ReasonCode::from(error.kind()),
-                            error.to_string(),
-                        ))
-                        .await
-                        .context("couldn't send OPEN FAILURE message through mpsc channel")?;
-
-                    anyhow::bail!("couldn't open TCP stream to {host}:{port}: {error}");
-                } else {
-                    anyhow::bail!("no addresses resolved for {host}:{port}");
+                Err(error) => {
+                    debug!(?error, ?socket_addr, "TcpStream::connect failed");
+                    last_error = Some((socket_addr, error));
                 }
             }
-            _ => anyhow::bail!("unsupported scheme: {scheme}"),
+        }
+
+        if let Some((failed_addr, error)) = last_error {
+            if let Some(callback) = traffic_callback {
+                let connect_and_disconnect_time = SystemTime::now();
+
+                callback(TrafficEvent {
+                    outcome: EventOutcome::ConnectFailure,
+                    protocol: TransportProtocol::Tcp,
+                    target_host: channel.target_host.clone(),
+                    target_ip: failed_addr.ip(),
+                    target_port: failed_addr.port(),
+                    connect_at: connect_and_disconnect_time,
+                    disconnect_at: connect_and_disconnect_time,
+                    active_duration: std::time::Duration::ZERO,
+                    bytes_tx: 0,
+                    bytes_rx: 0,
+                });
+            }
+
+            Err(StreamResolutionFailure {
+                reason_code: ReasonCode::from(error.kind()),
+                description: error.to_string(),
+                error: anyhow::Error::new(error).context(format!("couldn't open TCP stream to {host}:{port}")),
+            })
+        } else {
+            Err(StreamResolutionFailure {
+                error: anyhow::anyhow!("no addresses resolved for {host}:{port}"),
+                reason_code: ReasonCode::GENERAL_FAILURE,
+                description: "no addresses resolved".to_owned(),
+            })
         }
     }
 }
