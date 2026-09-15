@@ -1,7 +1,4 @@
-﻿; ----------------------------------------------------------------------
-; Devolutions Gateway - Windows Event Log message definitions (.mc)
-; English (0x409), French (0x40c), German (0x407)
-; ----------------------------------------------------------------------
+﻿; Devolutions Agent Windows Event Log message definitions.
 
 MessageIdTypedef=DWORD
 
@@ -22,9 +19,7 @@ LanguageNames=(
     German=0x407:MSG00407
 )
 
-; ======================================================================
 ; 1000-1099 Service / Lifecycle
-; ======================================================================
 
 MessageId=1000
 SymbolicName=SERVICE_STARTED
@@ -86,9 +81,7 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
-; ======================================================================
-; 2000-2099 Listeners & Networking
-; ======================================================================
+; 2000-2099 Listeners and Networking
 
 MessageId=2000
 SymbolicName=LISTENER_STARTED
@@ -126,9 +119,7 @@ Language=German
 Listener gestoppt. Kontext=%1 Adresse=%2 Grund=%3
 .
 
-; ======================================================================
 ; 3000-3099 TLS / Certificates
-; ======================================================================
 
 MessageId=3000
 SymbolicName=TLS_CONFIGURED
@@ -214,9 +205,7 @@ Language=German
 Kein geeignetes Zertifikat gefunden. Kontext=%1 Fehler=%2 Probleme=%3
 .
 
-; ======================================================================
-; 4000-4099 Sessions, Tokens & Recording
-; ======================================================================
+; 4000-4099 Sessions, Tokens and Recording
 
 MessageId=4000
 SymbolicName=SESSION_OPENED
@@ -314,9 +303,7 @@ Language=German
 Aufnahmefehler. Kontext=%1 Pfad=%2 Fehler=%3
 .
 
-; ======================================================================
 ; 5000-5099 Authentication / Authorization
-; ======================================================================
 
 MessageId=5001
 SymbolicName=JWT_REJECTED
@@ -366,9 +353,7 @@ Language=German
 Auth-Zusammenfassung. Kontext=%1 IntervallSek=%2 JwtOk=%3 JwtAbgelehnt=%4 Verweigert=%5 NachGrund=%6
 .
 
-; ======================================================================
 ; 6000-6099 Agent Integration
-; ======================================================================
 
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
@@ -430,9 +415,7 @@ Language=German
 PEDM aktiviert. Kontext=%1
 .
 
-; ======================================================================
 ; 7000-7099 Health
-; ======================================================================
 
 MessageId=7010
 SymbolicName=RECORDING_STORAGE_LOW
@@ -446,10 +429,7 @@ Language=German
 Aufnahmespeicher niedrig. Kontext=%1 VerbleibendeBytes=%2 Schwelle=%3
 .
 
-; ======================================================================
 ; 8000-8099 Package Broker / Policy Management
-; Emitted by Devolutions Agent only; both catalogs must define every code.
-; ======================================================================
 
 MessageId=8000
 SymbolicName=POLICY_WRITE_ATTEMPTED
@@ -547,9 +527,7 @@ Language=German
 Externe Richtlinienänderung abgelehnt. Kontext=%1 Pfad=%2 Grund=%3
 .
 
-; ======================================================================
 ; 9000-9099 Diagnostics
-; ======================================================================
 
 MessageId=9001
 SymbolicName=DEBUG_OPTIONS_ENABLED

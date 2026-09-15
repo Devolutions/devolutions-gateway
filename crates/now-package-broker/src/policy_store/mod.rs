@@ -9,9 +9,9 @@ use chrono::Utc;
 use now_policy::PolicyDocument;
 use now_policy_api::{
     API_VERSION_STR, ErrorCode, ErrorResponse, ErrorResponseKind, InvalidPolicyDiagnostics, PolicyConfigurationSource,
-    PolicyManagementSnapshot, PolicyManagementState, PolicyReadOnlyReason, PolicyReplacementOperation,
-    PolicyReplacementRequest, PolicyStoreToken, PolicyValidationResult, PolicyWriteCapability, ServerContext,
-    Transport,
+    PolicyConflictHandling, PolicyManagementSnapshot, PolicyManagementState, PolicyReadOnlyReason,
+    PolicyReplacementOperation, PolicyReplacementRequest, PolicyStoreToken, PolicyValidationResult,
+    PolicyWriteCapability, ServerContext, Transport,
 };
 
 mod receipt;
@@ -323,7 +323,7 @@ impl PolicyStore {
             return self.management_snapshot();
         }
         let (_, observation) = self.observe_storage(false);
-        let management = self.publish_observation(observation);
+        let management = self.publish_external_observation(observation);
         tracing::info!(?cause, state = ?management.state, "Reloaded package broker policy");
         management
     }
@@ -363,8 +363,28 @@ impl PolicyStore {
     }
 
     pub async fn replace(&self, request: PolicyReplacementRequest) -> Result<ReplaceSuccess, ErrorResponse> {
+        self.replace_inner(request, None).await
+    }
+
+    pub(crate) async fn replace_audited(
+        &self,
+        request: PolicyReplacementRequest,
+        audit: crate::audit::WriteAudit,
+    ) -> Result<ReplaceSuccess, ErrorResponse> {
+        self.replace_inner(request, Some(audit)).await
+    }
+
+    async fn replace_inner(
+        &self,
+        request: PolicyReplacementRequest,
+        audit: Option<crate::audit::WriteAudit>,
+    ) -> Result<ReplaceSuccess, ErrorResponse> {
+        let operation = request.operation;
         let monitoring = self.writer.lock().await;
         if *monitoring != Monitoring::Available {
+            if let Some(audit) = &audit {
+                audit.failed(operation, crate::audit::FailureReason::MonitoringUnavailable);
+            }
             return Err(error_with_management(
                 ErrorCode::BrokerPaused,
                 "policy change monitoring is unavailable",
@@ -378,7 +398,11 @@ impl PolicyStore {
         // Both conflict modes require this exact token.
         // ConfirmOverwrite records retry intent without retaining token history.
         if fresh_token != request.expected_store_token {
-            let management = self.publish_observation(observation);
+            let management = self.publish_external_observation(observation);
+            if let Some(audit) = &audit {
+                let path = Path::new(&management.configured_path);
+                audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
+            }
             return Err(error_with_management(
                 ErrorCode::StalePolicyStoreToken,
                 "the configured policy changed after the supplied store token was observed",
@@ -387,6 +411,13 @@ impl PolicyStore {
         }
 
         if observation.write_capability != PolicyWriteCapability::Writable {
+            if let Some(audit) = &audit {
+                audit.failed_at(
+                    operation,
+                    &observation.canonical_path,
+                    crate::audit::FailureReason::PathNotWritable,
+                );
+            }
             let code = match observation.read_only_reason {
                 Some(PolicyReadOnlyReason::UnsupportedFileSystem) => ErrorCode::UnsupportedPolicyFilesystem,
                 Some(PolicyReadOnlyReason::UnsupportedFormat) => ErrorCode::UnsupportedPolicyFormat,
@@ -397,6 +428,13 @@ impl PolicyStore {
 
         let validation = self.validate_draft(&request.draft);
         if !validation.is_valid {
+            if let Some(audit) = &audit {
+                audit.failed_at(
+                    operation,
+                    &observation.canonical_path,
+                    crate::audit::FailureReason::InvalidPolicy,
+                );
+            }
             return Err(error_with_validation(
                 ErrorCode::InvalidPolicy,
                 "the submitted draft failed authoritative validation",
@@ -413,6 +451,13 @@ impl PolicyStore {
             &validation.findings,
             &request.validation_receipt,
         ) {
+            if let Some(audit) = &audit {
+                audit.failed_at(
+                    operation,
+                    &observation.canonical_path,
+                    crate::audit::FailureReason::InvalidReceipt,
+                );
+            }
             return Err(error_with_validation(
                 ErrorCode::ValidationFailed,
                 "the validation receipt does not match this draft",
@@ -420,6 +465,13 @@ impl PolicyStore {
             ));
         }
         if !validation.findings.is_empty() && !request.warnings_acknowledged {
+            if let Some(audit) = &audit {
+                audit.failed_at(
+                    operation,
+                    &observation.canonical_path,
+                    crate::audit::FailureReason::WarningsNotAcknowledged,
+                );
+            }
             return Err(error_with_validation(
                 ErrorCode::WarningConfirmationRequired,
                 "validation warnings must be explicitly acknowledged",
@@ -427,21 +479,56 @@ impl PolicyStore {
             ));
         }
 
-        let revision = plan_revision(
+        let revision = match plan_revision(
             request.operation,
             observation.state,
             observation.policy.as_ref(),
             &draft.metadata.id.0,
-        )
-        .map_err(|message| error_response(ErrorCode::Conflict, message))?;
-        let policy = draft.into_policy_document(revision, Utc::now()).map_err(|_| {
-            error_response(
-                ErrorCode::ValidationFailed,
-                "failed to commit the validated policy draft",
-            )
-        })?;
-        let bytes = serde_json::to_vec_pretty(&policy)
-            .map_err(|_| error_response(ErrorCode::InternalError, "failed to serialize the committed policy"))?;
+        ) {
+            Ok(revision) => revision,
+            Err(message) => {
+                if let Some(audit) = &audit {
+                    audit.failed_at(
+                        operation,
+                        &observation.canonical_path,
+                        crate::audit::FailureReason::RevisionConflict,
+                    );
+                }
+                return Err(error_response(ErrorCode::Conflict, message));
+            }
+        };
+        let policy = match draft.into_policy_document(revision, Utc::now()) {
+            Ok(policy) => policy,
+            Err(_) => {
+                if let Some(audit) = &audit {
+                    audit.failed_at(
+                        operation,
+                        &observation.canonical_path,
+                        crate::audit::FailureReason::DraftCommitFailed,
+                    );
+                }
+                return Err(error_response(
+                    ErrorCode::ValidationFailed,
+                    "failed to commit the validated policy draft",
+                ));
+            }
+        };
+        let bytes = match serde_json::to_vec_pretty(&policy) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                if let Some(audit) = &audit {
+                    audit.failed_at(
+                        operation,
+                        &observation.canonical_path,
+                        crate::audit::FailureReason::SerializationFailed,
+                    );
+                }
+                return Err(error_response(
+                    ErrorCode::InternalError,
+                    "failed to serialize the committed policy",
+                ));
+            }
+        };
 
         let persisted = if request.operation == PolicyReplacementOperation::Create {
             self.storage
@@ -456,12 +543,23 @@ impl PolicyStore {
                 tracing::warn!(error = format!("{error:#}"), "Policy persistence failed");
                 let (_, current) = self.observe_storage(false);
                 if current.fingerprint != observation.fingerprint {
-                    let management = self.publish_observation(current);
+                    let management = self.publish_external_observation(current);
+                    if let Some(audit) = &audit {
+                        let path = Path::new(&management.configured_path);
+                        audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
+                    }
                     return Err(error_with_management(
                         ErrorCode::StalePolicyStoreToken,
                         "the policy storage changed before publication; retry with the current store token",
                         management,
                     ));
+                }
+                if let Some(audit) = &audit {
+                    audit.failed_at(
+                        operation,
+                        &observation.canonical_path,
+                        crate::audit::FailureReason::PersistenceFailed,
+                    );
                 }
                 return Err(error_response(
                     ErrorCode::PolicyPersistenceFailed,
@@ -475,12 +573,23 @@ impl PolicyStore {
                 );
                 let (_, current) = self.observe_storage(false);
                 if current.fingerprint == observation.fingerprint {
+                    if let Some(audit) = &audit {
+                        audit.failed_at(
+                            operation,
+                            &observation.canonical_path,
+                            crate::audit::FailureReason::ConditionalPublicationFailed,
+                        );
+                    }
                     return Err(error_response(
                         ErrorCode::PolicyPersistenceFailed,
                         "failed to conditionally persist the policy",
                     ));
                 }
-                let management = self.publish_observation(current);
+                let management = self.publish_external_observation(current);
+                if let Some(audit) = &audit {
+                    let path = Path::new(&management.configured_path);
+                    audit.failed_at(operation, path, crate::audit::FailureReason::StaleStoreToken);
+                }
                 return Err(error_with_management(
                     ErrorCode::StalePolicyStoreToken,
                     "the policy storage changed during publication; retry with the current store token",
@@ -493,7 +602,11 @@ impl PolicyStore {
                     "Published policy failed authoritative reload"
                 );
                 let (_, current) = self.observe_storage(false);
-                let management = self.publish_observation(current);
+                let management = self.publish_external_observation(current);
+                if let Some(audit) = &audit {
+                    let path = Path::new(&management.configured_path);
+                    audit.failed_at(operation, path, crate::audit::FailureReason::ActivationFailed);
+                }
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
                     "the policy was published but failed authoritative reload",
@@ -502,6 +615,9 @@ impl PolicyStore {
             }
         };
 
+        let old_id = observation.policy.as_ref().map(|policy| policy.metadata.id.0.clone());
+        let old_revision = observation.policy.as_ref().map(|policy| policy.metadata.revision);
+        let canonical_path = observation.canonical_path.clone();
         let token = token_for(&previous, &persisted.fingerprint);
         let snapshot = Arc::new(Snapshot {
             state: PolicyManagementState::Active,
@@ -514,6 +630,18 @@ impl PolicyStore {
             fingerprint: persisted.fingerprint,
         });
         *self.snapshot.write().expect("policy store snapshot lock poisoned") = snapshot;
+
+        if let Some(audit) = &audit {
+            audit.succeeded_at(
+                &canonical_path,
+                old_id.as_deref(),
+                old_revision,
+                &persisted.policy.metadata.id.0,
+                persisted.policy.metadata.revision,
+                operation,
+                request.conflict_handling == PolicyConflictHandling::ConfirmOverwrite,
+            );
+        }
 
         Ok(ReplaceSuccess {
             policy: persisted.policy,
@@ -534,6 +662,30 @@ impl PolicyStore {
         let snapshot = Arc::new(snapshot_from_observation(observation, token));
         let management = management_from_snapshot(&snapshot, self.source);
         *self.snapshot.write().expect("policy store snapshot lock poisoned") = snapshot;
+        management
+    }
+
+    fn publish_external_observation(&self, observation: Observation) -> PolicyManagementSnapshot {
+        let policy_changed = self.snapshot().fingerprint != observation.fingerprint;
+        let management = self.publish_observation(observation);
+        if policy_changed {
+            let path = Path::new(&management.configured_path);
+            match (management.state, management.policy.as_ref()) {
+                (PolicyManagementState::Active, Some(policy)) => {
+                    crate::audit::external_change_applied(path, &policy.metadata.id.0, policy.metadata.revision);
+                }
+                (PolicyManagementState::Missing | PolicyManagementState::Invalid, _) => {
+                    crate::audit::external_change_rejected(
+                        path,
+                        management.state,
+                        management.invalid_diagnostics.as_ref(),
+                    );
+                }
+                (PolicyManagementState::Active, None) => {
+                    crate::audit::external_change_rejected(path, PolicyManagementState::Invalid, None);
+                }
+            }
+        }
         management
     }
 
@@ -877,6 +1029,7 @@ fn clone_observation(observation: &Observation) -> Observation {
 mod storage_tests {
     use now_policy::PolicyDraftDocument;
     use now_policy_api::{PolicyConflictHandling, PolicyReplacementRequestKind};
+    use win_api_wrappers::identity::sid::Sid;
 
     struct DefaultTransitionStorage {
         managed: PathBuf,
@@ -980,6 +1133,130 @@ mod storage_tests {
         }
     }
 
+    fn recording_audit() -> (crate::audit::WriteAudit, Arc<crate::audit::RecordingAudit>) {
+        let sid =
+            Sid::from_well_known(::windows::Win32::Security::WinLocalSystemSid, None).expect("resolve SYSTEM SID");
+        crate::audit::WriteAudit::begin_recording(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
+    }
+
+    #[tokio::test]
+    async fn audited_legacy_drafts_and_old_receipts_fail_once_without_publication() {
+        for legacy_field in [Some("$schema"), Some("PolicyVersion"), None] {
+            let store = PolicyStore::load_with_storage(
+                Some(PathBuf::from(r"C:\policy.json")),
+                Arc::new(TestStorage::new(Some(policy("current", 1)))),
+                Monitoring::Available,
+            );
+            let before = store.management_snapshot().store_token;
+            let mut request = update_request(&store);
+            let (expected_code, expected_reason) = if let Some(field) = legacy_field {
+                request.draft[field] = serde_json::json!("private legacy value");
+                (ErrorCode::InvalidPolicy, "invalid_policy")
+            } else {
+                let validation = store.validate_draft(&request.draft);
+                assert_eq!(validation.validator_version, "now-package-broker-policy-validator/9");
+                request.validation_receipt = store.receipt_key.issue(
+                    "now-package-broker-policy-validator/8",
+                    validation.canonical_draft.as_ref().expect("valid draft"),
+                    &validation.findings,
+                );
+                (ErrorCode::ValidationFailed, "invalid_receipt")
+            };
+            let (audit, recorder) = recording_audit();
+            let error = store
+                .replace_audited(request, audit)
+                .await
+                .expect_err("reject old contract");
+            assert_eq!(error.code, expected_code);
+            assert_eq!(store.management_snapshot().store_token, before);
+            assert_eq!(store.active_policy().expect("unchanged policy").metadata.revision, 1);
+            let events = recorder.events();
+            assert_eq!(
+                events.iter().map(|entry| entry.event_code).collect::<Vec<_>>(),
+                [
+                    Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                    Some(sysevent_codes::POLICY_CHANGE_FAILED)
+                ]
+            );
+            assert!(
+                events[1]
+                    .fields
+                    .iter()
+                    .any(|(name, value)| name == "reason" && value == expected_reason)
+            );
+            assert!(!format!("{events:?}").contains("private legacy value"));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn external_legacy_rejection_and_converted_policy_are_not_write_outcomes() {
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        crate::audit::take_test_events();
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(
+            crate::audit::take_test_events().is_empty(),
+            "unchanged current format is not an event"
+        );
+
+        storage.set_disk_state(None, true, 2);
+        storage.observation.lock().invalid_diagnostics = Some(InvalidPolicyDiagnostics {
+            diagnostics_version: API_VERSION_STR.into(),
+            findings: vec![validation::disk_failure_finding(
+                validation::DiskFailureReason::LegacyPolicyContract,
+            )],
+        });
+        let rejected = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(rejected.state, PolicyManagementState::Invalid);
+        assert!(store.active_policy().is_none());
+        let events = crate::audit::take_test_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
+        );
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "legacy_policy_contract")
+        );
+
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(
+            crate::audit::take_test_events().is_empty(),
+            "unremediated legacy policy is not a new change"
+        );
+
+        let mut legacy = serde_json::to_value(policy("converted", 7)).expect("serialize policy");
+        let version = legacy
+            .as_object_mut()
+            .expect("object")
+            .remove("PolicyFormatVersion")
+            .expect("version");
+        legacy["PolicyVersion"] = version;
+        legacy["$schema"] = serde_json::json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
+        let converted =
+            crate::installer_policy_migration::convert_document(&legacy.to_string()).expect("convert legacy");
+        let converted = now_policy::schema::parse_policy_json(&converted).expect("official contract");
+        storage.set_disk_state(Some(converted), false, 3);
+        let applied = store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert_eq!(applied.state, PolicyManagementState::Active);
+        assert_eq!(store.active_policy().expect("converted policy").metadata.revision, 7);
+        let events = crate::audit::take_test_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)
+        );
+        store.reload_from_disk(ReloadCause::ExternalChange).await;
+        assert!(crate::audit::take_test_events().is_empty());
+    }
+
     #[tokio::test]
     async fn compatible_format_version_is_bound_to_receipts_and_persisted_tokens() {
         let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
@@ -1027,8 +1304,9 @@ mod storage_tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn concurrent_external_replacement_is_preserved_and_published() {
+        crate::audit::take_test_events();
         let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
         let store = PolicyStore::load_with_storage(
             Some(PathBuf::from(r"C:\policy.json")),
@@ -1036,9 +1314,13 @@ mod storage_tests {
             Monitoring::Available,
         );
         let request = update_request(&store);
+        let (audit, recorder) = recording_audit();
         storage.race_before_next_persist(policy("external", 7));
 
-        let error = store.replace(request).await.expect_err("external replacement wins");
+        let error = store
+            .replace_audited(request, audit)
+            .await
+            .expect_err("external replacement wins");
 
         assert_eq!(error.code, ErrorCode::StalePolicyStoreToken);
         assert_eq!(
@@ -1053,6 +1335,61 @@ mod storage_tests {
                 .revision,
             7
         );
+        assert_eq!(
+            crate::audit::take_test_events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>(),
+            [Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)]
+        );
+        let events = recorder.events();
+        assert_eq!(
+            events.iter().map(|entry| entry.event_code).collect::<Vec<_>>(),
+            [
+                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(sysevent_codes::POLICY_CHANGE_FAILED)
+            ]
+        );
+        assert!(
+            events[1]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "outcome" && value == "stale_conflict")
+        );
+    }
+
+    #[tokio::test]
+    async fn audited_replacement_records_one_success_after_activation() {
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::new(TestStorage::new(Some(policy("current", 1)))),
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let (audit, recorder) = recording_audit();
+
+        let success = store
+            .replace_audited(request, audit)
+            .await
+            .expect("replacement succeeds");
+
+        assert_eq!(success.policy.metadata.revision, 2);
+        assert_eq!(
+            store.active_policy().expect("replacement is active").metadata.revision,
+            2
+        );
+        assert!(matches!(
+            recorder
+                .events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [
+                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(sysevent_codes::POLICY_CHANGE_SUCCEEDED)
+            ]
+        ));
     }
 
     #[tokio::test]
@@ -1165,7 +1502,7 @@ mod storage_tests {
         assert_eq!(store.watched_paths(), [replacement_canonical]);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn default_store_switches_from_legacy_when_managed_policy_appears() {
         let dir = tempfile::tempdir().expect("create temp directory");
         let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
@@ -1187,6 +1524,7 @@ mod storage_tests {
         std::fs::create_dir_all(managed.parent().expect("managed path has a parent"))
             .expect("create managed directory");
         std::fs::write(&managed, b"managed").expect("write managed marker");
+        crate::audit::take_test_events();
         store.reload_from_disk(ReloadCause::ExternalChange).await;
 
         assert_eq!(
@@ -1197,6 +1535,10 @@ mod storage_tests {
             store.management_snapshot().configured_path,
             managed.display().to_string()
         );
+        assert_eq!(
+            crate::audit::take_test_events()[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)
+        );
 
         std::fs::remove_file(&managed).expect("remove managed marker");
         *storage.managed_policy.write() = None;
@@ -1205,6 +1547,10 @@ mod storage_tests {
         assert_eq!(
             store.management_snapshot().configured_path,
             managed.display().to_string()
+        );
+        assert_eq!(
+            crate::audit::take_test_events()[0].event_code,
+            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
         );
     }
 

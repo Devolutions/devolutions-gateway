@@ -94,20 +94,18 @@ END"#,
         use std::path::PathBuf;
         use std::process::Command;
 
-        // --- gate: only release builds -------------------------------------
+        // --- gate: only release and production profiles --------------------
         let profile = env::var("PROFILE").unwrap_or_default();
-        if profile != "release" {
+        if !matches!(profile.as_str(), "release" | "production") {
             return;
         }
 
-        // --- gate: ignore with a warning when mc is not found --------------
-        let mc_exe_path = match find_mc() {
-            Some(path) => path,
-            None => {
-                println!("cargo:warning=Did not find mc.exe");
-                return;
-            }
-        };
+        let mc_exe_path = find_mc().unwrap_or_else(|| {
+            panic!(
+                "mc.exe is required to embed the Devolutions Gateway Event Log catalog; \
+                 use a Visual Studio developer shell or set WindowsSdkVerBinPath or WindowsSdkDir"
+            )
+        });
 
         // --- inputs/paths ---------------------------------------------------
         let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -163,20 +161,42 @@ END"#,
 
     fn find_mc() -> Option<std::path::PathBuf> {
         if let Ok(sdk_bin) = env::var("WindowsSdkVerBinPath") {
-            let p = std::path::Path::new(&sdk_bin).join("mc.exe");
-            if p.exists() {
-                return Some(p);
+            let sdk_bin = std::path::Path::new(&sdk_bin);
+            for candidate in [sdk_bin.join("mc.exe"), sdk_bin.join("x64").join("mc.exe")] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
             }
         }
 
-        if let Ok(sdk_dir) = env::var("WindowsSdkDir") {
-            // e.g. C:\Program Files (x86)\Windows Kits\10\
-            let candidate = std::path::Path::new(&sdk_dir).join("bin").join("x64").join("mc.exe");
-            if candidate.exists() {
-                return Some(candidate);
-            }
+        let bin_dir = std::path::PathBuf::from(env::var_os("WindowsSdkDir")?).join("bin");
+        let direct = bin_dir.join("x64").join("mc.exe");
+        if direct.is_file() {
+            return Some(direct);
         }
 
-        None
+        let mut versions: Vec<_> = fs::read_dir(bin_dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        versions.sort_by_key(|path| {
+            std::cmp::Reverse(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| {
+                        name.split('.')
+                            .map(str::parse::<u32>)
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok()
+                    })
+                    .unwrap_or_default(),
+            )
+        });
+        versions
+            .into_iter()
+            .map(|directory| directory.join("x64").join("mc.exe"))
+            .find(|path| path.is_file())
     }
 }
