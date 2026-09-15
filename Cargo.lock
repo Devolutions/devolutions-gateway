@@ -7632,6 +7632,7 @@ dependencies = [
  "network-scanner",
  "network-scanner-proto",
  "nonempty",
+ "now-package-broker",
  "picky",
  "proxy-socks",
  "quinn",

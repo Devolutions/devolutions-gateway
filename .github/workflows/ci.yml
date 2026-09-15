@@ -1113,6 +1113,21 @@ jobs:
         run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
+  agent-installer-tests:
+    name: Agent installer tests
+    runs-on: windows-2022
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Tests
+        run: dotnet test package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj
+        shell: pwsh
+
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
@@ -1357,7 +1372,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

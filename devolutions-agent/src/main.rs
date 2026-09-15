@@ -207,6 +207,28 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
 }
 
 fn main() {
+    #[cfg(windows)]
+    if env::args().nth(1).as_deref() == Some("installer-policy-convert") {
+        use std::io::{Read as _, Write as _};
+
+        let result = (|| -> Result<()> {
+            if env::args().count() != 2 {
+                bail!("installer-policy-convert accepts only policy JSON on stdin");
+            }
+            let mut input = String::new();
+            io::stdin()
+                .take(now_package_broker::installer_policy_migration::MAX_DOCUMENT_BYTES + 1)
+                .read_to_string(&mut input)?;
+            let output = now_package_broker::installer_policy_migration::convert_document(&input)?;
+            io::stdout().lock().write_all(output.as_bytes())?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
     if let Some(cmd) = env::args().nth(1) {
