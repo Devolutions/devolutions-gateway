@@ -4441,6 +4441,7 @@ mod tests {
             new_security_digest: policy_security::security_state_digest(&prepared).unwrap(),
         };
         rename_file_handle(&prepared, &dir_file, final_path.file_name().unwrap()).unwrap();
+        drop(prepared);
         let marker_file = open_deletable_test_file(&marker_path, b"marker");
         let old_file = open_deletable_test_file(&old_path, b"verified-old");
 
@@ -4495,6 +4496,7 @@ mod tests {
             new_security_digest: policy_security::security_state_digest(&prepared).unwrap(),
         };
         rename_file_handle(&prepared, &dir_file, final_path.file_name().unwrap()).unwrap();
+        drop(prepared);
         let marker_file = open_deletable_test_file(&marker_path, b"marker");
         let old_file = open_deletable_test_file(&old_path, b"verified-old");
 
