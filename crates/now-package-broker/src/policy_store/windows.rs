@@ -211,7 +211,7 @@ fn ensure_managed_authority_marker(dir: &File, dir_path: &Path) -> anyhow::Resul
     }
 
     let path = dir_path.join(MANAGED_AUTHORITY_MARKER_NAME);
-    let marker = match create_secure_transaction_file(&path) {
+    let marker = match create_secure_transaction_file_in(dir, &path) {
         Ok(marker) => marker,
         Err(create_error) => {
             return match open_verified_managed_authority_marker(dir_path) {
@@ -2408,8 +2408,8 @@ fn conditional_replace(
         TransactionPaths::new(hosting_dir.canonical_path(), final_path).map_err(WriteFailure::PrePublication)?;
 
     let mut marker_file =
-        create_secure_transaction_file(&paths.marker_staging).map_err(WriteFailure::PrePublication)?;
-    let mut temp_file = match create_secure_transaction_file(&paths.new) {
+        create_secure_transaction_file_in(dir_handle, &paths.marker_staging).map_err(WriteFailure::PrePublication)?;
+    let mut temp_file = match create_secure_transaction_file_in(dir_handle, &paths.new) {
         Ok(file) => file,
         Err(error) => {
             let error = cleanup_transaction_files(error, &[(&marker_file, "marker staging cleanup also failed")]);
@@ -2593,6 +2593,28 @@ fn publish_prepared_transaction(
     Ok(())
 }
 
+fn create_secure_transaction_file_in(directory: &File, path: &Path) -> anyhow::Result<File> {
+    let security_attributes = policy_security::managed_policy_transaction_security_attributes(directory)
+        .context("build transaction file security")?;
+    let path = U16CString::from_os_str(path.as_os_str()).context("transaction path contains an interior NUL")?;
+    // SAFETY: The path and security attributes remain valid for the call, and the returned handle is owned.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_pcwstr(),
+            GENERIC_READ.0 | GENERIC_WRITE.0 | DELETE.0 | READ_CONTROL.0,
+            FILE_SHARE_NONE,
+            Some(security_attributes.as_ptr()),
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH,
+            None,
+        )
+    }
+    .context("failed to create secure transaction file")?;
+    // SAFETY: CreateFileW returned a new owned handle.
+    Ok(File::from(unsafe { OwnedHandle::from_raw_handle(handle.0) }))
+}
+
+#[cfg(test)]
 fn create_secure_transaction_file(path: &Path) -> anyhow::Result<File> {
     let security_attributes =
         policy_security::admin_only_security_attributes(false).context("build transaction file security")?;
@@ -3290,7 +3312,8 @@ pub(super) fn atomic_create(
     let temp_path = hosting_dir
         .canonical_path()
         .join(format!(".{POLICY_FILE_NAME}.tmp-{}", uuid::Uuid::new_v4()));
-    let mut temp_file = create_secure_transaction_file(&temp_path).map_err(WriteFailure::PrePublication)?;
+    let mut temp_file =
+        create_secure_transaction_file_in(dir_handle, &temp_path).map_err(WriteFailure::PrePublication)?;
     if let Err(error) = temp_file
         .write_all(bytes)
         .and_then(|()| temp_file.sync_all())
