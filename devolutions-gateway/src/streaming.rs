@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,15 +7,13 @@ use anyhow::Context;
 use axum::body::Body;
 use axum::extract::ws::{CloseFrame, Utf8Bytes, WebSocket};
 use axum::response::Response;
-use bytes::Bytes;
 use devolutions_gateway_task::ShutdownSignal;
 use futures::{SinkExt, Stream, stream};
 use terminal_streamer::terminal_stream;
 use tokio::fs::{File, OpenOptions};
-use tokio::io::AsyncReadExt;
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
-use video_streamer::{RecordingEvent, SessionConfig, StartAt, stream_session};
+use video_streamer::{RecordingClip, RecordingEvent, RecordingSource, SessionConfig, StartAt, stream_session};
 
 use crate::recording::{RecordingMessageSender, RecordingStreamState};
 use crate::token::RecordingFileType;
@@ -152,7 +152,7 @@ async fn setup_webm_streaming(
     socket: WebSocket,
     shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
-    let source = recording_event_stream(stream_state)?;
+    let source = WebmRecordingSource { stream_state };
     let (websocket_stream, close_handle) = crate::ws::handle_messages(
         socket,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
@@ -241,9 +241,21 @@ mod tests {
     }
 }
 
+struct WebmRecordingSource {
+    stream_state: watch::Receiver<RecordingStreamState>,
+}
+
+impl RecordingSource for WebmRecordingSource {
+    type Stream = Pin<Box<dyn Stream<Item = anyhow::Result<RecordingEvent>> + Send>>;
+    type Start = Pin<Box<dyn Future<Output = anyhow::Result<Self::Stream>> + Send>>;
+
+    fn start(self) -> Self::Start {
+        Box::pin(async move { recording_event_stream(self.stream_state) })
+    }
+}
+
 struct CurrentRecordingClip {
     sequence: u64,
-    file: File,
     caught_up: bool,
 }
 
@@ -280,23 +292,14 @@ impl RecordingEventSource {
     }
 
     async fn next_event(&mut self) -> anyhow::Result<Option<RecordingEvent>> {
-        const READ_BUFFER_SIZE: usize = 64 * 1024;
-
         if self.ended {
             return Ok(None);
         }
 
         loop {
-            let state = self.stream_state.borrow_and_update().clone();
+            let state = self.stream_state.borrow().clone();
 
             if let Some(current_clip) = self.current_clip.as_mut() {
-                let mut bytes = vec![0; READ_BUFFER_SIZE];
-                let read = current_clip.file.read(&mut bytes).await?;
-                if read > 0 {
-                    bytes.truncate(read);
-                    return Ok(Some(RecordingEvent::Bytes(Bytes::from(bytes))));
-                }
-
                 if !current_clip.caught_up {
                     current_clip.caught_up = true;
                     return Ok(Some(RecordingEvent::CaughtUp));
@@ -306,10 +309,28 @@ impl RecordingEventSource {
                     .active
                     .is_some_and(|active| active.sequence == current_clip.sequence)
                 {
+                    if self.stream_state.has_changed()? {
+                        let latest = self.stream_state.borrow_and_update().clone();
+                        if latest
+                            .active
+                            .is_some_and(|active| active.sequence == current_clip.sequence)
+                        {
+                            return Ok(Some(RecordingEvent::DataAvailable));
+                        }
+                        continue;
+                    }
                     self.stream_state
                         .changed()
                         .await
                         .context("recording stream state closed")?;
+                    if self
+                        .stream_state
+                        .borrow()
+                        .active
+                        .is_some_and(|active| active.sequence == current_clip.sequence)
+                    {
+                        return Ok(Some(RecordingEvent::DataAvailable));
+                    }
                     continue;
                 }
 
@@ -343,15 +364,16 @@ impl RecordingEventSource {
                 let file = File::open(&clip.path)
                     .await
                     .with_context(|| format!("failed to open recording clip: {}", clip.path))?;
+                let file = file.into_std().await;
                 let start_at = std::mem::replace(&mut self.next_start_at, StartAt::Beginning);
                 self.current_clip = Some(CurrentRecordingClip {
                     sequence: clip.sequence,
-                    file,
                     caught_up: false,
                 });
                 return Ok(Some(RecordingEvent::ClipStarted {
                     sequence: clip.sequence,
                     start_at,
+                    clip: RecordingClip::new(file),
                 }));
             }
 
@@ -370,16 +392,16 @@ impl RecordingEventSource {
 
 fn recording_event_stream(
     stream_state: watch::Receiver<RecordingStreamState>,
-) -> anyhow::Result<impl Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static> {
+) -> anyhow::Result<Pin<Box<dyn Stream<Item = anyhow::Result<RecordingEvent>> + Send>>> {
     let source = RecordingEventSource::new(stream_state)?;
-    Ok(stream::unfold(Some(source), |source| async move {
+    Ok(Box::pin(stream::unfold(Some(source), |source| async move {
         let mut source = source?;
         match source.next_event().await {
             Ok(Some(event)) => Some((Ok(event), Some(source))),
             Ok(None) => None,
             Err(error) => Some((Err(error), None)),
         }
-    }))
+    })))
 }
 
 #[cfg(test)]
@@ -427,27 +449,33 @@ mod tests {
         let (sender, receiver) = watch::channel(state);
         let mut source = RecordingEventSource::new(receiver).expect("create recording event source");
 
-        assert_eq!(
-            source.next_event().await.expect("read first start"),
+        match source.next_event().await.expect("read first start") {
             Some(RecordingEvent::ClipStarted {
-                sequence: 0,
-                start_at: StartAt::LiveEdge,
-            })
-        );
-        assert_eq!(
-            source.next_event().await.expect("read first bytes"),
-            Some(RecordingEvent::Bytes(Bytes::from_static(b"first")))
-        );
-        assert_eq!(
+                sequence,
+                start_at,
+                clip,
+            }) => {
+                assert_eq!(sequence, 0);
+                assert_eq!(start_at, StartAt::LiveEdge);
+                drop(clip);
+            }
+            event => panic!("unexpected first start event: {event:?}"),
+        }
+        assert!(matches!(
             source.next_event().await.expect("catch up first clip"),
             Some(RecordingEvent::CaughtUp)
-        );
+        ));
+        sender.send_modify(|_| {});
+        assert!(matches!(
+            source.next_event().await.expect("read availability marker"),
+            Some(RecordingEvent::DataAvailable)
+        ));
 
         sender.send_modify(RecordingStreamState::mark_disconnected);
-        assert_eq!(
+        assert!(matches!(
             source.next_event().await.expect("end first clip"),
             Some(RecordingEvent::ClipEnded)
-        );
+        ));
         assert!(
             tokio::time::timeout(Duration::from_millis(25), source.next_event())
                 .await
@@ -466,32 +494,79 @@ mod tests {
             });
             state.ended = false;
         });
-        assert_eq!(
-            source.next_event().await.expect("read second start"),
+        match source.next_event().await.expect("read second start") {
             Some(RecordingEvent::ClipStarted {
-                sequence: 1,
-                start_at: StartAt::Beginning,
-            })
-        );
-        assert_eq!(
-            source.next_event().await.expect("read second bytes"),
-            Some(RecordingEvent::Bytes(Bytes::from_static(b"second")))
-        );
-        assert_eq!(
+                sequence,
+                start_at,
+                clip,
+            }) => {
+                assert_eq!(sequence, 1);
+                assert_eq!(start_at, StartAt::Beginning);
+                drop(clip);
+            }
+            event => panic!("unexpected second start event: {event:?}"),
+        }
+        assert!(matches!(
             source.next_event().await.expect("catch up second clip"),
             Some(RecordingEvent::CaughtUp)
-        );
+        ));
 
         sender.send_modify(RecordingStreamState::mark_disconnected);
-        assert_eq!(
+        assert!(matches!(
             source.next_event().await.expect("end second clip"),
             Some(RecordingEvent::ClipEnded)
-        );
+        ));
         sender.send_modify(RecordingStreamState::mark_ended);
-        assert_eq!(
+        assert!(matches!(
             source.next_event().await.expect("end session"),
             Some(RecordingEvent::SessionEnded)
+        ));
+        assert!(source.next_event().await.expect("finish source").is_none());
+    }
+
+    #[tokio::test]
+    async fn catch_up_precedes_coalesced_append_markers() {
+        let scratch = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join("streaming-tests")
+            .join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&scratch).expect("create test directory");
+        let _cleanup = ScratchDirectory(scratch.clone());
+
+        let path = scratch.join("recording-0.webm");
+        fs::write(&path, b"recording").expect("write clip");
+        let state = RecordingStreamState::for_test(
+            vec![RecordingStreamClip { sequence: 0, path }],
+            Some(ActiveRecordingStreamClip {
+                sequence: 0,
+                ready: true,
+            }),
+            false,
         );
-        assert_eq!(source.next_event().await.expect("finish source"), None);
+        let (sender, receiver) = watch::channel(state);
+        let mut source = RecordingEventSource::new(receiver).expect("create recording event source");
+
+        assert!(matches!(
+            source.next_event().await.expect("read clip start"),
+            Some(RecordingEvent::ClipStarted { .. })
+        ));
+        sender.send_modify(|_| {});
+        sender.send_modify(|_| {});
+
+        assert!(matches!(
+            source.next_event().await.expect("read catch-up marker"),
+            Some(RecordingEvent::CaughtUp)
+        ));
+        assert!(matches!(
+            source.next_event().await.expect("read coalesced availability marker"),
+            Some(RecordingEvent::DataAvailable)
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), source.next_event())
+                .await
+                .is_err(),
+            "coalesced append markers must produce one availability event"
+        );
     }
 }
