@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, bail};
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::process::Process;
 use win_api_wrappers::security::acl::{Acl, InheritableAcl, InheritableAclKind};
 use win_api_wrappers::security::attributes::{SecurityAttributes, SecurityAttributesInit};
 use windows::Win32::Foundation::{
@@ -51,7 +52,7 @@ use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetLengthSid, INHERIT_ONLY_ACE,
-    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid,
+    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, WinBuiltinAdministratorsSid,
     WinLocalServiceSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
@@ -452,7 +453,10 @@ fn admin_only_acl(inheritance: windows::Win32::Security::ACE_FLAGS) -> anyhow::R
         .context("build admin-only ACL")
 }
 
-pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyhow::Result<SecurityAttributes> {
+fn admin_only_security_attributes_for_owner(
+    owner: Sid,
+    inherit_to_children: bool,
+) -> anyhow::Result<SecurityAttributes> {
     use windows::Win32::Security::{CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE};
 
     let inheritance = if inherit_to_children {
@@ -460,7 +464,6 @@ pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyho
     } else {
         NO_INHERITANCE
     };
-    let owner = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
     let acl = admin_only_acl(inheritance)?;
 
     Ok(SecurityAttributesInit {
@@ -472,6 +475,70 @@ pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyho
         ..Default::default()
     }
     .init())
+}
+
+pub(crate) fn admin_only_security_attributes(inherit_to_children: bool) -> anyhow::Result<SecurityAttributes> {
+    let owner = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    admin_only_security_attributes_for_owner(owner, inherit_to_children)
+}
+
+/// Build protected transaction-file attributes using the verified managed directory owner.
+///
+/// Production stores run as SYSTEM and retain SYSTEM ownership.
+/// Elevated development stores whose directory is owned by Administrators retain that owner,
+/// which avoids requiring an Administrator token to assign the unrelated SYSTEM SID.
+pub(crate) fn managed_policy_transaction_security_attributes(directory: &File) -> anyhow::Result<SecurityAttributes> {
+    verify_policy_directory_security(directory)
+        .context("transaction directory failed managed policy security verification")?;
+
+    let mut owner = PSID::default();
+    let mut descriptor = OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
+    // SAFETY: `directory` is an open file handle, and the out parameters remain valid for the call.
+    let result = unsafe {
+        GetSecurityInfo(
+            HANDLE(directory.as_raw_handle()),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            None,
+            None,
+            Some(&mut descriptor.0),
+        )
+    };
+    if result != ERROR_SUCCESS {
+        bail!("failed to read managed policy directory owner: error {}", result.0);
+    }
+    if owner.0.is_null() {
+        bail!("managed policy directory has no owner information");
+    }
+    let process_owner = Process::current_process()
+        .token(TOKEN_QUERY)
+        .context("open current process token to select transaction owner")?
+        .sid_and_attributes()
+        .context("read current process owner to select transaction owner")?
+        .sid;
+    managed_policy_transaction_security_attributes_for_owners(owner, &process_owner)
+}
+
+fn managed_policy_transaction_security_attributes_for_owners(
+    directory_owner: PSID,
+    process_owner: &Sid,
+) -> anyhow::Result<SecurityAttributes> {
+    // SAFETY: Callers provide either a valid GetSecurityInfo owner SID or a test fixture SID.
+    if !unsafe { is_trusted_sid(directory_owner, TrustedWriters::ManagedPolicy) } {
+        // SAFETY: `owner` points into the valid descriptor returned by GetSecurityInfo.
+        let owner_string = unsafe { sid_to_string(directory_owner) };
+        bail!("managed policy directory owner {owner_string} is not a trusted principal");
+    }
+    let system = Sid::from_well_known(WinLocalSystemSid, None).context("resolve SYSTEM SID")?;
+    let owner = if process_owner == &system {
+        system
+    } else {
+        // SAFETY: The caller retains the valid directory owner SID through the copy.
+        unsafe { Sid::from_psid(directory_owner) }.context("copy managed policy directory owner")?
+    };
+    admin_only_security_attributes_for_owner(owner, false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1354,6 +1421,54 @@ mod tests {
 
         assert!(descriptor.Control.contains(windows::Win32::Security::SE_DACL_PROTECTED));
         assert!(descriptor.Control.contains(windows::Win32::Security::SE_DACL_PRESENT));
+    }
+
+    fn security_attributes_owner(attributes: &SecurityAttributes) -> PSID {
+        // SAFETY: `attributes` owns the live security descriptor.
+        let raw = unsafe { &*attributes.as_ptr() };
+        let descriptor = PSECURITY_DESCRIPTOR(raw.lpSecurityDescriptor.cast());
+        let mut owner = PSID::default();
+        let mut defaulted = windows::core::BOOL(0);
+        // SAFETY: The descriptor is valid and the out parameters point to live variables.
+        unsafe { GetSecurityDescriptorOwner(descriptor, &mut owner, &mut defaulted) }
+            .expect("security attributes retain an owner");
+        assert!(!defaulted.as_bool());
+        owner
+    }
+
+    #[test]
+    fn transaction_security_attributes_preserve_each_trusted_managed_owner() {
+        let system = Sid::from_well_known(WinLocalSystemSid, None).expect("resolve SYSTEM owner");
+        let administrators =
+            Sid::from_well_known(WinBuiltinAdministratorsSid, None).expect("resolve Administrators owner");
+        let local_service = Sid::from_well_known(WinLocalServiceSid, None).expect("resolve LocalService owner");
+
+        for (directory_owner, process_owner, expected_owner) in [
+            (&system, &system, WinLocalSystemSid),
+            (&administrators, &system, WinLocalSystemSid),
+            (&administrators, &local_service, WinBuiltinAdministratorsSid),
+        ] {
+            let attributes = managed_policy_transaction_security_attributes_for_owners(
+                directory_owner.as_psid_const(),
+                process_owner,
+            )
+            .expect("build transaction attributes");
+            let copied_owner = security_attributes_owner(&attributes);
+            // SAFETY: `copied_owner` points into the security descriptor retained by `attributes`.
+            assert!(unsafe { IsWellKnownSid(copied_owner, expected_owner) }.as_bool());
+        }
+    }
+
+    #[test]
+    fn transaction_security_attributes_reject_untrusted_directory_owner() {
+        let owner = Sid::from_well_known(WinWorldSid, None).expect("resolve untrusted owner");
+        let process_owner = Sid::from_well_known(WinLocalServiceSid, None).expect("resolve process owner");
+        let error =
+            match managed_policy_transaction_security_attributes_for_owners(owner.as_psid_const(), &process_owner) {
+                Ok(_) => panic!("untrusted owner must not be copied into transaction files"),
+                Err(error) => error,
+            };
+        assert!(error.to_string().contains("not a trusted principal"), "{error:#}");
     }
 
     /// SDDL-backed security descriptor together with its extracted owner and DACL pointers.
