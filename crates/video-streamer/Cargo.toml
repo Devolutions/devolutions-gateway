@@ -53,3 +53,4 @@ workspace = true
 [[bench]]
 name = "vpx_reencode"
 harness = false
+required-features = ["bench"]

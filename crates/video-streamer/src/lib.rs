@@ -44,7 +44,7 @@ pub use streamer::signal_writer::SignalWriter;
 #[rustfmt::skip]
 pub use streamer::webm_stream;
 #[rustfmt::skip]
-pub use session::{RecordingEvent, SessionConfig, StartAt, stream_session};
+pub use session::{RecordingClip, RecordingEvent, RecordingSource, SessionConfig, StartAt, stream_session};
 
 #[cfg(feature = "bench")]
 pub mod bench_support;

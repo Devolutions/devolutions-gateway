@@ -1,26 +1,27 @@
-use std::io::{self, Write};
+use std::io::{self, SeekFrom, Write};
 use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
 
 use anyhow::Context;
 use bytes::{Bytes, BytesMut};
 use cadeau::xmf::vpx::{VpxCodec, VpxEncoder, VpxEncoderPreset, VpxImage};
-use ebml_iterable::TagDecoder;
 use ebml_iterable::error::TagIteratorError;
+use ebml_iterable::{PositionedTag, TagDecoder};
 use futures_util::{Stream, StreamExt};
 use tokio::sync::mpsc;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
 
 use crate::decoder::{Dimensions, InputDecoder};
-use crate::session::{RecordingEvent, SessionConfig, StartAt};
+use crate::session::{RecordingClip, RecordingEvent, SessionConfig, StartAt};
 use crate::streamer::block_tag::{VideoBlock, is_vpx_key_frame};
 
-const OUTPUT_CHANNEL_CAPACITY: usize = 1;
+const OUTPUT_CHANNEL_CAPACITY: usize = 4;
+const OUTPUT_CHUNK_SIZE: usize = 64 * 1024;
 const INPUT_CHANNEL_CAPACITY: usize = 1;
 const INPUT_CHUNK_SIZE: usize = 64 * 1024;
-const MAX_BUFFERED_TAG_BYTES: usize = 64 * 1024 * 1024;
-const MAX_PENDING_GOP_BYTES: usize = 64 * 1024 * 1024;
+const MAX_TAG_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_INPUT_BUFFER_BYTES: usize = MAX_TAG_PAYLOAD_BYTES + 16;
 const OUTPUT_BITRATE: u32 = 256 * 1024;
 const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
@@ -66,6 +67,32 @@ impl Drop for NormalizedSession {
         if let Some(supervisor) = self.supervisor.take() {
             supervisor.abort();
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_session<S>(stream: S) -> NormalizedSession
+where
+    S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
+    let supervisor = tokio::spawn(async move {
+        tokio::pin!(stream);
+        loop {
+            tokio::select! {
+                event = stream.next() => {
+                    let Some(event) = event else { break };
+                    if sender.send(event).await.is_err() {
+                        break;
+                    }
+                }
+                () = sender.closed() => break,
+            }
+        }
+    });
+    NormalizedSession {
+        receiver,
+        supervisor: Some(supervisor),
     }
 }
 
@@ -129,24 +156,25 @@ fn normalize_events(
 
     while let Some(event) = receiver.blocking_recv() {
         match event.context("recording source failed")? {
-            RecordingEvent::ClipStarted { sequence, start_at } => {
+            RecordingEvent::ClipStarted {
+                sequence,
+                start_at,
+                clip,
+            } => {
                 anyhow::ensure!(
                     matches!(phase, SessionPhase::AwaitClip),
                     "clip {sequence} started before the previous clip ended"
                 );
-                phase = SessionPhase::InClip(Box::new(ClipNormalizer::new(
-                    sequence,
-                    start_at,
-                    sender.clone(),
-                    config,
-                    next_segment_sequence,
-                )));
+                let mut clip_normalizer =
+                    ClipNormalizer::new(sequence, start_at, clip, sender.clone(), config, next_segment_sequence)?;
+                clip_normalizer.scan_available()?;
+                phase = SessionPhase::InClip(Box::new(clip_normalizer));
             }
-            RecordingEvent::Bytes(bytes) => {
+            RecordingEvent::DataAvailable => {
                 let SessionPhase::InClip(clip) = &mut phase else {
-                    anyhow::bail!("recording bytes arrived outside a clip");
+                    anyhow::bail!("data availability arrived outside a clip");
                 };
-                clip.push(&bytes)?;
+                clip.scan_available()?;
             }
             RecordingEvent::CaughtUp => {
                 let SessionPhase::InClip(clip) = &mut phase else {
@@ -190,6 +218,13 @@ struct SourceVideo {
     codec: VpxCodec,
 }
 
+#[derive(Default)]
+struct TrackEntryState {
+    track: Option<u64>,
+    track_type: Option<u64>,
+    codec_id: Option<String>,
+}
+
 struct PendingFrame {
     data: Vec<u8>,
     timestamp: u64,
@@ -204,43 +239,34 @@ enum ClipPhase {
 
 enum HistoryPolicy {
     EmitAll,
-    KeepLatestGop(PendingGop),
+    KeepLatestGop,
 }
 
-#[derive(Default)]
-struct PendingGop {
-    frames: Vec<PendingFrame>,
-    bytes: usize,
+#[derive(Clone, Copy)]
+struct ReplayPoint {
+    block_offset: u64,
+    cluster_timestamp: u64,
 }
 
-impl PendingGop {
-    fn push(&mut self, frame: PendingFrame) -> anyhow::Result<()> {
-        if frame.key_frame {
-            self.frames.clear();
-            self.bytes = 0;
-        } else if self.frames.is_empty() {
-            return Ok(());
-        }
-
-        let bytes = self
-            .bytes
-            .checked_add(frame.data.len())
-            .context("pending GOP size overflow")?;
-        anyhow::ensure!(bytes <= MAX_PENDING_GOP_BYTES, "pending GOP exceeds the resource limit");
-        self.frames.push(frame);
-        self.bytes = bytes;
-        Ok(())
-    }
+struct PendingBlockGroup {
+    offset: u64,
+    block: Option<Vec<u8>>,
 }
 
 struct ClipNormalizer {
     clip_sequence: u64,
+    clip: RecordingClip,
+    reader_head: u64,
     decoder: TagDecoder<MatroskaSpec>,
     input: BytesMut,
     source_video: Option<SourceVideo>,
+    track_entry: Option<TrackEntryState>,
+    pending_block_group: Option<PendingBlockGroup>,
     cluster_timestamp: Option<u64>,
     timestamp_scale_ns: u64,
     phase: ClipPhase,
+    replay_point: Option<ReplayPoint>,
+    complete_boundary: u64,
     input_decoder: Option<InputDecoder>,
     output_segment: Option<OutputSegment>,
     next_segment_sequence: u64,
@@ -252,55 +278,99 @@ impl ClipNormalizer {
     fn new(
         clip_sequence: u64,
         start_at: StartAt,
+        mut clip: RecordingClip,
         sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
         config: SessionConfig,
         next_segment_sequence: u64,
-    ) -> Self {
-        let targets = [
-            MatroskaSpec::TrackEntry(Master::Start),
-            MatroskaSpec::BlockGroup(Master::Start),
-        ];
-        let mut decoder = TagDecoder::new(&targets);
-        decoder.set_max_allowable_tag_size(Some(MAX_BUFFERED_TAG_BYTES));
+    ) -> anyhow::Result<Self> {
+        let reader_head = clip.seek(SeekFrom::Start(0))?;
+        anyhow::ensure!(reader_head == 0, "recording clip did not seek to its beginning");
         let phase = match start_at {
             StartAt::Beginning => ClipPhase::History(HistoryPolicy::EmitAll),
-            StartAt::LiveEdge => ClipPhase::History(HistoryPolicy::KeepLatestGop(PendingGop::default())),
+            StartAt::LiveEdge => ClipPhase::History(HistoryPolicy::KeepLatestGop),
         };
-        Self {
+        Ok(Self {
             clip_sequence,
-            decoder,
+            clip,
+            reader_head,
+            decoder: new_decoder(),
             input: BytesMut::new(),
             source_video: None,
+            track_entry: None,
+            pending_block_group: None,
             cluster_timestamp: None,
             timestamp_scale_ns: WEBM_TIMESTAMP_SCALE_NS,
             phase,
+            replay_point: None,
+            complete_boundary: reader_head,
             input_decoder: None,
             output_segment: None,
             next_segment_sequence,
             sender,
             config,
-        }
+        })
     }
 
-    fn push(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
-        for chunk in bytes.chunks(INPUT_CHUNK_SIZE) {
-            self.input.extend_from_slice(chunk);
-            while let Some(positioned) = self.decoder.decode(&mut self.input)? {
-                self.handle_tag(positioned.tag)?;
+    fn scan_available(&mut self) -> anyhow::Result<()> {
+        let mut process_frame = Self::process_frame;
+        self.scan_available_with(&mut process_frame)
+    }
+
+    fn scan_available_with<F>(&mut self, process_frame: &mut F) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        loop {
+            if self.sender.is_closed() {
+                return Ok(());
             }
+
+            while let Some(positioned) = self.decoder.decode(&mut self.input)? {
+                if self.sender.is_closed() {
+                    return Ok(());
+                }
+                self.handle_tag_with(positioned, process_frame)?;
+            }
+
+            if self.sender.is_closed() {
+                return Ok(());
+            }
+            if self.input.len() >= MAX_INPUT_BUFFER_BYTES {
+                anyhow::bail!("recording input exceeds the resource limit");
+            }
+
+            let read_limit = (MAX_INPUT_BUFFER_BYTES - self.input.len()).min(INPUT_CHUNK_SIZE);
+            anyhow::ensure!(read_limit > 0, "recording input cannot make progress");
+            let mut buffer = vec![0; read_limit];
+            let read = self.clip.read(&mut buffer)?;
+            if read == 0 {
+                return Ok(());
+            }
+            self.reader_head = self
+                .reader_head
+                .checked_add(u64::try_from(read).context("recording reader position overflow")?)
+                .context("recording reader position overflow")?;
+            self.input.extend_from_slice(&buffer[..read]);
         }
-        Ok(())
     }
 
     fn caught_up(&mut self) -> anyhow::Result<()> {
+        let mut process_frame = Self::process_frame;
+        self.caught_up_with(&mut process_frame)
+    }
+
+    fn caught_up_with<F>(&mut self, process_frame: &mut F) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
         let history = match std::mem::replace(&mut self.phase, ClipPhase::Live) {
             ClipPhase::History(history) => history,
             ClipPhase::Live => anyhow::bail!("clip {} sent caught-up twice", self.clip_sequence),
         };
-        if let HistoryPolicy::KeepLatestGop(pending) = history {
-            for frame in pending.frames {
-                self.process_frame(frame)?;
-            }
+        if matches!(history, HistoryPolicy::KeepLatestGop)
+            && let Some(replay_point) = self.replay_point
+        {
+            self.replay_latest_gop_with(replay_point, process_frame)?;
         }
         Ok(())
     }
@@ -311,9 +381,16 @@ impl ClipNormalizer {
             "clip {} ended before caught-up",
             self.clip_sequence
         );
+        self.scan_available()?;
+        if self.sender.is_closed() {
+            return Ok(self.next_segment_sequence);
+        }
         loop {
+            if self.sender.is_closed() {
+                return Ok(self.next_segment_sequence);
+            }
             match self.decoder.decode_eof(&mut self.input) {
-                Ok(Some(positioned)) => self.handle_tag(positioned.tag)?,
+                Ok(Some(positioned)) => self.handle_tag(positioned)?,
                 Ok(None) if self.decoder.is_finished() => break,
                 Ok(None) => continue,
                 Err(TagIteratorError::UnexpectedEOF { .. }) => {
@@ -323,6 +400,8 @@ impl ClipNormalizer {
                         "Discard incomplete trailing EBML element"
                     );
                     self.input.clear();
+                    self.pending_block_group = None;
+                    self.track_entry = None;
                     break;
                 }
                 Err(error) => return Err(error.into()),
@@ -335,48 +414,153 @@ impl ClipNormalizer {
         Ok(self.next_segment_sequence)
     }
 
-    fn handle_tag(&mut self, tag: MatroskaSpec) -> anyhow::Result<()> {
-        match tag {
-            MatroskaSpec::TrackEntry(Master::Full(children)) => {
-                if let Some(video) = parse_video_track(&children)? {
-                    anyhow::ensure!(self.source_video.is_none(), "multiple video tracks are not supported");
-                    self.source_video = Some(video);
+    fn handle_tag(&mut self, positioned: PositionedTag<MatroskaSpec>) -> anyhow::Result<()> {
+        let mut process_frame = Self::process_frame;
+        self.handle_tag_with(positioned, &mut process_frame)
+    }
+
+    fn handle_tag_with<F>(
+        &mut self,
+        positioned: PositionedTag<MatroskaSpec>,
+        process_frame: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        let offset = u64::try_from(positioned.offset).context("recording tag offset overflow")?;
+        match positioned.tag {
+            MatroskaSpec::TrackEntry(Master::Start) => {
+                anyhow::ensure!(self.track_entry.is_none(), "nested video track entry");
+                self.track_entry = Some(TrackEntryState::default());
+            }
+            MatroskaSpec::TrackEntry(Master::End) => {
+                let track_entry = self
+                    .track_entry
+                    .take()
+                    .context("track entry end arrived without a start")?;
+                self.finish_track_entry(track_entry)?;
+            }
+            MatroskaSpec::TrackNumber(value) => {
+                if let Some(track_entry) = &mut self.track_entry {
+                    track_entry.track = Some(value);
                 }
             }
-            MatroskaSpec::TimestampScale(value) => self.timestamp_scale_ns = value,
+            MatroskaSpec::TrackType(value) => {
+                if let Some(track_entry) = &mut self.track_entry {
+                    track_entry.track_type = Some(value);
+                }
+            }
+            MatroskaSpec::CodecID(value) => {
+                if let Some(track_entry) = &mut self.track_entry {
+                    track_entry.codec_id = Some(value);
+                }
+            }
+            MatroskaSpec::TimestampScale(value) => {
+                self.timestamp_scale_ns = value;
+            }
             MatroskaSpec::Cluster(Master::Start) => self.cluster_timestamp = None,
             MatroskaSpec::Timestamp(value) => self.cluster_timestamp = Some(value),
-            tag @ (MatroskaSpec::SimpleBlock(_) | MatroskaSpec::BlockGroup(Master::Full(_))) => {
-                self.handle_block(tag)?;
+            MatroskaSpec::BlockGroup(Master::Start) => {
+                anyhow::ensure!(self.pending_block_group.is_none(), "nested block group");
+                self.pending_block_group = Some(PendingBlockGroup { offset, block: None });
+            }
+            MatroskaSpec::Block(data) => {
+                let group = self
+                    .pending_block_group
+                    .as_mut()
+                    .context("block arrived outside a block group")?;
+                anyhow::ensure!(
+                    group.block.replace(data).is_none(),
+                    "block group contains multiple blocks"
+                );
+            }
+            MatroskaSpec::BlockGroup(Master::End) => {
+                let group = self
+                    .pending_block_group
+                    .take()
+                    .context("block group end arrived without a start")?;
+                let data = group.block.context("block group does not contain a block")?;
+                self.handle_block_with(
+                    MatroskaSpec::BlockGroup(Master::Full(vec![MatroskaSpec::Block(data)])),
+                    group.offset,
+                    process_frame,
+                )?;
+                self.complete_boundary = decoder_position(&self.decoder)?;
+            }
+            MatroskaSpec::SimpleBlock(data) => {
+                self.handle_block_with(MatroskaSpec::SimpleBlock(data), offset, process_frame)?;
+                self.complete_boundary = decoder_position(&self.decoder)?;
             }
             _ => {}
         }
         Ok(())
     }
 
-    fn handle_block(&mut self, tag: MatroskaSpec) -> anyhow::Result<()> {
+    fn finish_track_entry(&mut self, track_entry: TrackEntryState) -> anyhow::Result<()> {
+        if track_entry.track_type != Some(1) {
+            return Ok(());
+        }
+        anyhow::ensure!(self.source_video.is_none(), "multiple video tracks are not supported");
+        let track = track_entry.track.context("video track number is missing")?;
+        let codec_id = track_entry.codec_id.context("video codec ID is missing")?;
+        let codec = match codec_id.as_str() {
+            "V_VP8" | "vp8" => VpxCodec::VP8,
+            "V_VP9" | "vp9" => VpxCodec::VP9,
+            _ => anyhow::bail!("unsupported video codec: {codec_id}"),
+        };
+        self.source_video = Some(SourceVideo { track, codec });
+        Ok(())
+    }
+
+    fn handle_block_with<F>(
+        &mut self,
+        tag: MatroskaSpec,
+        block_offset: u64,
+        process_frame: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        let cluster_timestamp = self.cluster_timestamp;
+        let Some(frame) = self.frame_from_block(tag, cluster_timestamp)? else {
+            return Ok(());
+        };
+
+        if matches!(&self.phase, ClipPhase::History(HistoryPolicy::KeepLatestGop)) {
+            if frame.key_frame {
+                self.replay_point = Some(ReplayPoint {
+                    block_offset,
+                    cluster_timestamp: cluster_timestamp.context("cluster timestamp is missing")?,
+                });
+            }
+            return Ok(());
+        }
+
+        process_frame(self, frame)
+    }
+
+    fn frame_from_block(
+        &self,
+        tag: MatroskaSpec,
+        cluster_timestamp: Option<u64>,
+    ) -> anyhow::Result<Option<PendingFrame>> {
         let video = self
             .source_video
             .context("video track header not found before video data")?;
-        let block = VideoBlock::new(tag, self.cluster_timestamp, video.codec)?;
+        let block = VideoBlock::new(tag, cluster_timestamp, video.codec)?;
         if block.track != video.track {
-            return Ok(());
+            return Ok(None);
         }
 
         let data = block.get_frame()?;
         let key_frame = is_vpx_key_frame(&data, video.codec);
         let timestamp = scale_timestamp(block.absolute_timestamp()?, self.timestamp_scale_ns)?;
-        let frame = PendingFrame {
+        Ok(Some(PendingFrame {
             data,
             timestamp,
             codec: video.codec,
             key_frame,
-        };
-
-        match &mut self.phase {
-            ClipPhase::History(HistoryPolicy::KeepLatestGop(pending)) => pending.push(frame),
-            ClipPhase::History(HistoryPolicy::EmitAll) | ClipPhase::Live => self.process_frame(frame),
-        }
+        }))
     }
 
     fn process_frame(&mut self, frame: PendingFrame) -> anyhow::Result<()> {
@@ -410,6 +594,186 @@ impl ClipNormalizer {
             .encode(&decoded.image, frame.timestamp)?;
         Ok(())
     }
+
+    fn replay_latest_gop_with<F>(&mut self, replay_point: ReplayPoint, process_frame: &mut F) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        if self.sender.is_closed() {
+            return Ok(());
+        }
+
+        let replay_end = self.complete_boundary;
+        anyhow::ensure!(
+            replay_point.block_offset <= replay_end,
+            "replay point is after the complete scan boundary"
+        );
+        if replay_point.block_offset == replay_end {
+            return Ok(());
+        }
+
+        let original_decoder = std::mem::replace(&mut self.decoder, new_decoder());
+        let original_input = std::mem::take(&mut self.input);
+        let original_reader_head = self.reader_head;
+        let replay_result = (|| {
+            self.seek_reader(replay_point.block_offset)?;
+            self.replay_window(replay_point, replay_end, process_frame)
+        })();
+
+        self.decoder = original_decoder;
+        self.input = original_input;
+        let restore_result = self.seek_reader(original_reader_head);
+        if let Err(restore_error) = restore_result {
+            return Err(match replay_result {
+                Ok(()) => restore_error.context("failed to restore recording reader"),
+                Err(replay_error) => {
+                    replay_error.context(format!("failed to restore recording reader: {restore_error:#}"))
+                }
+            });
+        }
+        replay_result
+    }
+
+    fn replay_window<F>(
+        &mut self,
+        replay_point: ReplayPoint,
+        replay_end: u64,
+        process_frame: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        let mut cluster_timestamp = Some(replay_point.cluster_timestamp);
+        let mut block_group: Option<PendingBlockGroup> = None;
+
+        loop {
+            if self.sender.is_closed() {
+                return Ok(());
+            }
+
+            while let Some(positioned) = self.decoder.decode(&mut self.input)? {
+                if self.sender.is_closed() {
+                    return Ok(());
+                }
+                self.handle_replay_tag(
+                    positioned,
+                    replay_point.block_offset,
+                    &mut cluster_timestamp,
+                    &mut block_group,
+                    process_frame,
+                )?;
+            }
+
+            if self.reader_head >= replay_end {
+                anyhow::ensure!(self.input.is_empty(), "replay endpoint is inside an incomplete element");
+                if let Some(group) = block_group.take() {
+                    anyhow::ensure!(
+                        group.offset < replay_end,
+                        "replay endpoint is inside an incomplete block group"
+                    );
+                    self.process_replay_block_group(group, cluster_timestamp, process_frame)?;
+                }
+                return Ok(());
+            }
+
+            if self.input.len() >= MAX_INPUT_BUFFER_BYTES {
+                anyhow::bail!("replay input exceeds the resource limit");
+            }
+            let read_limit = usize::try_from(replay_end - self.reader_head)
+                .context("replay window is too large")?
+                .min(INPUT_CHUNK_SIZE)
+                .min(MAX_INPUT_BUFFER_BYTES - self.input.len());
+            anyhow::ensure!(read_limit > 0, "replay input cannot make progress");
+            let mut buffer = vec![0; read_limit];
+            let read = self.clip.read(&mut buffer)?;
+            anyhow::ensure!(read > 0, "recording ended before replay boundary");
+            self.reader_head = self
+                .reader_head
+                .checked_add(u64::try_from(read).context("replay reader position overflow")?)
+                .context("replay reader position overflow")?;
+            self.input.extend_from_slice(&buffer[..read]);
+        }
+    }
+
+    fn process_replay_block_group<F>(
+        &mut self,
+        group: PendingBlockGroup,
+        cluster_timestamp: Option<u64>,
+        process_frame: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        let data = group.block.context("replay block group does not contain a block")?;
+        if let Some(frame) = self.frame_from_block(
+            MatroskaSpec::BlockGroup(Master::Full(vec![MatroskaSpec::Block(data)])),
+            cluster_timestamp,
+        )? {
+            process_frame(self, frame)?;
+        }
+        Ok(())
+    }
+
+    fn handle_replay_tag<F>(
+        &mut self,
+        positioned: PositionedTag<MatroskaSpec>,
+        replay_offset: u64,
+        cluster_timestamp: &mut Option<u64>,
+        block_group: &mut Option<PendingBlockGroup>,
+        process_frame: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
+    {
+        let offset = u64::try_from(positioned.offset)
+            .context("replay tag offset overflow")?
+            .checked_add(replay_offset)
+            .context("replay tag offset overflow")?;
+        match positioned.tag {
+            MatroskaSpec::Cluster(Master::Start) => *cluster_timestamp = None,
+            MatroskaSpec::Timestamp(value) => *cluster_timestamp = Some(value),
+            MatroskaSpec::BlockGroup(Master::Start) => {
+                anyhow::ensure!(block_group.is_none(), "nested replay block group");
+                *block_group = Some(PendingBlockGroup { offset, block: None });
+            }
+            MatroskaSpec::Block(data) => {
+                let group = block_group
+                    .as_mut()
+                    .context("replay block arrived outside a block group")?;
+                anyhow::ensure!(
+                    group.block.replace(data).is_none(),
+                    "replay block group contains multiple blocks"
+                );
+            }
+            MatroskaSpec::BlockGroup(Master::End) => {
+                let group = block_group.take().context("replay block group end without a start")?;
+                self.process_replay_block_group(group, *cluster_timestamp, process_frame)?;
+            }
+            MatroskaSpec::SimpleBlock(data) => {
+                if let Some(frame) = self.frame_from_block(MatroskaSpec::SimpleBlock(data), *cluster_timestamp)? {
+                    process_frame(self, frame)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn seek_reader(&mut self, position: u64) -> anyhow::Result<()> {
+        self.clip.seek(SeekFrom::Start(position))?;
+        self.reader_head = position;
+        Ok(())
+    }
+}
+
+fn new_decoder() -> TagDecoder<MatroskaSpec> {
+    let mut decoder = TagDecoder::new(&[]);
+    decoder.set_max_allowable_tag_size(Some(MAX_TAG_PAYLOAD_BYTES));
+    decoder
+}
+
+fn decoder_position(decoder: &TagDecoder<MatroskaSpec>) -> anyhow::Result<u64> {
+    u64::try_from(decoder.position()).context("decoder position overflow")
 }
 
 fn next_segment_info(
@@ -422,42 +786,6 @@ fn next_segment_info(
         width: frame_dimensions.width,
         height: frame_dimensions.height,
     })
-}
-
-fn parse_video_track(children: &[MatroskaSpec]) -> anyhow::Result<Option<SourceVideo>> {
-    let is_video = children
-        .iter()
-        .find_map(|tag| match tag {
-            MatroskaSpec::TrackType(value) => Some(*value == 1),
-            _ => None,
-        })
-        .unwrap_or(false);
-
-    if !is_video {
-        return Ok(None);
-    }
-
-    let track = children
-        .iter()
-        .find_map(|tag| match tag {
-            MatroskaSpec::TrackNumber(value) => Some(*value),
-            _ => None,
-        })
-        .context("video track number is missing")?;
-    let codec_id = children
-        .iter()
-        .find_map(|tag| match tag {
-            MatroskaSpec::CodecID(value) => Some(value.as_str()),
-            _ => None,
-        })
-        .context("video codec ID is missing")?;
-    let codec = match codec_id {
-        "V_VP8" | "vp8" => VpxCodec::VP8,
-        "V_VP9" | "vp9" => VpxCodec::VP9,
-        _ => anyhow::bail!("unsupported video codec: {codec_id}"),
-    };
-
-    Ok(Some(SourceVideo { track, codec }))
 }
 
 fn scale_timestamp(value: u64, timestamp_scale_ns: u64) -> anyhow::Result<u64> {
@@ -641,9 +969,11 @@ struct EventWriter {
 
 impl Write for EventWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.sender
-            .blocking_send(Ok(SegmentEvent::Data(Bytes::copy_from_slice(buffer))))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "segment event receiver closed"))?;
+        for chunk in buffer.chunks(OUTPUT_CHUNK_SIZE) {
+            self.sender
+                .blocking_send(Ok(SegmentEvent::Data(Bytes::copy_from_slice(chunk))))
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "segment event receiver closed"))?;
+        }
         Ok(buffer.len())
     }
 
@@ -653,129 +983,4 @@ impl Write for EventWriter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn empty_clip_bytes() -> Vec<u8> {
-        let mut writer = WebmWriter::new(Vec::new());
-        writer
-            .write(&MatroskaSpec::Ebml(Master::Full(vec![
-                MatroskaSpec::EbmlVersion(1),
-                MatroskaSpec::EbmlReadVersion(1),
-                MatroskaSpec::EbmlMaxIdLength(4),
-                MatroskaSpec::EbmlMaxSizeLength(8),
-                MatroskaSpec::DocType("webm".to_owned()),
-                MatroskaSpec::DocTypeVersion(4),
-                MatroskaSpec::DocTypeReadVersion(2),
-            ])))
-            .expect("write EBML header");
-        writer
-            .write_advanced(
-                &MatroskaSpec::Segment(Master::Start),
-                WriteOptions::is_unknown_sized_element(),
-            )
-            .expect("write segment start");
-        writer
-            .write_advanced(
-                &MatroskaSpec::Cluster(Master::Start),
-                WriteOptions::is_unknown_sized_element(),
-            )
-            .expect("write cluster start");
-        writer
-            .write(&MatroskaSpec::Timestamp(0))
-            .expect("write cluster timestamp");
-        writer.into_inner().expect("finish clip bytes")
-    }
-
-    #[test]
-    fn resolution_change_starts_the_next_output_segment() {
-        let first_dimensions = Dimensions {
-            width: 640,
-            height: 480,
-        };
-        let second_dimensions = Dimensions {
-            width: 1280,
-            height: 720,
-        };
-
-        assert_eq!(
-            next_segment_info(None, first_dimensions, 0),
-            Some(SegmentInfo {
-                sequence: 0,
-                width: 640,
-                height: 480,
-            })
-        );
-        assert_eq!(next_segment_info(Some(first_dimensions), first_dimensions, 1), None);
-        assert_eq!(
-            next_segment_info(Some(first_dimensions), second_dimensions, 1),
-            Some(SegmentInfo {
-                sequence: 1,
-                width: 1280,
-                height: 720,
-            })
-        );
-    }
-
-    #[test]
-    fn truncated_clip_tail_does_not_abort_the_following_clip() {
-        let mut truncated = empty_clip_bytes();
-        truncated.extend_from_slice(&[0xa3, 0x84, 0x81, 0x00]);
-        let complete = empty_clip_bytes();
-        let events = [
-            RecordingEvent::ClipStarted {
-                sequence: 0,
-                start_at: StartAt::Beginning,
-            },
-            RecordingEvent::Bytes(Bytes::from(truncated)),
-            RecordingEvent::CaughtUp,
-            RecordingEvent::ClipEnded,
-            RecordingEvent::ClipStarted {
-                sequence: 1,
-                start_at: StartAt::Beginning,
-            },
-            RecordingEvent::Bytes(Bytes::from(complete)),
-            RecordingEvent::CaughtUp,
-            RecordingEvent::ClipEnded,
-            RecordingEvent::SessionEnded,
-        ];
-        let (input_sender, input_receiver) = mpsc::channel(events.len());
-        for event in events {
-            input_sender.blocking_send(Ok(event)).expect("queue recording event");
-        }
-        drop(input_sender);
-        let (output_sender, mut output_receiver) = mpsc::channel(1);
-
-        normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
-            .expect("normalize reconnecting clips");
-        assert!(output_receiver.blocking_recv().is_none());
-    }
-
-    #[test]
-    fn corruption_before_an_incomplete_tail_still_fails() {
-        let mut corrupted = empty_clip_bytes();
-        corrupted.extend_from_slice(&[0xff, 0x80]);
-        corrupted.extend_from_slice(&[0xa3, 0x84, 0x81, 0x00]);
-        let events = [
-            RecordingEvent::ClipStarted {
-                sequence: 0,
-                start_at: StartAt::Beginning,
-            },
-            RecordingEvent::Bytes(Bytes::from(corrupted)),
-            RecordingEvent::CaughtUp,
-            RecordingEvent::ClipEnded,
-            RecordingEvent::SessionEnded,
-        ];
-        let (input_sender, input_receiver) = mpsc::channel(events.len());
-        for event in events {
-            input_sender.blocking_send(Ok(event)).expect("queue recording event");
-        }
-        drop(input_sender);
-        let (output_sender, _output_receiver) = mpsc::channel(1);
-
-        let error = normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
-            .expect_err("corruption before the incomplete tail must fail");
-
-        assert!(format!("{error:#}").contains("corrupted"), "{error:#}");
-    }
-}
+mod tests;
