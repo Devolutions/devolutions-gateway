@@ -1,8 +1,7 @@
 //! Admin-only-writable file security validation.
 //!
-//! Shared by four trust boundaries in the package broker:
-//! - Legacy policy files loaded from the Agent directory.
-//! - The dedicated managed-policy directory and its files.
+//! Shared by three trust boundaries in the package broker:
+//! - The policy directory and its files.
 //! - Authenticated pipe-client executables.
 //! - Package-manager executables resolved for elevated/machine-scope execution
 //!   (e.g. `winget.exe`, `choco.exe`).
@@ -17,9 +16,7 @@
 //! a trusted principal and that its DACL does not grant write access to any other
 //! principal. Callers fail closed when this check fails.
 //!
-//! The legacy Agent-directory loader accepts SYSTEM, `LOCAL SERVICE`, and built-in
-//! Administrators because that shared directory grants `LOCAL SERVICE` write access.
-//! The managed policy store accepts only SYSTEM and built-in Administrators.
+//! The policy store accepts only SYSTEM and built-in Administrators.
 //! Executable checks also accept `NT SERVICE\TrustedInstaller` for Windows-protected
 //! binaries under locations such as `System32`, `Program Files`, and `WindowsApps`.
 //!
@@ -53,7 +50,7 @@ use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurit
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetLengthSid, INHERIT_ONLY_ACE,
     IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, WinBuiltinAdministratorsSid,
-    WinLocalServiceSid, WinLocalSystemSid,
+    WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
@@ -113,8 +110,6 @@ const TRUSTED_INSTALLER_SID: &str = "S-1-5-80-956008885-3418522649-1831038044-18
 /// Principals trusted to hold write access over a verified file.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TrustedWriters {
-    /// SYSTEM, `LOCAL SERVICE`, and the built-in Administrators group (policy file).
-    AdminOnly,
     /// SYSTEM and built-in Administrators only for the managed policy store.
     ManagedPolicy,
     /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`
@@ -167,25 +162,6 @@ impl Drop for OwnedSecurityDescriptor {
     }
 }
 
-/// Verify that the policy file may only be written by SYSTEM, `LOCAL SERVICE`, or
-/// built-in Administrators.
-///
-/// The check is performed on the already-opened file handle so the verified security
-/// descriptor belongs to the very same file that is subsequently read (no TOCTOU window
-/// via file replacement).
-///
-/// Rules (fail-closed):
-/// - The owner must be a trusted principal.
-/// - A DACL must be present (a NULL DACL grants everyone full control).
-/// - Every access-allowed ACE granting write access must have a trusted principal as
-///   the trustee (inherit-only ACEs are skipped, since they do not apply to the object;
-///   callback allow ACEs are treated as unconditional allow ACEs, since their condition
-///   can only narrow the grant).
-/// - Unsupported (object) access-allowed ACE types are rejected.
-pub(crate) fn verify_policy_file_security(file: &File) -> anyhow::Result<()> {
-    verify_handle_security(file, "policy file", TrustedWriters::AdminOnly, WRITE_ACCESS_MASK)
-}
-
 /// Verify the stricter managed-store policy-file ACL.
 pub(crate) fn verify_managed_policy_file_security(file: &File) -> anyhow::Result<()> {
     verify_handle_security(file, "policy file", TrustedWriters::ManagedPolicy, WRITE_ACCESS_MASK)
@@ -197,16 +173,6 @@ pub(crate) fn verify_policy_directory_security(directory: &File) -> anyhow::Resu
         directory,
         "policy directory",
         TrustedWriters::ManagedPolicy,
-        PARENT_DIRECTORY_TAMPER_MASK,
-    )
-}
-
-/// Verify the legacy Agent policy directory without granting it managed-store write capability.
-pub(crate) fn verify_legacy_policy_directory_security(directory: &File) -> anyhow::Result<()> {
-    verify_handle_security(
-        directory,
-        "legacy policy directory",
-        TrustedWriters::AdminOnly,
         PARENT_DIRECTORY_TAMPER_MASK,
     )
 }
@@ -657,7 +623,7 @@ pub(crate) fn verify_retained_executable_security(
 ///   already has it open, and the guard prevents modification, deletion, and renaming
 ///   of the verified object until it is dropped.
 /// - The executable's owner and DACL must only allow writes by SYSTEM, built-in
-///   Administrators, or `NT SERVICE\TrustedInstaller` (see [`verify_policy_file_security`]
+///   Administrators, or `NT SERVICE\TrustedInstaller` (see [`verify_handle_security`]
 ///   for the exact DACL rules).
 /// - Every ancestor directory of the final path (resolved from the verified handle) must
 ///   not allow untrusted principals to rename or delete path components, so the name used
@@ -1102,8 +1068,6 @@ fn verify_handle_security(
 /// Verify that `owner` is trusted and that `dacl` grants `tamper_mask` rights to
 /// `trusted_writers` SIDs only.
 ///
-/// See [`verify_policy_file_security`] for the exact rules.
-///
 /// # Safety
 ///
 /// - `owner` must be null or point to a valid SID.
@@ -1196,26 +1160,12 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
         return true;
     }
 
-    // The Devolutions Agent installer creates `C:\ProgramData\Devolutions\Agent` with
-    // write access for `LOCAL SERVICE`, so it must be trusted for the policy file.
-    // It is a low-privilege shared service identity, however, so it is not trusted for
-    // elevated executables, where accepting it would open a privilege-escalation path.
-    if trusted_writers == TrustedWriters::AdminOnly
-        // SAFETY: Per function contract, `sid` points to a valid SID.
-        && unsafe { IsWellKnownSid(sid, WinLocalServiceSid) }.as_bool()
-    {
-        return true;
-    }
-
     // SAFETY: Per function contract, `sid` points to a valid SID.
     if unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) }.as_bool() {
         return true;
     }
 
-    if matches!(
-        trusted_writers,
-        TrustedWriters::AdminOnly | TrustedWriters::ManagedPolicy
-    ) {
+    if matches!(trusted_writers, TrustedWriters::ManagedPolicy) {
         return false;
     }
 
@@ -1262,7 +1212,7 @@ mod tests {
         ConvertStringSecurityDescriptorToSecurityDescriptorW, GRANT_ACCESS, SDDL_REVISION_1,
     };
     use windows::Win32::Security::{
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, NO_INHERITANCE, WinWorldSid,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, NO_INHERITANCE, WinLocalServiceSid, WinWorldSid,
     };
 
     use super::*;
@@ -1528,7 +1478,7 @@ mod tests {
                     "test file",
                     self.owner,
                     self.dacl,
-                    TrustedWriters::AdminOnly,
+                    TrustedWriters::ManagedPolicy,
                     WRITE_ACCESS_MASK,
                 )
             }
@@ -1577,14 +1527,6 @@ mod tests {
     fn administrators_owner_is_accepted() {
         let sd = SddlDescriptor::parse("O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)");
         sd.verify().expect("Administrators owner must be accepted");
-    }
-
-    #[test]
-    fn local_service_write_ace_is_accepted_for_policy_file() {
-        // The installer creates the Agent ProgramData directory with write access for
-        // LOCAL SERVICE, so the policy-file check must accept it.
-        let sd = SddlDescriptor::parse("O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LS)");
-        sd.verify().expect("LOCAL SERVICE write access must be accepted");
     }
 
     #[test]
@@ -2018,7 +1960,7 @@ mod tests {
         set_security(temp.path(), None, &[grant(GENERIC_ALL.0, everyone)]).unwrap();
 
         let file = File::open(temp.path()).unwrap();
-        let result = verify_policy_file_security(&file);
+        let result = verify_managed_policy_file_security(&file);
 
         assert!(result.is_err(), "everyone-writable policy file must be rejected");
     }
@@ -2056,7 +1998,7 @@ mod tests {
             .unwrap();
 
         verify_policy_file_path(&file, &path).expect("ordinary policy path must be accepted");
-        verify_policy_file_security(&file).expect("SYSTEM/Administrators-only policy file must be accepted");
+        verify_managed_policy_file_security(&file).expect("SYSTEM/Administrators-only policy file must be accepted");
     }
 
     #[test]

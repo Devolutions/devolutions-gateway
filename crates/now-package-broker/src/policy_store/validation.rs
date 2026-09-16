@@ -78,7 +78,7 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         ));
         return invalid_result(findings);
     }
-    if reject_legacy_policy_identity(raw, &mut findings) {
+    if reject_noncanonical_identity_fields(raw, &mut findings) {
         return invalid_result(findings);
     }
     check_constant(
@@ -206,7 +206,7 @@ fn check_constant(
         )),
     }
 }
-fn reject_legacy_policy_identity(raw: &serde_json::Value, findings: &mut Findings) -> bool {
+fn reject_noncanonical_identity_fields(raw: &serde_json::Value, findings: &mut Findings) -> bool {
     let has_schema = raw.get("$schema").is_some();
     if has_schema {
         findings.push(error(
@@ -373,7 +373,6 @@ pub(crate) enum DiskFailureReason {
     Unreadable,
     InsecureStorage,
     MalformedContent,
-    LegacyPolicyContract,
     UnsupportedFormat,
     FailedSemanticValidation,
     WatcherUnavailable,
@@ -385,18 +384,11 @@ pub(crate) fn disk_failure_finding(reason: DiskFailureReason) -> PolicyFinding {
         DiskFailureReason::MalformedContent => {
             "the configured policy file does not contain a policy matching the expected schema"
         }
-        DiskFailureReason::LegacyPolicyContract => {
-            "the configured policy file uses the unsupported legacy '$schema' or 'PolicyVersion' field; replace it with the canonical 'PolicyFormatVersion' contract"
-        }
         DiskFailureReason::UnsupportedFormat => "the configured policy path uses an unsupported format",
         DiskFailureReason::FailedSemanticValidation => "the configured policy file failed semantic validation",
         DiskFailureReason::WatcherUnavailable => "policy change monitoring is unavailable",
     };
-    let code = match reason {
-        DiskFailureReason::LegacyPolicyContract => PolicyFindingCode::UnsupportedPolicyFormatVersion,
-        _ => PolicyFindingCode::SchemaViolation,
-    };
-    error(code, "", message)
+    error(PolicyFindingCode::SchemaViolation, "", message)
 }
 fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, findings: &mut Findings) {
     if draft.rules.len() > MAX_RULES {
@@ -896,8 +888,8 @@ mod tests {
         assert!(has_code(&validate_draft(&raw), PolicyFindingCode::UnknownField));
     }
     #[test]
-    fn legacy_policy_identity_is_rejected_with_precise_diagnostics() {
-        for (legacy_field, expected_message) in [
+    fn noncanonical_policy_identity_fields_are_rejected_with_precise_diagnostics() {
+        for (field, expected_message) in [
             (
                 "$schema",
                 "'$schema' is unsupported; remove it and use 'PolicyFormatVersion'",
@@ -908,7 +900,7 @@ mod tests {
             ),
         ] {
             let mut raw = draft();
-            raw[legacy_field] = json!("1.0.0");
+            raw[field] = json!("1.0.0");
             let result = validate_draft(&raw);
             assert!(!result.is_valid);
             assert_eq!(result.findings.len(), 1);
