@@ -11,7 +11,7 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 
@@ -21,6 +21,10 @@ pub(crate) struct PipeClient {
     executable_path: PathBuf,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
+    /// Actual connected process token elevation, captured at connect.
+    is_elevated: bool,
+    /// Enabled built-in Administrators membership, captured at connect.
+    is_administrator: bool,
 }
 
 impl PipeClient {
@@ -40,17 +44,28 @@ impl PipeClient {
         let executable_path = process
             .exe_path()
             .with_context(|| format!("failed to query pipe client process {process_id} executable path"))?;
-        let user_sid = process
-            .token(TOKEN_QUERY)
-            .with_context(|| format!("failed to open pipe client process {process_id} token"))?
+        let token = process
+            .token(TOKEN_QUERY | TOKEN_DUPLICATE)
+            .with_context(|| format!("failed to open pipe client process {process_id} token"))?;
+        let user_sid = token
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
             .sid;
+        let is_elevated = token
+            .is_elevated()
+            .with_context(|| format!("failed to query pipe client process {process_id} token elevation"))?;
+        let administrators_sid =
+            Sid::from_well_known(WinBuiltinAdministratorsSid, None).context("resolve Administrators SID")?;
+        let is_administrator = token
+            .is_member(&administrators_sid)
+            .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
 
         Ok(Self {
             process_id,
             executable_path,
             user_sid,
+            is_elevated,
+            is_administrator,
         })
     }
 
@@ -59,9 +74,21 @@ impl PipeClient {
         Self::from_process_id(std::process::id())
     }
 
+    #[cfg(all(test, feature = "dev-skip-broker-signature"))]
+    pub(crate) fn test_with_authority(is_elevated: bool, is_administrator: bool) -> anyhow::Result<Self> {
+        let mut client = Self::from_current_process()?;
+        client.is_elevated = is_elevated;
+        client.is_administrator = is_administrator;
+        Ok(client)
+    }
+
     /// Security identifier of the authenticated pipe client user, captured at connect.
     pub(crate) fn user_sid(&self) -> &Sid {
         &self.user_sid
+    }
+
+    pub(crate) fn is_elevated_administrator(&self) -> bool {
+        self.is_elevated && self.is_administrator
     }
 
     pub(crate) fn validate_request(
@@ -280,6 +307,8 @@ mod tests {
             process_id: 0,
             executable_path: PathBuf::new(),
             user_sid: system_sid(),
+            is_elevated: true,
+            is_administrator: true,
         }
     }
 
@@ -371,6 +400,8 @@ mod tests {
                 process_id: std::process::id(),
                 executable_path: std::env::current_exe().expect("current test executable path"),
                 user_sid: client_user_sid(),
+                is_elevated: false,
+                is_administrator: false,
             };
 
             assert!(client.validate_connection(true).is_err());

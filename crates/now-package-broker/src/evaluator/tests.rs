@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use chrono::Utc;
 use now_policy::{
-    Decision, PackageBrokerPolicy, PolicyDocument, PolicyEnforcement, PolicyMatch, PolicyMetadata, PolicyRule,
-    PolicySchemaUri, ResourceId, RulePrecedence, SemanticVersion, StringPattern,
+    Decision, PackageBrokerPolicy, PolicyDocument, PolicyEnforcement, PolicyFormatVersion, PolicyMatch, PolicyMetadata,
+    PolicyRule, ResourceId, RulePrecedence, StringPattern,
 };
 use now_policy_api::{self as api, PackageRequest};
 
@@ -13,8 +13,7 @@ use super::evaluate;
 
 fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
     PolicyDocument {
-        _schema: PolicySchemaUri,
-        policy_version: SemanticVersion::from("1.0.0"),
+        policy_format_version: PolicyFormatVersion::current(),
         policy_type: PackageBrokerPolicy,
         metadata: PolicyMetadata {
             id: ResourceId::from("test-policy"),

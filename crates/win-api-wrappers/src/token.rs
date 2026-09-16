@@ -397,6 +397,22 @@ impl Token {
         Ok(is_elevated)
     }
 
+    /// Determines whether `sid` is an enabled group in this token.
+    pub fn is_member(&self, sid: &Sid) -> anyhow::Result<bool> {
+        use windows::Win32::Security::CheckTokenMembership;
+
+        let token = self
+            .duplicate(TOKEN_QUERY, None, SecurityIdentification, Security::TokenImpersonation)
+            .context("duplicate token for membership check")?;
+        let mut is_member = windows::core::BOOL(0);
+
+        // SAFETY: The duplicated token, SID, and output pointer remain valid for the call.
+        unsafe { CheckTokenMembership(Some(token.handle.raw()), sid.as_psid_const(), &mut is_member) }
+            .context("CheckTokenMembership failed")?;
+
+        Ok(is_member.as_bool())
+    }
+
     pub fn linked_token(&self) -> anyhow::Result<Self> {
         // SAFETY: The TokenLinkedToken info class is associated to a HANDLE.
         let handle = unsafe {
