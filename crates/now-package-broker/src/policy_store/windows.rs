@@ -7,7 +7,6 @@
 //!
 //! Replacement observations retain the exact target without write or delete sharing.
 //! Publication renames that handle to a reserved tombstone, then renames a flushed secure temporary handle to the final leaf without replacing any raced-in content.
-//! A durable admin-only marker lets startup restore the exact tombstone or preserve a final file already present after interruption.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
@@ -48,7 +47,6 @@ use crate::policy_store::validation;
 
 /// Base file name for the policy file (a fixed name inside its dedicated directory).
 pub(super) const POLICY_FILE_NAME: &str = "package-broker-policy.json";
-const MANAGED_AUTHORITY_MARKER_NAME: &str = ".package-broker-managed-authority.v1";
 const FILE_SYNCHRONIZE: u32 = 0x0010_0000;
 const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
 const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
@@ -81,159 +79,6 @@ unsafe extern "system" {
     ) -> NTSTATUS;
 }
 
-/// Return the managed and legacy default paths in arbitration order.
-pub(super) fn default_policy_paths() -> [PathBuf; 2] {
-    crate::policy_loader::default_policy_candidates()
-}
-
-pub(super) fn select_default_policy_path(managed: PathBuf, legacy: PathBuf) -> PathBuf {
-    select_default_policy_path_with(managed, legacy, || {})
-}
-
-fn select_default_policy_path_with(
-    managed: PathBuf,
-    legacy: PathBuf,
-    before_final_managed_check: impl FnOnce(),
-) -> PathBuf {
-    if managed_default_has_state(&managed) {
-        return managed;
-    }
-    match std::fs::symlink_metadata(&legacy) {
-        Ok(_) => {
-            before_final_managed_check();
-            if managed_default_has_state(&managed) {
-                managed
-            } else {
-                legacy
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => managed,
-        Err(_) => legacy,
-    }
-}
-
-fn managed_default_has_state(managed: &Path) -> bool {
-    match std::fs::symlink_metadata(managed) {
-        Ok(_) => return true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return true,
-    }
-    let Some(dir) = managed.parent() else {
-        return true;
-    };
-    match std::fs::symlink_metadata(dir.join(MANAGED_AUTHORITY_MARKER_NAME)) {
-        Ok(_) => return true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return true,
-    }
-    let Some(final_leaf) = managed.file_name().and_then(OsStr::to_str) else {
-        return true;
-    };
-    let transaction_prefix = OsString::from(format!(".{final_leaf}.txn-"));
-    let create_prefix = OsString::from(format!(".{final_leaf}.tmp-"));
-
-    let mut handles = match policy_security::retain_policy_no_reparse_directory_chain(dir, "managed policy directory") {
-        Ok(handles) => handles,
-        Err(error)
-            if error
-                .root_cause()
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
-        {
-            return false;
-        }
-        Err(_) => return true,
-    };
-    let Some(dir_handle) = handles.pop() else {
-        return true;
-    };
-    if policy_security::verify_policy_directory_security(&dir_handle).is_err() {
-        return true;
-    }
-    let canonical_dir = match policy_security::final_path_from_handle(&dir_handle) {
-        Ok(path) => path,
-        Err(_) => return true,
-    };
-    let entries = match std::fs::read_dir(canonical_dir) {
-        Ok(entries) => entries,
-        Err(_) => return true,
-    };
-    for entry in entries {
-        let Ok(entry) = entry else {
-            return true;
-        };
-        let name = entry.file_name();
-        if reserved_name_remainder(&name, &transaction_prefix).map_or(true, |remainder| remainder.is_some())
-            || reserved_name_remainder(&name, &create_prefix).map_or(true, |remainder| remainder.is_some())
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn open_verified_managed_authority_marker(dir_path: &Path) -> anyhow::Result<Option<File>> {
-    let path = dir_path.join(MANAGED_AUTHORITY_MARKER_NAME);
-    match std::fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).context("failed to inspect managed authority marker"),
-        Ok(_) => {}
-    }
-
-    let file = open_transaction_file(&path).context("failed to open managed authority marker")?;
-    verify_managed_authority_file(&file, &path)?;
-    Ok(Some(file))
-}
-
-#[cfg(test)]
-fn verify_managed_authority_marker_if_present(dir_path: &Path) -> anyhow::Result<bool> {
-    open_verified_managed_authority_marker(dir_path).map(|marker| marker.is_some())
-}
-
-fn verify_managed_authority_file(file: &File, path: &Path) -> anyhow::Result<()> {
-    policy_security::verify_policy_file_path(file, path).context("managed authority marker path is invalid")?;
-    ensure!(
-        policy_security::file_link_count(file)? == 1,
-        "managed authority marker has multiple hard links"
-    );
-    policy_security::verify_managed_policy_file_security(file)
-        .context("managed authority marker security is invalid")?;
-    _ = policy_security::file_identity(file).context("failed to identify managed authority marker")?;
-    _ = policy_security::security_state_digest(file)
-        .context("failed to summarize managed authority marker security")?;
-    ensure!(file.metadata()?.len() == 0, "managed authority marker is not empty");
-    Ok(())
-}
-
-fn ensure_managed_authority_marker(dir: &File, dir_path: &Path) -> anyhow::Result<()> {
-    if open_verified_managed_authority_marker(dir_path)?.is_some() {
-        return Ok(());
-    }
-
-    let path = dir_path.join(MANAGED_AUTHORITY_MARKER_NAME);
-    let marker = match create_secure_transaction_file_in(dir, &path) {
-        Ok(marker) => marker,
-        Err(create_error) => {
-            return match open_verified_managed_authority_marker(dir_path) {
-                Ok(Some(_)) => Ok(()),
-                Ok(None) => Err(create_error).context("failed to create managed authority marker"),
-                Err(verify_error) => Err(verify_error).context(format!(
-                    "managed authority marker creation also failed: {create_error:#}"
-                )),
-            };
-        }
-    };
-    marker
-        .sync_all()
-        .context("failed to persist managed authority marker")?;
-    verify_managed_authority_file(&marker, &path)?;
-    let identity =
-        policy_security::file_identity(&marker).context("failed to identify new managed authority marker")?;
-    drop(marker);
-    verify_probe_directory_entry(dir, OsStr::new(MANAGED_AUTHORITY_MARKER_NAME), identity)
-        .context("managed authority marker directory entry is invalid")
-}
-
 /// Validate the *shape* of a configured policy path before ever touching disk: it must
 /// be an absolute path naming a `.json` (case-insensitive) leaf file, with no `.`/`..`
 /// component anywhere and no trailing directory separator. Never applied to the default
@@ -242,7 +87,7 @@ fn ensure_managed_authority_marker(dir: &File, dir_path: &Path) -> anyhow::Resul
 /// This is deliberately independent of any filesystem access (a relative path must never
 /// be silently resolved against the process's current directory by some later `open`
 /// call) and independent of JSON-vs-other-format content sniffing: the extension alone
-/// decides, so a legacy `.yaml`/`.yml` (or extensionless) configured path is rejected
+/// decides, so a `.yaml`/`.yml` (or extensionless) configured path is rejected
 /// up front rather than discovered only when its content fails to parse as JSON.
 #[derive(Debug)]
 enum ConfiguredPathError {
@@ -512,26 +357,6 @@ impl VerifiedHostingDirectory {
     }
 }
 
-pub(super) fn ensure_published_managed_authority(
-    source: PolicyConfigurationSource,
-    configured_path: &Path,
-    hosting_dir: &VerifiedHostingDirectory,
-) -> anyhow::Result<()> {
-    let [managed, _] = default_policy_paths();
-    if source != PolicyConfigurationSource::DefaultPath
-        || !policy_security::windows_paths_equal(configured_path, &managed)
-    {
-        return Ok(());
-    }
-
-    hosting_dir.verify_unchanged()?;
-    let handle = hosting_dir
-        .handle
-        .as_ref()
-        .expect("real policy publication retains the hosting directory handle");
-    ensure_managed_authority_marker(handle, hosting_dir.canonical_path())
-}
-
 /// Create the dedicated default policy directory (if it does not already exist) with an
 /// admin-only ACL established atomically at creation, then verify it.
 ///
@@ -684,19 +509,6 @@ fn verify_custom_directory_secure(dir: &Path) -> anyhow::Result<(File, PathBuf, 
     policy_security::verify_policy_directory_security(&handle)?;
     let ancestor_security_digest =
         policy_security::verified_policy_ancestor_digest(&ancestor_handles, "policy directory")?;
-    Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
-}
-
-fn verify_legacy_default_directory_secure(dir: &Path) -> anyhow::Result<(File, PathBuf, [u8; 32], Vec<File>)> {
-    let mut ancestor_handles =
-        policy_security::retain_policy_no_reparse_directory_chain(dir, "legacy policy directory")?;
-    let handle = ancestor_handles
-        .pop()
-        .context("legacy policy directory chain is empty")?;
-    let final_path = policy_security::final_path_from_handle(&handle)?;
-    policy_security::verify_legacy_policy_directory_security(&handle)?;
-    let ancestor_security_digest =
-        policy_security::verified_policy_ancestor_digest(&ancestor_handles, "legacy policy directory")?;
     Ok((handle, final_path, ancestor_security_digest, ancestor_handles))
 }
 
@@ -1469,15 +1281,9 @@ fn observe_impl(
     let leaf_name = configured_path
         .file_name()
         .expect("shape validation already required a named leaf file");
-    let [_, legacy_default_path] = default_policy_paths();
-    let legacy_default = matches!(source, PolicyConfigurationSource::DefaultPath)
-        && policy_security::windows_paths_equal(configured_path, &legacy_default_path);
-    let managed_default = matches!(source, PolicyConfigurationSource::DefaultPath) && !legacy_default;
-
-    let secured = match (source, legacy_default) {
-        (PolicyConfigurationSource::DefaultPath, true) => verify_legacy_default_directory_secure(dir),
-        (PolicyConfigurationSource::DefaultPath, false) => ensure_default_directory_secured(dir),
-        (PolicyConfigurationSource::ConfiguredPath, _) => verify_custom_directory_secure(dir),
+    let secured = match source {
+        PolicyConfigurationSource::DefaultPath => ensure_default_directory_secured(dir),
+        PolicyConfigurationSource::ConfiguredPath => verify_custom_directory_secure(dir),
     };
 
     let (dir_handle, canonical_dir, _, ancestor_handles) = match secured {
@@ -1517,12 +1323,7 @@ fn observe_impl(
         }
     };
 
-    let directory_security = if legacy_default {
-        policy_security::verify_legacy_policy_directory_security(&dir_handle)
-    } else {
-        policy_security::verify_policy_directory_security(&dir_handle)
-    };
-    if let Err(error) = directory_security {
+    if let Err(error) = policy_security::verify_policy_directory_security(&dir_handle) {
         tracing::warn!(
             path = %canonical_dir.display(), error = %format!("{error:#}"),
             "Held policy directory failed security verification"
@@ -1578,39 +1379,8 @@ fn observe_impl(
                 );
             }
         };
-    let authority_marker_present = if managed_default {
-        match open_verified_managed_authority_marker(&canonical_dir) {
-            Ok(marker) => marker.is_some(),
-            Err(error) => {
-                tracing::error!(
-                    path = %canonical_dir.display(),
-                    error = %format!("{error:#}"),
-                    "Managed policy authority marker failed closed"
-                );
-                return invalid_observation(
-                    &canonical_path,
-                    validation::DiskFailureReason::InsecureStorage,
-                    InvalidContext {
-                        parent: Some(parent),
-                        dir_security_digest: Some(dir_security_digest),
-                        ancestor_security_digest: Some(ancestor_security_digest),
-                        ..Default::default()
-                    },
-                    PolicyWriteCapability::ReadOnly,
-                    Some(PolicyReadOnlyReason::UnsafePath),
-                );
-            }
-        }
-    } else {
-        false
-    };
-
-    let recovery = if legacy_default {
-        Ok(())
-    } else {
-        recover_create_temporary_files(&canonical_dir)
-            .and_then(|()| recover_interrupted_transaction(&dir_handle, &canonical_dir, leaf_name))
-    };
+    let recovery = recover_create_temporary_files(&canonical_dir)
+        .and_then(|()| recover_interrupted_transaction(&dir_handle, &canonical_dir, leaf_name));
     if let Err(error) = recovery {
         tracing::error!(
             path = %canonical_dir.display(),
@@ -1633,14 +1403,7 @@ fn observe_impl(
 
     // The one-time, side-effecting atomic-replace capability probe (item 20): cached per
     // verified directory identity and security digest, never repeated on every observation.
-    // The installer successor migrates eligible legacy files before service startup.
-    // Until managed state appears, preserve legacy enforcement but never write through the legacy directory.
-    let (base_write_capability, base_read_only_reason) = if legacy_default {
-        (
-            PolicyWriteCapability::ReadOnly,
-            Some(PolicyReadOnlyReason::InsufficientPermissions),
-        )
-    } else {
+    let (base_write_capability, base_read_only_reason) =
         match probe_cache.get_or_probe(&canonical_dir, parent, dir_security_digest) {
             Ok(()) => (PolicyWriteCapability::Writable, None),
             Err((reason, diagnostic)) => {
@@ -1650,10 +1413,8 @@ fn observe_impl(
                 );
                 (probe_failure_capability(reason), Some(reason))
             }
-        }
-    };
+        };
 
-    let authority_dir = (managed_default && !authority_marker_present).then(|| dir_handle.try_clone());
     let hosting_dir = (base_write_capability == PolicyWriteCapability::Writable).then_some(VerifiedHostingDirectory {
         handle: Some(dir_handle),
         ancestor_handles,
@@ -1683,7 +1444,7 @@ fn observe_impl(
             Some(PolicyReadOnlyReason::UnsafePath),
         );
     }
-    let opened = match open_policy_file(&canonical_path, retain_target && !legacy_default) {
+    let opened = match open_policy_file(&canonical_path, retain_target) {
         Ok(opened) => opened,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if let Err(error) = verify_policy_leaf_type_if_present(&canonical_path) {
@@ -1867,14 +1628,8 @@ fn observe_impl(
         ..invalid_ctx
     };
 
-    let file_security = if legacy_default {
-        policy_security::verify_policy_file_security(&file)
-    } else {
-        policy_security::verify_managed_policy_file_security(&file)
-    };
-    if let Err(security_error) = file_security {
-        // Fail closed without ever reading content past a failed security check, exactly
-        // like the legacy loader: an insecurely-stored file is never trusted, whatever it
+    if let Err(security_error) = policy_security::verify_managed_policy_file_security(&file) {
+        // Fail closed without ever reading content past a failed security check:
         // contains. Forced ReadOnly regardless of the directory's own writable capability
         // (item 26): an untrustworthy existing file must never be blindly overwritten
         // through the management API either. The detailed reason is only ever traced,
@@ -1931,7 +1686,7 @@ fn observe_impl(
     // through the directory's own (already resolved) capability -- item 26.
     let retained_target = opened.retained_for_write.then_some(RetainedPolicyFile::Real(file));
 
-    let observation = observation_from_parts(
+    observation_from_parts(
         &canonical_path,
         &content,
         VerifiedIdentity {
@@ -1945,36 +1700,7 @@ fn observe_impl(
         base_read_only_reason,
         hosting_dir,
         retained_target,
-    );
-    if observation.state == PolicyManagementState::Active
-        && let Some(authority_dir) = authority_dir
-    {
-        let marker_result = authority_dir
-            .context("failed to retain managed policy directory for authority marker")
-            .and_then(|dir| ensure_managed_authority_marker(&dir, &canonical_dir));
-        if let Err(error) = marker_result {
-            tracing::error!(
-                path = %canonical_dir.display(),
-                error = %format!("{error:#}"),
-                "Failed to make managed policy selection durable"
-            );
-            return invalid_observation(
-                &canonical_path,
-                validation::DiskFailureReason::InsecureStorage,
-                InvalidContext {
-                    parent: Some(parent),
-                    dir_security_digest: Some(dir_security_digest),
-                    ancestor_security_digest: Some(ancestor_security_digest),
-                    target: Some(target),
-                    content_digest: Some(sha256_digest(&content)),
-                    security_digest: Some(security_digest),
-                },
-                PolicyWriteCapability::ReadOnly,
-                Some(PolicyReadOnlyReason::UnsafePath),
-            );
-        }
-    }
-    observation
+    )
 }
 
 /// Verified identity/security components already resolved for the current observation,
@@ -2048,7 +1774,7 @@ fn observation_from_parts(
             // and could otherwise leak content fragments to any authenticated (but not
             // necessarily elevated) caller of `GET /v1/policy/management`.
             tracing::warn!(%parse_error, "Configured policy file content failed to parse");
-            return invalid_with(disk_parse_failure_reason(content), hosting_dir);
+            return invalid_with(validation::DiskFailureReason::MalformedContent, hosting_dir);
         }
     };
 
@@ -2082,22 +1808,6 @@ fn observation_from_parts(
         canonical_path: path.to_owned(),
         hosting_dir,
         retained_target,
-    }
-}
-
-fn disk_parse_failure_reason(content: &[u8]) -> validation::DiskFailureReason {
-    if serde_json::from_slice::<serde_json::Value>(content)
-        .ok()
-        .and_then(|value| {
-            value
-                .as_object()
-                .map(|object| object.contains_key("$schema") || object.contains_key("PolicyVersion"))
-        })
-        == Some(true)
-    {
-        validation::DiskFailureReason::LegacyPolicyContract
-    } else {
-        validation::DiskFailureReason::MalformedContent
     }
 }
 
@@ -3453,29 +3163,6 @@ mod tests {
         tempfile::tempdir().expect("create temp dir")
     }
 
-    fn secure_test_hosting_directory(root: &Path) -> Option<VerifiedHostingDirectory> {
-        let attributes = policy_security::admin_only_security_attributes(true).ok()?;
-        let parent = open_directory_no_reparse(root).ok()?;
-        let handle = ensure_secure_directory_component(
-            &parent,
-            OsStr::new("PackageBroker"),
-            &attributes,
-            DirectorySecurityRole::DedicatedPolicy,
-            |_| Ok(()),
-        )
-        .ok()?;
-        let canonical_path = policy_security::final_path_from_handle(&handle).ok()?;
-        let identity = policy_security::file_identity(&handle).ok()?;
-        let security_digest = policy_security::security_state_digest(&handle).ok()?;
-        Some(VerifiedHostingDirectory {
-            handle: Some(handle),
-            ancestor_handles: Vec::new(),
-            canonical_path,
-            identity,
-            security_digest,
-        })
-    }
-
     fn committed_policy_bytes(default_decision: &str) -> Vec<u8> {
         let draft: now_policy::PolicyDraftDocument = serde_json::from_value(serde_json::json!({
             "PolicyFormatVersion": "1.0.0",
@@ -3512,39 +3199,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_policy_identity_has_a_precise_disk_diagnostic() {
-        let current: serde_json::Value = serde_json::from_slice(&valid_committed_policy_bytes()).unwrap();
-        for (legacy_field, legacy_value) in [
-            ("$schema", serde_json::json!("legacy")),
-            ("PolicyVersion", serde_json::json!("1.0.0")),
-        ] {
-            for retain_current_version in [false, true] {
-                let mut legacy = current.clone();
-                legacy[legacy_field] = legacy_value.clone();
-                if !retain_current_version {
-                    legacy.as_object_mut().unwrap().remove("PolicyFormatVersion");
-                }
-                let content = serde_json::to_vec(&legacy).unwrap();
-                let error = serde_json::from_slice::<PolicyDocument>(&content).expect_err("legacy field rejected");
-                assert!(error.to_string().contains(legacy_field), "{error}");
-                let observed = observe_test_content(&content);
-                assert_eq!(observed.state, PolicyManagementState::Invalid);
-                assert!(observed.policy.is_none());
-                assert_eq!(observed.write_capability, PolicyWriteCapability::Writable);
-                let expected = validation::disk_failure_finding(validation::DiskFailureReason::LegacyPolicyContract);
-                let finding = &observed.invalid_diagnostics.unwrap().findings[0];
-                assert_eq!(finding.code, expected.code);
-                assert_eq!(finding.message, expected.message);
-                assert_eq!(observe_test_content(&content).fingerprint, observed.fingerprint);
-            }
-        }
-        assert_eq!(
-            disk_parse_failure_reason(br#"{"PolicyFormatVersion":"broken"}"#),
-            validation::DiskFailureReason::MalformedContent
-        );
-    }
-
-    #[test]
     fn committed_policy_observation_preserves_compatible_format_and_exact_content_digest() {
         let mut current: serde_json::Value = serde_json::from_slice(&valid_committed_policy_bytes()).unwrap();
         for version in ["1.0.0", "1.7.3"] {
@@ -3569,144 +3223,6 @@ mod tests {
             assert_eq!(observed.state, PolicyManagementState::Invalid);
             assert!(observed.policy.is_none());
         }
-    }
-
-    #[test]
-    fn default_path_prefers_managed_then_legacy_then_new_location() {
-        let dir = temp_dir();
-        let managed = dir.path().join("PackageBroker").join(POLICY_FILE_NAME);
-        let legacy = dir.path().join("Agent").join(POLICY_FILE_NAME);
-
-        assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), managed);
-
-        std::fs::create_dir(legacy.parent().unwrap()).unwrap();
-        std::fs::write(&legacy, b"legacy").unwrap();
-        assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), legacy);
-
-        let selected = select_default_policy_path_with(managed.clone(), legacy.clone(), || {
-            std::fs::create_dir(managed.parent().unwrap()).unwrap();
-            std::fs::write(&managed, b"raced-managed").unwrap();
-        });
-        assert_eq!(selected, managed, "managed policy created during arbitration must win");
-        std::fs::remove_file(&managed).unwrap();
-
-        let marker = managed
-            .parent()
-            .unwrap()
-            .join(format!(".{POLICY_FILE_NAME}.txn-{}.marker", uuid::Uuid::new_v4()));
-        std::fs::write(&marker, b"interrupted").unwrap();
-        assert_eq!(
-            select_default_policy_path(managed.clone(), legacy.clone()),
-            managed,
-            "an interrupted managed transaction must never fall back to legacy policy"
-        );
-
-        std::fs::remove_file(marker).unwrap();
-        std::fs::write(&managed, b"managed").unwrap();
-        assert_eq!(select_default_policy_path(managed.clone(), legacy), managed);
-    }
-
-    #[test]
-    fn durable_authority_marker_prevents_legacy_rollback_after_restart() {
-        let root = temp_dir();
-        let Some(hosting) = secure_test_hosting_directory(root.path()) else {
-            return;
-        };
-        let managed = hosting.canonical_path().join(POLICY_FILE_NAME);
-        let legacy = root.path().join("Agent").join(POLICY_FILE_NAME);
-        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
-        std::fs::write(&legacy, b"legacy").unwrap();
-
-        assert_eq!(select_default_policy_path(managed.clone(), legacy.clone()), legacy);
-        ensure_managed_authority_marker(hosting.handle.as_ref().unwrap(), hosting.canonical_path()).unwrap();
-
-        assert_eq!(select_default_policy_path(managed.clone(), legacy), managed);
-        assert!(
-            verify_managed_authority_marker_if_present(hosting.canonical_path()).unwrap(),
-            "restart evidence must remain durable without a managed final policy"
-        );
-    }
-
-    #[test]
-    fn published_managed_policy_establishes_authority_before_success() {
-        let root = temp_dir();
-        let Some(hosting) = secure_test_hosting_directory(root.path()) else {
-            return;
-        };
-        let [managed, _] = default_policy_paths();
-
-        ensure_published_managed_authority(PolicyConfigurationSource::DefaultPath, &managed, &hosting).unwrap();
-
-        assert!(verify_managed_authority_marker_if_present(hosting.canonical_path()).unwrap());
-        assert_eq!(
-            std::fs::metadata(hosting.canonical_path().join(MANAGED_AUTHORITY_MARKER_NAME))
-                .unwrap()
-                .len(),
-            0,
-            "the marker must be complete at atomic creation"
-        );
-    }
-
-    #[test]
-    fn custom_policy_publication_does_not_create_managed_authority() {
-        let hosting = VerifiedHostingDirectory::for_fake_storage(
-            PathBuf::from(r"C:\custom"),
-            test_identity(1),
-            test_security_digest(1),
-        );
-
-        ensure_published_managed_authority(
-            PolicyConfigurationSource::ConfiguredPath,
-            Path::new(r"C:\custom\policy.json"),
-            &hosting,
-        )
-        .unwrap();
-
-        assert!(!verify_managed_authority_marker_if_present(hosting.canonical_path()).unwrap());
-    }
-
-    #[test]
-    fn invalid_managed_authority_marker_fails_closed_and_is_not_recovered() {
-        let root = temp_dir();
-        let marker_path = root.path().join(MANAGED_AUTHORITY_MARKER_NAME);
-        std::fs::write(&marker_path, b"invalid").unwrap();
-        let dir = open_directory_no_reparse(root.path()).unwrap();
-
-        assert!(verify_managed_authority_marker_if_present(root.path()).is_err());
-        assert!(ensure_managed_authority_marker(&dir, root.path()).is_err());
-        assert_eq!(std::fs::read(&marker_path).unwrap(), b"invalid");
-        recover_interrupted_transaction(&dir, root.path(), OsStr::new(POLICY_FILE_NAME)).unwrap();
-        assert!(
-            marker_path.exists(),
-            "routine recovery must not retire authority evidence"
-        );
-    }
-
-    #[test]
-    fn reparse_managed_authority_marker_fails_closed() {
-        let root = temp_dir();
-        let marker = root.path().join(MANAGED_AUTHORITY_MARKER_NAME);
-        create_directory_junction(&marker, &root.path().join("missing-target"));
-
-        assert!(verify_managed_authority_marker_if_present(root.path()).is_err());
-    }
-
-    #[test]
-    fn hard_link_managed_authority_marker_fails_closed_and_is_preserved() {
-        let root = temp_dir();
-        let original = root.path().join("original");
-        let marker = root.path().join(MANAGED_AUTHORITY_MARKER_NAME);
-        let Ok(original_file) = create_secure_transaction_file(&original) else {
-            return;
-        };
-        original_file.sync_all().unwrap();
-        drop(original_file);
-        std::fs::hard_link(&original, &marker).unwrap();
-        let dir = open_directory_no_reparse(root.path()).unwrap();
-
-        assert!(ensure_managed_authority_marker(&dir, root.path()).is_err());
-        assert!(marker.exists());
-        assert!(original.exists());
     }
 
     fn open_deletable_test_file(path: &Path, content: &[u8]) -> File {
@@ -4195,48 +3711,44 @@ mod tests {
     fn interrupted_repair_preserves_invalid_original_and_retires_prepublication_remnants() {
         use std::io::Write as _;
 
-        for original in [
-            b"malformed policy".as_slice(),
-            br#"{"$schema":"legacy","PolicyVersion":"1.0.0"}"#.as_slice(),
-        ] {
-            let dir = temp_dir();
-            let dir_file = open_directory_no_reparse(dir.path()).unwrap();
-            let final_path = dir.path().join("policy.json");
-            let mut final_file = match create_secure_transaction_file(&final_path) {
-                Ok(file) => file,
-                Err(error) => {
-                    tracing::warn!(
-                        error = %format!("{error:#}"),
-                        "Skipping administrator-owned repair recovery fixtures"
-                    );
-                    return;
-                }
-            };
-            final_file.write_all(original).unwrap();
-            final_file.sync_all().unwrap();
-            drop(final_file);
-            for stage_marker in [false, true] {
-                let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
-                let mut replacement = create_secure_transaction_file(&paths.new).unwrap();
-                replacement.write_all(b"partial replacement").unwrap();
-                replacement.sync_all().unwrap();
-                drop(replacement);
-                if stage_marker {
-                    let mut staging = create_secure_transaction_file(&paths.marker_staging).unwrap();
-                    staging.write_all(br#"{"Version":"#).unwrap();
-                    staging.sync_all().unwrap();
-                }
-
-                recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap();
-
-                assert_eq!(std::fs::read(&final_path).unwrap(), original);
-                assert!(!paths.new.exists());
-                assert!(!paths.marker_staging.exists());
-                let observed = observe_test_content(original);
-                assert_eq!(observed.state, PolicyManagementState::Invalid);
-                assert_eq!(observed.write_capability, PolicyWriteCapability::Writable);
-                assert!(observed.policy.is_none());
+        let original = b"malformed policy";
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let final_path = dir.path().join("policy.json");
+        let mut final_file = match create_secure_transaction_file(&final_path) {
+            Ok(file) => file,
+            Err(error) => {
+                tracing::warn!(
+                    error = %format!("{error:#}"),
+                    "Skipping administrator-owned repair recovery fixtures"
+                );
+                return;
             }
+        };
+        final_file.write_all(original).unwrap();
+        final_file.sync_all().unwrap();
+        drop(final_file);
+        for stage_marker in [false, true] {
+            let paths = TransactionPaths::new(dir.path(), &final_path).unwrap();
+            let mut replacement = create_secure_transaction_file(&paths.new).unwrap();
+            replacement.write_all(b"partial replacement").unwrap();
+            replacement.sync_all().unwrap();
+            drop(replacement);
+            if stage_marker {
+                let mut staging = create_secure_transaction_file(&paths.marker_staging).unwrap();
+                staging.write_all(br#"{"Version":"#).unwrap();
+                staging.sync_all().unwrap();
+            }
+
+            recover_interrupted_transaction(&dir_file, dir.path(), final_path.file_name().unwrap()).unwrap();
+
+            assert_eq!(std::fs::read(&final_path).unwrap(), original);
+            assert!(!paths.new.exists());
+            assert!(!paths.marker_staging.exists());
+            let observed = observe_test_content(original);
+            assert_eq!(observed.state, PolicyManagementState::Invalid);
+            assert_eq!(observed.write_capability, PolicyWriteCapability::Writable);
+            assert!(observed.policy.is_none());
         }
     }
 
@@ -4622,14 +4134,14 @@ mod tests {
         assert_eq!(decoded.new_content_digest, marker.new_content_digest);
         assert_eq!(decoded.new_security_digest, marker.new_security_digest);
 
-        let mut legacy: serde_json::Value = serde_json::from_slice(&marker.to_bytes()).unwrap();
-        legacy["Version"] = 1.into();
-        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&legacy).unwrap()).is_err());
+        let mut older_version: serde_json::Value = serde_json::from_slice(&marker.to_bytes()).unwrap();
+        older_version["Version"] = 1.into();
+        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&older_version).unwrap()).is_err());
 
-        legacy["Version"] = 2.into();
-        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&legacy).unwrap()).is_err());
+        older_version["Version"] = 2.into();
+        assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&older_version).unwrap()).is_err());
 
-        let mut missing_identity = legacy;
+        let mut missing_identity = older_version;
         missing_identity["Version"] = 3.into();
         missing_identity.as_object_mut().unwrap().remove("NewFileId");
         assert!(TransactionMarker::from_bytes(&serde_json::to_vec(&missing_identity).unwrap()).is_err());

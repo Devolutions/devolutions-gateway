@@ -35,14 +35,14 @@ trait PolicyStorage: Send + Sync {
     }
     fn create(
         &self,
-        source: PolicyConfigurationSource,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
     ) -> Result<PersistedPolicy, WriteFailure>;
     fn replace(
         &self,
-        source: PolicyConfigurationSource,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
@@ -72,7 +72,7 @@ impl PolicyStorage for FilePolicyStorage {
 
     fn create(
         &self,
-        source: PolicyConfigurationSource,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &Observation,
         bytes: &[u8],
@@ -87,14 +87,12 @@ impl PolicyStorage for FilePolicyStorage {
             &observation.canonical_path,
             bytes,
         )?;
-        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
-            .map_err(WriteFailure::PostPublication)?;
         self.authoritative_reobserve(configured_path, bytes)
     }
 
     fn replace(
         &self,
-        source: PolicyConfigurationSource,
+        _source: PolicyConfigurationSource,
         configured_path: &Path,
         observation: &mut Observation,
         bytes: &[u8],
@@ -110,8 +108,6 @@ impl PolicyStorage for FilePolicyStorage {
             &observation.canonical_path,
             bytes,
         )?;
-        windows::ensure_published_managed_authority(source, configured_path, hosting_dir)
-            .map_err(WriteFailure::PostPublication)?;
         self.authoritative_reobserve(configured_path, bytes)
     }
 }
@@ -174,8 +170,6 @@ pub struct ReplaceSuccess {
 
 pub struct PolicyStore {
     configured_path: PathBuf,
-    default_paths: Option<[PathBuf; 2]>,
-    default_managed_selected: std::sync::atomic::AtomicBool,
     source: PolicyConfigurationSource,
     snapshot: RwLock<Arc<Snapshot>>,
     writer: tokio::sync::Mutex<Monitoring>,
@@ -197,36 +191,17 @@ impl PolicyStore {
         storage: Arc<dyn PolicyStorage>,
         monitoring: Monitoring,
     ) -> Arc<Self> {
-        let (mut configured_path, default_paths, source) = match configured_path {
-            Some(path) => (path, None, PolicyConfigurationSource::ConfiguredPath),
-            None => {
-                let [managed, legacy] = windows::default_policy_paths();
-                (
-                    windows::select_default_policy_path(managed.clone(), legacy.clone()),
-                    Some([managed, legacy]),
-                    PolicyConfigurationSource::DefaultPath,
-                )
-            }
+        let (configured_path, source) = match configured_path {
+            Some(path) => (path, PolicyConfigurationSource::ConfiguredPath),
+            None => (
+                crate::policy_loader::default_policy_path(),
+                PolicyConfigurationSource::DefaultPath,
+            ),
         };
-        let mut default_managed_selected = default_paths
-            .as_ref()
-            .is_some_and(|[managed, _]| crate::policy_security::windows_paths_equal(&configured_path, managed));
-        let mut observation = storage.observe(source, &configured_path);
-        if let Some([managed, legacy]) = &default_paths
-            && !default_managed_selected
-        {
-            let final_path = windows::select_default_policy_path(managed.clone(), legacy.clone());
-            if crate::policy_security::windows_paths_equal(&final_path, managed) {
-                configured_path = final_path;
-                default_managed_selected = true;
-                observation = storage.observe(source, &configured_path);
-            }
-        }
+        let observation = storage.observe(source, &configured_path);
         let snapshot = Arc::new(snapshot_from_observation(observation, random_store_token()));
         Arc::new(Self {
             configured_path,
-            default_paths,
-            default_managed_selected: std::sync::atomic::AtomicBool::new(default_managed_selected),
             source,
             snapshot: RwLock::new(snapshot),
             writer: tokio::sync::Mutex::new(monitoring),
@@ -248,61 +223,18 @@ impl PolicyStore {
         management_from_snapshot(&snapshot, self.source)
     }
 
-    fn observation_path(&self) -> PathBuf {
-        match &self.default_paths {
-            Some([managed, _]) if self.default_managed_selected.load(std::sync::atomic::Ordering::Acquire) => {
-                managed.clone()
-            }
-            Some([managed, legacy]) => {
-                let selected = windows::select_default_policy_path(managed.clone(), legacy.clone());
-                if crate::policy_security::windows_paths_equal(&selected, managed) {
-                    self.default_managed_selected
-                        .store(true, std::sync::atomic::Ordering::Release);
-                }
-                selected
-            }
-            None => self.configured_path.clone(),
-        }
-    }
-
     fn observe_storage(&self, retain_for_write: bool) -> (PathBuf, Observation) {
-        let path = self.observation_path();
+        let path = self.configured_path.clone();
         let observation = if retain_for_write {
             self.storage.observe_for_write(self.source, &path)
         } else {
             self.storage.observe(self.source, &path)
         };
-        let Some([managed, legacy]) = &self.default_paths else {
-            return (path, observation);
-        };
-        if self.default_managed_selected.load(std::sync::atomic::Ordering::Acquire)
-            || crate::policy_security::windows_paths_equal(&path, managed)
-        {
-            return (path, observation);
-        }
-
-        let final_path = windows::select_default_policy_path(managed.clone(), legacy.clone());
-        if crate::policy_security::windows_paths_equal(&final_path, managed) {
-            self.default_managed_selected
-                .store(true, std::sync::atomic::Ordering::Release);
-            if retain_for_write {
-                (
-                    final_path.clone(),
-                    self.storage.observe_for_write(self.source, &final_path),
-                )
-            } else {
-                (final_path.clone(), self.storage.observe(self.source, &final_path))
-            }
-        } else {
-            (path, observation)
-        }
+        (path, observation)
     }
 
-    pub(crate) fn watched_paths(&self) -> Vec<PathBuf> {
-        match &self.default_paths {
-            Some(paths) => paths.to_vec(),
-            None => vec![self.snapshot().configured_path.clone()],
-        }
+    pub(crate) fn watched_path(&self) -> PathBuf {
+        self.snapshot().configured_path.clone()
     }
 
     pub fn validate_draft(&self, raw: &serde_json::Value) -> PolicyValidationResult {
@@ -878,74 +810,6 @@ mod storage_tests {
     use now_policy::PolicyDraftDocument;
     use now_policy_api::{PolicyConflictHandling, PolicyReplacementRequestKind};
 
-    struct DefaultTransitionStorage {
-        managed: PathBuf,
-        legacy_policy: PolicyDocument,
-        managed_policy: parking_lot::RwLock<Option<PolicyDocument>>,
-        publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool,
-    }
-
-    impl PolicyStorage for DefaultTransitionStorage {
-        fn observe(&self, _source: PolicyConfigurationSource, path: &Path) -> Observation {
-            let managed = crate::policy_security::windows_paths_equal(path, &self.managed);
-            if !managed
-                && self
-                    .publish_managed_while_observing_legacy
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                std::fs::create_dir_all(self.managed.parent().expect("managed path has a parent"))
-                    .expect("create managed directory");
-                std::fs::write(&self.managed, b"managed").expect("publish managed marker");
-            }
-            let (policy, invalid, marker) = if managed {
-                let managed_policy = self.managed_policy.read().clone();
-                let invalid = managed_policy.is_none();
-                (managed_policy, invalid, 9)
-            } else {
-                (Some(self.legacy_policy.clone()), false, 1)
-            };
-            let mut observation = test_observation(policy, invalid, marker);
-            observation.canonical_path = path.to_owned();
-            observation
-        }
-
-        fn create(
-            &self,
-            _source: PolicyConfigurationSource,
-            _configured_path: &Path,
-            _observation: &Observation,
-            _bytes: &[u8],
-        ) -> Result<PersistedPolicy, WriteFailure> {
-            unreachable!("default transition tests do not write")
-        }
-
-        fn replace(
-            &self,
-            _source: PolicyConfigurationSource,
-            _configured_path: &Path,
-            _observation: &mut Observation,
-            _bytes: &[u8],
-        ) -> Result<PersistedPolicy, WriteFailure> {
-            unreachable!("default transition tests do not write")
-        }
-    }
-
-    fn default_transition_store(paths: [PathBuf; 2], storage: Arc<DefaultTransitionStorage>) -> Arc<PolicyStore> {
-        let configured_path = windows::select_default_policy_path(paths[0].clone(), paths[1].clone());
-        let managed_selected = crate::policy_security::windows_paths_equal(&configured_path, &paths[0]);
-        let observation = storage.observe(PolicyConfigurationSource::DefaultPath, &configured_path);
-        Arc::new(PolicyStore {
-            configured_path,
-            default_paths: Some(paths),
-            default_managed_selected: std::sync::atomic::AtomicBool::new(managed_selected),
-            source: PolicyConfigurationSource::DefaultPath,
-            snapshot: RwLock::new(Arc::new(snapshot_from_observation(observation, random_store_token()))),
-            writer: tokio::sync::Mutex::new(Monitoring::Available),
-            storage,
-            receipt_key: receipt::ReceiptKey::generate(),
-        })
-    }
-
     use super::*;
 
     fn draft(id: &str) -> PolicyDraftDocument {
@@ -963,6 +827,16 @@ mod storage_tests {
         draft(id)
             .into_policy_document(revision, Utc::now())
             .expect("valid committed policy")
+    }
+
+    #[test]
+    fn default_store_uses_only_the_canonical_policy_path() {
+        let storage = Arc::new(TestStorage::new(None));
+        storage.observation.lock().canonical_path = crate::policy_loader::default_policy_path();
+        let store = PolicyStore::load_with_storage(None, storage as Arc<dyn PolicyStorage>, Monitoring::Available);
+
+        assert_eq!(store.configured_path, crate::policy_loader::default_policy_path());
+        assert_eq!(store.watched_path(), crate::policy_loader::default_policy_path());
     }
 
     fn update_request(store: &PolicyStore) -> PolicyReplacementRequest {
@@ -1148,10 +1022,10 @@ mod storage_tests {
             Monitoring::Available,
         );
 
-        assert_eq!(store.watched_paths().as_slice(), std::slice::from_ref(&canonical));
+        assert_eq!(store.watched_path(), canonical);
         let success = store.replace(update_request(&store)).await.expect("replace policy");
         assert_eq!(&*storage.persisted_configured_paths.lock(), &[configured]);
-        assert_eq!(store.watched_paths(), [canonical]);
+        assert_eq!(store.watched_path(), canonical);
 
         let post_write_token = success.management.store_token;
         let reloaded = store.reload_from_disk(ReloadCause::ExternalChange).await;
@@ -1162,120 +1036,6 @@ mod storage_tests {
         storage.observation.lock().canonical_path = replacement_canonical.clone();
         let replaced = store.reload_from_disk(ReloadCause::ExternalChange).await;
         assert_ne!(replaced.store_token, post_write_token);
-        assert_eq!(store.watched_paths(), [replacement_canonical]);
-    }
-
-    #[tokio::test]
-    async fn default_store_switches_from_legacy_when_managed_policy_appears() {
-        let dir = tempfile::tempdir().expect("create temp directory");
-        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
-        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
-        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
-        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
-        let storage = Arc::new(DefaultTransitionStorage {
-            managed: managed.clone(),
-            legacy_policy: policy("legacy", 1),
-            managed_policy: parking_lot::RwLock::new(Some(policy("managed", 2))),
-            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
-        });
-        let store = default_transition_store([managed.clone(), legacy], Arc::clone(&storage));
-        assert_eq!(
-            store.active_policy().expect("legacy policy active").metadata.id.0,
-            "legacy"
-        );
-
-        std::fs::create_dir_all(managed.parent().expect("managed path has a parent"))
-            .expect("create managed directory");
-        std::fs::write(&managed, b"managed").expect("write managed marker");
-        store.reload_from_disk(ReloadCause::ExternalChange).await;
-
-        assert_eq!(
-            store.active_policy().expect("managed policy active").metadata.id.0,
-            "managed"
-        );
-        assert_eq!(
-            store.management_snapshot().configured_path,
-            managed.display().to_string()
-        );
-
-        std::fs::remove_file(&managed).expect("remove managed marker");
-        *storage.managed_policy.write() = None;
-        store.reload_from_disk(ReloadCause::ExternalChange).await;
-        assert!(store.active_policy().is_none(), "managed selection must remain sticky");
-        assert_eq!(
-            store.management_snapshot().configured_path,
-            managed.display().to_string()
-        );
-    }
-
-    #[tokio::test]
-    async fn managed_transaction_evidence_after_startup_fails_closed_instead_of_using_legacy() {
-        let dir = tempfile::tempdir().expect("create temp directory");
-        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
-        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
-        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
-        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
-        let storage = Arc::new(DefaultTransitionStorage {
-            managed: managed.clone(),
-            legacy_policy: policy("legacy", 1),
-            managed_policy: parking_lot::RwLock::new(None),
-            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
-        });
-        let store = default_transition_store([managed.clone(), legacy], storage);
-        assert_eq!(
-            store.active_policy().expect("legacy policy active").metadata.id.0,
-            "legacy"
-        );
-
-        std::fs::create_dir_all(managed.parent().expect("managed path has a parent"))
-            .expect("create managed directory");
-        let marker = managed.parent().expect("managed path has a parent").join(format!(
-            ".{}.txn-{}.marker",
-            windows::POLICY_FILE_NAME,
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::write(marker, b"unsafe remnant").expect("write managed transaction marker");
-        store.reload_from_disk(ReloadCause::ExternalChange).await;
-
-        assert!(store.active_policy().is_none());
-        assert_eq!(store.management_snapshot().state, PolicyManagementState::Invalid);
-        assert_eq!(
-            store.management_snapshot().configured_path,
-            managed.display().to_string()
-        );
-    }
-
-    #[tokio::test]
-    async fn managed_policy_created_during_legacy_observation_is_never_published_as_legacy() {
-        let dir = tempfile::tempdir().expect("create temp directory");
-        let managed = dir.path().join("PackageBroker").join(windows::POLICY_FILE_NAME);
-        let legacy = dir.path().join("Agent").join(windows::POLICY_FILE_NAME);
-        std::fs::create_dir_all(legacy.parent().expect("legacy path has a parent")).expect("create legacy directory");
-        std::fs::write(&legacy, b"legacy").expect("write legacy marker");
-        let storage = Arc::new(DefaultTransitionStorage {
-            managed: managed.clone(),
-            legacy_policy: policy("legacy", 1),
-            managed_policy: parking_lot::RwLock::new(Some(policy("managed", 2))),
-            publish_managed_while_observing_legacy: std::sync::atomic::AtomicBool::new(false),
-        });
-        let store = default_transition_store([managed.clone(), legacy], Arc::clone(&storage));
-        assert_eq!(
-            store.active_policy().expect("legacy policy active").metadata.id.0,
-            "legacy"
-        );
-        storage
-            .publish_managed_while_observing_legacy
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-
-        store.reload_from_disk(ReloadCause::ExternalChange).await;
-
-        assert_eq!(
-            store.active_policy().expect("managed policy active").metadata.id.0,
-            "managed"
-        );
-        assert_eq!(
-            store.management_snapshot().configured_path,
-            managed.display().to_string()
-        );
+        assert_eq!(store.watched_path(), replacement_canonical);
     }
 }
