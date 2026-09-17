@@ -1,5 +1,7 @@
-FROM debian:bookworm-slim
+FROM dhi.io/debian-base:13-dev
 LABEL maintainer="Devolutions Inc."
+
+USER root
 
 # Install PowerShell and dependencies
 # Microsoft's APT repository doesn't have PowerShell for ARM64, so we install from GitHub releases
@@ -15,7 +17,7 @@ RUN apt-get update \
         && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh \
         && rm "powershell-${PWSH_VERSION}-linux-arm64.tar.gz"; \
     else \
-        wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+        wget -q https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
         && dpkg -i packages-microsoft-prod.deb \
         && rm packages-microsoft-prod.deb \
         && apt-get update \
@@ -50,4 +52,7 @@ EXPOSE 8181
 
 COPY entrypoint.ps1 /usr/local/bin/entrypoint.ps1
 RUN chmod +x /usr/local/bin/entrypoint.ps1
+
+USER 65532
+
 ENTRYPOINT ["pwsh", "-File", "/usr/local/bin/entrypoint.ps1"]

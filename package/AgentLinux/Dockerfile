@@ -15,7 +15,7 @@ COPY . .
 RUN rm -f rust-toolchain.toml \
     && cargo build --package devolutions-agent --release
 
-FROM debian:trixie-slim AS runtime-base
+FROM dhi.io/debian-base:13-dev AS runtime-base
 
 ARG MULTI_PWSH_VERSION=v0.17.0
 ARG MULTI_PWSH_X64_SHA256=a0da12c5ac8bdbc72ce307d04e46768f7193830fb83d089473c3460ecd0ccbbb
@@ -24,6 +24,8 @@ ARG MULTI_PWSH_POWERSHELL_VERSION=7.6.4
 ARG TARGETARCH
 
 LABEL maintainer="Devolutions Inc."
+
+USER root
 
 WORKDIR /opt/devolutions/agent
 
