@@ -481,7 +481,49 @@ fn policy_draft(id: &str, publisher: &str) -> Value {
         "PolicyFormatVersion": "1.0.0",
         "Metadata": { "Id": id, "Publisher": publisher },
         "Enforcement": { "DefaultDecision": "Deny" },
-        "Rules": []
+        "Rules": [
+            {
+                "Id": "allow.exact",
+                "Priority": 100,
+                "Decision": "Allow",
+                "Match": {
+                    "Operations": ["Install"],
+                    "Managers": ["Winget"],
+                    "SourceNames": ["winget"],
+                    "PackageIdentifiers": { "Exact": ["Microsoft.PowerToys"] },
+                    "Version": { "Exact": ["0.86.0"] },
+                    "ExecutionElevation": ["Elevated"],
+                    "Interactive": true,
+                    "SkipHashCheck": false
+                },
+                "Constraints": {
+                    "AllowInteractive": true,
+                    "AllowSkipHashCheck": false
+                }
+            },
+            {
+                "Id": "allow.pattern",
+                "Priority": 101,
+                "Decision": "Allow",
+                "Match": {
+                    "Managers": ["Winget"],
+                    "SourceNames": ["winget"],
+                    "PackageIdentifiers": { "Patterns": ["Contoso.*"] },
+                    "Version": {
+                        "Range": {
+                            "MinVersion": "1.0.0",
+                            "MaxVersion": "2.0.0",
+                            "IncludePrerelease": false
+                        }
+                    },
+                    "ExecutionElevation": ["Standard"],
+                    "HasCustomParameters": false
+                },
+                "Constraints": {
+                    "AllowCustomParameters": false
+                }
+            }
+        ]
     })
 }
 
@@ -662,7 +704,7 @@ async fn validate_policy_by_pipe(pipe_name: &str, draft: &Value) -> anyhow::Resu
     let validation = validation_response.json()?["Validation"].clone();
     ensure!(validation["IsValid"] == true, "policy validation failed");
     ensure!(
-        validation["ValidatorVersion"] == "now-package-broker-policy-validator/9",
+        validation["ValidatorVersion"] == "now-package-broker-policy-validator/10",
         "unexpected validator contract"
     );
     ensure!(
@@ -911,13 +953,38 @@ async fn strict_contract_validation(pipe_name: &str) -> anyhow::Result<()> {
     for version in ["1.0.0", "1.7.3"] {
         let mut draft = policy_draft("tests.contract", "Contract");
         draft["PolicyFormatVersion"] = json!(version);
-        validate_policy_by_pipe(pipe_name, &draft).await?;
+        let validation = validate_policy_by_pipe(pipe_name, &draft).await?;
+        let canonical = &validation["CanonicalDraft"];
+        ensure!(
+            canonical["Rules"][0]["Match"]["Managers"] == json!(["Winget"])
+                && canonical["Rules"][0]["Match"]["SourceNames"] == json!(["winget"])
+                && canonical["Rules"][0]["Match"]["PackageIdentifiers"]["Exact"] == json!(["Microsoft.PowerToys"])
+                && canonical["Rules"][0]["Match"]["Version"]["Exact"] == json!(["0.86.0"])
+                && canonical["Rules"][0]["Match"]["ExecutionElevation"] == json!(["Elevated"])
+                && canonical["Rules"][1]["Match"]["PackageIdentifiers"]["Patterns"] == json!(["Contoso.*"])
+                && canonical["Rules"][1]["Match"]["Version"]["Range"]["MinVersion"] == "1.0.0"
+                && canonical["Rules"][1]["Match"]["ExecutionElevation"] == json!(["Standard"]),
+            "canonical draft did not preserve final rule shapes"
+        );
+        ensure!(
+            canonical["Rules"][0]["Match"].get("PreRelease").is_none()
+                && canonical["Rules"][1]["Match"].get("Interactive").is_none(),
+            "canonical draft did not omit absent optional characteristics"
+        );
     }
     for (value, expected_path) in [("2.0.0", "/PolicyFormatVersion"), ("broken", "/PolicyFormatVersion")] {
         let mut draft = policy_draft("tests.contract", "Contract");
         draft["PolicyFormatVersion"] = json!(value);
         assert_invalid_draft(pipe_name, draft, expected_path).await?;
     }
+    let mut invalid_interval = policy_draft("tests.contract", "Contract");
+    invalid_interval["Metadata"]["ValidFrom"] = json!("2026-01-01T00:00:00Z");
+    invalid_interval["Metadata"]["ValidUntil"] = json!("2026-01-01T00:00:00Z");
+    assert_invalid_draft(pipe_name, invalid_interval, "/Metadata/ValidUntil").await?;
+
+    let mut duplicate_rule = policy_draft("tests.contract", "Contract");
+    duplicate_rule["Rules"][1]["Id"] = duplicate_rule["Rules"][0]["Id"].clone();
+    assert_invalid_draft(pipe_name, duplicate_rule, "/Rules/1/Id").await?;
     Ok(())
 }
 
@@ -945,7 +1012,7 @@ async fn assert_invalid_draft(pipe_name: &str, draft: Value, expected_path: &str
     ensure!(
         invalid_validation.get("CanonicalDraft").is_none()
             && invalid_validation.get("ValidationReceipt").is_none()
-            && invalid_validation["ValidatorVersion"] == "now-package-broker-policy-validator/9",
+            && invalid_validation["ValidatorVersion"] == "now-package-broker-policy-validator/10",
         "invalid draft returned a canonical draft, receipt, or wrong validator version"
     );
     ensure!(
