@@ -757,11 +757,11 @@ impl BrokerState {
         if !evaluator::source_name_is_unambiguous(&request.source.name) {
             warn!(
                 request_id = %request.request_id,
-                "Rejecting request: package source name contains default-ignorable characters"
+                "Rejecting request: package source name has ambiguous spelling"
             );
             return Err(error_response(
                 ErrorCode::ValidationFailed,
-                "package source name contains unsupported default-ignorable characters",
+                "package source name has unsupported leading, trailing, or default-ignorable characters",
             ));
         }
 
