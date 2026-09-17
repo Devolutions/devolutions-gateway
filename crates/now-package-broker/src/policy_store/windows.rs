@@ -3166,9 +3166,8 @@ mod tests {
     fn committed_policy_bytes(default_decision: &str) -> Vec<u8> {
         let draft: now_policy::PolicyDraftDocument = serde_json::from_value(serde_json::json!({
             "PolicyFormatVersion": "1.0.0",
-            "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "recovery-test", "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": default_decision, "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": default_decision },
             "Rules": []
         }))
         .unwrap();

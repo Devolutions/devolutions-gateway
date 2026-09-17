@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use chrono::Utc;
 use now_policy::{
-    Decision, PackageBrokerPolicy, PolicyDocument, PolicyEnforcement, PolicyFormatVersion, PolicyMatch, PolicyMetadata,
-    PolicyRule, ResourceId, RulePrecedence, StringPattern,
+    Decision, PackageIdentifier, PackageIdentifierCondition, PolicyDocument, PolicyEnforcement, PolicyFormatVersion,
+    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId,
 };
 use now_policy_api::{self as api, PackageRequest};
 
@@ -14,7 +14,6 @@ use super::evaluate;
 fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
     PolicyDocument {
         policy_format_version: PolicyFormatVersion::current(),
-        policy_type: PackageBrokerPolicy,
         metadata: PolicyMetadata {
             id: ResourceId::from("test-policy"),
             publisher: "Test".to_owned(),
@@ -27,7 +26,6 @@ fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocu
         },
         enforcement: PolicyEnforcement {
             default_decision,
-            rule_precedence: RulePrecedence::PriorityThenDeny,
             audit_mode: None,
         },
         rules,
@@ -89,7 +87,9 @@ fn allow_matching_package() {
             decision: Decision::Allow,
             reason: Some("Firefox is allowed.".to_owned()),
             match_criteria: PolicyMatch {
-                package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
+                package_identifiers: Some(PackageIdentifierCondition::Exact(BTreeSet::from([
+                    PackageIdentifier::parse("Mozilla.Firefox").expect("valid identifier"),
+                ]))),
                 ..Default::default()
             },
             constraints: None,
@@ -113,7 +113,9 @@ fn deny_unmatched_package() {
             decision: Decision::Allow,
             reason: None,
             match_criteria: PolicyMatch {
-                package_identifiers: BTreeSet::from([StringPattern("Mozilla.Firefox".to_owned())]),
+                package_identifiers: Some(PackageIdentifierCondition::Exact(BTreeSet::from([
+                    PackageIdentifier::parse("Mozilla.Firefox").expect("valid identifier"),
+                ]))),
                 ..Default::default()
             },
             constraints: None,
@@ -137,7 +139,9 @@ fn disabled_rules_are_ignored() {
             decision: Decision::Allow,
             reason: None,
             match_criteria: PolicyMatch {
-                package_identifiers: BTreeSet::from([StringPattern("Some.Package".to_owned())]),
+                package_identifiers: Some(PackageIdentifierCondition::Exact(BTreeSet::from([
+                    PackageIdentifier::parse("Some.Package").expect("valid identifier"),
+                ]))),
                 ..Default::default()
             },
             constraints: None,

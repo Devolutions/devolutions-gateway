@@ -11,10 +11,7 @@ pub(super) fn get_effective_version(request: &PackageRequest) -> String {
     }
 }
 
-pub(super) fn version_range_matches(version: &str, range: &Option<VersionRange>) -> bool {
-    let Some(range) = range else {
-        return true;
-    };
+pub(super) fn version_range_matches(version: &str, range: &VersionRange) -> bool {
     if version.is_empty() {
         return false;
     }
@@ -52,18 +49,14 @@ pub(super) fn version_range_matches(version: &str, range: &Option<VersionRange>)
 mod tests {
     use super::*;
 
-    fn range(min: Option<&str>, max: Option<&str>, include_prerelease: bool) -> Option<VersionRange> {
-        Some(VersionRange {
-            min_version: min.map(ToOwned::to_owned),
-            max_version: max.map(ToOwned::to_owned),
+    fn range(min: Option<&str>, max: Option<&str>, include_prerelease: bool) -> VersionRange {
+        VersionRange {
+            min_version: min
+                .map(|version| now_policy::SemanticVersion::parse(version).expect("valid semantic version")),
+            max_version: max
+                .map(|version| now_policy::SemanticVersion::parse(version).expect("valid semantic version")),
             include_prerelease,
-        })
-    }
-
-    #[test]
-    fn absent_range_accepts_empty_or_present_versions() {
-        assert!(version_range_matches("", &None));
-        assert!(version_range_matches("1.2.3", &None));
+        }
     }
 
     #[test]
@@ -102,8 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_versions_fail_closed_when_range_is_configured() {
+    fn nonsemantic_requested_versions_fail_closed_when_range_is_configured() {
         assert!(!version_range_matches("1.2", &range(Some("1.0.0"), None, false)));
-        assert!(!version_range_matches("1.2.3", &range(Some("1.0"), None, false)));
     }
 }

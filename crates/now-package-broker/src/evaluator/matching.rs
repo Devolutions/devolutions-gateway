@@ -2,12 +2,13 @@
 
 use std::collections::BTreeSet;
 
-use now_policy::{Architecture, Elevation, ManagerName, Operation, PolicyRule, Scope};
+use now_policy::{
+    Architecture, Elevation, ManagerName, Operation, PackageIdentifierCondition, PolicyRule, Scope, VersionCondition,
+};
 use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
-use super::version::version_range_matches;
 use super::wildcard::wildcard_any;
 
 pub(super) fn rule_matches(
@@ -20,22 +21,20 @@ pub(super) fn rule_matches(
 
     operations_match(request.operation, &m.operations)
         && managers_match(request.manager, &m.managers)
-        && wildcard_any(&request.source.name, &m.sources)
-        && wildcard_any(&request.package.id, &m.package_identifiers)
-        && m.package_names.is_empty()
-        && string_in_set(effective_version, &m.versions)
-        && version_range_matches(effective_version, &m.version_range)
+        && source_names_match(&request.source.name, &m.source_names)
+        && package_identifiers_match(&request.package.id, &m.package_identifiers)
+        && versions_match(effective_version, &m.version)
         && scopes_match(request.options.scope, &m.scopes)
         && architectures_match(request.package.architecture, &m.architectures)
-        && elevation_match(request.client.requested_elevation, &m.elevation)
-        && bool_in_set(request.options.interactive, &m.interactive)
-        && bool_in_set(request.options.skip_hash_check, &m.skip_hash_check)
-        && bool_in_set(request.options.pre_release, &m.pre_release)
-        && bool_in_set(flags.has_custom_parameters, &m.has_custom_parameters)
-        && bool_in_set(flags.has_custom_install_location, &m.has_custom_install_location)
-        && bool_in_set(flags.has_pre_post_commands, &m.has_pre_post_commands)
-        && bool_in_set(flags.has_kill_before_operation, &m.has_kill_before_operation)
-        && bool_in_set(flags.has_uninstall_previous, &m.has_uninstall_previous)
+        && elevation_match(super::effective_execution_elevation(request), &m.execution_elevation)
+        && optional_bool_matches(request.options.interactive, m.interactive)
+        && optional_bool_matches(request.options.skip_hash_check, m.skip_hash_check)
+        && optional_bool_matches(request.options.pre_release, m.pre_release)
+        && optional_bool_matches(flags.has_custom_parameters, m.has_custom_parameters)
+        && optional_bool_matches(flags.has_custom_install_location, m.has_custom_install_location)
+        && optional_bool_matches(flags.has_pre_post_commands, m.has_pre_post_commands)
+        && optional_bool_matches(flags.has_kill_before_operation, m.has_kill_before_operation)
+        && optional_bool_matches(flags.has_uninstall_previous, m.has_uninstall_previous)
         && constraints_pass(&rule.constraints, request, flags)
 }
 
@@ -130,25 +129,41 @@ fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elev
     allowed.is_empty() || allowed.contains(&policy_elevation(elevation))
 }
 
-fn bool_in_set(value: bool, set: &BTreeSet<bool>) -> bool {
-    set.is_empty() || set.contains(&value)
+fn source_names_match(value: &str, allowed: &BTreeSet<now_policy::SourceName>) -> bool {
+    allowed.is_empty() || allowed.iter().any(|source| source.as_ref().eq_ignore_ascii_case(value))
 }
 
-fn string_in_set<S: AsRef<str>>(value: &str, set: &BTreeSet<S>) -> bool {
-    if set.is_empty() {
-        return true;
+fn package_identifiers_match(
+    value: &now_policy_api::PackageIdentifier,
+    condition: &Option<PackageIdentifierCondition>,
+) -> bool {
+    match condition {
+        None => true,
+        Some(PackageIdentifierCondition::Exact(identifiers)) => {
+            identifiers.iter().any(|identifier| identifier.as_ref() == value.0)
+        }
+        Some(PackageIdentifierCondition::Patterns(patterns)) => wildcard_any(&value.0, patterns),
     }
-    if value.is_empty() {
-        // If no version specified and set requires specific versions, don't match.
-        return false;
+}
+
+fn versions_match(value: &str, condition: &Option<VersionCondition>) -> bool {
+    match condition {
+        None => true,
+        Some(VersionCondition::Exact(versions)) => {
+            !value.is_empty() && versions.iter().any(|version| version.0 == value)
+        }
+        Some(VersionCondition::Range(range)) => super::version::version_range_matches(value, range),
     }
-    set.iter().any(|item| item.as_ref() == value)
+}
+
+fn optional_bool_matches(value: bool, expected: Option<bool>) -> bool {
+    expected.is_none_or(|expected| expected == value)
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use now_policy::{Decision, PolicyMatch, ResourceId, StringPattern};
+    use now_policy::{Decision, PackageIdentifierCondition, PolicyMatch, ResourceId, StringPattern};
     use now_policy_api as api;
 
     use super::*;
@@ -225,13 +240,24 @@ mod tests {
         assert!(matches(PolicyMatch {
             operations: BTreeSet::from([Operation::Install]),
             managers: BTreeSet::from([ManagerName::Winget]),
-            sources: BTreeSet::from([StringPattern("winget".to_owned())]),
-            package_identifiers: BTreeSet::from([StringPattern("Microsoft.*Code".to_owned())]),
+            source_names: BTreeSet::from([now_policy::SourceName::parse("winget").expect("valid source")]),
+            package_identifiers: Some(PackageIdentifierCondition::Patterns(BTreeSet::from([StringPattern(
+                "Microsoft.*Code".to_owned(),
+            )]))),
             ..Default::default()
         }));
 
         assert!(!matches(PolicyMatch {
             managers: BTreeSet::from([ManagerName::PowerShell]),
+            ..Default::default()
+        }));
+    }
+
+    #[test]
+    fn source_names_are_exact_not_wildcard_patterns() {
+        assert!(!matches(PolicyMatch {
+            managers: BTreeSet::from([ManagerName::Winget]),
+            source_names: BTreeSet::from([now_policy::SourceName::parse("wing*").expect("valid source")]),
             ..Default::default()
         }));
     }
@@ -252,20 +278,40 @@ mod tests {
     }
 
     #[test]
-    fn package_name_criteria_fail_closed_until_request_contains_display_name() {
-        assert!(!matches(PolicyMatch {
-            package_names: BTreeSet::from([StringPattern("Visual Studio Code".to_owned())]),
-            ..Default::default()
-        }));
-    }
-
-    #[test]
     fn boolean_flags_match_request_options() {
         let mut request = request();
         request.options.interactive = true;
         let flags = RequestFlags::from_request(&request);
         let rule = rule(PolicyMatch {
-            interactive: BTreeSet::from([true]),
+            interactive: Some(true),
+            ..Default::default()
+        });
+
+        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+    }
+
+    #[test]
+    fn machine_scope_uses_effective_elevated_execution_privilege() {
+        let mut request = request();
+        request.client.requested_elevation = api::Elevation::Standard;
+        request.options.scope = Some(api::Scope::Machine);
+        let flags = RequestFlags::from_request(&request);
+        let rule = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Elevated]),
+            ..Default::default()
+        });
+
+        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+    }
+
+    #[test]
+    fn user_scope_without_requested_elevation_uses_standard_execution_privilege() {
+        let mut request = request();
+        request.client.requested_elevation = api::Elevation::Standard;
+        request.options.scope = Some(api::Scope::User);
+        let flags = RequestFlags::from_request(&request);
+        let rule = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Standard]),
             ..Default::default()
         });
 

@@ -815,9 +815,8 @@ mod storage_tests {
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
             "PolicyFormatVersion": "1.0.0",
-            "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": id, "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": "Deny" },
             "Rules": []
         }))
         .expect("valid draft")
@@ -871,7 +870,7 @@ mod storage_tests {
         assert_eq!(error.code, ErrorCode::ValidationFailed);
 
         let validation = store.validate_draft(&request.draft);
-        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/9");
+        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/10");
         let canonical = validation.canonical_draft.as_ref().expect("compatible draft");
         let old_receipt =
             store

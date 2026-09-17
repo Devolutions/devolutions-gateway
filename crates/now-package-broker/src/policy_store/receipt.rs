@@ -92,9 +92,8 @@ mod tests {
     fn draft(id: &str) -> PolicyDraftDocument {
         serde_json::from_value(serde_json::json!({
             "PolicyFormatVersion": "1.0.0",
-            "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": id, "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": "Deny" },
             "Rules": []
         }))
         .expect("valid draft")
@@ -264,28 +263,16 @@ mod tests {
     #[tokio::test]
     async fn canonical_sensitive_warnings_accept_the_original_receipt() {
         let options = [
-            ("SkipHashCheck", "SkipHashCheck", "AllowSkipHashCheck"),
-            ("PreRelease", "PreRelease", "AllowPreRelease"),
-            (
-                "AllowCustomInstallLocation",
-                "HasCustomInstallLocation",
-                "AllowCustomInstallLocation",
-            ),
-            ("AllowPrePostCommands", "HasPrePostCommands", "AllowPrePostCommands"),
-            (
-                "AllowKillBeforeOperation",
-                "HasKillBeforeOperation",
-                "AllowKillBeforeOperation",
-            ),
-            (
-                "AllowUninstallPrevious",
-                "HasUninstallPrevious",
-                "AllowUninstallPrevious",
-            ),
-            ("AllowCustomParameters", "HasCustomParameters", "AllowCustomParameters"),
+            ("SkipHashCheck", "AllowSkipHashCheck"),
+            ("PreRelease", "AllowPreRelease"),
+            ("AllowCustomInstallLocation", "AllowCustomInstallLocation"),
+            ("AllowPrePostCommands", "AllowPrePostCommands"),
+            ("AllowKillBeforeOperation", "AllowKillBeforeOperation"),
+            ("AllowUninstallPrevious", "AllowUninstallPrevious"),
+            ("AllowCustomParameters", "AllowCustomParameters"),
         ];
-        for (option, match_field, constraint_field) in options {
-            for explicit in ["Constraint", "EmptyMatch", "Default"] {
+        for (option, constraint_field) in options {
+            for explicit in ["Constraint", "AbsentMatch", "Default"] {
                 let store = PolicyStore::for_tests(None);
                 let mut raw = serde_json::to_value(draft(&format!("{option}-{explicit}"))).expect("serialize draft");
                 let mut rule = serde_json::json!({
@@ -299,7 +286,7 @@ mod tests {
                         rule["Constraints"] = serde_json::json!({});
                         rule["Constraints"][constraint_field] = serde_json::json!(true);
                     }
-                    "EmptyMatch" => rule["Match"][match_field] = serde_json::json!([]),
+                    "AbsentMatch" => {}
                     "Default" => {}
                     _ => unreachable!(),
                 }
