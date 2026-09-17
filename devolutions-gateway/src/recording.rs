@@ -276,20 +276,17 @@ pub(crate) struct RecordingStreamState {
     pub(crate) clips: Arc<Vec<RecordingStreamClip>>,
     pub(crate) active: Option<ActiveRecordingStreamClip>,
     pub(crate) ended: bool,
-    revision: u64,
 }
 
 impl RecordingStreamState {
     pub(crate) fn mark_disconnected(&mut self) {
         self.active = None;
         self.ended = false;
-        self.revision = self.revision.saturating_add(1);
     }
 
     pub(crate) fn mark_ended(&mut self) {
         self.active = None;
         self.ended = true;
-        self.revision = self.revision.saturating_add(1);
     }
 
     #[cfg(test)]
@@ -302,7 +299,6 @@ impl RecordingStreamState {
             clips: Arc::new(clips),
             active,
             ended,
-            revision: 0,
         }
     }
 }
@@ -320,18 +316,15 @@ mod stream_state_tests {
                 ready: true,
             }),
             ended: false,
-            revision: 0,
         };
 
         state.mark_disconnected();
         assert!(state.active.is_none());
         assert!(!state.ended);
-        assert_eq!(state.revision, 1);
 
         state.mark_ended();
         assert!(state.active.is_none());
         assert!(state.ended);
-        assert_eq!(state.revision, 2);
     }
 }
 
@@ -739,7 +732,6 @@ impl RecordingManagerTask {
                 Arc::make_mut(&mut state.clips).push(clip.clone());
                 state.active = Some(ActiveRecordingStreamClip { sequence, ready: false });
                 state.ended = false;
-                state.revision = state.revision.saturating_add(1);
             });
             stream_state
         } else {
@@ -758,7 +750,6 @@ impl RecordingManagerTask {
                 clips: Arc::new(clips),
                 active: Some(ActiveRecordingStreamClip { sequence, ready: false }),
                 ended: false,
-                revision: 0,
             };
             watch::channel(state).0
         };
@@ -808,7 +799,6 @@ impl RecordingManagerTask {
                 sequence: active.sequence,
                 ready: true,
             });
-            state.revision = state.revision.saturating_add(1);
         });
 
         Ok(())
@@ -829,9 +819,7 @@ impl RecordingManagerTask {
             anyhow::bail!("recording clip is not ready");
         }
 
-        ongoing.stream_state.send_modify(|state| {
-            state.revision = state.revision.saturating_add(1);
-        });
+        ongoing.stream_state.send_modify(|_| {});
 
         Ok(())
     }

@@ -174,7 +174,7 @@ async fn setup_webm_streaming(
 }
 
 #[cfg(test)]
-mod tests {
+mod file_type_tests {
     use super::*;
 
     #[tokio::test]

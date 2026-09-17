@@ -93,7 +93,6 @@ impl VideoBlock {
         u64::try_from(timestamp).context("negative absolute block timestamp")
     }
 
-    // We only handle non-lacing frames for now
     pub(crate) fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
         let mut frames: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
@@ -126,8 +125,8 @@ impl VideoBlock {
             }
         };
 
-        assert!(frames.len() == 1);
-        Ok(frames.pop().expect("frame length was asserted"))
+        anyhow::ensure!(frames.len() == 1, "laced video blocks are not supported");
+        frames.pop().context("video block contains no frame")
     }
 }
 
@@ -228,6 +227,20 @@ mod tests {
         assert_eq!(
             video_block.get_frame().expect("frame should be available"),
             expected_frame
+        );
+    }
+
+    #[test]
+    fn get_frame_rejects_laced_blocks() {
+        let tag = MatroskaSpec::SimpleBlock(vec![0x81, 0x00, 0x01, 0x84, 0x01, 0x00, 0x00]);
+        let video_block = VideoBlock::new(tag, None, VpxCodec::VP8).expect("laced block should parse");
+
+        assert_eq!(
+            video_block
+                .get_frame()
+                .expect_err("laced block should be rejected")
+                .to_string(),
+            "laced video blocks are not supported"
         );
     }
 
