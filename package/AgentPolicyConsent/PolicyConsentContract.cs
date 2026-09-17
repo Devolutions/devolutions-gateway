@@ -5,6 +5,7 @@ namespace DevolutionsAgentPolicyConsent
         internal const string ProtocolVersion = "2.0";
         internal const string ExecutableName = "DevolutionsAgentPolicyConsent.exe";
         internal const string ProductName = "Devolutions Agent Policy Consent";
+        internal const string DefaultBrokerPipeName = @"\\.\pipe\Devolutions.Now.PackageBroker.v1";
 
         // Supported UniGetUI hosts are version 2026.2.7 or newer and must carry this signer:
         // subject CN=Devolutions Inc, O=Devolutions Inc, C=CA;

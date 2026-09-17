@@ -63,7 +63,8 @@ internal static class Protocol
 
     internal static void ValidateRequest(ElevationRequest request)
     {
-        if (request.ProtocolVersion != Version ||
+        if (request.RequestId is null ||
+            request.ProtocolVersion != Version ||
             !IsLowerHex(request.RequestId.AsSpan(), 32) ||
             request.Operation is not ("Update" or "ReplaceIdentity" or "Create" or "Repair") ||
             request.ConflictHandling is not ("Reject" or "ConfirmOverwrite") ||
@@ -77,7 +78,8 @@ internal static class Protocol
 
     internal static void ValidateResponse(ElevationResponse response)
     {
-        if (response.ProtocolVersion != Version ||
+        if (response.RequestId is null ||
+            response.ProtocolVersion != Version ||
             !IsLowerHex(response.RequestId.AsSpan(), 32) ||
             response.Disposition is not ("Committed" or "Rejected" or "Unknown") ||
             !IsOptionalCredential(response.BrokerErrorCode, 64))

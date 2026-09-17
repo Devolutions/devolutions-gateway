@@ -27,6 +27,9 @@ namespace DevolutionsAgent.Resources
         internal static readonly string POLICY_CONSENT_PROTOCOL_VERSION =
             DevolutionsAgentPolicyConsent.PolicyConsentContract.ProtocolVersion;
 
+        internal static readonly string POLICY_CONSENT_DEFAULT_BROKER_PIPE_NAME =
+            DevolutionsAgentPolicyConsent.PolicyConsentContract.DefaultBrokerPipeName;
+
         internal static readonly string POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256 =
             DevolutionsAgentPolicyConsent.PolicyConsentContract.CurrentUiSignerSpkiSha256;
 

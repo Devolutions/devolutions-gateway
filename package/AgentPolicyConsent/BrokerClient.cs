@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipes;
+using Microsoft.Win32;
 using System.Text;
 using System.Text.Json;
 
@@ -7,7 +8,8 @@ namespace DevolutionsAgentPolicyConsent;
 
 internal static class BrokerClient
 {
-    private const string PipeName = "Devolutions.Now.PackageBroker.v1";
+    private const string BrokerPipeNameValue = "BrokerPipeName";
+    private const string DiscoveryKey = @"SOFTWARE\Devolutions\Agent\PolicyConsentHelper";
     private const int MaximumHeaderBytes = 64 * 1024;
     private const int MaximumBrokerResponseBytes = 50_606_928;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
@@ -16,12 +18,12 @@ internal static class BrokerClient
         ElevationRequest request,
         CancellationToken cancellationToken)
     {
-        byte[] body = CreateOfficialRequest(request);
         try
         {
+            byte[] body = CreateOfficialRequest(request);
             using NamedPipeClientStream pipe = new(
                 ".",
-                PipeName,
+                ReadBrokerPipeName(),
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.WriteThrough,
                 System.Security.Principal.TokenImpersonationLevel.Anonymous);
@@ -64,14 +66,34 @@ internal static class BrokerClient
         {
             return Rejected(request.RequestId, "Unauthorized");
         }
+        catch (BrokerDiscoveryException)
+        {
+            return Rejected(request.RequestId, "BrokerUnavailable");
+        }
         catch (InvalidOperationException)
         {
             return Unknown(request.RequestId, null, "InvalidResponse");
         }
         catch (ProtocolException)
         {
-            return Unknown(request.RequestId, null, "InvalidResponse");
+            return Rejected(request.RequestId, "InvalidRequest");
         }
+    }
+
+    internal static string NormalizeBrokerPipeName(string pipeName)
+    {
+        const string LocalPipePrefix = @"\\.\pipe\";
+        if (pipeName.StartsWith(LocalPipePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            pipeName = pipeName[LocalPipePrefix.Length..];
+        }
+        if (pipeName.Length is 0 or > 256 ||
+            pipeName.IndexOf('\0') >= 0 ||
+            pipeName.Contains('\\'))
+        {
+            throw new BrokerDiscoveryException();
+        }
+        return pipeName;
     }
 
     internal static byte[] CreateOfficialRequest(ElevationRequest request)
@@ -246,6 +268,17 @@ internal static class BrokerClient
     private static ElevationResponse Rejected(string requestId, string errorCode) =>
         new(Protocol.Version, requestId, "Rejected", null, errorCode, null, null, null, null);
 
+    private static string ReadBrokerPipeName()
+    {
+        using RegistryKey machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using RegistryKey? discovery = machine.OpenSubKey(DiscoveryKey);
+        if (discovery?.GetValue(BrokerPipeNameValue) is not string pipeName)
+        {
+            throw new BrokerDiscoveryException();
+        }
+        return NormalizeBrokerPipeName(pipeName);
+    }
+
     private static async Task<BrokerServerLease> OpenBrokerServerAsync(
         NamedPipeClientStream pipe,
         CancellationToken cancellationToken)
@@ -294,4 +327,12 @@ internal static class BrokerClient
 
     private sealed class BrokerAuthenticationException(Exception innerException)
         : Exception("broker server authentication failed", innerException);
+
+    private sealed class BrokerDiscoveryException : InvalidOperationException
+    {
+        internal BrokerDiscoveryException()
+            : base("broker pipe discovery is unavailable")
+        {
+        }
+    }
 }

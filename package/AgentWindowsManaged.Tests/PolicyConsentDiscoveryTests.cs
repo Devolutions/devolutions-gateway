@@ -52,13 +52,19 @@ public sealed class PolicyConsentDiscoveryTests
             "CurrentUiSignerSpkiSha256",
             "e43ed3368eaabff61abc79eb338cba9da88a80d93b751735ff417f26afa579a8",
             true);
+        RegValue brokerPipe = CreateDiscoveryValue(
+            "BrokerPipeName",
+            @"\\.\pipe\Devolutions.Now.PackageBroker.v1",
+            true);
 
         Assert.Equal("[INSTALLDIR]DevolutionsAgentPolicyConsent.exe", executablePath.Value);
         Assert.Equal(
             "e43ed3368eaabff61abc79eb338cba9da88a80d93b751735ff417f26afa579a8",
             signer.Value);
+        Assert.Equal(@"\\.\pipe\Devolutions.Now.PackageBroker.v1", brokerPipe.Value);
         Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, executablePath.RegistryKeyAction);
         Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, signer.RegistryKeyAction);
+        Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, brokerPipe.RegistryKeyAction);
     }
 
     private static RegValue CreateDiscoveryValue(string name, string value, bool win64)
