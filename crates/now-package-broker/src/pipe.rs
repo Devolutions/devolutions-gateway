@@ -37,10 +37,11 @@ const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 ///
 /// Each connection serves exactly one HTTP request (`keep_alive` is disabled) and all
 /// endpoints respond without blocking on package operations (execution is asynchronous,
-/// tracked via the operation tracker), so a healthy exchange completes well within this
-/// deadline. Without it, idle clients holding their connection open without sending a
-/// request would each pin a connection slot indefinitely and could exhaust the pool.
-const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+/// tracked via the operation tracker), except policy replacement, which validates and
+/// persists a bounded document. Keep this aligned with the consent helper's bounded
+/// exchange stage. Without it, idle clients holding their connection open without sending
+/// a request would each pin a connection slot indefinitely and could exhaust the pool.
+const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Start the named pipe server and accept connections until shutdown.
 pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
@@ -199,6 +200,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn connection_deadline_matches_consent_exchange_timeout() {
+        assert_eq!(CONNECTION_DEADLINE, Duration::from_secs(120));
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn timed_out_capture_keeps_its_permit_until_blocking_work_finishes() {
