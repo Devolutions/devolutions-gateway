@@ -2,6 +2,9 @@
 
 use std::collections::BTreeSet;
 
+use unicode_normalization::UnicodeNormalization as _;
+use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+
 pub(super) fn wildcard_any<S: AsRef<str>>(value: &str, patterns: &BTreeSet<S>) -> bool {
     patterns.is_empty() || patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
@@ -10,16 +13,17 @@ pub(super) fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bo
     patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
 
-/// Match an exact source name using Unicode-aware, case-insensitive semantics.
+/// Match an exact source name using the PowerShell repository identity semantics.
 ///
-/// Source names are literals, so escaping before enabling case-insensitive regex
-/// matching preserves a literal `*` rather than applying wildcard semantics.
+/// PowerShell resolves repository names after canonical Unicode normalization with
+/// ordinal case-insensitive comparison.
+/// Source names are literals, so this deliberately does not apply wildcard semantics.
 pub(super) fn literal_case_insensitive_match(value: &str, expected: &str) -> bool {
-    let regex_pattern = format!("^{}$", regex::escape(expected));
-    regex::RegexBuilder::new(&regex_pattern)
-        .case_insensitive(true)
-        .build()
-        .is_ok_and(|re| re.is_match(value))
+    let value: Vec<u16> = value.nfc().collect::<String>().encode_utf16().collect();
+    let expected: Vec<u16> = expected.nfc().collect::<String>().encode_utf16().collect();
+
+    // SAFETY: The binding marshals both valid UTF-8 strings as bounded UTF-16.
+    unsafe { CompareStringOrdinal(&value, &expected, true) == CSTR_EQUAL }
 }
 
 fn wildcard_match(value: &str, pattern: &str) -> bool {
@@ -62,7 +66,8 @@ mod tests {
 
     #[test]
     fn literal_match_uses_unicode_case_insensitive_semantics() {
-        assert!(literal_case_insensitive_match("cörp", "CÖRP"));
+        assert!(literal_case_insensitive_match("CO\u{0308}RP", "CÖRP"));
+        assert!(!literal_case_insensitive_match("P\u{017F}Gallery", "PSGallery"));
         assert!(!literal_case_insensitive_match("cörp", "CÖRP*"));
     }
 }

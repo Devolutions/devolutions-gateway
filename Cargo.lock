@@ -4837,6 +4837,7 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
+ "unicode-normalization",
  "uuid",
  "widestring 1.2.1",
  "win-api-wrappers",
