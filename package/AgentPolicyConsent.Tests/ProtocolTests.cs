@@ -124,6 +124,17 @@ public sealed class ProtocolTests
             Assert.True(PeerLease.MatchesProcessIdentity(expected, 42, 638900000000000000, 1));
         }
 
+        [Theory]
+        [InlineData(@"C:\Program Files\UniGetUI\UniGetUI.exe", true)]
+        [InlineData(@"\\server\share\UniGetUI.exe", false)]
+        [InlineData(@"\Device\Mup\server\share\UniGetUI.exe", false)]
+        [InlineData(@"\Device\WebDavRedirector\server\share\UniGetUI.exe", false)]
+        [InlineData(@"relative\UniGetUI.exe", false)]
+        public void ParentImageMustUseAFixedLocalVolume(string path, bool expected)
+        {
+            Assert.Equal(expected, PeerLease.IsSupportedLocalImagePath(path));
+        }
+
         [Fact]
         public void BrokerServerRequiresExactAgentSiblingPath()
         {
