@@ -9,7 +9,7 @@ use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
-use super::wildcard::wildcard_any;
+use super::wildcard::{literal_case_insensitive_match, wildcard_any};
 
 pub(super) fn rule_matches(
     rule: &PolicyRule,
@@ -130,7 +130,10 @@ fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elev
 }
 
 fn source_names_match(value: &str, allowed: &BTreeSet<now_policy::SourceName>) -> bool {
-    allowed.is_empty() || allowed.iter().any(|source| source.as_ref().eq_ignore_ascii_case(value))
+    allowed.is_empty()
+        || allowed
+            .iter()
+            .any(|source| literal_case_insensitive_match(value, source.as_ref()))
 }
 
 fn package_identifiers_match(

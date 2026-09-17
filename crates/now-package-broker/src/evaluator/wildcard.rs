@@ -10,6 +10,18 @@ pub(super) fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bo
     patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
 
+/// Match an exact source name using Unicode-aware, case-insensitive semantics.
+///
+/// Source names are literals, so escaping before enabling case-insensitive regex
+/// matching preserves a literal `*` rather than applying wildcard semantics.
+pub(super) fn literal_case_insensitive_match(value: &str, expected: &str) -> bool {
+    let regex_pattern = format!("^{}$", regex::escape(expected));
+    regex::RegexBuilder::new(&regex_pattern)
+        .case_insensitive(true)
+        .build()
+        .is_ok_and(|re| re.is_match(value))
+}
+
 fn wildcard_match(value: &str, pattern: &str) -> bool {
     // Convert glob pattern to regex: escape everything except *, which becomes .*
     let regex_pattern = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
@@ -46,5 +58,11 @@ mod tests {
         let patterns = BTreeSet::from([StringPattern("Contoso.Tools+".to_owned())]);
         assert!(wildcard_any("Contoso.Tools+", &patterns));
         assert!(!wildcard_any("Contoso.Toolss", &patterns));
+    }
+
+    #[test]
+    fn literal_match_uses_unicode_case_insensitive_semantics() {
+        assert!(literal_case_insensitive_match("cörp", "CÖRP"));
+        assert!(!literal_case_insensitive_match("cörp", "CÖRP*"));
     }
 }
