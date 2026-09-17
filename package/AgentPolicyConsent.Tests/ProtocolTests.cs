@@ -135,6 +135,14 @@ public sealed class ProtocolTests
             Assert.Equal(expected, PeerLease.IsSupportedLocalImagePath(path));
         }
 
+        [Theory]
+        [InlineData(@"\\?\C:\Program Files\UniGetUI\UniGetUI.exe", @"C:\Program Files\UniGetUI\UniGetUI.exe")]
+        [InlineData(@"\\?\UNC\server\share\UniGetUI.exe", @"\\server\share\UniGetUI.exe")]
+        public void RetainedImagePathRemovesOnlyExtendedPrefix(string input, string expected)
+        {
+            Assert.Equal(expected, PeerLease.NormalizeFinalPath(input));
+        }
+
         [Fact]
         public void BrokerServerRequiresExactAgentSiblingPath()
         {

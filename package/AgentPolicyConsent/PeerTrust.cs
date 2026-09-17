@@ -97,8 +97,13 @@ internal sealed class PeerLease : IDisposable
             try
             {
                 VerifyImageMapping(process, image);
-                VerifyImageMetadata(path, image);
-                using X509Certificate2 signer = VerifyAuthenticodeSigner(path, image, "parent image");
+                string retainedPath = FinalPath(image);
+                if (!IsSupportedLocalImagePath(retainedPath))
+                {
+                    throw new InvalidOperationException("parent image is not on a supported local volume");
+                }
+                VerifyImageMetadata(retainedPath, image);
+                using X509Certificate2 signer = VerifyAuthenticodeSigner(retainedPath, image, "parent image");
                 VerifySigner(signer);
                 VerifyImageMapping(process, image);
                 EnsureActive(process);
@@ -214,6 +219,39 @@ internal sealed class PeerLease : IDisposable
             return false;
         }
         return Native.GetDriveType(root) == DriveFixed;
+    }
+
+    internal static string FinalPath(SafeFileHandle image)
+    {
+        uint capacity = 260;
+        while (capacity <= 32_768)
+        {
+            StringBuilder path = new(checked((int)capacity));
+            uint length = Native.GetFinalPathNameByHandle(image, path, capacity, 0);
+            if (length == 0)
+            {
+                throw new Win32Exception();
+            }
+            if (length < capacity)
+            {
+                return NormalizeFinalPath(path.ToString());
+            }
+            capacity = length + 1;
+        }
+        throw new InvalidOperationException("parent image final path is too long");
+    }
+
+    internal static string NormalizeFinalPath(string path)
+    {
+        const string ExtendedPrefix = @"\\?\";
+        const string ExtendedUncPrefix = @"\\?\UNC\";
+        if (path.StartsWith(ExtendedUncPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return @"\\" + path[ExtendedUncPrefix.Length..];
+        }
+        return path.StartsWith(ExtendedPrefix, StringComparison.Ordinal)
+            ? path[ExtendedPrefix.Length..]
+            : path;
     }
 
     internal static bool IsLocalSystemProcess(SafeProcessHandle process)
@@ -832,6 +870,13 @@ internal static partial class Native
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetDriveTypeW", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial uint GetDriveType(string rootPathName);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle file,
+        StringBuilder path,
+        uint length,
+        uint flags);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

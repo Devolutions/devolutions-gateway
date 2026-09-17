@@ -45,8 +45,9 @@ function Set-FileNameAndCopy {
 
     # If the name is already correct, return the original path without copying
     if ($currName -ieq $NewName) {
-        Write-Host "Using $Path without copying"
-        return $Path
+        $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+        Write-Host "Using $resolvedPath without copying"
+        return $resolvedPath
     }
 
     # Copy to a temporary directory.
