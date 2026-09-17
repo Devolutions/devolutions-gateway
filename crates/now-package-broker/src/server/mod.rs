@@ -754,6 +754,17 @@ impl BrokerState {
         reason = "the shared API contract requires ErrorResponse values"
     )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
+        if !evaluator::source_name_is_unambiguous(&request.source.name) {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: package source name contains default-ignorable characters"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "package source name contains unsupported default-ignorable characters",
+            ));
+        }
+
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
         // their content yet. Running them elevated would grant arbitrary elevated
