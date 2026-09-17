@@ -918,6 +918,13 @@ async fn standard_user_management(ready_path: &Path, nonce: &str, client: &Proce
 
     let management = policy_management_by_pipe(pipe_name).await?;
     ensure!(management["State"] == "Missing", "expected a missing policy");
+    let missing_policy = request(pipe_name, "GET", "/v1/policy").await?;
+    ensure!(
+        missing_policy.status == 404
+            && missing_policy.json()?["Code"] == "NotFound"
+            && missing_policy.json()?["Message"] == "active policy is unavailable",
+        "standard-user missing policy read did not return the canonical not-found response"
+    );
 
     let valid_draft = policy_draft("tests.standard-user", "Test");
     let validation = validate_policy_by_pipe(pipe_name, &valid_draft).await?;
@@ -1107,7 +1114,7 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
         &agent,
         "Update",
         "Reject",
-        stale_token,
+        stale_token.clone(),
         policy_draft("tests.managed-external", "Stale"),
     )
     .await?;
@@ -1119,6 +1126,19 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
         "stale Update did not return the current policy snapshot"
     );
     wait_for_log(&agent, "stale_conflict").await?;
+
+    let stale_confirm = replace_policy_response(
+        &agent,
+        "Update",
+        "ConfirmOverwrite",
+        stale_token,
+        policy_draft("tests.managed-external", "Stale confirmed overwrite"),
+    )
+    .await?;
+    ensure!(
+        stale_confirm.status == 409 && stale_confirm.json()?["Code"] == "StalePolicyStoreToken",
+        "stale ConfirmOverwrite did not return a store token conflict"
+    );
 
     let current_token = stale["Management"]["StoreToken"].clone();
     let confirmed = replace_policy_response(
