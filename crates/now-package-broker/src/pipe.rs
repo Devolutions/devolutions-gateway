@@ -20,7 +20,7 @@ use windows::Win32::Security::Authorization::SET_ACCESS;
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
 
 use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::server::{BrokerState, build_router_for_client_with_policy_write_deadline, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -102,15 +102,37 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                                 }
                             };
 
-                            let deadline = if client.validate_policy_write(state.skip_signature_validation).is_ok() {
-                                POLICY_CONSENT_CONNECTION_DEADLINE
-                            } else {
-                                CONNECTION_DEADLINE
-                            };
                             info!("Client connected to named pipe");
-                            let router = build_router_for_client(state, client);
-                            if tokio::time::timeout(deadline, serve_connection(server, router)).await.is_err() {
-                                warn!("Closed named pipe connection: deadline exceeded");
+                            let (policy_write_deadline, mut policy_write_authorized) = tokio::sync::watch::channel(false);
+                            let router = build_router_for_client_with_policy_write_deadline(
+                                state,
+                                client,
+                                policy_write_deadline,
+                            );
+                            let serve = serve_connection(server, router);
+                            tokio::pin!(serve);
+                            let connection_deadline = tokio::time::sleep(CONNECTION_DEADLINE);
+                            tokio::pin!(connection_deadline);
+                            let policy_deadline = tokio::time::sleep(POLICY_CONSENT_CONNECTION_DEADLINE);
+                            tokio::pin!(policy_deadline);
+                            let mut policy_write_is_authorized = false;
+                            loop {
+                                tokio::select! {
+                                    () = &mut serve => break,
+                                    () = &mut connection_deadline, if !policy_write_is_authorized => {
+                                        warn!("Closed named pipe connection: deadline exceeded");
+                                        break;
+                                    }
+                                    () = &mut policy_deadline, if policy_write_is_authorized => {
+                                        warn!("Closed named pipe policy replacement: deadline exceeded");
+                                        break;
+                                    }
+                                    result = policy_write_authorized.changed(), if !policy_write_is_authorized => {
+                                        if result.is_ok() && *policy_write_authorized.borrow_and_update() {
+                                            policy_write_is_authorized = true;
+                                        }
+                                    }
+                                }
                             }
                             info!("Client disconnected from named pipe");
                         });
