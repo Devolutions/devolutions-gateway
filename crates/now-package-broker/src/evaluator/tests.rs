@@ -169,6 +169,8 @@ fn unicode_case_equivalent_source_deny_outranks_allow() {
 #[test]
 fn default_ignorable_source_spelling_is_rejected_before_evaluation() {
     assert!(!source_name_is_unambiguous("PS\u{00AD}Gallery"));
+    assert!(!source_name_is_unambiguous("PSGallery "));
+    assert!(!source_name_is_unambiguous(" PSGallery"));
     assert!(source_name_is_unambiguous("PSGallery"));
 }
 
