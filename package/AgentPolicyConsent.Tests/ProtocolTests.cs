@@ -30,10 +30,11 @@ public sealed class ProtocolTests
     public sealed class TrustPolicyTests
     {
         [Fact]
-        public void CurrentAndTransitionSignersAreAccepted()
+        public void OnlyTheCurrentSignerIsAccepted()
         {
             Assert.True(PeerLease.IsAllowedSigner(PeerLease.CurrentUiSignerSpkiSha256));
-            Assert.True(PeerLease.IsAllowedSigner(PeerLease.TransitionUiSignerSpkiSha256));
+            Assert.False(PeerLease.IsAllowedSigner(
+                "99e7adb5894e242d87d32b8ad6cb5a1e0d2dd791a447bd7192c30189ef083fab"));
         }
 
         [Fact]
@@ -89,10 +90,9 @@ public sealed class ProtocolTests
         }
 
         [Theory]
-        [InlineData("3.3.7")]
         [InlineData("2026.2.7")]
         [InlineData("2026.2.7-preview")]
-        public void ProductBindingSupportsProtocolEraAndCurrentInstallModes(string version)
+        public void ProductBindingSupportsCurrentSignedHosts(string version)
         {
             Assert.True(PeerLease.IsSupportedUiIdentity("UniGetUI", "UniGetUI.dll", version));
         }
@@ -101,6 +101,7 @@ public sealed class ProtocolTests
         [InlineData("Lookalike", "UniGetUI.dll", "2026.2.7")]
         [InlineData("UniGetUI", "malware.exe", "2026.2.7")]
         [InlineData("UniGetUI", "UniGetUI.dll", "3.3.6")]
+        [InlineData("UniGetUI", "UniGetUI.dll", "2026.2.6")]
         public void ProductBindingRejectsLookalikes(string product, string originalFilename, string version)
         {
             Assert.False(PeerLease.IsSupportedUiIdentity(product, originalFilename, version));

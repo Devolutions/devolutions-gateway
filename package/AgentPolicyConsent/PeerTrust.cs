@@ -12,9 +12,6 @@ namespace DevolutionsAgentPolicyConsent;
 
 internal sealed class PeerLease : IDisposable
 {
-    // SHA-256 digests of accepted UniGetUI signer SPKIs. Keep both keys during certificate rollover.
-    internal const string TransitionUiSignerSpkiSha256 =
-        PolicyConsentContract.TransitionUiSignerSpkiSha256;
     internal const string CurrentUiSignerSpkiSha256 =
         PolicyConsentContract.CurrentUiSignerSpkiSha256;
 
@@ -127,8 +124,7 @@ internal sealed class PeerLease : IDisposable
     }
 
     internal static bool IsAllowedSigner(string digest) =>
-        FixedTimeEqualsHex(digest, CurrentUiSignerSpkiSha256) ||
-        FixedTimeEqualsHex(digest, TransitionUiSignerSpkiSha256);
+        FixedTimeEqualsHex(digest, CurrentUiSignerSpkiSha256);
 
     internal static bool IsAllowedDevolutionsSigner(string thumbprint) =>
         PolicyConsentContract.DevolutionsSignerSha1Thumbprints.Any(
@@ -139,7 +135,7 @@ internal sealed class PeerLease : IDisposable
         string.Equals(originalFilename, "UniGetUI.dll", StringComparison.OrdinalIgnoreCase) &&
         productVersion is not null &&
         Version.TryParse(productVersion.Split(['+', '-'], StringSplitOptions.TrimEntries)[0], out Version? parsed) &&
-        parsed >= new Version(3, 3, 7);
+        parsed >= new Version(2026, 2, 7);
 
     internal static bool MatchesProcessIdentity(
         Arguments expected,
