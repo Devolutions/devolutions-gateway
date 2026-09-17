@@ -338,6 +338,56 @@ public sealed class ProtocolTests
         Assert.Throws<ProtocolException>(() => Protocol.ValidateRequest(request));
     }
 
+    [Fact]
+    public void RequestRejectsExplicitNullRequiredMembers()
+    {
+        string nullRequestId =
+            """{"protocolVersion":"2.0","requestId":null,"operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","warningsAcknowledged":false,"draft":{}}""";
+
+        ElevationRequest request = JsonSerializer.Deserialize(
+            nullRequestId,
+            ProtocolJsonContext.Default.ElevationRequest)
+            ?? throw new InvalidOperationException("request should deserialize");
+        Assert.Throws<ProtocolException>(() => Protocol.ValidateRequest(request));
+    }
+
+    [Theory]
+    [InlineData(@"\\.\pipe\Devolutions.Now.PackageBroker.v1", "Devolutions.Now.PackageBroker.v1")]
+    [InlineData("custom-broker", "custom-broker")]
+    public void BrokerPipeDiscoveryNormalizesLocalPipeNames(string configured, string expected)
+    {
+        Assert.Equal(expected, BrokerClient.NormalizeBrokerPipeName(configured));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(@"\\server\pipe\broker")]
+    [InlineData(@"\\.\pipe\")]
+    public void BrokerPipeDiscoveryRejectsNonlocalOrEmptyNames(string configured)
+    {
+        Assert.ThrowsAny<InvalidOperationException>(() => BrokerClient.NormalizeBrokerPipeName(configured));
+    }
+
+    [Fact]
+    public async Task OversizedOfficialRequestIsRejectedBeforeBrokerConnection()
+    {
+        using JsonDocument draft = JsonDocument.Parse($$"""{"padding":"{{new string('x', Protocol.MaxRequestBodyBytes)}}" }""");
+        ElevationRequest request = new(
+            "2.0",
+            RequestId,
+            "Update",
+            "Reject",
+            "token",
+            "receipt",
+            false,
+            draft.RootElement.Clone());
+
+        ElevationResponse response = await BrokerClient.ReplaceAsync(request, CancellationToken.None);
+
+        Assert.Equal("Rejected", response.Disposition);
+        Assert.Equal("InvalidRequest", response.BrokerErrorCode);
+    }
+
     [Theory]
     [InlineData("Delete", "Reject")]
     [InlineData("Update", "Overwrite")]

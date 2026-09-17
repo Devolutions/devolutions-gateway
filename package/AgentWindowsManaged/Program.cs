@@ -360,6 +360,10 @@ internal class Program
                 DevolutionsAgentProductVersion.ToString(),
                 Use64BitRegistryView(project.Platform)),
             CreatePolicyConsentRegistryValue(
+                "BrokerPipeName",
+                Includes.POLICY_CONSENT_DEFAULT_BROKER_PIPE_NAME,
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
                 "CurrentUiSignerSpkiSha256",
                 Includes.POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256,
                 Use64BitRegistryView(project.Platform)),
