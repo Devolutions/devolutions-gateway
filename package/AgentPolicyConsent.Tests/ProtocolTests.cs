@@ -81,6 +81,8 @@ public sealed class ProtocolTests
         {
             Assert.True(PeerLease.IsReparsePoint(PeerLease.FileAttributeReparsePoint));
             Assert.False(PeerLease.IsReparsePoint(0));
+            Assert.True(PeerLease.IsDirectory(PeerLease.FileAttributeDirectory));
+            Assert.False(PeerLease.IsDirectory(0));
         }
 
         [Fact]

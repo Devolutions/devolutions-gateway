@@ -25,6 +25,7 @@ internal sealed class PeerLease : IDisposable
     internal const uint FileShareRead = 0x1;
     internal const uint FileShareWrite = 0x2;
     internal const uint OpenExisting = 3;
+    internal const uint FileAttributeDirectory = 0x10;
     internal const uint FileAttributeReparsePoint = 0x400;
     internal const uint FileFlagBackupSemantics = 0x0200_0000;
     internal const uint FileFlagOpenReparsePoint = 0x0020_0000;
@@ -453,6 +454,9 @@ internal sealed class PeerLease : IDisposable
     internal static bool IsReparsePoint(uint attributes) =>
         (attributes & FileAttributeReparsePoint) != 0;
 
+    internal static bool IsDirectory(uint attributes) =>
+        (attributes & FileAttributeDirectory) != 0;
+
     internal const int FileTamperRights =
         0x0000_0002 | 0x0000_0004 | 0x0000_0010 | 0x0000_0100 |
         0x0001_0000 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000 | 0x4000_0000;
@@ -724,6 +728,20 @@ internal sealed class BrokerServerLease : IDisposable
                     handle,
                     $"Agent installation directory '{directory.FullName}'",
                     tamperRights);
+                if (!Native.GetFileInformationByHandle(handle, out Native.ByHandleFileInformation information))
+                {
+                    throw new Win32Exception();
+                }
+                if (!PeerLease.IsDirectory(information.FileAttributes))
+                {
+                    throw new InvalidOperationException(
+                        $"Agent installation directory '{directory.FullName}' is not a directory");
+                }
+                if (!IsExpectedPath(PeerLease.FinalPath(handle), directory.FullName))
+                {
+                    throw new InvalidOperationException(
+                        $"Agent installation directory '{directory.FullName}' resolved to an unexpected path");
+                }
                 tamperRights = PeerLease.AncestorDirectoryTamperRights;
             }
             return handles;

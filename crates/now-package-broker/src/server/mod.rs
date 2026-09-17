@@ -113,6 +113,7 @@ struct EvaluatedRequest {
 }
 
 /// Build the axum router for a single authenticated pipe client.
+#[cfg(test)]
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
     build_router_for_client_with_optional_policy_write_deadline(state, client, None)
 }
