@@ -10,6 +10,8 @@ use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
+use crate::evaluator;
+
 pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/10";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
@@ -419,6 +421,17 @@ fn check_rule(index: usize, rule: &PolicyRule, findings: &mut Findings) {
     if let Some(reason) = &rule.reason {
         check_string_len(reason, 0, 512, &format!("{base}/Reason"), findings);
     }
+    for (source_index, source_name) in rule.match_criteria.source_names.iter().enumerate() {
+        if !evaluator::source_name_is_unambiguous(source_name.as_ref()) {
+            findings.push(rule_finding(
+                rule,
+                PolicyFindingSeverity::Error,
+                PolicyFindingCode::InvalidFieldValue,
+                format!("{base}/Match/SourceNames/{source_index}"),
+                "SourceNames must not contain leading, trailing, or default-ignorable characters",
+            ));
+        }
+    }
     if let Some(PackageIdentifierCondition::Patterns(patterns)) = &rule.match_criteria.package_identifiers {
         check_patterns(
             index,
@@ -707,6 +720,18 @@ mod tests {
         let canonical =
             serde_json::to_value(result.canonical_draft.expect("canonical draft")).expect("serialize draft");
         assert_eq!(canonical.pointer("/Rules/0/Match/Interactive"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn source_names_reject_ambiguous_spellings() {
+        for source_name in ["PSGallery ", " PSGallery", "PS\u{00AD}Gallery"] {
+            let mut raw = draft();
+            raw["Rules"] = json!([rule("deny", json!({ "SourceNames": [source_name] }))]);
+
+            let result = validate_draft(&raw);
+
+            assert!(!result.is_valid, "{source_name:?} must be rejected");
+        }
     }
 
     #[test]
