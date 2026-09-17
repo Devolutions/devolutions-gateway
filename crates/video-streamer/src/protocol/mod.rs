@@ -21,7 +21,7 @@ where
     E: Error + Send + Sync + 'static,
 {
     let mut transport = SessionTransport::new(CodecTransport::new(transport));
-    let Some(start) = receive_expected_request(&mut transport, ClientMessage::Start).await? else {
+    let Some(_) = receive_expected_request(&mut transport, ClientMessage::Start).await? else {
         return Ok(());
     };
 
@@ -33,7 +33,7 @@ where
         }
     };
     let mut segments = SessionSegments::new(crate::normalizer::normalize(source_stream, config));
-    let stream_result = run_started_session(&mut transport, &mut segments, start).await;
+    let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 
     match (stream_result, shutdown_result) {
@@ -54,7 +54,6 @@ where
     let Some(incoming) = transport.recv().await else {
         return Ok(None);
     };
-
     let message = match incoming {
         Ok(message) => message,
         Err(ReceiveError::Transport(error)) => {
@@ -79,15 +78,19 @@ where
 async fn run_started_session<T, E>(
     transport: &mut SessionTransport<T>,
     segments: &mut SessionSegments<NormalizedSession>,
-    start: ClientMessage,
 ) -> anyhow::Result<()>
 where
     T: Stream<Item = Result<ClientMessage, ReceiveError<E>>> + Sink<ServerMessage, Error = E> + Unpin,
     E: Error + Send + Sync + 'static,
 {
-    let mut request = start;
+    debug!("Serving Start request");
+    transport.send(ServerMessage::Metadata).await?;
+
     loop {
-        debug!(request = ?request, "Serving client request");
+        let Some(_) = receive_expected_request(transport, ClientMessage::Pull).await? else {
+            return Ok(());
+        };
+        debug!("Serving Pull request");
         let response = match segments.next().await {
             Ok(response) => response,
             Err(error) => {
@@ -103,11 +106,6 @@ where
         if ended {
             return Ok(());
         }
-
-        let Some(next_request) = receive_expected_request(transport, ClientMessage::Pull).await? else {
-            return Ok(());
-        };
-        request = next_request;
     }
 }
 
