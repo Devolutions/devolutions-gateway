@@ -108,6 +108,64 @@ function Remove-StagingPath {
     }
 }
 
+function Complete-ServerShutdown {
+    param(
+        [bool] $ServerLaunchAttempted,
+        [bool] $ServerLaunchExplicitlyFailed,
+        [string] $StopPath,
+        [string] $StatusPath,
+        [string] $ServerOutputPath,
+        [string] $OutputPath,
+        [int] $ExitCode,
+        [scriptblock] $SignalServer
+    )
+
+    if (-not $ServerLaunchAttempted) {
+        return $ExitCode
+    }
+
+    $signal = & $SignalServer
+    $signal.Output | Out-File $OutputPath -Append
+    if ($signal.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $StopPath)) {
+        try {
+            New-Item -ItemType File -Path $StopPath -ErrorAction Stop | Out-Null
+            "Created the stop marker directly after LocalSystem signaling did not confirm it" | Out-File $OutputPath -Append
+        } catch {
+            $_ | Out-File $OutputPath -Append
+        }
+    }
+    if (-not (Test-Path -LiteralPath $StopPath)) {
+        "Failed to create the LocalSystem test server stop marker" | Out-File $OutputPath -Append
+        $ExitCode = 1
+    }
+
+    if (-not $ServerLaunchExplicitlyFailed) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while (-not (Test-Path -LiteralPath $StatusPath) -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+        }
+        if (Test-Path -LiteralPath $ServerOutputPath) {
+            Get-Content -LiteralPath $ServerOutputPath | Out-File $OutputPath -Append
+        }
+        if (Test-Path -LiteralPath $StatusPath) {
+            try {
+                $serverExitCode = Read-ServerStatus -Path $StatusPath
+                if ($serverExitCode -ne 0 -and $ExitCode -eq 0) {
+                    $ExitCode = $serverExitCode
+                }
+            } catch {
+                $_ | Out-File $OutputPath -Append
+                $ExitCode = 1
+            }
+        } else {
+            "Timed out waiting for LocalSystem test server shutdown" | Out-File $OutputPath -Append
+            $ExitCode = 1
+        }
+    }
+
+    return $ExitCode
+}
+
 function New-RandomSecurePassword {
     $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*"
     $bytes = [byte[]]::new(32)
@@ -271,6 +329,7 @@ function Invoke-RunnerSelfTests {
     try {
         $ready = Join-Path $root "ready.json"
         $status = Join-Path $root "status"
+        $serverOutput = Join-Path $root "server.out"
         foreach ($expected in @(0, 1, -1)) {
             Publish-ServerStatus -Path $status -ExitCode $expected
             if ((Read-ServerStatus -Path $status) -ne $expected) {
@@ -381,6 +440,27 @@ function Invoke-RunnerSelfTests {
             if ($_ -notmatch "Timed out waiting for LocalSystem test server readiness" -or -not $launchAttempted) {
                 throw
             }
+        }
+
+        $stop = Join-Path $root "stop"
+        $shutdownOutput = Join-Path $root "shutdown.out"
+        $signalState = [pscustomobject]@{ Count = 0 }
+        [System.IO.File]::WriteAllText($status, "invalid")
+        $readinessFailureExitCode = Complete-ServerShutdown `
+            -ServerLaunchAttempted $true -ServerLaunchExplicitlyFailed $false `
+            -StopPath $stop -StatusPath $status -ServerOutputPath $serverOutput -OutputPath $shutdownOutput `
+            -ExitCode 1 -SignalServer {
+                $signalState.Count++
+                New-Item -ItemType File -Path $stop | Out-Null
+                [pscustomobject]@{ ExitCode = 0; Output = @("Simulated LocalSystem signal") }
+            }
+        if (
+            $readinessFailureExitCode -ne 1 -or
+            $signalState.Count -ne 1 -or
+            -not (Test-Path -LiteralPath $stop) -or
+            (Get-Content -LiteralPath $shutdownOutput -Raw) -notmatch "published an invalid completion status"
+        ) {
+            throw "Readiness failure did not signal and verify LocalSystem server shutdown"
         }
 
         Remove-StagingPath -Path (Join-Path $root "already-absent")
@@ -550,48 +630,14 @@ try {
     $_ | Out-File $outputPath -Append
     $exitCode = 1
 } finally {
-    if ($serverLaunchAttempted) {
-        $signalOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
-            -Action Signal -StopPath $stopPath 2>&1
-        $signalExitCode = $LASTEXITCODE
-        $signalOutput | Out-File $outputPath -Append
-        if ($signalExitCode -ne 0 -and -not (Test-Path -LiteralPath $stopPath)) {
-            try {
-                New-Item -ItemType File -Path $stopPath -ErrorAction Stop | Out-Null
-                "Created the stop marker directly after SYSTEM signaling failed" | Out-File $outputPath -Append
-            } catch {
-                $_ | Out-File $outputPath -Append
-            }
+    $exitCode = Complete-ServerShutdown `
+        -ServerLaunchAttempted $serverLaunchAttempted -ServerLaunchExplicitlyFailed $serverLaunchExplicitlyFailed `
+        -StopPath $stopPath -StatusPath $statusPath -ServerOutputPath $serverOutputPath -OutputPath $outputPath `
+        -ExitCode $exitCode -SignalServer {
+            $signalOutput = & psexec.exe -accepteula -s pwsh.exe -NoProfile -File $PSCommandPath `
+                -Action Signal -StopPath $stopPath 2>&1
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $signalOutput }
         }
-        if (-not (Test-Path -LiteralPath $stopPath) -and $exitCode -eq 0) {
-            "Failed to create the LocalSystem test server stop marker" | Out-File $outputPath -Append
-            $exitCode = 1
-        }
-
-        if (-not $serverLaunchExplicitlyFailed) {
-            $deadline = [DateTime]::UtcNow.AddSeconds(30)
-            while (-not (Test-Path -LiteralPath $statusPath) -and [DateTime]::UtcNow -lt $deadline) {
-                Start-Sleep -Milliseconds 100
-            }
-            if (Test-Path -LiteralPath $serverOutputPath) {
-                Get-Content -LiteralPath $serverOutputPath | Out-File $outputPath -Append
-            }
-            if (Test-Path -LiteralPath $statusPath) {
-                try {
-                    $serverExitCode = Read-ServerStatus -Path $statusPath
-                    if ($serverExitCode -ne 0 -and $exitCode -eq 0) {
-                        $exitCode = $serverExitCode
-                    }
-                } catch {
-                    $_ | Out-File $outputPath -Append
-                    $exitCode = 1
-                }
-            } elseif ($exitCode -eq 0) {
-                "Timed out waiting for LocalSystem test server shutdown" | Out-File $outputPath -Append
-                $exitCode = 1
-            }
-        }
-    }
 
     if ($clientAccount) {
         try {
