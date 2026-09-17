@@ -28,6 +28,7 @@ internal sealed class PeerLease : IDisposable
     internal const uint FileAttributeReparsePoint = 0x400;
     internal const uint FileFlagBackupSemantics = 0x0200_0000;
     internal const uint FileFlagOpenReparsePoint = 0x0020_0000;
+    internal const uint DriveFixed = 3;
     internal const int ProcessImageFileMapping = 44;
     internal const uint StillActive = 259;
 
@@ -76,6 +77,10 @@ internal sealed class PeerLease : IDisposable
             }
 
             string path = ImagePath(process);
+            if (!IsSupportedLocalImagePath(path))
+            {
+                throw new InvalidOperationException("parent image is not on a supported local volume");
+            }
             SafeFileHandle image = Native.CreateFile(
                 path,
                 GenericRead | FileExecute | Synchronize,
@@ -198,6 +203,17 @@ internal sealed class PeerLease : IDisposable
         return leftInfo.VolumeSerialNumber == rightInfo.VolumeSerialNumber &&
             leftInfo.FileIndexHigh == rightInfo.FileIndexHigh &&
             leftInfo.FileIndexLow == rightInfo.FileIndexLow;
+    }
+
+    internal static bool IsSupportedLocalImagePath(string path)
+    {
+        if (!Path.IsPathFullyQualified(path) ||
+            path.StartsWith(@"\\", StringComparison.Ordinal) ||
+            Path.GetPathRoot(path) is not { Length: 3 } root)
+        {
+            return false;
+        }
+        return Native.GetDriveType(root) == DriveFixed;
     }
 
     internal static bool IsLocalSystemProcess(SafeProcessHandle process)
@@ -813,6 +829,9 @@ internal static partial class Native
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetDriveTypeW", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint GetDriveType(string rootPathName);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
