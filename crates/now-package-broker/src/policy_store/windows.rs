@@ -34,10 +34,11 @@ use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_DISPOSITION_INFO_EX_FLAGS,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0, FILE_SHARE_DELETE,
-    FILE_SHARE_NONE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx, FileRenameInfo,
-    FileRenameInfoEx, GetVolumeInformationW, GetVolumePathNameW, READ_CONTROL, SetFileInformationByHandle,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH,
+    FILE_GENERIC_READ, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0,
+    FILE_SHARE_DELETE, FILE_SHARE_NONE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileDispositionInfoEx,
+    FileRenameInfo, FileRenameInfoEx, GetVolumeInformationW, GetVolumePathNameW, READ_CONTROL,
+    SetFileInformationByHandle,
 };
 #[cfg(test)]
 use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
@@ -544,6 +545,11 @@ impl std::error::Error for UnsupportedAtomicSemantics {}
 /// Filesystem names known to support atomic same-directory handle renames.
 /// Conservative by design: an unrecognized filesystem is treated as unsupported.
 const ATOMIC_REPLACE_CAPABLE_FILESYSTEMS: &[&str] = &["NTFS", "ReFS"];
+const PROBE_SOURCE_NAME: &str = ".package-broker-write-probe-a.tmp";
+const PROBE_TARGET_NAME: &str = ".package-broker-write-probe-b.tmp";
+const PROBE_TOMBSTONE_NAME: &str = ".package-broker-write-probe-old.tmp";
+const PROBE_SOURCE_CONTENT: &[u8] = b"probe-source";
+const PROBE_TARGET_CONTENT: &[u8] = b"probe-target";
 
 /// Verifies that `dir` supports the handle-based tombstone and create-new publication semantics required by [`atomic_replace`].
 ///
@@ -559,11 +565,12 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     }
 
     let dir_handle = open_directory_no_reparse(dir)?;
-    let source_path = dir.join(".package-broker-write-probe-a.tmp");
-    let target_path = dir.join(".package-broker-write-probe-b.tmp");
-    let tombstone_path = dir.join(".package-broker-write-probe-old.tmp");
-    let source = create_probe_file(&source_path, b"probe-source", false)?;
-    let target = match create_probe_file(&target_path, b"probe-target", true) {
+    recover_interrupted_write_capability_probe(&dir_handle, dir)?;
+    let source_path = dir.join(PROBE_SOURCE_NAME);
+    let target_path = dir.join(PROBE_TARGET_NAME);
+    let tombstone_path = dir.join(PROBE_TOMBSTONE_NAME);
+    let source = create_probe_file(&source_path, PROBE_SOURCE_CONTENT, false)?;
+    let target = match create_probe_file(&target_path, PROBE_TARGET_CONTENT, true) {
         Ok(target) => target,
         Err(error) => {
             return match cleanup_probe_file(source, &source_path, "write-capability probe source") {
@@ -595,7 +602,7 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
         source_published = true;
         let replaced = std::fs::read(&target_path).context("read write-capability probe result")?;
         ensure!(
-            replaced == b"probe-source",
+            replaced == PROBE_SOURCE_CONTENT,
             "atomic replacement did not take effect on this filesystem"
         );
         delete_file_handle(&target).context("probe POSIX tombstone unlink")?;
@@ -618,6 +625,59 @@ fn probe_write_capability(dir: &Path) -> anyhow::Result<()> {
     };
 
     probe_result.and(source_cleanup).and(target_cleanup)
+}
+
+/// Retire a trusted remnant from a capability probe interrupted before its
+/// delete-on-close handles were released.
+///
+/// The fixed names are only reclaimable when the entry is a non-reparse,
+/// single-link, managed-policy file containing one of the probe's exact payloads.
+/// This preserves fail-closed collision handling for untrusted lookalikes.
+fn recover_interrupted_write_capability_probe(dir: &File, dir_path: &Path) -> anyhow::Result<()> {
+    verify_directory_handle_type(dir, "write-capability probe directory")?;
+
+    for (name, expected_contents) in [
+        (PROBE_SOURCE_NAME, &[PROBE_SOURCE_CONTENT][..]),
+        (PROBE_TARGET_NAME, &[PROBE_TARGET_CONTENT, PROBE_SOURCE_CONTENT][..]),
+        (PROBE_TOMBSTONE_NAME, &[PROBE_TARGET_CONTENT][..]),
+    ] {
+        let path = dir_path.join(name);
+        let file = match OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ.0 | DELETE.0 | READ_CONTROL.0)
+            .share_mode(FILE_SHARE_READ.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to open interrupted write probe {}", path.display()));
+            }
+        };
+
+        policy_security::verify_policy_file_path(&file, &path)
+            .with_context(|| format!("interrupted write probe {} is unsafe", path.display()))?;
+        policy_security::verify_managed_policy_file_security(&file)
+            .with_context(|| format!("interrupted write probe {} has unsafe security", path.display()))?;
+        ensure!(
+            policy_security::file_link_count(&file)? == 1,
+            "interrupted write probe {} has multiple hard links",
+            path.display()
+        );
+        let content = read_file_from_start(&file)
+            .with_context(|| format!("failed to read interrupted write probe {}", path.display()))?;
+        ensure!(
+            expected_contents.contains(&content.as_slice()),
+            "interrupted write probe {} has unexpected content",
+            path.display()
+        );
+        delete_file_handle(&file)
+            .with_context(|| format!("failed to retire interrupted write probe {}", path.display()))?;
+        drop(file);
+        ensure_path_absent(&path, "interrupted write probe")?;
+    }
+    Ok(())
 }
 
 fn verify_no_replace_collision(
@@ -775,7 +835,7 @@ fn create_probe_file(path: &Path, bytes: &[u8], allow_delete_share: bool) -> any
             }
             .0,
         )
-        .custom_flags((FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH).0)
+        .custom_flags((FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH).0)
         .open(path)
         .with_context(|| format!("failed to create write-capability probe {}", path.display()))?;
     if let Err(error) = file
@@ -4148,7 +4208,7 @@ mod tests {
 
     // ─── probe_write_capability / volume_filesystem_name ──────────────────────
     //
-    // No elevation required: these never touch `admin_only_security_attributes`.
+    // No elevation required: ordinary probes use inherited directory security.
 
     #[test]
     fn volume_filesystem_name_reports_a_known_filesystem_for_a_temp_directory() {
@@ -4169,6 +4229,54 @@ mod tests {
             .filter_map(|entry| entry.ok())
             .collect();
         assert!(leftover.is_empty(), "probe left files behind: {leftover:?}");
+    }
+
+    #[test]
+    fn probe_file_is_removed_when_its_handle_closes() {
+        let dir = temp_dir();
+        let path = dir.path().join(PROBE_SOURCE_NAME);
+        let file = create_probe_file(&path, PROBE_SOURCE_CONTENT, false).unwrap();
+
+        drop(file);
+
+        assert!(!path.exists(), "delete-on-close probe file survived its handle");
+    }
+
+    #[test]
+    fn interrupted_trusted_probe_remnant_is_recovered() {
+        use std::io::Write as _;
+
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let path = dir.path().join(PROBE_SOURCE_NAME);
+        let mut file = match create_secure_transaction_file(&path) {
+            Ok(file) => file,
+            Err(error) => {
+                tracing::warn!(
+                    error = %format!("{error:#}"),
+                    "Skipping administrator-owned probe recovery fixture"
+                );
+                return;
+            }
+        };
+        file.write_all(PROBE_SOURCE_CONTENT).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        recover_interrupted_write_capability_probe(&dir_file, dir.path()).unwrap();
+
+        assert!(!path.exists(), "trusted interrupted probe remnant was not retired");
+    }
+
+    #[test]
+    fn interrupted_untrusted_probe_remnant_is_not_removed() {
+        let dir = temp_dir();
+        let dir_file = open_directory_no_reparse(dir.path()).unwrap();
+        let path = dir.path().join(PROBE_SOURCE_NAME);
+        std::fs::write(&path, PROBE_SOURCE_CONTENT).unwrap();
+
+        assert!(recover_interrupted_write_capability_probe(&dir_file, dir.path()).is_err());
+        assert!(path.exists(), "untrusted probe collision must remain fail-closed");
     }
 
     #[test]
