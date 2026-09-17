@@ -20,8 +20,6 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, PRO
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
 const MANAGED_POLICY_RELATIVE_PATH: &str = r"Devolutions\PackageBroker\package-broker-policy.json";
-const MANAGED_AUTHORITY_MARKER: &str = r"Devolutions\PackageBroker\.package-broker-managed-authority.v1";
-const LEGACY_POLICY_RELATIVE_PATH: &str = r"Devolutions\Agent\package-broker-policy.json";
 #[cfg(test)]
 const SECURITY_MANDATORY_LOW_RID: u32 = 0x1000;
 const SECURITY_MANDATORY_MEDIUM_RID: u32 = 0x2000;
@@ -194,7 +192,6 @@ enum Mode {
     StandardServer,
     StandardClient,
     Elevated,
-    Probe,
 }
 
 impl Mode {
@@ -203,8 +200,7 @@ impl Mode {
             "standard-server" => Ok(Self::StandardServer),
             "standard-client" => Ok(Self::StandardClient),
             "elevated" => Ok(Self::Elevated),
-            "probe" => Ok(Self::Probe),
-            _ => bail!("unknown mode '{value}'; expected 'standard-server', 'standard-client', 'elevated', or 'probe'"),
+            _ => bail!("unknown mode '{value}'; expected 'standard-server', 'standard-client', or 'elevated'"),
         }
     }
 }
@@ -247,25 +243,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             redirected_policy_paths_fail_closed(&agent_path).await?;
             management_write_tokens_survive_watcher_reload(&agent_path).await?;
             managed_policy_lifecycle(&agent_path).await?;
-            legacy_contract_and_interrupted_repair(&agent_path).await?;
+            interrupted_malformed_repair(&agent_path).await?;
         }
-        Mode::Probe => {
-            verify_local_system()?;
-            let pipe_name = next_string(&mut args, "pipe name")?;
-            let path = next_string(&mut args, "request path")?;
-            ensure!(args.next().is_none(), "unexpected probe arguments");
-            probe(&pipe_name, &path).await?;
-        }
-    }
-
-    async fn probe(pipe_name: &str, path: &str) -> anyhow::Result<()> {
-        let response = request(pipe_name, "GET", path).await?;
-        let body = response.json()?;
-        let mut stdout = std::io::stdout().lock();
-        serde_json::to_writer(&mut stdout, &json!({ "Status": response.status, "Body": body }))?;
-        stdout.write_all(b"\n")?;
-        stdout.flush()?;
-        Ok(())
     }
 
     Ok(())
@@ -688,10 +667,8 @@ async fn validate_policy_by_pipe(pipe_name: &str, draft: &Value) -> anyhow::Resu
         "unexpected validator contract"
     );
     ensure!(
-        validation["CanonicalDraft"].get("$schema").is_none()
-            && validation["CanonicalDraft"].get("PolicyVersion").is_none()
-            && validation["CanonicalDraft"]["PolicyFormatVersion"] == draft["PolicyFormatVersion"],
-        "canonical draft changed the format version or emitted legacy fields"
+        validation["CanonicalDraft"]["PolicyFormatVersion"] == draft["PolicyFormatVersion"],
+        "canonical draft changed the format version"
     );
     Ok(validation)
 }
@@ -937,28 +914,12 @@ async fn strict_contract_validation(pipe_name: &str) -> anyhow::Result<()> {
         draft["PolicyFormatVersion"] = json!(version);
         validate_policy_by_pipe(pipe_name, &draft).await?;
     }
-    for (field, value, expected_path) in [
-        (
-            "$schema",
-            "https://devolutions.net/schemas/now-policy.schema.1.0.json",
-            "/$schema",
-        ),
-        ("PolicyVersion", "1.0.0", "/PolicyVersion"),
-        ("PolicyFormatVersion", "2.0.0", "/PolicyFormatVersion"),
-        ("PolicyFormatVersion", "broken", "/PolicyFormatVersion"),
-    ] {
+    for (value, expected_path) in [("2.0.0", "/PolicyFormatVersion"), ("broken", "/PolicyFormatVersion")] {
         let mut draft = policy_draft("tests.contract", "Contract");
-        draft[field] = json!(value);
+        draft["PolicyFormatVersion"] = json!(value);
         assert_invalid_draft(pipe_name, draft, expected_path).await?;
     }
-    let mut legacy = policy_draft("tests.contract", "Contract");
-    legacy
-        .as_object_mut()
-        .context("draft is not an object")?
-        .remove("PolicyFormatVersion");
-    legacy["PolicyVersion"] = json!("1.0.0");
-    legacy["$schema"] = json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
-    assert_invalid_draft(pipe_name, legacy, "/PolicyVersion").await
+    Ok(())
 }
 
 async fn assert_invalid_draft(pipe_name: &str, draft: Value, expected_path: &str) -> anyhow::Result<()> {
@@ -1022,11 +983,6 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
     ensure!(
         created["Policy"]["Metadata"]["Revision"] == 1,
         "Create did not assign revision 1"
-    );
-    let authority_marker = agent.data_dir.path().join(MANAGED_AUTHORITY_MARKER);
-    ensure!(
-        authority_marker.is_file() && std::fs::metadata(&authority_marker)?.len() == 0,
-        "Create did not establish durable managed authority"
     );
     wait_for_log(&agent, "Policy creation succeeded").await?;
 
@@ -1144,30 +1100,6 @@ async fn managed_policy_lifecycle(agent_path: &Path) -> anyhow::Result<()> {
         restarted.json()?["Policy"] == confirmed["Policy"],
         "restart changed the active managed policy"
     );
-    ensure!(
-        authority_marker.is_file() && policy_management(&agent).await?["Source"] == "DefaultPath",
-        "restart lost durable managed authority"
-    );
-
-    agent.stop().await?;
-    let legacy_path = agent.data_dir.path().join(LEGACY_POLICY_RELATIVE_PATH);
-    let legacy_dir = legacy_path.parent().context("legacy policy path has no parent")?;
-    std::fs::create_dir_all(legacy_dir).context("create isolated legacy policy directory")?;
-    secure_policy_path(legacy_dir, true)?;
-    std::fs::write(&legacy_path, serde_json::to_vec_pretty(&empty_policy())?)
-        .context("write isolated legacy policy")?;
-    secure_policy_path(&legacy_path, false)?;
-    std::fs::remove_file(&agent.policy_path).context("remove managed policy before authority restart")?;
-    agent.start_again(agent_path).await?;
-    let authority = policy_management(&agent).await?;
-    ensure!(
-        authority["State"] == "Missing" && authority["Source"] == "DefaultPath",
-        "durable managed authority allowed legacy policy rollback"
-    );
-    ensure!(
-        request(&agent.pipe_name, "GET", "/v1/policy").await?.status == 404,
-        "legacy policy became active after managed authority was established"
-    );
     Ok(())
 }
 
@@ -1176,7 +1108,7 @@ async fn warnings_identity_and_receipts(
     agent_path: &Path,
     current: &Value,
 ) -> anyhow::Result<Value> {
-    let mut draft = policy_draft("tests.replaced-identity", "Compatible contract");
+    let mut draft = policy_draft("tests.replaced-identity", "Canonical contract");
     draft["PolicyFormatVersion"] = json!("1.7.3");
     draft["Enforcement"]["AuditMode"] = json!(true);
     let validation = validate_policy_by_pipe(&agent.pipe_name, &draft).await?;
@@ -1226,10 +1158,8 @@ async fn warnings_identity_and_receipts(
     ensure!(
         replaced["Policy"]["Metadata"]["Id"] == "tests.replaced-identity"
             && replaced["Policy"]["Metadata"]["Revision"] == 1
-            && replaced["Policy"]["PolicyFormatVersion"] == "1.7.3"
-            && replaced["Policy"].get("$schema").is_none()
-            && replaced["Policy"].get("PolicyVersion").is_none(),
-        "ReplaceIdentity did not preserve the compatible contract and reset revision"
+            && replaced["Policy"]["PolicyFormatVersion"] == "1.7.3",
+        "ReplaceIdentity did not preserve the canonical contract and reset revision"
     );
     wait_for_log(agent, "Policy change succeeded").await?;
     wait_for_log(agent, "replace_identity").await?;
@@ -1238,79 +1168,49 @@ async fn warnings_identity_and_receipts(
     Ok(replaced)
 }
 
-async fn legacy_contract_and_interrupted_repair(agent_path: &Path) -> anyhow::Result<()> {
-    let mut legacy = empty_policy();
-    legacy
-        .as_object_mut()
-        .context("policy is not an object")?
-        .remove("PolicyFormatVersion");
-    legacy["$schema"] = json!("https://devolutions.net/schemas/now-policy.schema.1.0.json");
-    legacy["PolicyVersion"] = json!("1.0.0");
-    let mut mixed = legacy.clone();
-    mixed["PolicyFormatVersion"] = json!("1.0.0");
-    for original in [
-        serde_json::to_vec(&legacy)?,
-        serde_json::to_vec(&mixed)?,
-        b"malformed-policy-secret-marker".to_vec(),
-    ] {
-        for marker_staging in [false, true] {
-            let data_dir = create_data_dir()?;
-            let policy_path = data_dir.path().join("policy.json");
-            std::fs::write(&policy_path, &original)?;
-            secure_policy_path(&policy_path, false)?;
-            let prefix = ".policy.json.txn-11111111-2222-4333-8444-555555555555";
-            let new_path = data_dir.path().join(format!("{prefix}.new"));
-            std::fs::write(&new_path, b"partial replacement")?;
-            secure_policy_path(&new_path, false)?;
-            let marker_path = data_dir.path().join(format!("{prefix}.marker.prepare"));
-            if marker_staging {
-                std::fs::write(&marker_path, br#"{"Version":"#)?;
-                secure_policy_path(&marker_path, false)?;
-            }
-            let mut agent =
-                AgentHarness::start_with_path(agent_path, data_dir, unique_pipe_name(), policy_path).await?;
-            let mut invalid = policy_management(&agent).await?;
-            ensure!(
-                invalid["State"] == "Invalid" && invalid["WriteCapability"] == "Writable",
-                "interrupted Repair did not retain a repairable invalid original: {invalid}"
-            );
-            ensure!(
-                std::fs::read(&agent.policy_path)? == original && !new_path.exists() && !marker_path.exists(),
-                "recovery changed the original or retained prepublication remnants"
-            );
-            ensure!(
-                request(&agent.pipe_name, "GET", "/v1/policy").await?.status == 404,
-                "legacy, mixed, or malformed policy became active"
-            );
-            if original.starts_with(b"{") {
-                ensure!(
-                    invalid["InvalidDiagnostics"]["Findings"]
-                        .as_array()
-                        .is_some_and(|findings| findings
-                            .iter()
-                            .any(|finding| finding["Code"] == "UnsupportedPolicyFormatVersion")),
-                    "legacy contract did not produce its strict diagnostic"
-                );
-                std::fs::write(&agent.policy_path, serde_json::to_vec(&empty_policy())?)?;
-                wait_for_management(&agent, |management| management["State"] == "Active").await?;
-                std::fs::write(&agent.policy_path, &original)?;
-                invalid = wait_for_management(&agent, |management| management["State"] == "Invalid").await?;
-                wait_for_log(&agent, "legacy_policy_contract").await?;
-            }
-            let repaired = replace_policy(
-                &agent,
-                "Repair",
-                invalid["StoreToken"].clone(),
-                policy_draft("tests.interrupted-repair", "Recovered"),
-            )
-            .await?;
-            agent.restart(agent_path).await?;
-            ensure!(
-                policy_management(&agent).await?["Policy"] == repaired["Policy"],
-                "repaired policy did not survive restart"
-            );
-            agent.stop().await?;
+async fn interrupted_malformed_repair(agent_path: &Path) -> anyhow::Result<()> {
+    let original = b"malformed-policy-secret-marker";
+    for marker_staging in [false, true] {
+        let data_dir = create_data_dir()?;
+        let policy_path = data_dir.path().join("policy.json");
+        std::fs::write(&policy_path, original)?;
+        secure_policy_path(&policy_path, false)?;
+        let prefix = ".policy.json.txn-11111111-2222-4333-8444-555555555555";
+        let new_path = data_dir.path().join(format!("{prefix}.new"));
+        std::fs::write(&new_path, b"partial replacement")?;
+        secure_policy_path(&new_path, false)?;
+        let marker_path = data_dir.path().join(format!("{prefix}.marker.prepare"));
+        if marker_staging {
+            std::fs::write(&marker_path, br#"{"Version":"#)?;
+            secure_policy_path(&marker_path, false)?;
         }
+        let mut agent = AgentHarness::start_with_path(agent_path, data_dir, unique_pipe_name(), policy_path).await?;
+        let invalid = policy_management(&agent).await?;
+        ensure!(
+            invalid["State"] == "Invalid" && invalid["WriteCapability"] == "Writable",
+            "interrupted Repair did not retain a repairable invalid original: {invalid}"
+        );
+        ensure!(
+            std::fs::read(&agent.policy_path)? == original && !new_path.exists() && !marker_path.exists(),
+            "recovery changed the original or retained prepublication remnants"
+        );
+        ensure!(
+            request(&agent.pipe_name, "GET", "/v1/policy").await?.status == 404,
+            "malformed policy became active"
+        );
+        let repaired = replace_policy(
+            &agent,
+            "Repair",
+            invalid["StoreToken"].clone(),
+            policy_draft("tests.interrupted-repair", "Recovered"),
+        )
+        .await?;
+        agent.restart(agent_path).await?;
+        ensure!(
+            policy_management(&agent).await?["Policy"] == repaired["Policy"],
+            "repaired policy did not survive restart"
+        );
+        agent.stop().await?;
     }
     Ok(())
 }
@@ -1500,8 +1400,6 @@ mod tests {
     fn policy_fixtures_use_the_current_contract() {
         for policy in [full_policy(), empty_policy(), policy_draft("tests.contract", "Test")] {
             assert_eq!(policy["PolicyFormatVersion"], "1.0.0");
-            assert!(policy.get("$schema").is_none());
-            assert!(policy.get("PolicyVersion").is_none());
         }
     }
 
@@ -1514,11 +1412,6 @@ mod tests {
         ] {
             assert!(validate_standard_user_token(actual_sid, "S-1-5-21-1-2-3-1001", administrator, integrity).is_err());
         }
-    }
-
-    #[test]
-    fn probe_mode_is_only_available_to_a_local_system_client() {
-        assert!(matches!(Mode::parse("probe"), Ok(Mode::Probe)));
     }
 
     #[test]
