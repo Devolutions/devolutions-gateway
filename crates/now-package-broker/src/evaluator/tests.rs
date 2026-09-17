@@ -9,7 +9,7 @@ use now_policy::{
 };
 use now_policy_api::{self as api, PackageRequest};
 
-use super::evaluate;
+use super::{evaluate, source_name_is_unambiguous};
 
 fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
     PolicyDocument {
@@ -164,6 +164,12 @@ fn unicode_case_equivalent_source_deny_outranks_allow() {
 
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "deny-corp");
+}
+
+#[test]
+fn default_ignorable_source_spelling_is_rejected_before_evaluation() {
+    assert!(!source_name_is_unambiguous("PS\u{00AD}Gallery"));
+    assert!(source_name_is_unambiguous("PSGallery"));
 }
 
 #[test]
