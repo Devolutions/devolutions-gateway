@@ -107,6 +107,7 @@ async fn accept_connections(
                 match result {
                     Ok(()) => {
                         let state = Arc::clone(state);
+                        let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
                         connections.spawn(async move {
                             // Serving this connection can commit a policy and record its terminal
                             // event, which is blocking work the shutdown cannot interrupt, so the
@@ -120,7 +121,7 @@ async fn accept_connections(
                                 (server, client)
                             });
                             let (_permit, server, client) =
-                                match tokio::time::timeout(CONNECTION_DEADLINE, capture).await {
+                                match tokio::time::timeout_at(connection_deadline, capture).await {
                                 Ok(Ok((permit, (server, Ok(client))))) => (permit, server, client),
                                 Ok(Ok((_permit, (_server, Err(error))))) => {
                                     warn!(error = format!("{error:#}"), "Rejected named pipe client");
@@ -148,25 +149,23 @@ async fn accept_connections(
                             );
                             let serve = serve_connection(server, router);
                             tokio::pin!(serve);
-                            let connection_deadline = tokio::time::sleep(CONNECTION_DEADLINE);
-                            tokio::pin!(connection_deadline);
-                            let policy_deadline = tokio::time::sleep(POLICY_CONSENT_CONNECTION_DEADLINE);
-                            tokio::pin!(policy_deadline);
                             let mut policy_write_is_authorized = false;
+                            let mut deadline = connection_deadline;
                             loop {
                                 tokio::select! {
                                     () = &mut serve => break,
-                                    () = &mut connection_deadline, if !policy_write_is_authorized => {
-                                        warn!("Closed named pipe connection: deadline exceeded");
-                                        break;
-                                    }
-                                    () = &mut policy_deadline, if policy_write_is_authorized => {
-                                        warn!("Closed named pipe policy replacement: deadline exceeded");
+                                    () = tokio::time::sleep_until(deadline) => {
+                                        if policy_write_is_authorized {
+                                            warn!("Closed named pipe policy replacement: deadline exceeded");
+                                        } else {
+                                            warn!("Closed named pipe connection: deadline exceeded");
+                                        }
                                         break;
                                     }
                                     result = policy_write_authorized.changed(), if !policy_write_is_authorized => {
                                         if result.is_ok() && *policy_write_authorized.borrow_and_update() {
                                             policy_write_is_authorized = true;
+                                            deadline = tokio::time::Instant::now() + POLICY_CONSENT_CONNECTION_DEADLINE;
                                         }
                                     }
                                 }
