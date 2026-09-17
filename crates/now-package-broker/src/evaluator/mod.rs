@@ -113,6 +113,12 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
     }
 }
 
+/// Whether a source spelling has a stable identity across package-manager lookup and
+/// policy evaluation.
+pub(crate) fn source_name_is_unambiguous(source_name: &str) -> bool {
+    !wildcard::has_default_ignorable_code_point(source_name)
+}
+
 pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {
     if request.options.scope == Some(Scope::Machine) || request.client.requested_elevation == Elevation::Elevated {
         Elevation::Elevated
