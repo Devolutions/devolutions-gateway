@@ -726,12 +726,28 @@ mod tests {
     fn source_names_reject_ambiguous_spellings() {
         for source_name in ["PSGallery ", " PSGallery", "PS\u{00AD}Gallery"] {
             let mut raw = draft();
-            raw["Rules"] = json!([rule("deny", json!({ "SourceNames": [source_name] }))]);
+            raw["Rules"] = json!([rule(
+                "deny",
+                json!({ "Managers": ["PowerShell"], "SourceNames": [source_name] })
+            )]);
 
             let result = validate_draft(&raw);
 
             assert!(!result.is_valid, "{source_name:?} must be rejected");
+            assert!(
+                result
+                    .findings
+                    .iter()
+                    .any(|finding| finding.path == "/Rules/0/Match/SourceNames/0")
+            );
         }
+
+        let mut valid = draft();
+        valid["Rules"] = json!([rule(
+            "deny",
+            json!({ "Managers": ["PowerShell"], "SourceNames": ["PSGallery"] })
+        )]);
+        assert!(validate_draft(&valid).is_valid);
     }
 
     #[test]
