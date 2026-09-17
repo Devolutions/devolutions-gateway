@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use now_policy_api::{InvalidPolicyDiagnostics, PolicyFindingCode, PolicyManagementState, PolicyReplacementOperation};
+use now_policy_api::{PolicyManagementState, PolicyReplacementOperation};
 #[cfg(not(test))]
 use sysevent::Severity;
 #[cfg(all(not(test), not(debug_assertions)))]
@@ -402,24 +402,10 @@ pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u
     ));
 }
 
-pub(crate) fn external_change_rejected(
-    path: &Path,
-    state: PolicyManagementState,
-    diagnostics: Option<&InvalidPolicyDiagnostics>,
-) {
+pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState) {
     let reason = match state {
         PolicyManagementState::Active => "active",
         PolicyManagementState::Missing => "missing",
-        PolicyManagementState::Invalid
-            if diagnostics.is_some_and(|diagnostics| {
-                diagnostics
-                    .findings
-                    .iter()
-                    .any(|finding| finding.code == PolicyFindingCode::UnsupportedPolicyFormatVersion)
-            }) =>
-        {
-            "legacy_policy_contract"
-        }
         PolicyManagementState::Invalid => "invalid",
     };
     RECORDER.record(sysevent_codes::policy_external_change_rejected(
