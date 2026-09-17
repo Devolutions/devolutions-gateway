@@ -30,7 +30,8 @@ ENV XDG_DATA_HOME="/tmp/.local/share"
 ENV POWERSHELL_TELEMETRY_OPTOUT="1"
 
 ENV DGATEWAY_CONFIG_PATH="/tmp/devolutions-gateway"
-RUN mkdir -p "$DGATEWAY_CONFIG_PATH"
+RUN mkdir -p "$DGATEWAY_CONFIG_PATH" \
+    && chown 65532:65532 "$DGATEWAY_CONFIG_PATH"
 
 WORKDIR /opt/devolutions/gateway
 
