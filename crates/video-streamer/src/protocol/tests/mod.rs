@@ -112,11 +112,11 @@ where
 {
     let mut transport = SessionTransport::new(CodecTransport::new(transport));
     let mut segments = SessionSegments::new(crate::normalizer::test_session(source));
-    let start = receive_expected_request(&mut transport, ClientMessage::Start)
+    receive_expected_request(&mut transport, ClientMessage::Start)
         .await?
         .ok_or_else(|| anyhow::anyhow!("test transport closed before Start"))?;
 
-    let stream_result = run_started_session(&mut transport, &mut segments, start).await;
+    let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 
     match (stream_result, shutdown_result) {
@@ -235,9 +235,14 @@ async fn valid_start_launches_source_before_polling_the_underlying_source() {
 
     assert_eq!(start_calls.load(Ordering::SeqCst), 0);
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
     polled_receiver.await.expect("underlying source was polled");
     assert_eq!(start_calls.load(Ordering::SeqCst), 1);
 
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
     release_sender.send(()).expect("release source");
     assert_eq!(
         receive_response(&mut client_receiver).await,
@@ -278,23 +283,29 @@ async fn aborting_running_session_drops_source() {
 async fn undecodable_request_waits_for_current_media_and_rejects_only_that_request() {
     let (media_waiting_sender, media_waiting_receiver) = oneshot::channel();
     let (media_release_sender, media_release_receiver) = oneshot::channel();
-    let source = stream::once(async move {
+    let source = stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+        sequence: 0,
+        width: 640,
+        height: 480,
+    }))])
+    .chain(stream::once(async move {
         media_waiting_sender.send(()).expect("signal pending media");
         media_release_receiver.await.expect("release media");
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 0,
-            width: 640,
-            height: 480,
-        }))
-    })
+        Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
+    }))
     .chain(stream::pending());
     let (transport, client_sender, mut client_receiver) = channel_transport();
     let task = tokio::spawn(stream_segment_source(transport, source));
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
     media_waiting_receiver.await.expect("media was polled");
     client_sender
-        .send(Bytes::from_static(b"\x02"))
+        .send(Bytes::from_static(b"\xFF"))
         .expect("send undecodable request");
     client_sender
         .send(Bytes::from_static(b"\x01"))
@@ -302,7 +313,10 @@ async fn undecodable_request_waits_for_current_media_and_rejects_only_that_reque
     assert!(client_receiver.try_recv().is_err());
     media_release_sender.send(()).expect("release media");
 
-    assert_eq!(receive_response(&mut client_receiver).await[0], 1);
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00chunk")
+    );
     assert_eq!(receive_response(&mut client_receiver).await[0], 2);
     assert!(task.await.expect("stream task panicked").is_err());
     assert_eq!(client_receiver.recv().await, None);
@@ -312,20 +326,26 @@ async fn undecodable_request_waits_for_current_media_and_rejects_only_that_reque
 async fn transport_error_waits_for_current_media_response() {
     let (media_waiting_sender, media_waiting_receiver) = oneshot::channel();
     let (media_release_sender, media_release_receiver) = oneshot::channel();
-    let source = stream::once(async move {
+    let source = stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+        sequence: 0,
+        width: 640,
+        height: 480,
+    }))])
+    .chain(stream::once(async move {
         media_waiting_sender.send(()).expect("signal pending media");
         media_release_receiver.await.expect("release media");
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 0,
-            width: 640,
-            height: 480,
-        }))
-    })
+        Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
+    }))
     .chain(stream::pending());
     let (transport, client_sender, mut client_receiver) = channel_transport();
     let task = tokio::spawn(stream_segment_source(transport, source));
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
     media_waiting_receiver.await.expect("media was polled");
     client_sender
         .send_error(std::io::Error::new(
@@ -336,7 +356,10 @@ async fn transport_error_waits_for_current_media_response() {
     assert!(client_receiver.try_recv().is_err());
     media_release_sender.send(()).expect("release media");
 
-    assert_eq!(receive_response(&mut client_receiver).await[0], 1);
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00chunk")
+    );
     assert!(task.await.expect("stream task panicked").is_err());
     assert_eq!(client_receiver.recv().await, None);
 }
@@ -377,6 +400,11 @@ async fn source_starts_once_after_valid_start() {
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     assert_eq!(
         receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
         Bytes::from_static(b"\x03")
     );
     task.await
@@ -408,6 +436,10 @@ async fn pull_sent_during_launch_is_unread_after_stream_end() {
     );
     release_sender.send(()).expect("release startup");
 
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
     assert_eq!(
         receive_response(&mut client_receiver).await,
         Bytes::from_static(b"\x03")
@@ -450,26 +482,35 @@ async fn startup_failure_rejects_the_accepted_start_only() {
 async fn disconnect_waits_for_current_media_response() {
     let (media_waiting_sender, media_waiting_receiver) = oneshot::channel();
     let (media_release_sender, media_release_receiver) = oneshot::channel();
-    let source = stream::once(async move {
+    let source = stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+        sequence: 0,
+        width: 640,
+        height: 480,
+    }))])
+    .chain(stream::once(async move {
         media_waiting_sender.send(()).expect("signal pending media");
         media_release_receiver.await.expect("release media");
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 0,
-            width: 640,
-            height: 480,
-        }))
-    })
+        Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
+    }))
     .chain(stream::pending());
     let (transport, client_sender, mut client_receiver) = channel_transport();
     let task = tokio::spawn(stream_segment_source(transport, source));
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
     media_waiting_receiver.await.expect("media was polled");
     drop(client_sender);
     assert!(client_receiver.try_recv().is_err());
     media_release_sender.send(()).expect("release media");
 
-    assert_eq!(receive_response(&mut client_receiver).await[0], 1);
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00chunk")
+    );
     task.await
         .expect("stream task panicked")
         .expect("disconnect should end the stream cleanly");
@@ -499,12 +540,12 @@ async fn abort_during_startup_drops_pending_source() {
 #[test]
 fn protocol_codes_are_stable() {
     assert_eq!(
-        encode_server_message(ServerMessage::SegmentStarted(SegmentInfo {
-            sequence: 7,
-            width: 1920,
-            height: 1080,
-        })),
-        Bytes::from_static(b"\x01{\"codec\":\"vp8\",\"sequence\":7,\"width\":1920,\"height\":1080}")
+        encode_server_message(ServerMessage::Metadata),
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    assert_eq!(
+        encode_server_message(ServerMessage::SegmentStarted),
+        Bytes::from_static(b"\x04{\"codec\":\"vp8\"}")
     );
     assert_eq!(
         encode_server_message(ServerMessage::Chunk(Bytes::from_static(b"webm"))),
@@ -526,6 +567,7 @@ fn client_messages_require_one_complete_transport_message() {
         decode_client_message(b"\x01").expect("decode pull"),
         ClientMessage::Pull
     );
+    assert!(decode_client_message(b"\x02").is_err());
     assert!(decode_client_message(b"\x00\x01").is_err());
     assert!(decode_client_message(b"").is_err());
 }
@@ -575,23 +617,61 @@ async fn segment_end_is_implicit_on_the_wire() {
     ];
     let mut segments = SessionSegments::new(stream::iter(events));
 
-    assert!(matches!(
-        segments.next().await.expect("first begin"),
-        ServerMessage::SegmentStarted(SegmentInfo { sequence: 0, .. })
-    ));
     assert_eq!(
         segments.next().await.expect("first data"),
         ServerMessage::Chunk(Bytes::from_static(b"first"))
     );
-    assert!(matches!(
+    assert_eq!(
         segments.next().await.expect("second begin"),
-        ServerMessage::SegmentStarted(SegmentInfo { sequence: 1, .. })
-    ));
+        ServerMessage::SegmentStarted
+    );
     assert_eq!(
         segments.next().await.expect("second data"),
         ServerMessage::Chunk(Bytes::from_static(b"second"))
     );
     assert_eq!(segments.next().await.expect("stream end"), ServerMessage::StreamEnded);
+}
+
+#[tokio::test]
+async fn multi_segment_protocol_transcript_is_stable() {
+    let source = segment_source([
+        Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 0,
+            width: 640,
+            height: 480,
+        })),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"first"))),
+        Ok(SegmentEvent::End),
+        Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 1,
+            width: 800,
+            height: 600,
+        })),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"second"))),
+        Ok(SegmentEvent::End),
+    ]);
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let task = tokio::spawn(stream_segment_source(transport, stream::iter(source)));
+
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+
+    for expected in [
+        Bytes::from_static(b"\x00first"),
+        Bytes::from_static(b"\x04{\"codec\":\"vp8\"}"),
+        Bytes::from_static(b"\x00second"),
+        Bytes::from_static(b"\x03"),
+    ] {
+        client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+        assert_eq!(receive_response(&mut client_receiver).await, expected);
+    }
+
+    task.await
+        .expect("stream task panicked")
+        .expect("stream session failed");
 }
 
 #[tokio::test]
@@ -675,20 +755,26 @@ async fn buffered_pull_is_read_after_the_current_media_response() {
 async fn wrong_state_request_waits_for_current_media_and_sends_one_error() {
     let (media_waiting_sender, media_waiting_receiver) = oneshot::channel();
     let (media_release_sender, media_release_receiver) = oneshot::channel();
-    let source = stream::once(async move {
+    let source = stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+        sequence: 0,
+        width: 640,
+        height: 480,
+    }))])
+    .chain(stream::once(async move {
         media_waiting_sender.send(()).expect("signal pending media");
         media_release_receiver.await.expect("release media");
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 0,
-            width: 640,
-            height: 480,
-        }))
-    })
+        Ok(SegmentEvent::Data(Bytes::from_static(b"chunk")))
+    }))
     .chain(stream::pending());
     let (transport, client_sender, mut client_receiver) = channel_transport();
     let task = tokio::spawn(stream_segment_source(transport, source));
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
     media_waiting_receiver.await.expect("media was polled");
     client_sender
         .send(Bytes::from_static(b"\x00"))
@@ -699,7 +785,10 @@ async fn wrong_state_request_waits_for_current_media_and_sends_one_error() {
     assert!(client_receiver.try_recv().is_err());
     media_release_sender.send(()).expect("release media");
 
-    assert_eq!(receive_response(&mut client_receiver).await[0], 1);
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00chunk")
+    );
     assert_eq!(receive_response(&mut client_receiver).await[0], 2);
     assert!(task.await.expect("stream task panicked").is_err());
     assert_eq!(client_receiver.recv().await, None);
@@ -737,10 +826,6 @@ async fn segment_sequence_gap_is_rejected() {
         })),
     ]));
 
-    assert!(matches!(
-        segments.next().await.expect("first segment"),
-        ServerMessage::SegmentStarted(SegmentInfo { sequence: 0, .. })
-    ));
     let error = segments.next().await.expect_err("segment sequence gap must fail");
 
     assert!(
@@ -759,6 +844,10 @@ async fn stream_end_answers_current_request_only() {
     let source = stream::empty::<anyhow::Result<SegmentEvent>>();
     let task = tokio::spawn(stream_segment_source(transport, source));
 
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
     assert_eq!(
         receive_response(&mut client_receiver).await,
         Bytes::from_static(b"\x03")
@@ -824,6 +913,10 @@ async fn segment_failure_sends_one_error_for_the_current_request() {
     client_sender
         .send(Bytes::from_static(b"\x01"))
         .expect("send unread Pull");
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x01{\"codec\":\"vp8\"}")
+    );
     let response = receive_response(&mut client_receiver).await;
     assert_eq!(response[0], 2);
     assert!(task.await.expect("stream task panicked").is_err());

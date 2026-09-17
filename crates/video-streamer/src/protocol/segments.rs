@@ -64,7 +64,9 @@ where
                         height = info.height,
                         "Segment begin"
                     );
-                    return Ok(ServerMessage::SegmentStarted(info));
+                    if info.sequence > 0 {
+                        return Ok(ServerMessage::SegmentStarted);
+                    }
                 }
                 SegmentEvent::Data(data) => {
                     anyhow::ensure!(

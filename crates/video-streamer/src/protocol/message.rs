@@ -1,11 +1,12 @@
 use bytes::{BufMut as _, Bytes, BytesMut};
 
-use crate::normalizer::SegmentInfo;
+const VP8_METADATA_PAYLOAD: &[u8] = b"{\"codec\":\"vp8\"}";
 
 #[derive(Debug, Eq, PartialEq)]
 pub(super) enum ServerMessage {
     Chunk(Bytes),
-    SegmentStarted(SegmentInfo),
+    Metadata,
+    SegmentStarted,
     Error(UserFriendlyError),
     StreamEnded,
 }
@@ -40,7 +41,8 @@ pub(super) fn decode_client_message(message: &[u8]) -> anyhow::Result<ClientMess
 pub(super) fn response_kind(message: &ServerMessage) -> &'static str {
     match message {
         ServerMessage::Chunk(_) => "chunk",
-        ServerMessage::SegmentStarted(_) => "segment-started",
+        ServerMessage::Metadata => "metadata",
+        ServerMessage::SegmentStarted => "segment-started",
         ServerMessage::Error(_) => "error",
         ServerMessage::StreamEnded => "stream-ended",
     }
@@ -54,13 +56,9 @@ pub(super) fn encode_server_message(message: ServerMessage) -> Bytes {
             encoded.put_u8(0);
             encoded.put(chunk);
         }
-        ServerMessage::SegmentStarted(info) => {
+        ServerMessage::Metadata => {
             encoded.put_u8(1);
-            let json = format!(
-                "{{\"codec\":\"vp8\",\"sequence\":{},\"width\":{},\"height\":{}}}",
-                info.sequence, info.width, info.height
-            );
-            encoded.put(json.as_bytes());
+            encoded.put(VP8_METADATA_PAYLOAD);
         }
         ServerMessage::Error(error) => {
             encoded.put_u8(2);
@@ -68,6 +66,10 @@ pub(super) fn encode_server_message(message: ServerMessage) -> Bytes {
             encoded.put(json.as_bytes());
         }
         ServerMessage::StreamEnded => encoded.put_u8(3),
+        ServerMessage::SegmentStarted => {
+            encoded.put_u8(4);
+            encoded.put(VP8_METADATA_PAYLOAD);
+        }
     }
     encoded.freeze()
 }
