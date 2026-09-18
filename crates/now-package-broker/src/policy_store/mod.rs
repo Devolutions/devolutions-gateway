@@ -1002,10 +1002,10 @@ mod storage_tests {
         }
     }
 
-    fn recording_audit() -> (crate::audit::WriteAudit, Arc<crate::audit::RecordingAudit>) {
+    fn recording_audit() -> (crate::audit::WriteAudit, Arc<crate::audit::mock::Recorder>) {
         let sid =
             Sid::from_well_known(::windows::Win32::Security::WinLocalSystemSid, None).expect("resolve SYSTEM SID");
-        crate::audit::WriteAudit::begin_recording(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
+        crate::audit::mock::begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
     }
 
     #[tokio::test]
@@ -1058,11 +1058,11 @@ mod storage_tests {
             Arc::clone(&storage) as Arc<dyn PolicyStorage>,
             Monitoring::Available,
         );
-        crate::audit::take_test_events();
+        crate::audit::mock::take_events();
 
         store.reload_from_disk(ReloadCause::ExternalChange).await;
         assert!(
-            crate::audit::take_test_events().is_empty(),
+            crate::audit::mock::take_events().is_empty(),
             "unchanged policy is not an event"
         );
 
@@ -1073,7 +1073,7 @@ mod storage_tests {
             store.active_policy().is_none(),
             "invalid external policy is not published"
         );
-        let events = crate::audit::take_test_events();
+        let events = crate::audit::mock::take_events();
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_code,
@@ -1088,7 +1088,7 @@ mod storage_tests {
 
         store.reload_from_disk(ReloadCause::ExternalChange).await;
         assert!(
-            crate::audit::take_test_events().is_empty(),
+            crate::audit::mock::take_events().is_empty(),
             "unchanged invalid policy is not an event"
         );
 
@@ -1103,7 +1103,7 @@ mod storage_tests {
                 .revision,
             7
         );
-        let events = crate::audit::take_test_events();
+        let events = crate::audit::mock::take_events();
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_code,
@@ -1112,7 +1112,7 @@ mod storage_tests {
 
         store.reload_from_disk(ReloadCause::ExternalChange).await;
         assert!(
-            crate::audit::take_test_events().is_empty(),
+            crate::audit::mock::take_events().is_empty(),
             "unchanged external policy is not an event"
         );
     }
@@ -1166,7 +1166,7 @@ mod storage_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn concurrent_external_replacement_is_preserved_and_published() {
-        crate::audit::take_test_events();
+        crate::audit::mock::take_events();
         let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
         let store = PolicyStore::load_with_storage(
             Some(PathBuf::from(r"C:\policy.json")),
@@ -1196,7 +1196,7 @@ mod storage_tests {
             7
         );
         assert_eq!(
-            crate::audit::take_test_events()
+            crate::audit::mock::take_events()
                 .iter()
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
