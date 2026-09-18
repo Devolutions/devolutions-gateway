@@ -7,17 +7,6 @@ const MESSAGE_CATALOGS: &[&str] = &[
     "../../devolutions-agent/devolutions-agent.mc",
 ];
 
-const POLICY_INSERTION_COUNTS: &[(u32, usize)] = &[
-    (sysevent_codes::POLICY_WRITE_ATTEMPTED, 5),
-    (sysevent_codes::POLICY_WRITE_DENIED, 6),
-    (sysevent_codes::POLICY_CREATE_FAILED, 8),
-    (sysevent_codes::POLICY_CREATE_SUCCEEDED, 11),
-    (sysevent_codes::POLICY_CHANGE_FAILED, 8),
-    (sysevent_codes::POLICY_CHANGE_SUCCEEDED, 11),
-    (sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED, 4),
-    (sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED, 3),
-];
-
 #[test]
 fn every_event_code_is_defined_once_in_every_catalog() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -96,43 +85,6 @@ fn every_catalog_message_terminates_each_translation() {
                 "{}: MessageId={code} must define each translation once",
                 path.display()
             );
-        }
-    }
-}
-
-#[test]
-fn policy_catalog_insertions_match_structured_field_order() {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-
-    for catalog in MESSAGE_CATALOGS {
-        let path = manifest_dir.join(catalog);
-        let content =
-            std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-
-        for &(code, insertion_count) in POLICY_INSERTION_COUNTS {
-            let block = message_block(&content, code);
-            let messages: Vec<_> = block
-                .lines()
-                .enumerate()
-                .filter(|(_, line)| line.starts_with("Language="))
-                .map(|(index, _)| block.lines().nth(index + 1).unwrap_or_default())
-                .collect();
-            assert_eq!(messages.len(), 3, "{}: MessageId={code}", path.display());
-
-            for message in messages {
-                for insertion in 1..=insertion_count {
-                    assert!(
-                        message.contains(&format!("%{insertion}")),
-                        "{}: MessageId={code} omits %{insertion}",
-                        path.display()
-                    );
-                }
-                assert!(
-                    !message.contains(&format!("%{}", insertion_count + 1)),
-                    "{}: MessageId={code} has an unexpected insertion",
-                    path.display()
-                );
-            }
         }
     }
 }

@@ -1038,8 +1038,8 @@ mod storage_tests {
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
             [
-                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
-                Some(sysevent_codes::POLICY_CHANGE_FAILED)
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_FAILED)
             ]
         );
         assert!(
@@ -1077,7 +1077,7 @@ mod storage_tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_code,
-            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
+            Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
         );
         assert!(
             events[0]
@@ -1107,7 +1107,7 @@ mod storage_tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_code,
-            Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)
+            Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)
         );
 
         store.reload_from_disk(ReloadCause::ExternalChange).await;
@@ -1200,7 +1200,7 @@ mod storage_tests {
                 .iter()
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
-            [Some(sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)]
+            [Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)]
         );
         assert_eq!(
             recorder
@@ -1209,8 +1209,8 @@ mod storage_tests {
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
             [
-                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
-                Some(sysevent_codes::POLICY_CHANGE_FAILED)
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_FAILED)
             ]
         );
         assert!(
@@ -1243,8 +1243,8 @@ mod storage_tests {
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
             [
-                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
-                Some(sysevent_codes::POLICY_CHANGE_SUCCEEDED)
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_SUCCEEDED)
             ]
         );
     }

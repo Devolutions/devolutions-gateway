@@ -97,6 +97,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-sysevent-codes"
+version = "0.0.0"
+dependencies = [
+ "sysevent",
+]
+
+[[package]]
 name = "agent-tunnel"
 version = "0.0.0"
 dependencies = [
@@ -4804,6 +4811,7 @@ dependencies = [
 name = "now-package-broker"
 version = "0.0.0"
 dependencies = [
+ "agent-sysevent-codes",
  "anyhow",
  "async-trait",
  "axum 0.8.9",
@@ -4827,7 +4835,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sysevent",
- "sysevent-codes",
  "sysevent-winevent",
  "tempfile",
  "tokio 1.52.3",
