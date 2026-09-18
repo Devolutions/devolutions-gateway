@@ -7,7 +7,7 @@ use anyhow::Context;
 use axum::body::Body;
 use axum::extract::ws::{CloseFrame, Utf8Bytes, WebSocket};
 use axum::response::Response;
-use devolutions_gateway_task::ShutdownSignal;
+use devolutions_gateway_task::{ChildTask, ShutdownSignal};
 use futures::{SinkExt, Stream, stream};
 use terminal_streamer::terminal_stream;
 use tokio::fs::{File, OpenOptions};
@@ -25,17 +25,14 @@ pub(crate) async fn stream_recording(
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
     let stream_state = recordings.subscribe_to_stream(recording_id).await?;
-    let path = stream_state
-        .borrow()
-        .clips
-        .last()
-        .context("recording has no clips")?
-        .path
-        .clone();
+    let (path, clip_sequence) = {
+        let state = stream_state.borrow();
+        let clip = state.clips.last().context("recording has no clips")?;
+        (clip.path.clone(), clip.sequence)
+    };
     let streaming_type = validate_streaming_file(&path).await?;
     let upgrade_result = match streaming_type {
         StreamingType::Terminal(input_type) => {
-            let shutdown_notify = recordings.subscribe_to_recording_finish(recording_id).await?;
             let when_new_chunk_appended = move || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 recordings.add_new_chunk_listener(recording_id, tx);
@@ -43,6 +40,12 @@ pub(crate) async fn stream_recording(
             };
             let path = Arc::new(path);
             ws.on_upgrade(move |socket| async move {
+                let shutdown_notify = Arc::new(Notify::new());
+                let notify = Arc::clone(&shutdown_notify);
+                let _shutdown_bridge = ChildTask::spawn(async move {
+                    wait_for_terminal_stream_end(stream_state, clip_sequence, shutdown_signal).await;
+                    notify.notify_one();
+                });
                 if let Err(e) =
                     setup_terminal_streaming(&path, input_type, socket, shutdown_notify, when_new_chunk_appended).await
                 {
@@ -147,18 +150,48 @@ async fn setup_terminal_streaming(
     Ok(())
 }
 
+async fn wait_for_recording_clip_end(mut stream_state: watch::Receiver<RecordingStreamState>, clip_sequence: u64) {
+    loop {
+        if stream_state
+            .borrow()
+            .active
+            .is_none_or(|active| active.sequence != clip_sequence)
+        {
+            return;
+        }
+        if stream_state.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+async fn wait_for_terminal_stream_end(
+    stream_state: watch::Receiver<RecordingStreamState>,
+    clip_sequence: u64,
+    mut shutdown_signal: ShutdownSignal,
+) {
+    tokio::select! {
+        () = wait_for_recording_clip_end(stream_state, clip_sequence) => {}
+        () = shutdown_signal.wait() => {}
+    }
+}
+
 async fn setup_webm_streaming(
     stream_state: watch::Receiver<RecordingStreamState>,
     socket: WebSocket,
     shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
     let source = WebmRecordingSource { stream_state };
+    let mut session_shutdown = shutdown_signal.clone();
     let (websocket_stream, close_handle) = crate::ws::handle_messages(
         socket,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(45),
     );
-    let streaming_result = stream_session(source, websocket_stream, SessionConfig::default()).await;
+    let streaming_result = tokio::select! {
+        result = stream_session(source, websocket_stream, SessionConfig::default()) => result,
+        () = session_shutdown.wait() => return Ok(()),
+    };
 
     match streaming_result {
         Err(error) => {
@@ -417,6 +450,24 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn terminal_clip_end_is_retained_before_waiting() {
+        let state = RecordingStreamState::for_test(
+            Vec::new(),
+            Some(ActiveRecordingStreamClip {
+                sequence: 0,
+                ready: true,
+            }),
+            false,
+        );
+        let (sender, receiver) = watch::channel(state);
+        sender.send_modify(RecordingStreamState::mark_disconnected);
+
+        tokio::time::timeout(Duration::from_millis(25), wait_for_recording_clip_end(receiver, 0))
+            .await
+            .expect("clip end should already be visible");
     }
 
     #[tokio::test]

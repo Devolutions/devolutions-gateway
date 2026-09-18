@@ -192,7 +192,10 @@ fn closed_output_stops_scan_at_a_frame_checkpoint() {
         StartAt::Beginning,
         RecordingClip::new(reader),
         sender,
-        SessionConfig { encoder_threads: 1 },
+        SessionConfig {
+            encoder_threads: 1,
+            adaptive_frame_skip: false,
+        },
         0,
     )
     .expect("create beginning normalizer");
@@ -276,6 +279,9 @@ fn cross_cluster_replay_bytes() -> Vec<u8> {
             true,
         )))
         .expect("write first frame");
+    writer
+        .write(&MatroskaSpec::Cluster(Master::End))
+        .expect("write first cluster end");
     writer
         .write(&MatroskaSpec::Cluster(Master::Full(vec![
             MatroskaSpec::Timestamp(30),
