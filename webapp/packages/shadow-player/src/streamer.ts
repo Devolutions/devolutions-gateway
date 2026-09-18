@@ -5,7 +5,7 @@ import {
   PlaybackControls,
   type PlaybackControlsAction,
 } from './playbackControls';
-import type { ErrorMessage, SegmentStartedMessage, ServerMessage } from './protocol';
+import type { ErrorMessage, ServerMessage, StreamCodec } from './protocol';
 import styles from './streamer.css?inline';
 import { ServerWebSocket } from './websocket';
 
@@ -293,8 +293,19 @@ export class ShadowPlayer extends HTMLElement {
     }
     this.awaitingResponse = false;
 
+    if (message.type === 'metadata') {
+      if (this.clips.length !== 0) {
+        throw new Error('Received metadata after the first segment');
+      }
+      await this.startSegment(websocket, message.codec);
+      this.sendRequest(websocket, 'pull');
+      return;
+    }
     if (message.type === 'segment-started') {
-      await this.startSegment(websocket, message);
+      if (this.clips.length === 0) {
+        throw new Error('Received a segment boundary before metadata');
+      }
+      await this.startSegment(websocket, message.codec);
       this.sendRequest(websocket, 'pull');
       return;
     }
@@ -319,16 +330,12 @@ export class ShadowPlayer extends HTMLElement {
     this.completeStream();
   }
 
-  private async startSegment(websocket: ServerWebSocket, metadata: SegmentStartedMessage): Promise<void> {
-    if (metadata.sequence !== this.clips.length) {
-      throw new Error(`Expected segment ${this.clips.length}, received ${metadata.sequence}`);
-    }
-
+  private async startSegment(websocket: ServerWebSocket, codec: StreamCodec): Promise<void> {
     await this.finishReceivingClip();
     if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
       return;
     }
-    const clip = new PlaybackClip(metadata);
+    const clip = new PlaybackClip({ codec, sequence: this.clips.length });
     clip.setDebug(this.debug);
     this.configureVideo(clip);
     this.clips.push(clip);
