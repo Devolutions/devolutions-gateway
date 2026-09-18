@@ -1,16 +1,20 @@
-export type ServerMessage = ChunkMessage | SegmentStartedMessage | ErrorMessage | StreamEndedMessage;
+export type ServerMessage = ChunkMessage | MetadataMessage | SegmentStartedMessage | ErrorMessage | StreamEndedMessage;
+
+export type StreamCodec = 'vp8' | 'vp9';
 
 export interface ChunkMessage {
   type: 'chunk';
   data: Uint8Array;
 }
 
+export interface MetadataMessage {
+  type: 'metadata';
+  codec: StreamCodec;
+}
+
 export interface SegmentStartedMessage {
   type: 'segment-started';
-  codec: 'vp8' | 'vp9';
-  sequence: number;
-  width?: number;
-  height?: number;
+  codec: StreamCodec;
 }
 
 export interface ErrorMessage {
@@ -40,28 +44,9 @@ export function parseServerMessage(buffer: ArrayBuffer): ServerMessage {
   }
 
   if (typeCode === 1) {
-    const metadata = parseJsonPayload(buffer);
-    if (metadata.sequence === undefined && metadata.width === undefined && metadata.height === undefined) {
-      if (metadata.codec !== 'vp8' && metadata.codec !== 'vp9') {
-        throw new Error('Unsupported stream codec');
-      }
-      return {
-        type: 'segment-started',
-        codec: metadata.codec,
-        sequence: 0,
-      };
-    }
-
-    if (metadata.codec !== 'vp8') {
-      throw new Error('Unsupported stream codec');
-    }
-
     return {
-      type: 'segment-started',
-      codec: metadata.codec,
-      sequence: readInteger(metadata.sequence, 'sequence', 0),
-      width: readInteger(metadata.width, 'width', 1),
-      height: readInteger(metadata.height, 'height', 1),
+      type: 'metadata',
+      codec: parseCodec(buffer),
     };
   }
 
@@ -83,6 +68,13 @@ export function parseServerMessage(buffer: ArrayBuffer): ServerMessage {
     return { type: 'stream-ended' };
   }
 
+  if (typeCode === 4) {
+    return {
+      type: 'segment-started',
+      codec: parseCodec(buffer),
+    };
+  }
+
   throw new Error('Unknown server message type');
 }
 
@@ -102,9 +94,10 @@ function parseJsonPayload(buffer: ArrayBuffer): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function readInteger(value: unknown, field: string, minimum: number): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) {
-    throw new Error(`Invalid ${field}`);
+function parseCodec(buffer: ArrayBuffer): StreamCodec {
+  const payload = parseJsonPayload(buffer);
+  if (payload.codec !== 'vp8' && payload.codec !== 'vp9') {
+    throw new Error('Unsupported stream codec');
   }
-  return value;
+  return payload.codec;
 }

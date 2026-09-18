@@ -1,5 +1,10 @@
-import type { SegmentStartedMessage } from './protocol';
+import type { StreamCodec } from './protocol';
 import { ReactiveSourceBuffer } from './sourceBuffer';
+
+export interface PlaybackClipMetadata {
+  codec: StreamCodec;
+  sequence: number;
+}
 
 export class PlaybackClip {
   readonly video = document.createElement('video');
@@ -12,7 +17,7 @@ export class PlaybackClip {
   private complete = false;
   private finishing: Promise<void> | null = null;
 
-  constructor(readonly metadata: SegmentStartedMessage) {
+  constructor(readonly metadata: PlaybackClipMetadata) {
     this.video.src = this.objectUrl;
     this.opened = new Promise<void>((resolve, reject) => {
       const cleanup = () => {
