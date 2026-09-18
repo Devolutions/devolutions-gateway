@@ -83,7 +83,7 @@ trait AuditRecorder: Send + Sync {
 fn default_recorder() -> Arc<dyn AuditRecorder> {
     #[cfg(test)]
     {
-        Arc::new(TestRecorder)
+        Arc::new(mock::TestRecorder)
     }
     #[cfg(all(not(test), debug_assertions))]
     {
@@ -99,26 +99,6 @@ fn default_recorder() -> Arc<dyn AuditRecorder> {
             }
         }
     }
-}
-
-#[cfg(test)]
-std::thread_local! {
-    static TEST_EVENTS: std::cell::RefCell<Vec<Entry>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-
-#[cfg(test)]
-struct TestRecorder;
-
-#[cfg(test)]
-impl AuditRecorder for TestRecorder {
-    fn record(&self, entry: Entry) {
-        TEST_EVENTS.with(|events| events.borrow_mut().push(entry));
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn take_test_events() -> Vec<Entry> {
-    TEST_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
 }
 
 #[cfg(not(test))]
@@ -201,24 +181,6 @@ fn event_log_worker(receiver: &std::sync::mpsc::Receiver<sysevent::Entry>) {
     }
 }
 
-#[cfg(test)]
-#[derive(Default)]
-pub(crate) struct RecordingAudit(parking_lot::Mutex<Vec<Entry>>);
-
-#[cfg(test)]
-impl RecordingAudit {
-    pub(crate) fn events(&self) -> Vec<Entry> {
-        self.0.lock().clone()
-    }
-}
-
-#[cfg(test)]
-impl AuditRecorder for RecordingAudit {
-    fn record(&self, entry: Entry) {
-        self.0.lock().push(entry);
-    }
-}
-
 struct WriteAuditState {
     actor_sid: String,
     actor_exe: String,
@@ -264,14 +226,6 @@ impl WriteAudit {
             &state.path,
         ));
         Self(state)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn begin_recording(actor_sid: &Sid, actor_exe: &Path, path: &Path) -> (Self, Arc<RecordingAudit>) {
-        let recorder = Arc::new(RecordingAudit::default());
-        let recorder_sink = Arc::<RecordingAudit>::clone(&recorder);
-        let audit = Self::begin_with_recorder(actor_sid, actor_exe, path, recorder_sink);
-        (audit, recorder)
     }
 
     pub(crate) fn denied(&self, reason: DenialReason) {
@@ -458,12 +412,59 @@ const fn operation_name(operation: PolicyReplacementOperation) -> &'static str {
 }
 
 #[cfg(test)]
+pub(crate) mod mock {
+    use super::*;
+
+    std::thread_local! {
+        static EVENTS: std::cell::RefCell<Vec<Entry>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    pub(crate) struct TestRecorder;
+
+    impl AuditRecorder for TestRecorder {
+        fn record(&self, entry: Entry) {
+            EVENTS.with(|events| events.borrow_mut().push(entry));
+        }
+    }
+
+    pub(crate) fn take_events() -> Vec<Entry> {
+        EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
+    }
+
+    #[derive(Default)]
+    pub(crate) struct Recorder(parking_lot::Mutex<Vec<Entry>>);
+
+    impl Recorder {
+        pub(crate) fn events(&self) -> Vec<Entry> {
+            self.0.lock().clone()
+        }
+    }
+
+    impl AuditRecorder for Recorder {
+        fn record(&self, entry: Entry) {
+            self.0.lock().push(entry);
+        }
+    }
+
+    pub(crate) fn begin(actor_sid: &Sid, actor_exe: &Path, path: &Path) -> (WriteAudit, Arc<Recorder>) {
+        let recorder = Arc::new(Recorder::default());
+        let audit = WriteAudit::begin_with_recorder(
+            actor_sid,
+            actor_exe,
+            path,
+            Arc::clone(&recorder) as Arc<dyn AuditRecorder>,
+        );
+        (audit, recorder)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn test_audit() -> (WriteAudit, Arc<RecordingAudit>) {
+    fn test_audit() -> (WriteAudit, Arc<mock::Recorder>) {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
-        WriteAudit::begin_recording(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
+        mock::begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
     }
 
     #[test]
@@ -518,7 +519,7 @@ mod tests {
     fn audit_values_are_bounded_and_fields_are_allowlisted() {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
         let long = "é".repeat(MAX_PATH_BYTES);
-        let (audit, recorder) = WriteAudit::begin_recording(&sid, Path::new(&long), Path::new(&long));
+        let (audit, recorder) = mock::begin(&sid, Path::new(&long), Path::new(&long));
         audit.succeeded_at(
             Path::new(&long),
             Some(&long),
