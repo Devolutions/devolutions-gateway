@@ -1,6 +1,7 @@
 use std::io::{self, SeekFrom, Write};
 use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use bytes::{Bytes, BytesMut};
@@ -26,6 +27,7 @@ const OUTPUT_BITRATE: u32 = 256 * 1024;
 const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const MAX_WEBM_BLOCK_TIMESTAMP: u64 = 32_767;
+const MAX_CONSECUTIVE_FRAME_SKIPS: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SegmentInfo {
@@ -270,6 +272,9 @@ struct ClipNormalizer {
     input_decoder: Option<InputDecoder>,
     output_segment: Option<OutputSegment>,
     next_segment_sequence: u64,
+    processing_time: Duration,
+    first_frame_timestamp: Option<u64>,
+    frames_since_last_encode: u32,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
 }
@@ -306,6 +311,9 @@ impl ClipNormalizer {
             input_decoder: None,
             output_segment: None,
             next_segment_sequence,
+            processing_time: Duration::ZERO,
+            first_frame_timestamp: None,
+            frames_since_last_encode: 0,
             sender,
             config,
         })
@@ -564,6 +572,14 @@ impl ClipNormalizer {
     }
 
     fn process_frame(&mut self, frame: PendingFrame) -> anyhow::Result<()> {
+        let should_skip_encode = self.should_skip_encode(frame.timestamp);
+        let processing_started = Instant::now();
+        let result = self.process_frame_with_skip(frame, should_skip_encode);
+        self.processing_time += processing_started.elapsed();
+        result
+    }
+
+    fn process_frame_with_skip(&mut self, frame: PendingFrame, should_skip_encode: bool) -> anyhow::Result<()> {
         let input_decoder = self
             .input_decoder
             .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
@@ -574,6 +590,13 @@ impl ClipNormalizer {
             dimensions,
             self.next_segment_sequence,
         );
+
+        if new_segment.is_none() && should_skip_encode {
+            self.frames_since_last_encode += 1;
+            return Ok(());
+        }
+        self.frames_since_last_encode = 0;
+
         if self.output_segment.is_some() && new_segment.is_some() {
             self.output_segment
                 .take()
@@ -593,6 +616,16 @@ impl ClipNormalizer {
             .context("output segment is missing")?
             .encode(&decoded.image, frame.timestamp)?;
         Ok(())
+    }
+
+    fn should_skip_encode(&mut self, timestamp: u64) -> bool {
+        let first_timestamp = *self.first_frame_timestamp.get_or_insert(timestamp);
+        let media_advanced_ms = timestamp.saturating_sub(first_timestamp);
+        let processing_ms = u64::try_from(self.processing_time.as_millis()).unwrap_or(u64::MAX);
+
+        self.config.adaptive_frame_skip
+            && processing_ms > media_advanced_ms
+            && self.frames_since_last_encode < MAX_CONSECUTIVE_FRAME_SKIPS
     }
 
     fn replay_latest_gop_with<F>(&mut self, replay_point: ReplayPoint, process_frame: &mut F) -> anyhow::Result<()>

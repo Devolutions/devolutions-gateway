@@ -66,12 +66,14 @@ pub enum StartAt {
 #[derive(Clone, Copy, Debug)]
 pub struct SessionConfig {
     pub encoder_threads: u32,
+    pub adaptive_frame_skip: bool,
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             encoder_threads: u32::try_from(num_cpus::get()).unwrap_or(1).max(1),
+            adaptive_frame_skip: true,
         }
     }
 }
