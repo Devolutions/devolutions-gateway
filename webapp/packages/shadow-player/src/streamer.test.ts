@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ClientMessage, SegmentStartedMessage, ServerMessage } from './protocol';
+import type { PlaybackClipMetadata } from './playbackClip';
+import type { ClientMessage, MetadataMessage, SegmentStartedMessage, ServerMessage } from './protocol';
 
 interface MockServerWebSocket {
   sent: ClientMessage[];
@@ -12,7 +13,7 @@ interface MockServerWebSocket {
 }
 
 interface MockPlaybackClip {
-  metadata: SegmentStartedMessage;
+  metadata: PlaybackClipMetadata;
   video: HTMLVideoElement;
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
@@ -112,7 +113,7 @@ vi.mock('./playbackClip', () => ({
     private duration = 0;
     private ended = false;
 
-    constructor(readonly metadata: SegmentStartedMessage) {
+    constructor(readonly metadata: PlaybackClipMetadata) {
       this.openPromise = new Promise((resolve) => {
         this.openResolver = resolve;
       });
@@ -194,20 +195,14 @@ function createPlayer(attributes: string[] = []): { player: ShadowPlayer; socket
   return { player, socket };
 }
 
-const firstMetadata: SegmentStartedMessage = {
-  type: 'segment-started',
+const firstMetadata: MetadataMessage = {
+  type: 'metadata',
   codec: 'vp8',
-  sequence: 0,
-  width: 640,
-  height: 480,
 };
 
 const secondMetadata: SegmentStartedMessage = {
   type: 'segment-started',
   codec: 'vp8',
-  sequence: 1,
-  width: 1280,
-  height: 720,
 };
 
 describe('ShadowPlayer', () => {
@@ -230,6 +225,7 @@ describe('ShadowPlayer', () => {
     await flushMicrotasks();
     const firstClip = mocks.clips[0];
     expect(firstClip).toBeDefined();
+    expect(firstClip.metadata).toEqual({ codec: 'vp8', sequence: 0 });
     expect(socket.sent).toEqual([{ type: 'start' }]);
 
     firstClip.resolveOpen();
@@ -252,6 +248,7 @@ describe('ShadowPlayer', () => {
     await flushMicrotasks();
     const secondClip = mocks.clips[1];
     expect(secondClip).toBeDefined();
+    expect(secondClip.metadata).toEqual({ codec: 'vp8', sequence: 1 });
     secondClip.resolveOpen();
     await secondStart;
     expect(socket.sent).toHaveLength(4);
@@ -322,12 +319,10 @@ describe('ShadowPlayer', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it('rejects a noncontiguous segment sequence', async () => {
+  it('rejects a segment boundary before metadata', async () => {
     const { socket } = createPlayer();
 
-    await expect(socket.emitMessage({ ...firstMetadata, sequence: 1 })).rejects.toThrow(
-      'Expected segment 0, received 1',
-    );
+    await expect(socket.emitMessage(secondMetadata)).rejects.toThrow('Received a segment boundary before metadata');
     expect(mocks.clips).toHaveLength(0);
   });
 

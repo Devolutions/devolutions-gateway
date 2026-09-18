@@ -79,7 +79,7 @@ describe('ServerWebSocket', () => {
 
     websocket.onmessage(async (message) => {
       calls.push(message.type);
-      if (message.type === 'segment-started') {
+      if (message.type === 'metadata') {
         firstStarted.resolve();
         await releaseFirst.promise;
       } else {
@@ -88,13 +88,13 @@ describe('ServerWebSocket', () => {
     }, vi.fn());
     websocket.onclose(() => closed.resolve());
 
-    socket?.emitMessage(encodedMessage(1, '{"codec":"vp8","sequence":0,"width":640,"height":480}'));
+    socket?.emitMessage(encodedMessage(1, '{"codec":"vp8"}'));
     socket?.emitMessage(encodedMessage(0, 'chunk'));
     socket?.emitClose();
 
     await firstStarted.promise;
     await Promise.resolve();
-    expect(calls).toEqual(['segment-started']);
+    expect(calls).toEqual(['metadata']);
 
     let closeDispatched = false;
     void closed.promise.then(() => {
@@ -106,7 +106,7 @@ describe('ServerWebSocket', () => {
     releaseFirst.resolve();
     await secondStarted.promise;
     await closed.promise;
-    expect(calls).toEqual(['segment-started', 'chunk']);
+    expect(calls).toEqual(['metadata', 'chunk']);
   });
 
   it('serializes an error after a queued stream end', async () => {
