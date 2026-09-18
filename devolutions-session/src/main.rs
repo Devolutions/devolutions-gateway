@@ -33,7 +33,10 @@ fn main() -> anyhow::Result<()> {
 
     let _logger_guard = init_log(&conf);
 
-    info!("Starting Devolutions Session");
+    match session_id_from_args() {
+        Some(session_id) => info!(%session_id, "Starting Devolutions Session"),
+        None => info!("Starting Devolutions Session"),
+    }
 
     let (runtime, shutdown_handle, join_handle) = start()?;
 
@@ -51,6 +54,24 @@ fn main() -> anyhow::Result<()> {
     info!("Exiting Devolutions Session");
 
     Ok(())
+}
+
+/// Returns the session ID the Devolutions Agent passed via `--session`, if any.
+///
+/// The agent starts this process in a specific Windows session and names that session on the
+/// command line. Logging it is what makes a session log answerable on its own: the DVC can only
+/// be opened against the session the process actually runs in, so a failure to open it is only
+/// interpretable once that session is known.
+fn session_id_from_args() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        if arg == "--session" {
+            return args.next();
+        }
+    }
+
+    None
 }
 
 pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
