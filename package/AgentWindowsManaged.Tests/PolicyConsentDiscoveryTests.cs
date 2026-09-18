@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 
 using WixSharp;
@@ -39,6 +40,31 @@ public sealed class PolicyConsentDiscoveryTests
             BindingFlags.Static | BindingFlags.NonPublic);
 
         Assert.Equal(expected, Assert.IsType<bool>(method.Invoke(null, [platform])));
+    }
+
+    [Theory]
+    [InlineData(Platform.x86, 0)]
+    [InlineData(Platform.x64, 7)]
+    [InlineData(Platform.arm64, 7)]
+    public void NativeAgentMsiPublishesDiscoveryFor32BitConsumers(Platform platform, int expectedCount)
+    {
+        Type program = System.Reflection.Assembly
+            .Load("DevolutionsAgent")
+            .GetType("DevolutionsAgent.Program", throwOnError: true);
+        MethodInfo method = program.GetMethod(
+            "CreatePolicyConsentRegistryValuesFor32BitConsumers",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        RegValue[] values = Assert.IsAssignableFrom<System.Collections.Generic.IEnumerable<RegValue>>(
+                method.Invoke(null, [platform, new Version(2026, 3, 0)]))
+            .ToArray();
+
+        Assert.Equal(expectedCount, values.Length);
+        Assert.All(values, value =>
+        {
+            Assert.False(value.Win64);
+            Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
+        });
     }
 
     [Fact]
