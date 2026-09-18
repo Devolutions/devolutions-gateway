@@ -393,6 +393,9 @@ internal class Program
             },
             CreateEventLogSourceRegistryValue(project.Platform == Platform.x64),
         };
+        project.RegValues = project.RegValues
+            .Concat(CreatePolicyConsentRegistryValuesFor32BitConsumers(project.Platform, DevolutionsAgentProductVersion))
+            .ToArray();
 
         List<Property> projectProperties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToList();
 
@@ -490,9 +493,52 @@ internal class Program
             Feature = Features.AGENT_FEATURE,
         };
 
-    // Discovery follows the consumer's native registry view.
+    // 64-bit Agent MSIs publish discovery in both native and WOW6432Node views so a
+    // 32-bit UniGetUI consumer can discover the same protected helper.
     internal static bool Use64BitRegistryView(Platform? platform) =>
         platform is Platform.x64 or Platform.arm64;
+
+    internal static IEnumerable<RegValue> CreatePolicyConsentRegistryValuesFor32BitConsumers(
+        Platform? platform,
+        Version productVersion)
+    {
+        if (!Use64BitRegistryView(platform))
+        {
+            return [];
+        }
+
+        return
+        [
+            CreatePolicyConsentRegistryValue(
+                "ProtocolVersion",
+                Includes.POLICY_CONSENT_PROTOCOL_VERSION,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ExecutableName",
+                Includes.POLICY_CONSENT_EXECUTABLE_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ExecutablePath",
+                $"[{AgentProperties.InstallDir}]{Includes.POLICY_CONSENT_EXECUTABLE_NAME}",
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ProductName",
+                Includes.POLICY_CONSENT_PRODUCT_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ProductVersion",
+                productVersion.ToString(),
+                false),
+            CreatePolicyConsentRegistryValue(
+                "BrokerPipeName",
+                Includes.POLICY_CONSENT_DEFAULT_BROKER_PIPE_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "CurrentUiSignerSpkiSha256",
+                Includes.POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256,
+                false),
+        ];
+    }
 
     private static void Project_UnhandledException(ExceptionEventArgs e)
     {
