@@ -31,6 +31,8 @@ pub(crate) const DESCRIPTION: &str = "Devolutions Agent service";
 const POLICY_CONSENT_DISCOVERY_KEY: &str = r"SOFTWARE\Devolutions\Agent\PolicyConsentHelper";
 #[cfg(windows)]
 const POLICY_CONSENT_BROKER_PIPE_NAME_VALUE: &str = "BrokerPipeName";
+#[cfg(all(windows, target_pointer_width = "64"))]
+const KEY_WOW64_32KEY: u32 = 0x0200;
 
 struct TasksCtx {
     /// Spawned service tasks
@@ -293,7 +295,25 @@ fn publish_policy_consent_broker_pipe_name(pipe_name: &str) -> anyhow::Result<()
         .write()
         .open(POLICY_CONSENT_DISCOVERY_KEY)
         .context("open policy consent helper discovery key")?;
-    publish_policy_consent_broker_pipe_name_to(&key, pipe_name)
+    publish_policy_consent_broker_pipe_name_to(&key, pipe_name)?;
+
+    // A 32-bit UniGetUI process reads HKLM\Software through WOW6432Node, while the
+    // 64-bit Agent service naturally opens the native view. Keep configured pipe
+    // discovery synchronized with the MSI's dual-view contract.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let wow64_key = LOCAL_MACHINE
+            .options()
+            .read()
+            .write()
+            .access(KEY_WOW64_32KEY)
+            .open(POLICY_CONSENT_DISCOVERY_KEY)
+            .context("open 32-bit policy consent helper discovery key")?;
+        publish_policy_consent_broker_pipe_name_to(&wow64_key, pipe_name)
+            .context("publish configured policy consent helper broker pipe to 32-bit registry view")?;
+    }
+
+    Ok(())
 }
 
 #[cfg(windows)]
