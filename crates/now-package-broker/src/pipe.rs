@@ -20,7 +20,7 @@ use windows::Win32::Security::Authorization::SET_ACCESS;
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
 
 use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::server::{BrokerState, build_router_for_client_with_policy_write_deadline, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -36,11 +36,15 @@ const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 /// Deadline for serving a single pipe connection, from accept to response completion.
 ///
 /// Each connection serves exactly one HTTP request (`keep_alive` is disabled) and all
-/// endpoints respond without blocking on package operations (execution is asynchronous,
-/// tracked via the operation tracker), so a healthy exchange completes well within this
-/// deadline. Without it, idle clients holding their connection open without sending a
-/// request would each pin a connection slot indefinitely and could exhaust the pool.
+/// ordinary endpoints respond without blocking on package operations (execution is
+/// asynchronous and tracked via the operation tracker). Without this deadline, idle
+/// clients holding their connection open without sending a request would each pin a
+/// connection slot indefinitely and could exhaust the pool.
 const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The bounded policy-replacement exchange lifetime used only after the exact installed
+/// consent helper has passed write authorization.
+const POLICY_CONSENT_CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Start the named pipe server and accept connections until shutdown.
 pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
@@ -72,40 +76,65 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                 match result {
                     Ok(()) => {
                         let state = Arc::clone(&state);
+                        let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
                         tokio::spawn(async move {
-                            let serve = async move {
-                                // Keep blocking unauthenticated capture off the accept loop and
-                                // retain the connection slot until the work actually completes.
-                                let capture = spawn_bounded_capture(permit, move || {
-                                    let client = PipeClient::from_connected_pipe(&server);
-                                    (server, client)
-                                });
-                                let (_permit, server, client) = match capture.await {
-                                    Ok((permit, (server, Ok(client)))) => (permit, server, client),
-                                    Ok((_permit, (_server, Err(error)))) => {
-                                        warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                                        return;
-                                    }
-                                    Err(error) => {
-                                        error!(
-                                            error = format!("{error:#}"),
-                                            "Named pipe client identity capture task failed"
-                                        );
-                                        return;
-                                    }
-                                };
-
-                                info!("Client connected to named pipe");
-                                let router = build_router_for_client(state, client);
-                                serve_connection(server, router).await;
-                                info!("Client disconnected from named pipe");
+                            // Keep blocking unauthenticated capture off the accept loop and
+                            // retain the connection slot until the work actually completes.
+                            let capture = spawn_bounded_capture(permit, move || {
+                                let client = PipeClient::from_connected_pipe(&server);
+                                (server, client)
+                            });
+                            let (_permit, server, client) =
+                                match tokio::time::timeout_at(connection_deadline, capture).await {
+                                Ok(Ok((permit, (server, Ok(client))))) => (permit, server, client),
+                                Ok(Ok((_permit, (_server, Err(error))))) => {
+                                    warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                                    return;
+                                }
+                                Ok(Err(error)) => {
+                                    error!(
+                                        error = format!("{error:#}"),
+                                        "Named pipe client identity capture task failed"
+                                    );
+                                    return;
+                                }
+                                Err(_) => {
+                                    warn!("Closed named pipe connection: client identity capture deadline exceeded");
+                                    return;
+                                }
                             };
 
-                            // Enforce a deadline so idle or slow clients cannot pin
-                            // a connection slot indefinitely.
-                            if tokio::time::timeout(CONNECTION_DEADLINE, serve).await.is_err() {
-                                warn!("Closed named pipe connection: deadline exceeded");
+                            info!("Client connected to named pipe");
+                            let (policy_write_deadline, mut policy_write_authorized) = tokio::sync::watch::channel(false);
+                            let router = build_router_for_client_with_policy_write_deadline(
+                                state,
+                                client,
+                                policy_write_deadline,
+                            );
+                            let serve = serve_connection(server, router);
+                            tokio::pin!(serve);
+                            let mut policy_write_is_authorized = false;
+                            let mut deadline = connection_deadline;
+                            loop {
+                                tokio::select! {
+                                    () = &mut serve => break,
+                                    () = tokio::time::sleep_until(deadline) => {
+                                        if policy_write_is_authorized {
+                                            warn!("Closed named pipe policy replacement: deadline exceeded");
+                                        } else {
+                                            warn!("Closed named pipe connection: deadline exceeded");
+                                        }
+                                        break;
+                                    }
+                                    result = policy_write_authorized.changed(), if !policy_write_is_authorized => {
+                                        if result.is_ok() && *policy_write_authorized.borrow_and_update() {
+                                            policy_write_is_authorized = true;
+                                            deadline = tokio::time::Instant::now() + POLICY_CONSENT_CONNECTION_DEADLINE;
+                                        }
+                                    }
+                                }
                             }
+                            info!("Client disconnected from named pipe");
                         });
                     }
                     Err(error) => {
@@ -199,6 +228,12 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn connection_deadlines_preserve_short_untrusted_and_long_authorized_bounds() {
+        assert_eq!(CONNECTION_DEADLINE, Duration::from_secs(30));
+        assert_eq!(POLICY_CONSENT_CONNECTION_DEADLINE, Duration::from_secs(120));
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn timed_out_capture_keeps_its_permit_until_blocking_work_finishes() {

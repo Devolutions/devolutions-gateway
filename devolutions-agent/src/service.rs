@@ -21,10 +21,18 @@ use now_package_broker::pipe::DEFAULT_PIPE_NAME;
 use now_package_broker::task::{BrokerTask, BrokerTaskConfig};
 use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
+#[cfg(windows)]
+use windows_registry::{Key, LOCAL_MACHINE};
 
 pub(crate) const SERVICE_NAME: &str = "devolutions-agent";
 pub(crate) const DISPLAY_NAME: &str = "Devolutions Agent";
 pub(crate) const DESCRIPTION: &str = "Devolutions Agent service";
+#[cfg(windows)]
+const POLICY_CONSENT_DISCOVERY_KEY: &str = r"SOFTWARE\Devolutions\Agent\PolicyConsentHelper";
+#[cfg(windows)]
+const POLICY_CONSENT_BROKER_PIPE_NAME_VALUE: &str = "BrokerPipeName";
+#[cfg(all(windows, target_pointer_width = "64"))]
+const KEY_WOW64_32KEY: u32 = 0x0200;
 
 struct TasksCtx {
     /// Spawned service tasks
@@ -226,12 +234,19 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                 );
             }
 
+            let pipe_name = conf
+                .package_broker
+                .pipe_name
+                .clone()
+                .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned());
+            if let Err(error) = publish_policy_consent_broker_pipe_name(&pipe_name) {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Policy consent helper cannot discover the configured broker pipe"
+                );
+            }
             let broker_config = BrokerTaskConfig {
-                pipe_name: conf
-                    .package_broker
-                    .pipe_name
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned()),
+                pipe_name,
                 policy_path: conf.package_broker.policy_path.clone(),
                 // The bypass only takes effect in builds with the development-only
                 // `dev-skip-broker-signature` cargo feature, never in shipped builds.
@@ -270,4 +285,62 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
         tasks,
         service_event_tx,
     })
+}
+
+#[cfg(windows)]
+fn publish_policy_consent_broker_pipe_name(pipe_name: &str) -> anyhow::Result<()> {
+    let key = LOCAL_MACHINE
+        .options()
+        .read()
+        .write()
+        .open(POLICY_CONSENT_DISCOVERY_KEY)
+        .context("open policy consent helper discovery key")?;
+    publish_policy_consent_broker_pipe_name_to(&key, pipe_name)?;
+
+    // A 32-bit UniGetUI process reads HKLM\Software through WOW6432Node, while the
+    // 64-bit Agent service naturally opens the native view. Keep configured pipe
+    // discovery synchronized with the MSI's dual-view contract.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let wow64_key = LOCAL_MACHINE
+            .options()
+            .read()
+            .write()
+            .access(KEY_WOW64_32KEY)
+            .open(POLICY_CONSENT_DISCOVERY_KEY)
+            .context("open 32-bit policy consent helper discovery key")?;
+        publish_policy_consent_broker_pipe_name_to(&wow64_key, pipe_name)
+            .context("publish configured policy consent helper broker pipe to 32-bit registry view")?;
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn publish_policy_consent_broker_pipe_name_to(key: &Key, pipe_name: &str) -> anyhow::Result<()> {
+    key.set_string(POLICY_CONSENT_BROKER_PIPE_NAME_VALUE, pipe_name)
+        .context("publish configured policy consent helper broker pipe")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use windows_registry::CURRENT_USER;
+
+    use super::*;
+
+    #[test]
+    fn configured_broker_pipe_is_published_to_writable_discovery_key() {
+        let path = format!(r"Software\Devolutions\Agent\Tests\{}", uuid::Uuid::new_v4().as_simple());
+        let key = CURRENT_USER.create(&path).expect("create temporary discovery key");
+        let pipe_name = r"\\.\pipe\custom-broker";
+
+        publish_policy_consent_broker_pipe_name_to(&key, pipe_name).expect("publish configured broker pipe");
+
+        assert_eq!(
+            key.get_string(POLICY_CONSENT_BROKER_PIPE_NAME_VALUE)
+                .expect("read published broker pipe"),
+            pipe_name
+        );
+        CURRENT_USER.remove_tree(&path).expect("remove temporary discovery key");
+    }
 }

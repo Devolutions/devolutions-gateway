@@ -77,6 +77,10 @@ internal class Program
 
     private static string DevolutionsAgentExePath => ResolveArtifact("DAGENT_EXECUTABLE", "..\\..\\target\\debug\\devolutions-agent.exe");
 
+    private static string DevolutionsAgentPolicyConsentPath => ResolveArtifact(
+        "DAGENT_POLICY_CONSENT_HELPER",
+        "..\\AgentPolicyConsent\\bin\\Release\\net10.0-windows\\win-x64\\publish\\DevolutionsAgentPolicyConsent.exe");
+
     private static string DevolutionsDesktopAgentPath
     {
         // ReSharper disable once ArrangeAccessorOwnerBody
@@ -122,6 +126,12 @@ internal class Program
             return version;
         }
     }
+
+    // The MSI version drops the "20" prefix; discovery restores the calendar-year product version.
+    private static Version DevolutionsAgentProductVersion => new(
+        DevolutionsAgentVersion.Major + 2000,
+        DevolutionsAgentVersion.Minor,
+        DevolutionsAgentVersion.Build);
 
     private static WixSharp.Platform TargetPlatform
     {
@@ -298,6 +308,10 @@ internal class Program
                     new (Features.AGENT_FEATURE, DevolutionsMultiPwshExe)
                     {
                         TargetFileName = "multi-pwsh.exe"
+                    },
+                    new (Features.AGENT_FEATURE, DevolutionsAgentPolicyConsentPath)
+                    {
+                        TargetFileName = Includes.POLICY_CONSENT_EXECUTABLE_NAME
                     }
                 },
                 Dirs = new[]
@@ -325,6 +339,34 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
             },
+            CreatePolicyConsentRegistryValue(
+                "ProtocolVersion",
+                Includes.POLICY_CONSENT_PROTOCOL_VERSION,
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "ExecutableName",
+                Includes.POLICY_CONSENT_EXECUTABLE_NAME,
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "ExecutablePath",
+                $"[{AgentProperties.InstallDir}]{Includes.POLICY_CONSENT_EXECUTABLE_NAME}",
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "ProductName",
+                Includes.POLICY_CONSENT_PRODUCT_NAME,
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "ProductVersion",
+                DevolutionsAgentProductVersion.ToString(),
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "BrokerPipeName",
+                Includes.POLICY_CONSENT_DEFAULT_BROKER_PIPE_NAME,
+                Use64BitRegistryView(project.Platform)),
+            CreatePolicyConsentRegistryValue(
+                "CurrentUiSignerSpkiSha256",
+                Includes.POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256,
+                Use64BitRegistryView(project.Platform)),
             new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]{Includes.DESKTOP_DIRECTORY_NAME}\\{Includes.DESKTOP_EXECUTABLE_NAME}")
             {
                 Win64 = project.Platform == Platform.x64,
@@ -351,6 +393,9 @@ internal class Program
             },
             CreateEventLogSourceRegistryValue(project.Platform == Platform.x64),
         };
+        project.RegValues = project.RegValues
+            .Concat(CreatePolicyConsentRegistryValuesFor32BitConsumers(project.Platform, DevolutionsAgentProductVersion))
+            .ToArray();
 
         List<Property> projectProperties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToList();
 
@@ -434,6 +479,66 @@ internal class Program
             Win64 = win64,
             RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
         };
+
+    internal static RegValue CreatePolicyConsentRegistryValue(string name, string value, bool win64) =>
+        new(
+            RegistryHive.LocalMachine,
+            $"Software\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\\PolicyConsentHelper",
+            name,
+            value)
+        {
+            AttributesDefinition = win64 ? "Type=string; Component:Win64=yes" : "Type=string",
+            Win64 = win64,
+            RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
+            Feature = Features.AGENT_FEATURE,
+        };
+
+    // 64-bit Agent MSIs publish discovery in both native and WOW6432Node views so a
+    // 32-bit UniGetUI consumer can discover the same protected helper.
+    internal static bool Use64BitRegistryView(Platform? platform) =>
+        platform is Platform.x64 or Platform.arm64;
+
+    internal static IEnumerable<RegValue> CreatePolicyConsentRegistryValuesFor32BitConsumers(
+        Platform? platform,
+        Version productVersion)
+    {
+        if (!Use64BitRegistryView(platform))
+        {
+            return [];
+        }
+
+        return
+        [
+            CreatePolicyConsentRegistryValue(
+                "ProtocolVersion",
+                Includes.POLICY_CONSENT_PROTOCOL_VERSION,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ExecutableName",
+                Includes.POLICY_CONSENT_EXECUTABLE_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ExecutablePath",
+                $"[{AgentProperties.InstallDir}]{Includes.POLICY_CONSENT_EXECUTABLE_NAME}",
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ProductName",
+                Includes.POLICY_CONSENT_PRODUCT_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "ProductVersion",
+                productVersion.ToString(),
+                false),
+            CreatePolicyConsentRegistryValue(
+                "BrokerPipeName",
+                Includes.POLICY_CONSENT_DEFAULT_BROKER_PIPE_NAME,
+                false),
+            CreatePolicyConsentRegistryValue(
+                "CurrentUiSignerSpkiSha256",
+                Includes.POLICY_CONSENT_CURRENT_UI_SIGNER_SPKI_SHA256,
+                false),
+        ];
+    }
 
     private static void Project_UnhandledException(ExceptionEventArgs e)
     {
