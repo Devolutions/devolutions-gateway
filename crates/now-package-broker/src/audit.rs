@@ -417,7 +417,7 @@ pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState
 fn bounded(mut value: String, max_bytes: usize) -> String {
     value = value
         .chars()
-        .map(|character| if character.is_control() { ' ' } else { character })
+        .map(|character| if is_audit_control(character) { ' ' } else { character })
         .collect();
     if value.len() <= max_bytes {
         return value;
@@ -430,6 +430,14 @@ fn bounded(mut value: String, max_bytes: usize) -> String {
     value.truncate(end);
     value.push_str(SUFFIX);
     value
+}
+
+fn is_audit_control(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+        )
 }
 
 fn bounded_path(path: &Path) -> PathBuf {
@@ -492,11 +500,14 @@ mod tests {
 
     #[test]
     fn audit_text_removes_control_characters_before_truncation() {
-        let value = format!("injected\r\n\t\0{}", "é".repeat(MAX_POLICY_ID_BYTES));
+        let value = format!(
+            "injected\r\n\t\0\u{061c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}\u{202b}\u{202c}\u{202d}\u{202e}\u{2066}\u{2067}\u{2068}\u{2069}{}",
+            "é".repeat(MAX_POLICY_ID_BYTES)
+        );
         let bounded = bounded(value, MAX_POLICY_ID_BYTES);
         assert!(bounded.len() <= MAX_POLICY_ID_BYTES);
         assert!(bounded.ends_with("..."));
-        assert!(!bounded.chars().any(char::is_control));
+        assert!(!bounded.chars().any(is_audit_control));
     }
 
     #[test]
