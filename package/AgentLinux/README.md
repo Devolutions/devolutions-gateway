@@ -31,6 +31,12 @@ docker run --rm `
 | `PSU_DISPLAY_NAME` | `Devolutions Agent Linux` |
 | `PSU_POWERSHELL_EXECUTABLE` | `/var/lib/devolutions-agent/.pwsh/bin/pwsh` |
 
+Before building, authenticate to Docker Hardened Images:
+
+```powershell
+docker login dhi.io
+```
+
 Build one image locally:
 
 ```powershell
