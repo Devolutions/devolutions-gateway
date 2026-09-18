@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use agent_sysevent_codes as policy_events;
 use now_policy_api::{PolicyManagementState, PolicyReplacementOperation};
+use sysevent::Entry;
 #[cfg(not(test))]
 use sysevent::Severity;
 #[cfg(all(not(test), not(debug_assertions)))]
@@ -75,7 +77,7 @@ impl FailureReason {
 }
 
 trait AuditRecorder: Send + Sync {
-    fn record(&self, entry: sysevent::Entry);
+    fn record(&self, entry: Entry);
 }
 
 fn default_recorder() -> Arc<dyn AuditRecorder> {
@@ -101,7 +103,7 @@ fn default_recorder() -> Arc<dyn AuditRecorder> {
 
 #[cfg(test)]
 std::thread_local! {
-    static TEST_EVENTS: std::cell::RefCell<Vec<sysevent::Entry>> = const { std::cell::RefCell::new(Vec::new()) };
+    static TEST_EVENTS: std::cell::RefCell<Vec<Entry>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
@@ -109,13 +111,13 @@ struct TestRecorder;
 
 #[cfg(test)]
 impl AuditRecorder for TestRecorder {
-    fn record(&self, entry: sysevent::Entry) {
+    fn record(&self, entry: Entry) {
         TEST_EVENTS.with(|events| events.borrow_mut().push(entry));
     }
 }
 
 #[cfg(test)]
-pub(crate) fn take_test_events() -> Vec<sysevent::Entry> {
+pub(crate) fn take_test_events() -> Vec<Entry> {
     TEST_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
 }
 
@@ -124,7 +126,7 @@ struct TracingRecorder;
 
 #[cfg(not(test))]
 impl AuditRecorder for TracingRecorder {
-    fn record(&self, entry: sysevent::Entry) {
+    fn record(&self, entry: Entry) {
         trace_entry(&entry);
     }
 }
@@ -170,7 +172,7 @@ impl AuditRecorder for SystemRecorder {
 }
 
 #[cfg(not(test))]
-fn trace_entry(entry: &sysevent::Entry) {
+fn trace_entry(entry: &Entry) {
     let code = entry.event_code;
     let message = &entry.message;
     let fields = &entry.fields;
@@ -201,18 +203,18 @@ fn event_log_worker(receiver: &std::sync::mpsc::Receiver<sysevent::Entry>) {
 
 #[cfg(test)]
 #[derive(Default)]
-pub(crate) struct RecordingAudit(parking_lot::Mutex<Vec<sysevent::Entry>>);
+pub(crate) struct RecordingAudit(parking_lot::Mutex<Vec<Entry>>);
 
 #[cfg(test)]
 impl RecordingAudit {
-    pub(crate) fn events(&self) -> Vec<sysevent::Entry> {
+    pub(crate) fn events(&self) -> Vec<Entry> {
         self.0.lock().clone()
     }
 }
 
 #[cfg(test)]
 impl AuditRecorder for RecordingAudit {
-    fn record(&self, entry: sysevent::Entry) {
+    fn record(&self, entry: Entry) {
         self.0.lock().push(entry);
     }
 }
@@ -228,7 +230,7 @@ struct WriteAuditState {
 impl Drop for WriteAuditState {
     fn drop(&mut self) {
         if !self.terminal_recorded.swap(true, Ordering::AcqRel) {
-            self.record(sysevent_codes::policy_write_denied(
+            self.record(policy_events::policy_write_denied(
                 &self.actor_sid,
                 &self.actor_exe,
                 INTENT,
@@ -255,7 +257,7 @@ impl WriteAudit {
             terminal_recorded: AtomicBool::new(false),
             recorder,
         });
-        state.record(sysevent_codes::policy_write_attempted(
+        state.record(policy_events::policy_write_attempted(
             &state.actor_sid,
             &state.actor_exe,
             INTENT,
@@ -274,13 +276,7 @@ impl WriteAudit {
 
     pub(crate) fn denied(&self, reason: DenialReason) {
         self.finish(|state| {
-            sysevent_codes::policy_write_denied(
-                &state.actor_sid,
-                &state.actor_exe,
-                INTENT,
-                &state.path,
-                reason.as_str(),
-            )
+            policy_events::policy_write_denied(&state.actor_sid, &state.actor_exe, INTENT, &state.path, reason.as_str())
         });
     }
 
@@ -298,7 +294,9 @@ impl WriteAudit {
         };
         self.finish(|state| {
             if operation == PolicyReplacementOperation::Create {
-                sysevent_codes::policy_create_failed(
+                policy_events::policy_write_failed(
+                    policy_events::POLICY_CREATE_FAILED,
+                    "Policy creation failed",
                     &state.actor_sid,
                     &state.actor_exe,
                     INTENT,
@@ -308,7 +306,9 @@ impl WriteAudit {
                     reason.as_str(),
                 )
             } else {
-                sysevent_codes::policy_change_failed(
+                policy_events::policy_write_failed(
+                    policy_events::POLICY_CHANGE_FAILED,
+                    "Policy change failed",
                     &state.actor_sid,
                     &state.actor_exe,
                     INTENT,
@@ -347,7 +347,9 @@ impl WriteAudit {
         };
         self.finish(|state| {
             if operation == PolicyReplacementOperation::Create {
-                sysevent_codes::policy_create_succeeded(
+                policy_events::policy_write_succeeded(
+                    policy_events::POLICY_CREATE_SUCCEEDED,
+                    "Policy creation succeeded",
                     &state.actor_sid,
                     &state.actor_exe,
                     path,
@@ -360,7 +362,9 @@ impl WriteAudit {
                     outcome,
                 )
             } else {
-                sysevent_codes::policy_change_succeeded(
+                policy_events::policy_write_succeeded(
+                    policy_events::POLICY_CHANGE_SUCCEEDED,
+                    "Policy change succeeded",
                     &state.actor_sid,
                     &state.actor_exe,
                     path,
@@ -376,7 +380,7 @@ impl WriteAudit {
         });
     }
 
-    fn finish(&self, entry: impl FnOnce(&WriteAuditState) -> sysevent::Entry) {
+    fn finish(&self, entry: impl FnOnce(&WriteAuditState) -> Entry) {
         if self
             .0
             .terminal_recorded
@@ -389,13 +393,13 @@ impl WriteAudit {
 }
 
 impl WriteAuditState {
-    fn record(&self, entry: sysevent::Entry) {
+    fn record(&self, entry: Entry) {
         self.recorder.record(entry);
     }
 }
 
 pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u32) {
-    RECORDER.record(sysevent_codes::policy_external_change_applied(
+    RECORDER.record(policy_events::policy_external_change_applied(
         bounded_path(path),
         bounded(new_id.to_owned(), MAX_POLICY_ID_BYTES),
         new_revision,
@@ -408,7 +412,7 @@ pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState
         PolicyManagementState::Missing => "missing",
         PolicyManagementState::Invalid => "invalid",
     };
-    RECORDER.record(sysevent_codes::policy_external_change_rejected(
+    RECORDER.record(policy_events::policy_external_change_rejected(
         bounded_path(path),
         reason,
     ));
@@ -474,8 +478,8 @@ mod tests {
                 .map(|entry| entry.event_code)
                 .collect::<Vec<_>>(),
             [
-                Some(sysevent_codes::POLICY_WRITE_ATTEMPTED),
-                Some(sysevent_codes::POLICY_WRITE_DENIED)
+                Some(policy_events::POLICY_WRITE_ATTEMPTED),
+                Some(policy_events::POLICY_WRITE_DENIED)
             ]
         );
     }
@@ -489,7 +493,7 @@ mod tests {
         drop(retained);
         let events = recorder.events();
         assert_eq!(events.len(), 2);
-        assert_eq!(events[1].event_code, Some(sysevent_codes::POLICY_WRITE_DENIED));
+        assert_eq!(events[1].event_code, Some(policy_events::POLICY_WRITE_DENIED));
         assert!(
             events[1]
                 .fields
@@ -552,23 +556,23 @@ mod tests {
         for (operation, failure_code, success_code) in [
             (
                 PolicyReplacementOperation::Create,
-                sysevent_codes::POLICY_CREATE_FAILED,
-                sysevent_codes::POLICY_CREATE_SUCCEEDED,
+                policy_events::POLICY_CREATE_FAILED,
+                policy_events::POLICY_CREATE_SUCCEEDED,
             ),
             (
                 PolicyReplacementOperation::Update,
-                sysevent_codes::POLICY_CHANGE_FAILED,
-                sysevent_codes::POLICY_CHANGE_SUCCEEDED,
+                policy_events::POLICY_CHANGE_FAILED,
+                policy_events::POLICY_CHANGE_SUCCEEDED,
             ),
             (
                 PolicyReplacementOperation::Repair,
-                sysevent_codes::POLICY_CHANGE_FAILED,
-                sysevent_codes::POLICY_CHANGE_SUCCEEDED,
+                policy_events::POLICY_CHANGE_FAILED,
+                policy_events::POLICY_CHANGE_SUCCEEDED,
             ),
             (
                 PolicyReplacementOperation::ReplaceIdentity,
-                sysevent_codes::POLICY_CHANGE_FAILED,
-                sysevent_codes::POLICY_CHANGE_SUCCEEDED,
+                policy_events::POLICY_CHANGE_FAILED,
+                policy_events::POLICY_CHANGE_SUCCEEDED,
             ),
         ] {
             let (failed, failed_recorder) = test_audit();
