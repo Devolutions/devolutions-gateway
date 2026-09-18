@@ -199,7 +199,10 @@ mod tests {
         let mut stale_request = request(&store, PolicyReplacementOperation::Update, raw.clone());
         storage.set_disk_state(Some(policy("retargeted", 9)), false, 9);
         stale_request.conflict_handling = PolicyConflictHandling::ConfirmOverwrite;
-        let stale_error = store.replace(stale_request).await.expect_err("stale token rejected");
+        let stale_error = store
+            .replace_for_tests(stale_request)
+            .await
+            .expect_err("stale token rejected");
         assert_eq!(stale_error.code, ErrorCode::StalePolicyStoreToken);
         assert!(stale_error.management.is_some());
         assert_eq!(
@@ -208,7 +211,10 @@ mod tests {
         );
         let mut tampered = request(&store, PolicyReplacementOperation::Update, raw);
         tampered.draft["Metadata"]["Publisher"] = "Tampered".into();
-        let receipt_error = store.replace(tampered).await.expect_err("tampered draft rejected");
+        let receipt_error = store
+            .replace_for_tests(tampered)
+            .await
+            .expect_err("tampered draft rejected");
         assert_eq!(receipt_error.code, ErrorCode::ValidationFailed);
     }
     #[tokio::test]
@@ -253,12 +259,15 @@ mod tests {
         );
         let mut replacement = request(&store, PolicyReplacementOperation::Create, risky);
         let error = store
-            .replace(replacement.clone())
+            .replace_for_tests(replacement.clone())
             .await
             .expect_err("warning must be acknowledged");
         assert_eq!(error.code, ErrorCode::WarningConfirmationRequired);
         replacement.warnings_acknowledged = true;
-        store.replace(replacement).await.expect("acknowledged warning succeeds");
+        store
+            .replace_for_tests(replacement)
+            .await
+            .expect("acknowledged warning succeeds");
     }
     #[tokio::test]
     async fn canonical_sensitive_warnings_accept_the_original_receipt() {
@@ -317,13 +326,13 @@ mod tests {
                     let mut changed = replacement.clone();
                     changed.draft["Rules"][0]["Constraints"]["AllowSkipHashCheck"] = serde_json::json!(false);
                     let error = store
-                        .replace(changed)
+                        .replace_for_tests(changed)
                         .await
                         .expect_err("meaningful option change invalidates receipt");
                     assert_eq!(error.code, ErrorCode::ValidationFailed);
                 }
                 store
-                    .replace(replacement)
+                    .replace_for_tests(replacement)
                     .await
                     .unwrap_or_else(|error| panic!("{option} via {explicit} failed: {error:?}"));
             }
@@ -334,21 +343,21 @@ mod tests {
         let create = PolicyStore::for_tests(None);
         let raw = serde_json::to_value(draft("created")).expect("serialize draft");
         let created = create
-            .replace(request(&create, PolicyReplacementOperation::Create, raw))
+            .replace_for_tests(request(&create, PolicyReplacementOperation::Create, raw))
             .await
             .expect("create succeeds");
         assert_eq!(created.policy.metadata.revision, 1);
         let update = PolicyStore::for_tests(Some(policy("current", 7)));
         let raw = serde_json::to_value(draft("current")).expect("serialize draft");
         let updated = update
-            .replace(request(&update, PolicyReplacementOperation::Update, raw))
+            .replace_for_tests(request(&update, PolicyReplacementOperation::Update, raw))
             .await
             .expect("update succeeds");
         assert_eq!(updated.policy.metadata.revision, 8);
         let replace = PolicyStore::for_tests(Some(policy("current", 7)));
         let raw = serde_json::to_value(draft("replacement")).expect("serialize draft");
         let replaced = replace
-            .replace(request(&replace, PolicyReplacementOperation::ReplaceIdentity, raw))
+            .replace_for_tests(request(&replace, PolicyReplacementOperation::ReplaceIdentity, raw))
             .await
             .expect("identity replacement succeeds");
         assert_eq!(replaced.policy.metadata.revision, 1);
@@ -360,14 +369,14 @@ mod tests {
         );
         let raw = serde_json::to_value(draft("repaired")).expect("serialize draft");
         let repaired = repair
-            .replace(request(&repair, PolicyReplacementOperation::Repair, raw))
+            .replace_for_tests(request(&repair, PolicyReplacementOperation::Repair, raw))
             .await
             .expect("repair succeeds");
         assert_eq!(repaired.policy.metadata.revision, 1);
         let wrong_identity = PolicyStore::for_tests(Some(policy("current", 1)));
         let raw = serde_json::to_value(draft("different")).expect("serialize draft");
         let error = wrong_identity
-            .replace(request(&wrong_identity, PolicyReplacementOperation::Update, raw))
+            .replace_for_tests(request(&wrong_identity, PolicyReplacementOperation::Update, raw))
             .await
             .expect_err("update must preserve identity");
         assert_eq!(error.code, ErrorCode::Conflict);
@@ -377,7 +386,7 @@ mod tests {
         let store = PolicyStore::for_tests(Some(policy("current", 1)));
         let raw = serde_json::to_value(draft("current")).expect("serialize draft");
         let first = request(&store, PolicyReplacementOperation::Update, raw);
-        let (first, second) = tokio::join!(store.replace(first.clone()), store.replace(first));
+        let (first, second) = tokio::join!(store.replace_for_tests(first.clone()), store.replace_for_tests(first));
         let outcomes = [first, second];
         assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
         assert_eq!(
@@ -399,7 +408,7 @@ mod tests {
         storage.fail_persist.store(true, std::sync::atomic::Ordering::SeqCst);
         let raw = serde_json::to_value(draft("current")).expect("serialize draft");
         let error = store
-            .replace(request(&store, PolicyReplacementOperation::Update, raw))
+            .replace_for_tests(request(&store, PolicyReplacementOperation::Update, raw))
             .await
             .expect_err("persistence failure");
         assert_eq!(error.code, ErrorCode::PolicyPersistenceFailed);
@@ -470,7 +479,7 @@ mod tests {
                 );
                 replacement.expected_store_token = token;
                 let error = store
-                    .replace(replacement)
+                    .replace_for_tests(replacement)
                     .await
                     .expect_err("monitoring failure blocks PUT");
                 assert_eq!(error.code, ErrorCode::BrokerPaused);

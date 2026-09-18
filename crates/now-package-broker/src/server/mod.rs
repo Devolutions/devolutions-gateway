@@ -407,7 +407,7 @@ impl PackageBrokerServer for BrokerConnection {
         }
         self.state
             .policy_store
-            .replace_audited(request, audit)
+            .replace(request, audit)
             .await
             .map(|success| PolicyReplacementResponse {
                 response_kind: now_policy_api::PolicyReplacementResponseKind,
