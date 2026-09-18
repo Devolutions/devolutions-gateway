@@ -66,11 +66,8 @@ describe('PlaybackClip', () => {
 
   it('waits for pending SourceBuffer work before ending the MediaSource', async () => {
     const clip = new PlaybackClip({
-      type: 'segment-started',
       codec: 'vp8',
       sequence: 0,
-      width: 640,
-      height: 480,
     });
     const mediaSource = FakeMediaSource.latest;
     expect(mediaSource).not.toBeNull();
