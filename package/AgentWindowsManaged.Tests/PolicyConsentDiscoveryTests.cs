@@ -43,17 +43,22 @@ public sealed class PolicyConsentDiscoveryTests
     }
 
     [Theory]
-    [InlineData(Platform.x86, 0)]
-    [InlineData(Platform.x64, 7)]
-    [InlineData(Platform.arm64, 7)]
-    public void NativeAgentMsiPublishesDiscoveryFor32BitConsumers(Platform platform, int expectedCount)
+    [InlineData(Platform.x86, 7)]
+    [InlineData(Platform.x64, 14)]
+    [InlineData(Platform.arm64, 14)]
+    public void AgentMsiPublishesDiscoveryInRequiredRegistryViews(
+        Platform platform,
+        int expectedCount)
     {
         Type program = System.Reflection.Assembly
             .Load("DevolutionsAgent")
             .GetType("DevolutionsAgent.Program", throwOnError: true);
         MethodInfo method = program.GetMethod(
-            "CreatePolicyConsentRegistryValuesFor32BitConsumers",
-            BindingFlags.Static | BindingFlags.NonPublic);
+            "CreatePolicyConsentRegistryValues",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            binder: null,
+            types: [typeof(Platform?), typeof(Version)],
+            modifiers: null);
 
         RegValue[] values = Assert.IsAssignableFrom<System.Collections.Generic.IEnumerable<RegValue>>(
                 method.Invoke(null, [platform, new Version(2026, 3, 0)]))
@@ -62,8 +67,51 @@ public sealed class PolicyConsentDiscoveryTests
         Assert.Equal(expectedCount, values.Length);
         Assert.All(values, value =>
         {
-            Assert.False(value.Win64);
             Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
+        });
+        Assert.Equal(
+            new[]
+            {
+                "ProtocolVersion",
+                "ExecutableName",
+                "ExecutablePath",
+                "ProductName",
+                "ProductVersion",
+                "BrokerPipeName",
+                "CurrentUiSignerSpkiSha256",
+            },
+            values.Take(7).Select(value => value.Name));
+        Assert.Equal(
+            new[]
+            {
+                "2.0",
+                "DevolutionsAgentPolicyConsent.exe",
+                "[INSTALLDIR]DevolutionsAgentPolicyConsent.exe",
+                "Devolutions Agent Policy Consent",
+                "2026.3.0",
+                @"\\.\pipe\Devolutions.Now.PackageBroker.v1",
+                "e43ed3368eaabff61abc79eb338cba9da88a80d93b751735ff417f26afa579a8",
+            },
+            values.Take(7).Select(value => value.Value));
+        Assert.All(values.Take(7), value =>
+        {
+            Assert.Equal(platform != Platform.x86, value.Win64);
+            Assert.Equal(
+                platform == Platform.x86 ? "Type=string" : "Type=string; Component:Win64=yes",
+                value.AttributesDefinition);
+        });
+
+        if (platform == Platform.x86)
+        {
+            return;
+        }
+
+        Assert.Equal(values.Take(7).Select(value => value.Name), values.Skip(7).Select(value => value.Name));
+        Assert.Equal(values.Take(7).Select(value => value.Value), values.Skip(7).Select(value => value.Value));
+        Assert.All(values.Skip(7), value =>
+        {
+            Assert.False(value.Win64);
+            Assert.Equal("Type=string", value.AttributesDefinition);
         });
     }
 
