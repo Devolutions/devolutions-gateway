@@ -83,7 +83,7 @@ trait AuditRecorder: Send + Sync {
 fn default_recorder() -> Arc<dyn AuditRecorder> {
     #[cfg(test)]
     {
-        Arc::new(mock::TestRecorder)
+        Arc::new(tests::TestRecorder)
     }
     #[cfg(all(not(test), debug_assertions))]
     {
@@ -412,7 +412,7 @@ const fn operation_name(operation: PolicyReplacementOperation) -> &'static str {
 }
 
 #[cfg(test)]
-pub(crate) mod mock {
+pub(crate) mod tests {
     use super::*;
 
     std::thread_local! {
@@ -456,15 +456,10 @@ pub(crate) mod mock {
         );
         (audit, recorder)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_audit() -> (WriteAudit, Arc<mock::Recorder>) {
+    fn test_audit() -> (WriteAudit, Arc<Recorder>) {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
-        mock::begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
+        begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
     }
 
     #[test]
@@ -519,7 +514,7 @@ mod tests {
     fn audit_values_are_bounded_and_fields_are_allowlisted() {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
         let long = "é".repeat(MAX_PATH_BYTES);
-        let (audit, recorder) = mock::begin(&sid, Path::new(&long), Path::new(&long));
+        let (audit, recorder) = begin(&sid, Path::new(&long), Path::new(&long));
         audit.succeeded_at(
             Path::new(&long),
             Some(&long),
