@@ -32,6 +32,12 @@ enum SessionKind {
     Remote,
 }
 
+impl SessionKind {
+    fn is_remote(self) -> bool {
+        matches!(self, Self::Remote)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SessionReadiness {
     WaitingForLogon,
@@ -89,7 +95,6 @@ impl GatewaySession {
         }
     }
 
-    #[allow(dead_code)]
     fn kind(&self) -> SessionKind {
         self.kind
     }
@@ -99,8 +104,13 @@ impl GatewaySession {
         &self.session
     }
 
+    /// Whether the Devolutions Session process should be started for this session.
+    ///
+    /// The process exists to host the DVC handler, which only a remote session can serve: a
+    /// console session has no RDP client to open the dynamic virtual channel against, so starting
+    /// the process there yields one that fails the open with `ERROR_FILE_NOT_FOUND` and exits.
     fn is_ready_to_start(&self, event: SessionReadinessEvent) -> bool {
-        self.readiness.is_satisfied_by(event)
+        self.kind().is_remote() && self.readiness.is_satisfied_by(event)
     }
 
     fn set_session_ready(&mut self) {
@@ -196,10 +206,12 @@ impl Task for SessionManager {
                         AgentServiceEvent::SessionConnect(id) => {
                             info!(%id, "Session connected");
                             let mut ctx = ctx.write().await;
+                            // The session is registered so that a later upgrade to a remote
+                            // session is tracked, but the session process is only ever started for
+                            // remote sessions (initiated via RDP), because the DVC handler it hosts
+                            // is only reachable from one. `GatewaySession::is_ready_to_start`
+                            // enforces that.
                             ctx.register_session(&id, SessionKind::Console, SessionReadiness::WaitingForLogon);
-                            // We only start the session process for remote sessions (initiated
-                            // via RDP), as session process with DVC handler is only needed for remote
-                            // sessions.
                         }
                         AgentServiceEvent::SessionDisconnect(id) => {
                             info!(%id, "Session disconnected");
@@ -389,7 +401,11 @@ fn session_app_path() -> Utf8PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionReadiness, SessionReadinessEvent};
+    use super::{GatewaySession, Session, SessionKind, SessionReadiness, SessionReadinessEvent};
+
+    fn make_session(kind: SessionKind, readiness: SessionReadiness) -> GatewaySession {
+        GatewaySession::new(Session::new(1), kind, readiness)
+    }
 
     #[test]
     fn new_user_session_waits_for_logon() {
@@ -413,5 +429,36 @@ mod tests {
     fn unknown_session_user_state_accepts_logon_or_unlock() {
         assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Logon));
         assert!(SessionReadiness::WaitingForLogonOrUnlock.is_satisfied_by(SessionReadinessEvent::Unlock));
+    }
+
+    #[test]
+    fn console_session_never_starts_the_session_process() {
+        for readiness in [
+            SessionReadiness::WaitingForLogon,
+            SessionReadiness::WaitingForUnlock,
+            SessionReadiness::WaitingForLogonOrUnlock,
+        ] {
+            let session = make_session(SessionKind::Console, readiness);
+
+            assert!(!session.is_ready_to_start(SessionReadinessEvent::Logon));
+            assert!(!session.is_ready_to_start(SessionReadinessEvent::Unlock));
+        }
+    }
+
+    #[test]
+    fn remote_session_starts_on_its_readiness_event() {
+        let session = make_session(SessionKind::Remote, SessionReadiness::WaitingForLogon);
+        assert!(session.is_ready_to_start(SessionReadinessEvent::Logon));
+
+        let session = make_session(SessionKind::Remote, SessionReadiness::WaitingForUnlock);
+        assert!(session.is_ready_to_start(SessionReadinessEvent::Unlock));
+    }
+
+    #[test]
+    fn ready_remote_session_is_not_started_twice() {
+        let session = make_session(SessionKind::Remote, SessionReadiness::Ready);
+
+        assert!(!session.is_ready_to_start(SessionReadinessEvent::Logon));
+        assert!(!session.is_ready_to_start(SessionReadinessEvent::Unlock));
     }
 }
