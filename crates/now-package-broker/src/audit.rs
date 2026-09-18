@@ -457,6 +457,22 @@ pub(crate) mod tests {
         (audit, recorder)
     }
 
+    pub(crate) fn noop() -> WriteAudit {
+        let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
+        WriteAudit::begin_with_recorder(
+            &sid,
+            Path::new(r"C:\test-client.exe"),
+            Path::new(r"C:\policy.json"),
+            Arc::new(NoopRecorder),
+        )
+    }
+
+    struct NoopRecorder;
+
+    impl AuditRecorder for NoopRecorder {
+        fn record(&self, _: Entry) {}
+    }
+
     fn test_audit() -> (WriteAudit, Arc<Recorder>) {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
         begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
