@@ -6,7 +6,7 @@
 //! 3. Fall back to `enforcement.defaultDecision`
 
 use now_policy::{Decision, PolicyDocument};
-use now_policy_api::PackageRequest;
+use now_policy_api::{Elevation, PackageRequest, Scope};
 
 mod constraints;
 mod matching;
@@ -110,5 +110,13 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
         decision: winner.2,
         rule_id: winner.0.to_owned(),
         reason: winner.3.to_owned(),
+    }
+}
+
+pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {
+    if request.options.scope == Some(Scope::Machine) || request.client.requested_elevation == Elevation::Elevated {
+        Elevation::Elevated
+    } else {
+        Elevation::Standard
     }
 }

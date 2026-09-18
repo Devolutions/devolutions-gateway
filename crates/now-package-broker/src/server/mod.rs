@@ -1,13 +1,15 @@
 //! Runtime implementation of the shared NOW package broker server facade.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::Json;
+use axum::body::{Body, to_bytes};
 use axum::extract::{Extension, Request, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
@@ -20,7 +22,9 @@ use now_policy_api::{
     PolicyReplacementResponse, PolicyResponse, PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse,
     Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
-use now_policy_server_template::{MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer};
+use now_policy_server_template::{
+    MAX_POLICY_MANAGEMENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer,
+};
 use tracing::{info, trace, warn};
 use win_api_wrappers::identity::sid::Sid;
 
@@ -112,8 +116,175 @@ pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClien
         client: client.clone(),
     });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
+        .layer(middleware::from_fn(reject_duplicate_policy_json_members))
         .layer(middleware::from_fn_with_state(state, authenticate_policy_management))
         .layer(Extension(client))
+}
+
+async fn reject_duplicate_policy_json_members(request: Request, next: Next) -> Response {
+    let is_policy_write = matches!(
+        (request.method(), request.uri().path()),
+        (&Method::POST, "/v1/policy/validate") | (&Method::PUT, "/v1/policy")
+    );
+    if !is_policy_write || !is_json_content_type(request.headers()) {
+        return next.run(request).await;
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = match to_bytes(body, MAX_POLICY_MANAGEMENT_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(error) if body_size_limit_exceeded(&error) => {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(error_response(
+                    ErrorCode::PayloadTooLarge,
+                    "request body exceeds the broker limit",
+                )),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(error_response(
+                    ErrorCode::MalformedDraft,
+                    "request body is not a valid broker document",
+                )),
+            )
+                .into_response();
+        }
+    };
+    if reject_duplicate_json_members(&bytes).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(error_response(
+                ErrorCode::MalformedDraft,
+                "policy request contains duplicate JSON members",
+            )),
+        )
+            .into_response();
+    }
+
+    fn body_size_limit_exceeded(error: &axum::Error) -> bool {
+        std::error::Error::source(error).is_some_and(|source| source.is::<http_body_util::LengthLimitError>())
+    }
+
+    next.run(Request::from_parts(parts, Body::from(bytes))).await
+}
+
+fn is_json_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<mime::Mime>().ok())
+        .is_some_and(|value| {
+            value.type_() == mime::APPLICATION && (value.subtype() == mime::JSON || value.suffix() == Some(mime::JSON))
+        })
+}
+
+fn reject_duplicate_json_members(bytes: &[u8]) -> Result<(), serde_json::Error> {
+    struct UniqueJson;
+
+    impl<'de> serde::de::DeserializeSeed<'de> for UniqueJson {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(self)
+        }
+    }
+
+    impl<'de> serde::de::Visitor<'de> for UniqueJson {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON value without duplicate object members")
+        }
+
+        fn visit_bool<E>(self, _: bool) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_i64<E>(self, _: i64) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_u64<E>(self, _: u64) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_f64<E>(self, _: f64) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_str<E>(self, _: &str) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_none<E>(self) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_unit<E>(self) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(())
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<(), D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(self)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<(), A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            while sequence.next_element_seed(UniqueJson)?.is_some() {}
+            Ok(())
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<(), A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut keys = std::collections::HashSet::new();
+            while let Some(key) = map.next_key::<String>()? {
+                if !keys.insert(key.clone()) {
+                    return Err(serde::de::Error::custom(format!("duplicate JSON member '{key}'")));
+                }
+                map.next_value_seed(UniqueJson)?;
+            }
+            Ok(())
+        }
+    }
+
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    serde::de::DeserializeSeed::deserialize(UniqueJson, &mut deserializer)?;
+    deserializer.end()
 }
 
 async fn authenticate_policy_management(
@@ -385,7 +556,7 @@ impl BrokerState {
                 post_command: request.options.post_operation_command.clone(),
                 effective_user: request.client.effective_user.clone(),
                 user_sid: user_sid.clone(),
-                elevation: request.client.requested_elevation,
+                elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
                 capture_output: request.capture_output,
                 cancel_token: tokio_util::sync::CancellationToken::new(),
@@ -659,9 +830,7 @@ mod tests {
     use axum::http::{Method, Request, StatusCode};
     use axum::response::Response;
     use chrono::Utc;
-    use now_policy::{
-        PackageBrokerPolicy, PolicyEnforcement, PolicyFormatVersion, PolicyMetadata, ResourceId, RulePrecedence,
-    };
+    use now_policy::{PolicyEnforcement, PolicyFormatVersion, PolicyMetadata, ResourceId};
     use now_policy_api as api;
     use tower_service::Service as _;
 
@@ -706,7 +875,6 @@ mod tests {
     fn permissive_policy() -> PolicyDocument {
         PolicyDocument {
             policy_format_version: PolicyFormatVersion::current(),
-            policy_type: PackageBrokerPolicy,
             metadata: PolicyMetadata {
                 id: ResourceId::from("test-policy"),
                 publisher: "Test".to_owned(),
@@ -719,7 +887,6 @@ mod tests {
             },
             enforcement: PolicyEnforcement {
                 default_decision: now_policy::Decision::Allow,
-                rule_precedence: RulePrecedence::PriorityThenDeny,
                 audit_mode: Some(true),
             },
             rules: Vec::new(),
@@ -772,6 +939,118 @@ mod tests {
             .await
             .expect("read response body");
         serde_json::from_slice(&body).expect("response is valid JSON")
+    }
+
+    #[test]
+    fn duplicate_json_members_are_rejected_before_value_deserialization() {
+        for body in [
+            br#"{"Interactive":false,"Interactive":null}"#.as_slice(),
+            br#"{"Match":{"Managers":["Winget"],"Managers":["Choco"]}}"#.as_slice(),
+            br#"{"Rules":[{"Match":{"SourceNames":["winget"],"SourceNames":["store"]}}]}"#.as_slice(),
+        ] {
+            assert!(reject_duplicate_json_members(body).is_err());
+        }
+        assert!(reject_duplicate_json_members(br#"{"Interactive":null,"Match":{"Managers":["Winget"]}}"#).is_ok());
+    }
+
+    #[test]
+    fn policy_json_content_types_match_the_json_extractor() {
+        for content_type in [
+            "application/json",
+            "Application/JSON; charset=utf-8",
+            "application/vnd.now-policy+json",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(axum::http::header::CONTENT_TYPE, content_type.parse().unwrap());
+            assert!(is_json_content_type(&headers), "{content_type}");
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::CONTENT_TYPE, "application/jsonp".parse().unwrap());
+        assert!(!is_json_content_type(&headers));
+    }
+
+    #[cfg(feature = "dev-skip-broker-signature")]
+    #[tokio::test]
+    async fn policy_write_routes_reject_duplicate_members_before_draft_conversion() {
+        let client = PipeClient::test_with_authority(true, true).expect("create elevated test client");
+        let draft = serde_json::json!({
+            "PolicyFormatVersion": "1.0.0",
+            "Metadata": { "Id": "created", "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny" },
+            "Rules": [{ "Id": "rule", "Priority": 0, "Decision": "Deny", "Match": { "Managers": ["Winget"], "Interactive": null }}]
+        });
+        let validation_state = shared_state(None);
+        let valid_validation = serde_json::json!({
+            "RequestKind": "PolicyValidationRequest",
+            "RequestVersion": "1.0",
+            "Draft": draft,
+        });
+        let response = route_json(
+            Arc::clone(&validation_state),
+            client.clone(),
+            Method::POST,
+            "/v1/policy/validate",
+            valid_validation,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let replacement_state = shared_state(None);
+        let replacement_draft = serde_json::json!({
+            "PolicyFormatVersion": "1.0.0",
+            "Metadata": { "Id": "replacement", "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny" },
+            "Rules": [{ "Id": "rule", "Priority": 0, "Decision": "Deny", "Match": { "Managers": ["Winget"], "Interactive": null }}]
+        });
+        let validation = replacement_state.policy_store.validate_draft(&replacement_draft);
+        let valid_replacement = serde_json::json!({
+            "RequestKind": "PolicyReplacementRequest",
+            "RequestVersion": "1.0",
+            "ExpectedStoreToken": replacement_state.policy_store.management_snapshot().store_token,
+            "Operation": "Create",
+            "ConflictHandling": "Reject",
+            "WarningsAcknowledged": false,
+            "Draft": replacement_draft,
+            "ValidationReceipt": validation.validation_receipt.expect("valid receipt"),
+        });
+        let response = route_json(
+            Arc::clone(&replacement_state),
+            client.clone(),
+            Method::PUT,
+            "/v1/policy",
+            valid_replacement,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        for (state, method, path, content_type, body) in [
+            (
+                validation_state,
+                Method::POST,
+                "/v1/policy/validate",
+                "application/vnd.now-policy+json",
+                r#"{"RequestKind":"PolicyValidationRequest","RequestVersion":"1.0","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
+            ),
+            (
+                replacement_state,
+                Method::PUT,
+                "/v1/policy",
+                "Application/JSON; charset=utf-8",
+                r#"{"RequestKind":"PolicyReplacementRequest","RequestVersion":"1.0","ExpectedStoreToken":"invalid","Operation":"Create","ConflictHandling":"Reject","WarningsAcknowledged":false,"ValidationReceipt":"invalid","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
+            ),
+        ] {
+            let response = route_raw(
+                state,
+                client.clone(),
+                method,
+                path,
+                Some(content_type),
+                Body::from(body),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(response_json(response).await["Code"], "MalformedDraft");
+        }
     }
 
     #[cfg(feature = "dev-skip-broker-signature")]
@@ -832,10 +1111,7 @@ mod tests {
             (
                 Method::POST,
                 "/v1/policy/validate",
-                Body::from(vec![
-                    b'x';
-                    now_policy_server_template::MAX_POLICY_MANAGEMENT_BODY_BYTES + 1
-                ]),
+                Body::from(vec![b'x'; MAX_POLICY_MANAGEMENT_BODY_BYTES + 1]),
             ),
             (Method::PUT, "/v1/policy", Body::from("{")),
         ] {
@@ -909,9 +1185,8 @@ mod tests {
 
         let draft = serde_json::json!({
             "PolicyFormatVersion": "1.0.0",
-            "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "created", "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": "Deny" },
             "Rules": []
         });
         let validated = route_json(

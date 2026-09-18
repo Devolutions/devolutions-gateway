@@ -59,8 +59,8 @@ impl PolicyWatcher {
 
     /// Start watching the policy file for changes.
     ///
-    /// This spawns a background task that watches the policy file's parent directory
-    /// and reloads the policy when the file is modified, created, or removed.
+    /// Watches the canonical policy parent directory non-recursively.
+    /// Relevant policy modifications, creations, and removals reload the policy.
     /// The task runs until the shutdown notify is triggered.
     pub(crate) async fn watch(
         self,
@@ -68,7 +68,7 @@ impl PolicyWatcher {
         ready: tokio::sync::oneshot::Sender<Result<(), WatcherFailure>>,
     ) {
         let store = self.0;
-        let path = store.configured_path();
+        let path = store.watched_path();
         let dir = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
 
         let (change_tx, mut changes) = tokio::sync::mpsc::channel(1);
@@ -89,13 +89,11 @@ impl PolicyWatcher {
                         return;
                     }
                 };
-
             if let Err(error) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
                 error!(%error, path = %dir.display(), "Failed to watch policy directory");
                 let _ = ready.send(Err(WatcherFailure::Registration));
                 return;
             }
-
             let _ = ready.send(Ok(()));
             let _ = watcher_stop_rx.recv();
         });
@@ -181,6 +179,16 @@ mod tests {
             &notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(Path::new(r"C:\pölicy.json").to_owned()),
             Path::new(r"C:\PÖLICY.json"),
         ));
+    }
+
+    #[test]
+    fn canonical_watcher_ignores_other_policy_paths() {
+        let canonical = Path::new(r"C:\ProgramData\Devolutions\PackageBroker\package-broker-policy.json");
+        let other = Path::new(r"C:\ProgramData\Devolutions\Agent\package-broker-policy.json");
+        let event = |path| notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(path);
+
+        assert!(affects_policy(&event(canonical.to_owned()), canonical));
+        assert!(!affects_policy(&event(other.to_owned()), canonical));
     }
 
     #[tokio::test]

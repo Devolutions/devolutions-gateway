@@ -4812,8 +4812,10 @@ dependencies = [
  "devolutions-gateway-task",
  "hex",
  "hmac 0.12.1",
+ "http-body-util",
  "hyper 1.10.1",
  "hyper-util",
+ "mime",
  "notify 7.0.0",
  "now-policy",
  "now-policy-api",
@@ -4837,9 +4839,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27cd2de3c428b3b8570e7c399c85d6b9f0899930564b6f36c326116a7cd32068"
+checksum = "14bf619b405ffb47839ee24baebe1866009d1aea49b112afe0da1465fda7e700"
 dependencies = [
  "chrono",
  "schemars 0.9.0",
@@ -4852,9 +4854,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3b9efe2ceede4cde6ce6d1da8e027513c075a0ea969a9e1a49a1178a456b295"
+checksum = "8b61d66fd334d2dac6150d1ab83f3831ec4b0ee20272fb3386fbe5b5e31c6663"
 dependencies = [
  "chrono",
  "derive_more",
@@ -4869,9 +4871,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-server-template"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5df8a2a4381c1f4223ffef311de1952eb78a00b30fd67625d3da89c5b58a74dc"
+checksum = "fee165964d3b2dddfa2c6283b820d5cad337277d51365cf77e6b1376668f529d"
 dependencies = [
  "aide 0.15.1",
  "async-trait",

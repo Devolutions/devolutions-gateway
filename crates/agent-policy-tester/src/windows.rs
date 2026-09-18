@@ -203,9 +203,8 @@ fn empty_policy() -> Value {
 fn policy_draft(id: &str, publisher: &str) -> Value {
     json!({
         "PolicyFormatVersion": "1.0.0",
-        "PolicyType": "PackageBrokerPolicy",
         "Metadata": { "Id": id, "Publisher": publisher },
-        "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+        "Enforcement": { "DefaultDecision": "Deny" },
         "Rules": []
     })
 }

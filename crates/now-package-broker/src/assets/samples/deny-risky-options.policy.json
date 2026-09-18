@@ -1,6 +1,5 @@
 {
   "PolicyFormatVersion": "1.0.0",
-  "PolicyType": "PackageBrokerPolicy",
   "Metadata": {
     "Id": "contoso.desktop.deny-risky-options",
     "Publisher": "Contoso IT",
@@ -9,8 +8,7 @@
     "Description": "Default-allow policy that blocks risky broker request options."
   },
   "Enforcement": {
-    "DefaultDecision": "Allow",
-    "RulePrecedence": "PriorityThenDeny"
+    "DefaultDecision": "Allow"
   },
   "Rules": [
     {
@@ -23,9 +21,7 @@
           "Install",
           "Update"
         ],
-        "SkipHashCheck": [
-          true
-        ]
+        "SkipHashCheck": true
       }
     },
     {
@@ -34,9 +30,7 @@
       "Decision": "Deny",
       "Reason": "Custom package-manager parameters require a dedicated exception policy.",
       "Match": {
-        "HasCustomParameters": [
-          true
-        ]
+        "HasCustomParameters": true
       }
     },
     {
@@ -45,9 +39,7 @@
       "Decision": "Deny",
       "Reason": "Pre and post operation commands are outside the package manager trust boundary.",
       "Match": {
-        "HasPrePostCommands": [
-          true
-        ]
+        "HasPrePostCommands": true
       }
     },
     {
@@ -56,9 +48,7 @@
       "Decision": "Deny",
       "Reason": "Killing processes before a brokered package operation is not allowed by this policy.",
       "Match": {
-        "HasKillBeforeOperation": [
-          true
-        ]
+        "HasKillBeforeOperation": true
       }
     },
     {
@@ -70,7 +60,7 @@
         "Managers": [
           "Winget"
         ],
-        "Sources": [
+        "SourceNames": [
           "msstore",
           "winget-fonts"
         ]

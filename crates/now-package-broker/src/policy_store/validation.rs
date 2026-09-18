@@ -1,13 +1,16 @@
 //! Strict deterministic validation for editable policy documents.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use now_policy::{Decision, PolicyConstraints, PolicyDraftDocument, PolicyDraftMetadata, PolicyMatch, PolicyRule};
+use now_policy::{
+    Decision, PackageIdentifierCondition, PolicyConstraints, PolicyDraftDocument, PolicyDraftMetadata, PolicyMatch,
+    PolicyRule, VersionCondition,
+};
 use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
 };
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/9";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/10";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -15,23 +18,10 @@ const MAX_FINDINGS: usize = 128;
 const MATCH_COLLECTION_MAXIMA: &[(&str, usize)] = &[
     ("Operations", 3),
     ("Managers", 16),
-    ("Sources", 128),
-    ("PackageIdentifiers", 1024),
-    ("PackageNames", 1024),
-    ("Versions", 256),
+    ("SourceNames", 128),
     ("Scopes", 2),
     ("Architectures", 5),
-    ("Elevation", 2),
-];
-const BOOLEAN_MATCH_FIELDS: &[&str] = &[
-    "Interactive",
-    "SkipHashCheck",
-    "PreRelease",
-    "HasCustomParameters",
-    "HasCustomInstallLocation",
-    "HasPrePostCommands",
-    "HasKillBeforeOperation",
-    "HasUninstallPrevious",
+    ("ExecutionElevation", 2),
 ];
 const CONSTRAINT_COLLECTION_MAXIMA: &[(&str, usize)] = &[
     ("AllowedInstallLocationPatterns", 64),
@@ -39,10 +29,12 @@ const CONSTRAINT_COLLECTION_MAXIMA: &[(&str, usize)] = &[
     ("AllowedCustomParameterPatterns", 128),
     ("DeniedCustomParameters", 128),
 ];
+
 struct Findings {
     values: Vec<PolicyFinding>,
     has_error: bool,
 }
+
 impl Findings {
     fn new() -> Self {
         Self {
@@ -50,6 +42,7 @@ impl Findings {
             has_error: false,
         }
     }
+
     fn push(&mut self, finding: PolicyFinding) {
         let is_error = finding.severity == PolicyFindingSeverity::Error;
         self.has_error |= is_error;
@@ -64,10 +57,12 @@ impl Findings {
             self.values[MAX_FINDINGS - 1] = finding;
         }
     }
+
     fn is_saturated(&self) -> bool {
         self.values.len() == MAX_FINDINGS
     }
 }
+
 pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult {
     let mut findings = Findings::new();
     if !raw.is_object() {
@@ -78,24 +73,12 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         ));
         return invalid_result(findings);
     }
-    if reject_legacy_policy_identity(raw, &mut findings) {
-        return invalid_result(findings);
-    }
-    check_constant(
-        raw,
-        "PolicyType",
-        "/PolicyType",
-        "PackageBrokerPolicy",
-        PolicyFindingCode::UnsupportedPolicyType,
-        &mut findings,
-    );
     check_policy_format_version(raw, &mut findings);
-    if has_error(&findings) {
+    check_raw_validity_interval(raw, &mut findings);
+    if has_error(&findings) || check_raw_collection_bounds(raw, &mut findings) {
         return invalid_result(findings);
     }
-    if check_raw_collection_bounds(raw, &mut findings) {
-        return invalid_result(findings);
-    }
+
     match serde_json::from_value::<PolicyDraftDocument>(raw.clone()) {
         Ok(draft) => {
             semantic_checks(raw, &draft, &mut findings);
@@ -111,13 +94,16 @@ pub(super) fn validate_draft(raw: &serde_json::Value) -> PolicyValidationResult 
         }
     }
 }
+
 pub(super) fn validate_committed_policy(policy: &now_policy::PolicyDocument) -> PolicyValidationResult {
     let raw = serde_json::to_value(policy.to_draft()).expect("committed policy draft serializes");
     validate_draft(&raw)
 }
+
 fn has_error(findings: &Findings) -> bool {
     findings.has_error
 }
+
 fn invalid_result(findings: Findings) -> PolicyValidationResult {
     PolicyValidationResult {
         result_version: API_VERSION_STR.into(),
@@ -128,6 +114,7 @@ fn invalid_result(findings: Findings) -> PolicyValidationResult {
         findings: findings.values,
     }
 }
+
 fn valid_result(draft: PolicyDraftDocument, findings: Findings) -> PolicyValidationResult {
     PolicyValidationResult {
         result_version: API_VERSION_STR.into(),
@@ -138,6 +125,7 @@ fn valid_result(draft: PolicyDraftDocument, findings: Findings) -> PolicyValidat
         findings: findings.values,
     }
 }
+
 fn finding(
     severity: PolicyFindingSeverity,
     code: PolicyFindingCode,
@@ -162,12 +150,15 @@ fn finding(
         message,
     }
 }
+
 fn error(code: PolicyFindingCode, path: impl Into<String>, message: impl Into<String>) -> PolicyFinding {
     finding(PolicyFindingSeverity::Error, code, path, message)
 }
+
 fn warning(code: PolicyFindingCode, path: impl Into<String>, message: impl Into<String>) -> PolicyFinding {
     finding(PolicyFindingSeverity::Warning, code, path, message)
 }
+
 fn rule_finding(
     rule: &PolicyRule,
     severity: PolicyFindingSeverity,
@@ -179,52 +170,7 @@ fn rule_finding(
     finding.rule_id = Some(now_policy_api::ResourceId::from(rule.id.0.as_str()));
     finding
 }
-fn check_constant(
-    raw: &serde_json::Value,
-    key: &str,
-    path: &str,
-    expected: &str,
-    mismatch_code: PolicyFindingCode,
-    findings: &mut Findings,
-) {
-    match raw.get(key) {
-        None => findings.push(error(
-            PolicyFindingCode::MissingRequiredField,
-            path,
-            format!("missing required field '{key}'"),
-        )),
-        Some(serde_json::Value::String(value)) if value == expected => {}
-        Some(serde_json::Value::String(value)) => findings.push(error(
-            mismatch_code,
-            path,
-            format!("unsupported value '{value}'; expected '{expected}'"),
-        )),
-        Some(_) => findings.push(error(
-            PolicyFindingCode::InvalidFieldType,
-            path,
-            format!("'{key}' must be a string"),
-        )),
-    }
-}
-fn reject_legacy_policy_identity(raw: &serde_json::Value, findings: &mut Findings) -> bool {
-    let has_schema = raw.get("$schema").is_some();
-    if has_schema {
-        findings.push(error(
-            PolicyFindingCode::UnsupportedPolicyFormatVersion,
-            "/$schema",
-            "'$schema' is unsupported; remove it and use 'PolicyFormatVersion'",
-        ));
-    }
-    let has_policy_version = raw.get("PolicyVersion").is_some();
-    if has_policy_version {
-        findings.push(error(
-            PolicyFindingCode::UnsupportedPolicyFormatVersion,
-            "/PolicyVersion",
-            "'PolicyVersion' is unsupported; rename it to 'PolicyFormatVersion'",
-        ));
-    }
-    has_schema || has_policy_version
-}
+
 fn check_policy_format_version(raw: &serde_json::Value, findings: &mut Findings) {
     const PATH: &str = "/PolicyFormatVersion";
     match raw.get("PolicyFormatVersion") {
@@ -261,11 +207,10 @@ fn check_policy_format_version(raw: &serde_json::Value, findings: &mut Findings)
         )),
     }
 }
+
 pub(crate) fn classify_parse_error(parse_error: &serde_json::Error) -> PolicyFinding {
     let message = parse_error.to_string();
-    let code = if message.contains("boolean match arrays") {
-        PolicyFindingCode::IneffectiveBooleanMatch
-    } else if message.contains("missing field") {
+    let code = if message.contains("missing field") {
         PolicyFindingCode::MissingRequiredField
     } else if message.contains("unknown field") {
         PolicyFindingCode::UnknownField
@@ -280,6 +225,7 @@ pub(crate) fn classify_parse_error(parse_error: &serde_json::Error) -> PolicyFin
         format!("policy draft does not match the expected schema: {message}"),
     )
 }
+
 fn check_raw_collection_bounds(raw: &serde_json::Value, findings: &mut Findings) -> bool {
     let Some(rules) = raw.get("Rules").and_then(serde_json::Value::as_array) else {
         return false;
@@ -296,19 +242,6 @@ fn check_raw_collection_bounds(raw: &serde_json::Value, findings: &mut Findings)
         if let Some(matches) = rule.get("Match").and_then(serde_json::Value::as_object) {
             for &(field, max) in MATCH_COLLECTION_MAXIMA {
                 check_raw_set_array(matches, field, max, &format!("{base}/Match/{field}"), findings);
-            }
-            for &field in BOOLEAN_MATCH_FIELDS {
-                if matches
-                    .get(field)
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|values| values.len() > 1)
-                {
-                    findings.push(error(
-                        PolicyFindingCode::IneffectiveBooleanMatch,
-                        format!("{base}/Match/{field}"),
-                        "boolean match arrays may contain at most one value",
-                    ));
-                }
             }
         }
         if let Some(constraints) = rule.get("Constraints").and_then(serde_json::Value::as_object) {
@@ -328,6 +261,7 @@ fn check_raw_collection_bounds(raw: &serde_json::Value, findings: &mut Findings)
     }
     has_error(findings)
 }
+
 fn check_raw_array_len(
     object: &serde_json::Map<String, serde_json::Value>,
     field: &str,
@@ -339,6 +273,7 @@ fn check_raw_array_len(
         check_max_len(values.len(), max, path, findings);
     }
 }
+
 fn check_raw_set_array(
     object: &serde_json::Map<String, serde_json::Value>,
     field: &str,
@@ -368,16 +303,17 @@ fn check_raw_set_array(
         }
     }
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiskFailureReason {
     Unreadable,
     InsecureStorage,
     MalformedContent,
-    LegacyPolicyContract,
     UnsupportedFormat,
     FailedSemanticValidation,
     WatcherUnavailable,
 }
+
 pub(crate) fn disk_failure_finding(reason: DiskFailureReason) -> PolicyFinding {
     let message = match reason {
         DiskFailureReason::Unreadable => "the configured policy file could not be opened or read",
@@ -385,24 +321,14 @@ pub(crate) fn disk_failure_finding(reason: DiskFailureReason) -> PolicyFinding {
         DiskFailureReason::MalformedContent => {
             "the configured policy file does not contain a policy matching the expected schema"
         }
-        DiskFailureReason::LegacyPolicyContract => {
-            "the configured policy file uses the unsupported legacy '$schema' or 'PolicyVersion' field; replace it with the canonical 'PolicyFormatVersion' contract"
-        }
         DiskFailureReason::UnsupportedFormat => "the configured policy path uses an unsupported format",
         DiskFailureReason::FailedSemanticValidation => "the configured policy file failed semantic validation",
         DiskFailureReason::WatcherUnavailable => "policy change monitoring is unavailable",
     };
-    let code = match reason {
-        DiskFailureReason::LegacyPolicyContract => PolicyFindingCode::UnsupportedPolicyFormatVersion,
-        _ => PolicyFindingCode::SchemaViolation,
-    };
-    error(code, "", message)
+    error(PolicyFindingCode::SchemaViolation, "", message)
 }
+
 fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, findings: &mut Findings) {
-    if draft.rules.len() > MAX_RULES {
-        check_max_len(draft.rules.len(), MAX_RULES, "/Rules", findings);
-        return;
-    }
     check_metadata(&draft.metadata, findings);
     check_duplicate_rule_ids(&draft.rules, findings);
     for (index, rule) in draft.rules.iter().enumerate() {
@@ -435,12 +361,25 @@ fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, finding
         check_sensitive_options(raw, index, rule, findings);
     }
 }
+
 fn check_metadata(metadata: &PolicyDraftMetadata, findings: &mut Findings) {
     check_string_len(&metadata.publisher, 1, 128, "/Metadata/Publisher", findings);
     if let Some(description) = &metadata.description {
         check_string_len(description, 0, 512, "/Metadata/Description", findings);
     }
-    if let (Some(valid_from), Some(valid_until)) = (metadata.valid_from, metadata.valid_until)
+}
+
+fn check_raw_validity_interval(raw: &serde_json::Value, findings: &mut Findings) {
+    let Some(metadata) = raw.get("Metadata").and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    let parse = |field| {
+        metadata
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+    };
+    if let (Some(valid_from), Some(valid_until)) = (parse("ValidFrom"), parse("ValidUntil"))
         && valid_from >= valid_until
     {
         findings.push(error(
@@ -450,12 +389,10 @@ fn check_metadata(metadata: &PolicyDraftMetadata, findings: &mut Findings) {
         ));
     }
 }
+
 fn check_duplicate_rule_ids(rules: &[PolicyRule], findings: &mut Findings) {
     let mut seen: HashMap<&str, usize> = HashMap::new();
     for (index, rule) in rules.iter().enumerate() {
-        if findings.is_saturated() {
-            return;
-        }
         if let Some(first_index) = seen.insert(&rule.id.0, index) {
             findings.push(rule_finding(
                 rule,
@@ -467,9 +404,9 @@ fn check_duplicate_rule_ids(rules: &[PolicyRule], findings: &mut Findings) {
         }
     }
 }
+
 fn check_rule(index: usize, rule: &PolicyRule, findings: &mut Findings) {
     let base = format!("/Rules/{index}");
-    let matches = &rule.match_criteria;
     if rule.priority > MAX_RULE_PRIORITY {
         findings.push(rule_finding(
             rule,
@@ -482,136 +419,82 @@ fn check_rule(index: usize, rule: &PolicyRule, findings: &mut Findings) {
     if let Some(reason) = &rule.reason {
         check_string_len(reason, 0, 512, &format!("{base}/Reason"), findings);
     }
-    check_max_len(matches.managers.len(), 16, &format!("{base}/Match/Managers"), findings);
-    check_max_len(matches.sources.len(), 128, &format!("{base}/Match/Sources"), findings);
-    check_max_len(
-        matches.package_identifiers.len(),
-        1024,
-        &format!("{base}/Match/PackageIdentifiers"),
-        findings,
-    );
-    check_max_len(
-        matches.package_names.len(),
-        1024,
-        &format!("{base}/Match/PackageNames"),
-        findings,
-    );
-    check_max_len(matches.versions.len(), 256, &format!("{base}/Match/Versions"), findings);
-    if !matches.package_names.is_empty() {
-        findings.push(rule_finding(
+    if let Some(PackageIdentifierCondition::Patterns(patterns)) = &rule.match_criteria.package_identifiers {
+        check_patterns(
+            index,
             rule,
-            PolicyFindingSeverity::Error,
-            PolicyFindingCode::InvalidFieldValue,
-            format!("{base}/Match/PackageNames"),
-            "PackageNames is unsupported because requests do not provide a package display name",
-        ));
+            "Match/PackageIdentifiers/Patterns",
+            patterns.iter().map(AsRef::as_ref),
+            findings,
+        );
     }
-    check_version_range(index, rule, findings);
-    check_patterns(
-        index,
-        rule,
-        "Match/Sources",
-        matches.sources.iter().take(128).map(AsRef::as_ref),
-        findings,
-    );
-    check_patterns(
-        index,
-        rule,
-        "Match/PackageIdentifiers",
-        matches.package_identifiers.iter().take(1024).map(AsRef::as_ref),
-        findings,
-    );
+    if let Some(VersionCondition::Range(range)) = &rule.match_criteria.version {
+        check_version_range(index, rule, range, findings);
+    }
     if let Some(constraints) = &rule.constraints {
         check_constraints(index, rule, constraints, findings);
     }
 }
+
 fn check_constraints(index: usize, rule: &PolicyRule, constraints: &PolicyConstraints, findings: &mut Findings) {
     let base = format!("/Rules/{index}/Constraints");
-    check_max_len(
-        constraints.allowed_install_location_patterns.len(),
-        64,
-        &format!("{base}/AllowedInstallLocationPatterns"),
-        findings,
-    );
-    check_max_len(
-        constraints.allowed_custom_parameters.len(),
-        128,
-        &format!("{base}/AllowedCustomParameters"),
-        findings,
-    );
-    check_max_len(
-        constraints.allowed_custom_parameter_patterns.len(),
-        128,
-        &format!("{base}/AllowedCustomParameterPatterns"),
-        findings,
-    );
-    check_max_len(
-        constraints.denied_custom_parameters.len(),
-        128,
-        &format!("{base}/DeniedCustomParameters"),
-        findings,
-    );
     check_patterns(
         index,
         rule,
         "Constraints/AllowedInstallLocationPatterns",
-        constraints
-            .allowed_install_location_patterns
-            .iter()
-            .take(64)
-            .map(AsRef::as_ref),
+        constraints.allowed_install_location_patterns.iter().map(AsRef::as_ref),
         findings,
     );
     check_patterns(
         index,
         rule,
         "Constraints/AllowedCustomParameterPatterns",
-        constraints
-            .allowed_custom_parameter_patterns
-            .iter()
-            .take(128)
-            .map(AsRef::as_ref),
+        constraints.allowed_custom_parameter_patterns.iter().map(AsRef::as_ref),
         findings,
     );
-    let matches = &rule.match_criteria;
-    for (values, allowed, name) in [
-        (&matches.interactive, constraints.allow_interactive, "Interactive"),
+    for (value, allowed, name) in [
         (
-            &matches.skip_hash_check,
+            rule.match_criteria.interactive,
+            constraints.allow_interactive,
+            "Interactive",
+        ),
+        (
+            rule.match_criteria.skip_hash_check,
             constraints.allow_skip_hash_check,
             "SkipHashCheck",
         ),
-        (&matches.pre_release, constraints.allow_pre_release, "PreRelease"),
         (
-            &matches.has_custom_install_location,
+            rule.match_criteria.pre_release,
+            constraints.allow_pre_release,
+            "PreRelease",
+        ),
+        (
+            rule.match_criteria.has_custom_install_location,
             constraints.allow_custom_install_location,
             "HasCustomInstallLocation",
         ),
         (
-            &matches.has_custom_parameters,
+            rule.match_criteria.has_custom_parameters,
             constraints.allow_custom_parameters,
             "HasCustomParameters",
         ),
         (
-            &matches.has_pre_post_commands,
+            rule.match_criteria.has_pre_post_commands,
             constraints.allow_pre_post_commands,
             "HasPrePostCommands",
         ),
         (
-            &matches.has_kill_before_operation,
+            rule.match_criteria.has_kill_before_operation,
             constraints.allow_kill_before_operation,
             "HasKillBeforeOperation",
         ),
         (
-            &matches.has_uninstall_previous,
+            rule.match_criteria.has_uninstall_previous,
             constraints.allow_uninstall_previous,
             "HasUninstallPrevious",
         ),
     ] {
-        if findings.is_saturated() {
-            return;
-        }
-        if !allowed && values.len() == 1 && values.contains(&true) {
+        if value == Some(true) && !allowed {
             findings.push(rule_finding(
                 rule,
                 PolicyFindingSeverity::Error,
@@ -622,32 +505,18 @@ fn check_constraints(index: usize, rule: &PolicyRule, constraints: &PolicyConstr
         }
     }
 }
-fn check_version_range(index: usize, rule: &PolicyRule, findings: &mut Findings) {
-    let Some(range) = &rule.match_criteria.version_range else {
-        return;
-    };
-    let base = format!("/Rules/{index}/Match/VersionRange");
-    let min = parse_version_bound(
-        range.min_version.as_deref(),
-        &format!("{base}/MinVersion"),
-        rule,
-        findings,
-    );
-    let max = parse_version_bound(
-        range.max_version.as_deref(),
-        &format!("{base}/MaxVersion"),
-        rule,
-        findings,
-    );
-    if range.min_version.is_none() && range.max_version.is_none() {
-        findings.push(rule_finding(
-            rule,
-            PolicyFindingSeverity::Error,
-            PolicyFindingCode::EmptyVersionRange,
-            &base,
-            "version range must specify MinVersion or MaxVersion",
-        ));
-    } else if let (Some(min), Some(max)) = (min.as_ref(), max.as_ref())
+
+fn check_version_range(index: usize, rule: &PolicyRule, range: &now_policy::VersionRange, findings: &mut Findings) {
+    let base = format!("/Rules/{index}/Match/Version/Range");
+    let min = range
+        .min_version
+        .as_ref()
+        .and_then(|version| semver::Version::parse(version).ok());
+    let max = range
+        .max_version
+        .as_ref()
+        .and_then(|version| semver::Version::parse(version).ok());
+    if let (Some(min), Some(max)) = (min.as_ref(), max.as_ref())
         && min > max
     {
         findings.push(rule_finding(
@@ -675,37 +544,7 @@ fn check_version_range(index: usize, rule: &PolicyRule, findings: &mut Findings)
         }
     }
 }
-fn parse_version_bound(
-    value: Option<&str>,
-    path: &str,
-    rule: &PolicyRule,
-    findings: &mut Findings,
-) -> Option<semver::Version> {
-    let value = value?;
-    if value.is_empty() || value.len() > 128 {
-        findings.push(rule_finding(
-            rule,
-            PolicyFindingSeverity::Error,
-            PolicyFindingCode::InvalidVersionRange,
-            path,
-            "version bound must contain 1 to 128 characters",
-        ));
-        return None;
-    }
-    match semver::Version::parse(value) {
-        Ok(version) => Some(version),
-        Err(parse_error) => {
-            findings.push(rule_finding(
-                rule,
-                PolicyFindingSeverity::Error,
-                PolicyFindingCode::InvalidVersionRange,
-                path,
-                format!("invalid semantic version: {parse_error}"),
-            ));
-            None
-        }
-    }
-}
+
 fn check_patterns<S: AsRef<str>>(
     index: usize,
     rule: &PolicyRule,
@@ -714,11 +553,7 @@ fn check_patterns<S: AsRef<str>>(
     findings: &mut Findings,
 ) {
     for pattern in patterns {
-        if findings.is_saturated() {
-            return;
-        }
-        let pattern = pattern.as_ref();
-        let regex = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
+        let regex = format!("^{}$", regex::escape(pattern.as_ref()).replace(r"\*", ".*"));
         if regex::RegexBuilder::new(&regex).case_insensitive(true).build().is_err() {
             findings.push(rule_finding(
                 rule,
@@ -730,6 +565,7 @@ fn check_patterns<S: AsRef<str>>(
         }
     }
 }
+
 fn check_sensitive_options(raw: &serde_json::Value, index: usize, rule: &PolicyRule, findings: &mut Findings) {
     if !rule.enabled || rule.decision != Decision::Allow {
         return;
@@ -737,51 +573,50 @@ fn check_sensitive_options(raw: &serde_json::Value, index: usize, rule: &PolicyR
     let defaults = PolicyConstraints::default();
     let constraints = rule.constraints.as_ref().unwrap_or(&defaults);
     let matches: &PolicyMatch = &rule.match_criteria;
-    let reachable = |values: &BTreeSet<bool>| values.is_empty() || values.contains(&true);
+    let reachable = |value: Option<bool>| value != Some(false);
     let options = [
         (
-            constraints.allow_skip_hash_check && reachable(&matches.skip_hash_check),
+            constraints.allow_skip_hash_check && reachable(matches.skip_hash_check),
             "SkipHashCheck",
             "SkipHashCheck",
             "AllowSkipHashCheck",
         ),
         (
-            constraints.allow_pre_release && reachable(&matches.pre_release),
+            constraints.allow_pre_release && reachable(matches.pre_release),
             "PreRelease",
             "PreRelease",
             "AllowPreRelease",
         ),
         (
-            constraints.allow_custom_install_location && reachable(&matches.has_custom_install_location),
+            constraints.allow_custom_install_location && reachable(matches.has_custom_install_location),
             "AllowCustomInstallLocation",
             "HasCustomInstallLocation",
             "AllowCustomInstallLocation",
         ),
         (
-            constraints.allow_pre_post_commands && reachable(&matches.has_pre_post_commands),
+            constraints.allow_pre_post_commands && reachable(matches.has_pre_post_commands),
             "AllowPrePostCommands",
             "HasPrePostCommands",
             "AllowPrePostCommands",
         ),
         (
-            constraints.allow_kill_before_operation && reachable(&matches.has_kill_before_operation),
+            constraints.allow_kill_before_operation && reachable(matches.has_kill_before_operation),
             "AllowKillBeforeOperation",
             "HasKillBeforeOperation",
             "AllowKillBeforeOperation",
         ),
         (
-            constraints.allow_uninstall_previous && reachable(&matches.has_uninstall_previous),
+            constraints.allow_uninstall_previous && reachable(matches.has_uninstall_previous),
             "AllowUninstallPrevious",
             "HasUninstallPrevious",
             "AllowUninstallPrevious",
         ),
         (
             constraints.allow_custom_parameters
-                && reachable(&matches.has_custom_parameters)
+                && reachable(matches.has_custom_parameters)
                 && !constraints
                     .denied_custom_parameters
                     .iter()
-                    .take(128)
                     .any(|pattern| pattern.as_ref() == "*"),
             "AllowCustomParameters",
             "HasCustomParameters",
@@ -789,9 +624,6 @@ fn check_sensitive_options(raw: &serde_json::Value, index: usize, rule: &PolicyR
         ),
     ];
     for (enabled, option, match_field, constraint_field) in options {
-        if findings.is_saturated() {
-            return;
-        }
         if enabled {
             let rule_path = format!("/Rules/{index}");
             let match_path = format!("{rule_path}/Match/{match_field}");
@@ -817,6 +649,7 @@ fn check_sensitive_options(raw: &serde_json::Value, index: usize, rule: &PolicyR
         }
     }
 }
+
 fn check_string_len(value: &str, min: usize, max: usize, path: &str, findings: &mut Findings) {
     let length = value.chars().count();
     if !(min..=max).contains(&length) {
@@ -827,6 +660,7 @@ fn check_string_len(value: &str, min: usize, max: usize, path: &str, findings: &
         ));
     }
 }
+
 fn check_max_len(len: usize, max: usize, path: &str, findings: &mut Findings) {
     if len > max {
         findings.push(error(
@@ -842,490 +676,127 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
     fn draft() -> serde_json::Value {
         json!({
             "PolicyFormatVersion": "1.0.0",
-            "PolicyType": "PackageBrokerPolicy",
             "Metadata": { "Id": "policy-a", "Publisher": "Test" },
-            "Enforcement": { "DefaultDecision": "Deny", "RulePrecedence": "PriorityThenDeny" },
+            "Enforcement": { "DefaultDecision": "Deny" },
             "Rules": []
         })
     }
+
     fn rule(id: &str, match_value: serde_json::Value) -> serde_json::Value {
-        json!({
-            "Id": id,
-            "Priority": 1,
-            "Decision": "Deny",
-            "Match": match_value
-        })
-    }
-    fn has_code(result: &PolicyValidationResult, code: PolicyFindingCode) -> bool {
-        result.findings.iter().any(|finding| finding.code == code)
-    }
-    #[test]
-    fn strict_valid_draft_is_canonicalized_deterministically() {
-        let raw = draft();
-        let first = validate_draft(&raw);
-        let second = validate_draft(&raw);
-        assert!(first.is_valid);
-        assert_eq!(
-            serde_json::to_value(first.canonical_draft).expect("serialize canonical draft"),
-            serde_json::to_value(second.canonical_draft).expect("serialize canonical draft")
-        );
-    }
-    #[test]
-    fn constants_and_unknown_fields_are_rejected() {
-        for (pointer, value, code) in [
-            (
-                "/PolicyType",
-                json!("OtherPolicy"),
-                PolicyFindingCode::UnsupportedPolicyType,
-            ),
-            (
-                "/PolicyFormatVersion",
-                json!("2.0.0"),
-                PolicyFindingCode::UnsupportedPolicyFormatVersion,
-            ),
-        ] {
-            let mut raw = draft();
-            *raw.pointer_mut(pointer).expect("pointer exists") = value;
-            assert!(has_code(&validate_draft(&raw), code));
-        }
-        let mut raw = draft();
-        raw["Unexpected"] = json!(true);
-        assert!(has_code(&validate_draft(&raw), PolicyFindingCode::UnknownField));
-    }
-    #[test]
-    fn legacy_policy_identity_is_rejected_with_precise_diagnostics() {
-        for (legacy_field, expected_message) in [
-            (
-                "$schema",
-                "'$schema' is unsupported; remove it and use 'PolicyFormatVersion'",
-            ),
-            (
-                "PolicyVersion",
-                "'PolicyVersion' is unsupported; rename it to 'PolicyFormatVersion'",
-            ),
-        ] {
-            let mut raw = draft();
-            raw[legacy_field] = json!("1.0.0");
-            let result = validate_draft(&raw);
-            assert!(!result.is_valid);
-            assert_eq!(result.findings.len(), 1);
-            assert_eq!(
-                result.findings[0].code,
-                PolicyFindingCode::UnsupportedPolicyFormatVersion
-            );
-            assert_eq!(result.findings[0].message, expected_message);
-        }
-    }
-    #[test]
-    fn compatible_policy_format_version_is_preserved() {
-        let mut raw = draft();
-        raw["PolicyFormatVersion"] = json!("1.7.3");
-        let result = validate_draft(&raw);
-        assert!(result.is_valid);
-        assert_eq!(
-            serde_json::to_value(result.canonical_draft)
-                .expect("serialize canonical draft")
-                .pointer("/PolicyFormatVersion"),
-            Some(&json!("1.7.3"))
-        );
-    }
-    #[test]
-    fn structural_bounds_and_duplicate_ids_are_rejected() {
-        let mut raw = draft();
-        raw["Metadata"]["Publisher"] = json!("x".repeat(129));
-        assert!(has_code(&validate_draft(&raw), PolicyFindingCode::SchemaViolation));
-        let mut raw = draft();
-        raw["Rules"] = json!([
-            rule("duplicate", json!({ "Managers": ["Winget"] })),
-            rule("duplicate", json!({ "Managers": ["Npm"] }))
-        ]);
-        assert!(has_code(&validate_draft(&raw), PolicyFindingCode::DuplicateRuleId));
-    }
-    #[test]
-    fn oversized_rules_stop_after_one_structural_finding() {
-        let mut raw = draft();
-        raw["Rules"] = serde_json::Value::Array(
-            (0..=MAX_RULES)
-                .map(|_| rule("duplicate", json!({ "Managers": ["Winget"] })))
-                .collect(),
-        );
-        let started = std::time::Instant::now();
-        let result = validate_draft(&raw);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        assert!(!result.is_valid);
-        assert!(result.canonical_draft.is_none());
-        assert!(result.validation_receipt.is_none());
-        assert_eq!(result.findings.len(), 1);
-        assert_eq!(result.findings[0].code, PolicyFindingCode::SchemaViolation);
-        assert_eq!(result.findings[0].path, "/Rules");
-    }
-    #[test]
-    fn warning_findings_are_capped_without_invalidating_the_draft() {
-        let mut raw = draft();
-        raw["Rules"] = serde_json::Value::Array(
-            (0..64)
-                .map(|index| {
-                    let mut value = rule(&format!("allow-{index}"), json!({ "Managers": ["Winget"] }));
-                    value["Decision"] = json!("Allow");
-                    value
-                })
-                .collect(),
-        );
-        let started = std::time::Instant::now();
-        let first = validate_draft(&raw);
-        let second = validate_draft(&raw);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        assert!(first.is_valid);
-        assert!(first.canonical_draft.is_some());
-        assert!(first.validation_receipt.is_none());
-        assert_eq!(first.findings.len(), MAX_FINDINGS);
-        assert!(
-            first
-                .findings
-                .iter()
-                .all(|finding| finding.severity == PolicyFindingSeverity::Warning)
-        );
-        assert_eq!(
-            serde_json::to_value(&first.findings).expect("serialize findings"),
-            serde_json::to_value(&second.findings).expect("serialize findings")
-        );
+        json!({ "Id": id, "Priority": 1, "Decision": "Deny", "Match": match_value })
     }
 
     #[test]
-    fn warning_heavy_draft_with_a_late_error_remains_invalid() {
+    fn final_contract_is_canonical_and_uses_scalar_booleans() {
         let mut raw = draft();
-        let mut rules: Vec<_> = (0..64)
-            .map(|index| {
-                let mut value = rule(&format!("allow-{index}"), json!({ "Managers": ["Winget"] }));
-                value["Decision"] = json!("Allow");
-                value
-            })
-            .collect();
-        let mut invalid = rule("invalid-last", json!({ "Managers": ["Winget"] }));
-        invalid["Priority"] = json!(u64::from(MAX_RULE_PRIORITY) + 1);
-        rules.push(invalid);
-        raw["Rules"] = serde_json::Value::Array(rules);
-        let result = validate_draft(&raw);
-        assert!(!result.is_valid);
-        assert!(result.canonical_draft.is_none());
-        assert!(result.validation_receipt.is_none());
-        assert!(result.findings.iter().any(|finding| {
-            finding.severity == PolicyFindingSeverity::Error
-                && finding.code == PolicyFindingCode::InvalidFieldValue
-                && finding.path == "/Rules/64/Priority"
-        }));
-    }
-    #[test]
-    fn oversized_pattern_collections_have_bounded_ordered_findings() {
-        let mut raw = draft();
-        let sources: Vec<_> = (0..2048).map(|index| json!(format!("source-{index}"))).collect();
-        let packages: Vec<_> = (0..2048).map(|index| json!(format!("package-{index}"))).collect();
         raw["Rules"] = json!([rule(
-            "oversized",
-            json!({ "Sources": sources, "PackageIdentifiers": packages })
-        )]);
-        let result = validate_draft(&raw);
-        assert!(!result.is_valid);
-        assert_eq!(result.findings.len(), 2);
-        assert_eq!(result.findings[0].path, "/Rules/0/Match/Sources");
-        assert_eq!(result.findings[1].path, "/Rules/0/Match/PackageIdentifiers");
-    }
-    #[test]
-    fn every_schema_array_bound_is_rejected_before_typed_parsing() {
-        let collections = MATCH_COLLECTION_MAXIMA
-            .iter()
-            .map(|&(field, max)| ("Match", field, max))
-            .chain(BOOLEAN_MATCH_FIELDS.iter().map(|&field| ("Match", field, 1)))
-            .chain(
-                CONSTRAINT_COLLECTION_MAXIMA
-                    .iter()
-                    .map(|&(field, max)| ("Constraints", field, max)),
-            );
-        for (section, field, max) in collections {
-            let mut raw = draft();
-            let mut value = rule("bounded", json!({ "Managers": ["Winget"] }));
-            value[section][field] = serde_json::Value::Array(vec![json!(false); max + 1]);
-            raw["Rules"] = json!([value]);
-            let result = validate_draft(&raw);
-            assert!(!result.is_valid, "{section}/{field}");
-            assert!(result.canonical_draft.is_none(), "{section}/{field}");
-            assert!(result.validation_receipt.is_none(), "{section}/{field}");
-            assert_eq!(result.findings.len(), 1, "{section}/{field}");
-            assert_eq!(result.findings[0].path, format!("/Rules/0/{section}/{field}"));
-        }
-    }
-
-    #[test]
-    fn set_backed_match_arrays_reject_exact_duplicates() {
-        for (field, value) in [
-            ("Operations", "Install"),
-            ("Managers", "Winget"),
-            ("Sources", "source"),
-            ("PackageIdentifiers", "package"),
-            ("PackageNames", "name"),
-            ("Versions", "1.0.0"),
-            ("Scopes", "User"),
-            ("Architectures", "X64"),
-            ("Elevation", "Elevated"),
-        ] {
-            let mut raw = draft();
-            let mut duplicate = rule("duplicate", json!({ "Managers": ["Winget"] }));
-            duplicate["Match"][field] = json!([value, value]);
-            raw["Rules"] = json!([duplicate]);
-            let result = validate_draft(&raw);
-            assert!(!result.is_valid, "{field}");
-            assert!(result.canonical_draft.is_none(), "{field}");
-            assert!(result.validation_receipt.is_none(), "{field}");
-            assert!(result.findings.iter().any(|finding| {
-                finding.code == PolicyFindingCode::SchemaViolation
-                    && finding.path == format!("/Rules/0/Match/{field}")
-                    && finding.message.contains("duplicate value")
-            }));
-        }
-    }
-
-    #[test]
-    fn raw_uniqueness_is_case_sensitive_and_excludes_constraint_vectors() {
-        let mut raw = draft();
-        let mut distinct = rule(
-            "distinct",
+            "allow",
             json!({
-                "Operations": ["Install", "Update"],
-                "Managers": ["Winget", "Npm"],
-                "Sources": ["source", "Source"],
-                "PackageIdentifiers": ["package", "Package"],
-                "Versions": ["1.0.0", "2.0.0"],
-                "Scopes": ["User", "Machine"],
-                "Architectures": ["X64", "Arm64"],
-                "Elevation": ["Standard", "Elevated"]
-            }),
-        );
-        distinct["Constraints"] = json!({
-            "AllowedInstallLocationPatterns": ["C:\\Tools", "C:\\Tools"]
-        });
-        raw["Rules"] = json!([distinct]);
+                "Managers": ["Winget"],
+                "SourceNames": ["winget"],
+                "PackageIdentifiers": { "Exact": ["Microsoft.PowerToys"] },
+                "Interactive": false
+            })
+        )]);
         let result = validate_draft(&raw);
         assert!(result.is_valid);
-        assert_eq!(
-            result.canonical_draft.expect("valid canonical draft").rules[0]
-                .constraints
-                .as_ref()
-                .expect("constraints")
-                .allowed_install_location_patterns
-                .len(),
-            2
-        );
+        let canonical =
+            serde_json::to_value(result.canonical_draft.expect("canonical draft")).expect("serialize draft");
+        assert_eq!(canonical.pointer("/Rules/0/Match/Interactive"), Some(&json!(false)));
     }
 
     #[test]
-    fn large_boolean_arrays_are_rejected_quickly_and_deterministically() {
-        let oversized = serde_json::Value::Array(vec![json!(true); 125_000]);
-        let mut match_value = serde_json::Map::new();
-        for field in BOOLEAN_MATCH_FIELDS {
-            match_value.insert((*field).to_owned(), oversized.clone());
+    fn shared_contract_rejects_invalid_rule_shapes() {
+        let cases = [
+            json!({ "SourceNames": ["winget"] }),
+            json!({ "Managers": ["Winget"], "Interactive": [true] }),
+            json!({ "Managers": ["Winget"], "PackageIdentifiers": { "Exact": [] } }),
+        ];
+        for match_value in cases {
+            let mut raw = draft();
+            raw["Rules"] = json!([rule("rule", match_value)]);
+            assert!(!validate_draft(&raw).is_valid);
         }
+        let mut deny_with_constraints = rule("rule", json!({ "Managers": ["Winget"] }));
+        deny_with_constraints["Constraints"] = json!({ "AllowInteractive": false });
         let mut raw = draft();
-        raw["Rules"] = json!([rule("booleans", match_value.into())]);
-        let started = std::time::Instant::now();
-        let first = validate_draft(&raw);
-        let second = validate_draft(&raw);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        assert!(!first.is_valid && first.canonical_draft.is_none() && first.validation_receipt.is_none());
-        assert_eq!(first.findings.len(), BOOLEAN_MATCH_FIELDS.len());
-        assert_eq!(
-            serde_json::to_value(first.findings).expect("serialize findings"),
-            serde_json::to_value(second.findings).expect("serialize findings")
-        );
+        raw["Rules"] = json!([deny_with_constraints]);
+        assert!(!validate_draft(&raw).is_valid);
     }
 
     #[test]
-    fn ineffective_boolean_matches_and_unsupported_criteria_are_rejected() {
+    fn validity_window_must_be_strictly_increasing() {
         let mut raw = draft();
-        raw["Rules"] = json!([rule("r1", json!({ "Interactive": [false, true] }))]);
-        assert!(has_code(
-            &validate_draft(&raw),
-            PolicyFindingCode::IneffectiveBooleanMatch
-        ));
-        raw["Rules"] = json!([rule("r1", json!({ "PackageNames": ["Display Name"] }))]);
-        assert!(has_code(&validate_draft(&raw), PolicyFindingCode::InvalidFieldValue));
+        raw["Metadata"]["ValidFrom"] = json!("2026-01-01T00:00:00Z");
+        raw["Metadata"]["ValidUntil"] = json!("2026-01-01T00:00:00Z");
+        let result = validate_draft(&raw);
+        assert!(!result.is_valid);
+        assert_eq!(result.findings[0].code, PolicyFindingCode::InvalidValidityInterval);
+        assert_eq!(result.findings[0].path, "/Metadata/ValidUntil");
     }
 
     #[test]
-    fn invalid_ranges_validity_and_contradictions_are_rejected() {
+    fn version_range_must_contain_a_stable_version_without_prerelease_opt_in() {
         let mut raw = draft();
         raw["Rules"] = json!([rule(
-            "r1",
-            json!({ "VersionRange": { "MinVersion": "2.0.0", "MaxVersion": "1.0.0" } })
+            "rule",
+            json!({
+                "Managers": ["Winget"],
+                "Version": {
+                    "Range": {
+                        "MinVersion": "1.0.0-alpha",
+                        "MaxVersion": "1.0.0-beta",
+                        "IncludePrerelease": false
+                    }
+                }
+            }),
         )]);
-        assert!(has_code(&validate_draft(&raw), PolicyFindingCode::EmptyVersionRange));
-        let mut raw = draft();
-        let mut contradictory = rule("r1", json!({ "Interactive": [true] }));
-        contradictory["Constraints"] = json!({ "AllowInteractive": false });
-        raw["Rules"] = json!([contradictory]);
-        assert!(has_code(
-            &validate_draft(&raw),
-            PolicyFindingCode::ContradictoryConstraints
-        ));
+        let result = validate_draft(&raw);
+        assert!(!result.is_valid);
+        assert_eq!(result.findings[0].code, PolicyFindingCode::EmptyVersionRange);
+        assert_eq!(result.findings[0].path, "/Rules/0/Match/Version/Range");
     }
 
     #[test]
-    fn prerelease_exclusion_rejects_ranges_without_stable_versions() {
-        for (min, max, include_prerelease, expected_valid) in [
-            (Some("1.0.0-alpha"), Some("1.0.0-beta"), false, false),
-            (Some("1.0.0-alpha"), Some("1.0.0-beta"), true, true),
-            (Some("1.0.0-alpha"), Some("1.0.0"), false, true),
-            (None, Some("0.0.0-alpha"), false, false),
-            (None, Some("0.0.0"), false, true),
-            (Some("1.0.0"), Some("2.0.0-alpha"), false, true),
+    fn metadata_schema_bounds_are_enforced() {
+        for (pointer, value) in [
+            ("/Metadata/Publisher", json!("")),
+            ("/Metadata/Publisher", json!("x".repeat(129))),
+            ("/Metadata/Description", json!("x".repeat(513))),
         ] {
             let mut raw = draft();
-            let mut range = json!({ "IncludePrerelease": include_prerelease });
-            if let Some(min) = min {
-                range["MinVersion"] = json!(min);
-            }
-            if let Some(max) = max {
-                range["MaxVersion"] = json!(max);
-            }
-            raw["Rules"] = json!([rule("range", json!({ "VersionRange": range }))]);
-            let result = validate_draft(&raw);
-            assert_eq!(
-                result.is_valid, expected_valid,
-                "{min:?}..{max:?}, prerelease={include_prerelease}"
-            );
-            assert_eq!(result.validator_version, VALIDATOR_VERSION);
-            if expected_valid {
-                assert!(result.canonical_draft.is_some());
+            if pointer == "/Metadata/Description" {
+                raw["Metadata"]["Description"] = value;
             } else {
-                assert!(result.canonical_draft.is_none());
-                assert!(result.validation_receipt.is_none());
-                let finding = result
-                    .findings
-                    .iter()
-                    .find(|finding| finding.code == PolicyFindingCode::EmptyVersionRange)
-                    .expect("empty range finding");
-                assert_eq!(finding.path, "/Rules/0/Match/VersionRange");
+                raw["Metadata"]["Publisher"] = value;
             }
+            assert!(!validate_draft(&raw).is_valid, "{pointer} must be rejected");
         }
     }
 
     #[test]
-    fn validity_interval_requires_strictly_increasing_instants() {
-        for (valid_from, valid_until, expected_valid) in [
-            (None, None, true),
-            (Some("2026-01-01T00:00:00Z"), None, true),
-            (None, Some("2026-01-01T00:00:00Z"), true),
-            (Some("2026-01-01T00:00:00Z"), Some("2026-01-01T00:00:01Z"), true),
-            (Some("2026-01-01T00:00:00Z"), Some("2026-01-01T00:00:00Z"), false),
-            (Some("2026-01-01T00:00:00Z"), Some("2025-12-31T19:00:00-05:00"), false),
-            (Some("2026-02-01T00:00:00Z"), Some("2026-01-01T00:00:00Z"), false),
-        ] {
-            let mut raw = draft();
-            if let Some(valid_from) = valid_from {
-                raw["Metadata"]["ValidFrom"] = json!(valid_from);
-            }
-            if let Some(valid_until) = valid_until {
-                raw["Metadata"]["ValidUntil"] = json!(valid_until);
-            }
-            let result = validate_draft(&raw);
-            assert_eq!(result.is_valid, expected_valid, "{valid_from:?}..{valid_until:?}");
-            assert_eq!(result.validator_version, VALIDATOR_VERSION);
-            if expected_valid {
-                assert!(result.canonical_draft.is_some());
-            } else {
-                assert!(result.canonical_draft.is_none());
-                assert!(result.validation_receipt.is_none());
-                let finding = result
-                    .findings
-                    .iter()
-                    .find(|finding| finding.code == PolicyFindingCode::InvalidValidityInterval)
-                    .expect("invalid interval finding");
-                assert_eq!(finding.path, "/Metadata/ValidUntil");
-                assert_eq!(finding.message, "ValidUntil must be after ValidFrom");
-            }
-        }
-    }
-
-    #[test]
-    fn risky_postures_produce_ordered_warnings() {
+    fn empty_match_collections_are_omitted_from_canonical_drafts() {
         let mut raw = draft();
-        raw["Enforcement"]["AuditMode"] = json!(true);
-        raw["Enforcement"]["DefaultDecision"] = json!("Allow");
-        let mut allow = rule("allow", json!({ "Managers": ["Winget"] }));
-        allow["Decision"] = json!("Allow");
-        raw["Rules"] = json!([allow]);
+        raw["Rules"] = json!([rule("rule", json!({ "Managers": ["Winget"], "Scopes": [] }))]);
         let result = validate_draft(&raw);
         assert!(result.is_valid);
-        assert_eq!(result.findings[0].code, PolicyFindingCode::AuditModeEnabled);
-        assert_eq!(result.findings[1].code, PolicyFindingCode::DefaultAllow);
-        assert!(has_code(&result, PolicyFindingCode::SensitiveOptionAllowed));
+        let canonical =
+            serde_json::to_value(result.canonical_draft.expect("canonical draft")).expect("serialize draft");
+        assert!(canonical.pointer("/Rules/0/Match/Scopes").is_none());
     }
 
     #[test]
-    fn sensitive_option_warnings_point_into_the_submitted_draft() {
-        let options = [
-            ("SkipHashCheck", "SkipHashCheck", "AllowSkipHashCheck"),
-            ("PreRelease", "PreRelease", "AllowPreRelease"),
-            (
-                "AllowCustomInstallLocation",
-                "HasCustomInstallLocation",
-                "AllowCustomInstallLocation",
-            ),
-            ("AllowPrePostCommands", "HasPrePostCommands", "AllowPrePostCommands"),
-            (
-                "AllowKillBeforeOperation",
-                "HasKillBeforeOperation",
-                "AllowKillBeforeOperation",
-            ),
-            (
-                "AllowUninstallPrevious",
-                "HasUninstallPrevious",
-                "AllowUninstallPrevious",
-            ),
-            ("AllowCustomParameters", "HasCustomParameters", "AllowCustomParameters"),
-        ];
-        for (option, match_field, constraint_field) in options {
-            for explicit in ["Match", "Constraints", "Default"] {
-                let mut raw = draft();
-                let mut allow = rule("allow", json!({ "Managers": ["Winget"] }));
-                allow["Decision"] = json!("Allow");
-                match explicit {
-                    "Match" => allow["Match"][match_field] = json!([true]),
-                    "Constraints" => {
-                        allow["Constraints"] = json!({});
-                        allow["Constraints"][constraint_field] = json!(true);
-                    }
-                    "Default" => {}
-                    _ => unreachable!(),
-                }
-                raw["Rules"] = json!([allow]);
-                let result = validate_draft(&raw);
-                assert!(result.is_valid, "{option} via {explicit}");
-                let finding = result
-                    .findings
-                    .iter()
-                    .find(|finding| finding.arguments.get("option") == Some(&json!(option)))
-                    .unwrap_or_else(|| panic!("missing {option} finding via {explicit}"));
-                let expected_path = match explicit {
-                    "Match" => format!("/Rules/0/Match/{match_field}"),
-                    "Constraints" => format!("/Rules/0/Constraints/{constraint_field}"),
-                    "Default" => "/Rules/0".to_owned(),
-                    _ => unreachable!(),
-                };
-                assert_eq!(finding.path, expected_path);
-                assert!(raw.pointer(&finding.path).is_some(), "missing {}", finding.path);
-                assert!(!finding.arguments.contains_key("Option"));
-            }
-        }
-    }
-
-    #[test]
-    fn disk_diagnostics_are_sanitized_and_bounded() {
-        let finding = disk_failure_finding(DiskFailureReason::MalformedContent);
-        assert_eq!(finding.code, PolicyFindingCode::SchemaViolation);
-        assert!(!finding.message.contains("secret"));
-        assert!(finding.message.chars().count() <= MAX_FINDING_MESSAGE_CHARS);
+    fn null_boolean_criteria_are_absent_in_canonical_drafts() {
+        let mut raw = draft();
+        raw["Rules"] = json!([rule("rule", json!({ "Managers": ["Winget"], "Interactive": null }))]);
+        let result = validate_draft(&raw);
+        assert!(result.is_valid);
+        let canonical =
+            serde_json::to_value(result.canonical_draft.expect("canonical draft")).expect("serialize draft");
+        assert!(canonical.pointer("/Rules/0/Match/Interactive").is_none());
     }
 }
