@@ -14,7 +14,7 @@ use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
-use tokio::sync::{Notify, mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
@@ -359,10 +359,6 @@ enum RecordingManagerMessage {
         id: Uuid,
         session_must_be_recorded: bool,
     },
-    SubscribeToSessionEndNotification {
-        id: Uuid,
-        channel: oneshot::Sender<Arc<Notify>>,
-    },
     SubscribeToStream {
         id: Uuid,
         channel: oneshot::Sender<watch::Receiver<RecordingStreamState>>,
@@ -398,9 +394,6 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("session_must_be_recorded", session_must_be_recorded)
                 .finish(),
-            RecordingManagerMessage::SubscribeToSessionEndNotification { id, channel: _ } => {
-                f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish()
-            }
             RecordingManagerMessage::ListFiles { id, channel: _ } => {
                 f.debug_struct("ListFiles").field("id", id).finish()
             }
@@ -511,17 +504,6 @@ impl RecordingMessageSender {
             .context("couldn't send ChunkAppended message")
     }
 
-    pub(crate) async fn subscribe_to_recording_finish(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
-        let (tx, rx) = oneshot::channel();
-        self.channel
-            .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
-                id: recording_id,
-                channel: tx,
-            })
-            .await?;
-        Ok(rx.await?)
-    }
-
     pub(crate) async fn subscribe_to_stream(
         &self,
         recording_id: Uuid,
@@ -604,7 +586,6 @@ impl Ord for DisconnectedTtl {
 pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
-    recording_end_notifier: HashMap<Uuid, Arc<Notify>>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
     job_queue_handle: JobQueueHandle,
@@ -620,7 +601,6 @@ impl RecordingManagerTask {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
-            recording_end_notifier: HashMap::new(),
             recordings_path,
             session_manager_handle,
             job_queue_handle,
@@ -863,11 +843,6 @@ impl RecordingManagerTask {
             .stream_state
             .send_modify(RecordingStreamState::mark_disconnected);
 
-        // Wake terminal-recording streamers waiting for this clip to stop.
-        if let Some(notify) = self.recording_end_notifier.get(&id) {
-            notify.notify_waiters();
-        }
-
         info!(%id, "Start video remuxing operation");
         if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
             if cadeau::xmf::is_init() {
@@ -939,27 +914,11 @@ impl RecordingManagerTask {
                     }
 
                     self.ongoing_recordings.remove(&id);
-                    self.recording_end_notifier.remove(&id);
                 }
                 _ => {
                     trace!(%id, "Recording should not be removed yet");
                 }
             }
-        }
-    }
-
-    fn subscribe(&mut self, id: Uuid) -> anyhow::Result<Arc<Notify>> {
-        debug!(%id, "Subscribing to ongoing recording");
-        if !self.ongoing_recordings.contains_key(&id) {
-            anyhow::bail!("unknown recording for ID {id}");
-        }
-
-        if let Some(notify) = self.recording_end_notifier.get(&id) {
-            Ok(Arc::clone(notify))
-        } else {
-            let notify = Arc::new(Notify::new());
-            self.recording_end_notifier.insert(id, Arc::clone(&notify));
-            Ok(notify)
         }
     }
 
@@ -1072,14 +1031,6 @@ async fn recording_manager_task(
                                 session_must_be_recorded,
                                 "Updated recording policy for session",
                             );
-                        }
-                    },
-                    RecordingManagerMessage::SubscribeToSessionEndNotification {id, channel } => {
-                        match manager.subscribe(id) {
-                            Ok(notifier) => {
-                                let _ = channel.send(notifier);
-                            },
-                            Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
                         }
                     },
                     RecordingManagerMessage::SubscribeToStream { id, channel } => {

@@ -195,11 +195,30 @@ where
         StartAt::LiveEdge,
         RecordingClip::new(reader),
         sender,
-        SessionConfig { encoder_threads: 1 },
+        SessionConfig {
+            encoder_threads: 1,
+            adaptive_frame_skip: false,
+        },
         0,
     )
     .expect("create live-edge normalizer");
     (normalizer, receiver)
+}
+
+#[test]
+fn adaptive_frame_skip_is_bounded() {
+    let (mut normalizer, _receiver) = live_edge_normalizer(Cursor::new(Vec::new()));
+    normalizer.config.adaptive_frame_skip = true;
+    normalizer.first_frame_timestamp = Some(0);
+    normalizer.processing_time = Duration::from_millis(100);
+
+    assert!(normalizer.should_skip_encode(50));
+    normalizer.frames_since_last_encode = 1;
+    assert!(!normalizer.should_skip_encode(50));
+
+    normalizer.frames_since_last_encode = 0;
+    normalizer.config.adaptive_frame_skip = false;
+    assert!(!normalizer.should_skip_encode(50));
 }
 
 fn empty_clip_bytes() -> Vec<u8> {
@@ -481,8 +500,15 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
     drop(input_sender);
     let (output_sender, mut output_receiver) = mpsc::channel(1);
 
-    normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
-        .expect("normalize reconnecting clips");
+    normalize_events(
+        input_receiver,
+        output_sender,
+        SessionConfig {
+            encoder_threads: 1,
+            adaptive_frame_skip: false,
+        },
+    )
+    .expect("normalize reconnecting clips");
     assert!(output_receiver.blocking_recv().is_none());
 }
 
@@ -508,8 +534,15 @@ fn corruption_before_an_incomplete_tail_still_fails() {
     drop(input_sender);
     let (output_sender, _output_receiver) = mpsc::channel(1);
 
-    let error = normalize_events(input_receiver, output_sender, SessionConfig { encoder_threads: 1 })
-        .expect_err("corruption before the incomplete tail must fail");
+    let error = normalize_events(
+        input_receiver,
+        output_sender,
+        SessionConfig {
+            encoder_threads: 1,
+            adaptive_frame_skip: false,
+        },
+    )
+    .expect_err("corruption before the incomplete tail must fail");
 
     assert!(format!("{error:#}").contains("corrupted"), "{error:#}");
 }
