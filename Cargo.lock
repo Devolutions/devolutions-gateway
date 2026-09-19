@@ -2679,8 +2679,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
+ "windows-link 0.1.3",
+ "windows-result 0.3.4",
 ]
 
 [[package]]
@@ -3215,7 +3215,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -4864,9 +4864,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b61d66fd334d2dac6150d1ab83f3831ec4b0ee20272fb3386fbe5b5e31c6663"
+checksum = "fcd733577077eb870204207836f596ec3fc8fe4876d3652be7f0dee4a52e0dc8"
 dependencies = [
  "chrono",
  "derive_more",
@@ -4881,9 +4881,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-server-template"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fee165964d3b2dddfa2c6283b820d5cad337277d51365cf77e6b1376668f529d"
+checksum = "567491bfc7bf5615d1854cc951172987fe638084b86c6c153ad6d860f0096ae8"
 dependencies = [
  "aide 0.15.1",
  "async-trait",
