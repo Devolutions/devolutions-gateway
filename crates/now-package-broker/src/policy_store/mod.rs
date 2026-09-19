@@ -374,19 +374,6 @@ impl PolicyStore {
                 validation,
             ));
         }
-        if !validation.findings.is_empty() && !request.warnings_acknowledged {
-            audit.failed_at(
-                operation,
-                &observation.canonical_path,
-                crate::audit::FailureReason::WarningsNotAcknowledged,
-            );
-            return Err(error_with_validation(
-                ErrorCode::WarningConfirmationRequired,
-                "validation warnings must be explicitly acknowledged",
-                validation,
-            ));
-        }
-
         let revision = match plan_revision(
             request.operation,
             observation.state,
@@ -962,7 +949,6 @@ mod storage_tests {
             expected_store_token: store.management_snapshot().store_token,
             operation: PolicyReplacementOperation::Update,
             conflict_handling: PolicyConflictHandling::Reject,
-            warnings_acknowledged: false,
             draft: raw,
             validation_receipt: validation.validation_receipt.expect("valid receipt"),
         }

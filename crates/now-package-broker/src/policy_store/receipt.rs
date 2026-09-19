@@ -115,7 +115,6 @@ mod tests {
             expected_store_token: store.management_snapshot().store_token,
             operation,
             conflict_handling: PolicyConflictHandling::Reject,
-            warnings_acknowledged: false,
             draft: raw,
             validation_receipt: validation.validation_receipt.expect("valid receipt"),
         }
@@ -218,7 +217,7 @@ mod tests {
         assert_eq!(receipt_error.code, ErrorCode::ValidationFailed);
     }
     #[tokio::test]
-    async fn store_requires_warning_acknowledgement() {
+    async fn store_saves_valid_drafts_with_advisory_findings() {
         let store = PolicyStore::for_tests(None);
         let mut risky = serde_json::to_value(draft("risky")).expect("serialize draft");
         risky["Rules"] = serde_json::Value::Array(
@@ -257,17 +256,11 @@ mod tests {
             serde_json::to_value(round_trip).expect("serialize round-tripped validation result"),
             serialized
         );
-        let mut replacement = request(&store, PolicyReplacementOperation::Create, risky);
-        let error = store
-            .replace_for_tests(replacement.clone())
-            .await
-            .expect_err("warning must be acknowledged");
-        assert_eq!(error.code, ErrorCode::WarningConfirmationRequired);
-        replacement.warnings_acknowledged = true;
+        let replacement = request(&store, PolicyReplacementOperation::Create, risky);
         store
             .replace_for_tests(replacement)
             .await
-            .expect("acknowledged warning succeeds");
+            .expect("advisory findings do not block a valid draft");
     }
     #[tokio::test]
     async fn canonical_sensitive_warnings_accept_the_original_receipt() {
@@ -318,7 +311,6 @@ mod tests {
                     expected_store_token: store.management_snapshot().store_token,
                     operation: PolicyReplacementOperation::Create,
                     conflict_handling: PolicyConflictHandling::Reject,
-                    warnings_acknowledged: true,
                     draft: canonical.clone(),
                     validation_receipt: receipt.clone(),
                 };

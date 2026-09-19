@@ -1027,7 +1027,6 @@ mod tests {
             "ExpectedStoreToken": replacement_state.policy_store.management_snapshot().store_token,
             "Operation": "Create",
             "ConflictHandling": "Reject",
-            "WarningsAcknowledged": false,
             "Draft": replacement_draft,
             "ValidationReceipt": validation.validation_receipt.expect("valid receipt"),
         });
@@ -1054,7 +1053,7 @@ mod tests {
                 Method::PUT,
                 "/v1/policy",
                 "Application/JSON; charset=utf-8",
-                r#"{"RequestKind":"PolicyReplacementRequest","RequestVersion":"1.0","ExpectedStoreToken":"invalid","Operation":"Create","ConflictHandling":"Reject","WarningsAcknowledged":false,"ValidationReceipt":"invalid","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
+                r#"{"RequestKind":"PolicyReplacementRequest","RequestVersion":"1.0","ExpectedStoreToken":"invalid","Operation":"Create","ConflictHandling":"Reject","ValidationReceipt":"invalid","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
             ),
         ] {
             let response = route_raw(
@@ -1229,7 +1228,6 @@ mod tests {
             "ExpectedStoreToken": state.policy_store.management_snapshot().store_token,
             "Operation": "Create",
             "ConflictHandling": "Reject",
-            "WarningsAcknowledged": false,
             "Draft": draft,
             "ValidationReceipt": validation.validation_receipt.expect("valid receipt")
         });
