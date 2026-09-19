@@ -1,7 +1,4 @@
-﻿; ----------------------------------------------------------------------
-; Devolutions Gateway - Windows Event Log message definitions (.mc)
-; English (0x409), French (0x40c), German (0x407)
-; ----------------------------------------------------------------------
+﻿; Devolutions Agent Windows Event Log message definitions.
 
 MessageIdTypedef=DWORD
 
@@ -22,9 +19,7 @@ LanguageNames=(
     German=0x407:MSG00407
 )
 
-; ======================================================================
 ; 1000-1099 Service / Lifecycle
-; ======================================================================
 
 MessageId=1000
 SymbolicName=SERVICE_STARTED
@@ -86,9 +81,7 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
-; ======================================================================
-; 2000-2099 Listeners & Networking
-; ======================================================================
+; 2000-2099 Listeners and Networking
 
 MessageId=2000
 SymbolicName=LISTENER_STARTED
@@ -126,9 +119,7 @@ Language=German
 Listener gestoppt. Kontext=%1 Adresse=%2 Grund=%3
 .
 
-; ======================================================================
 ; 3000-3099 TLS / Certificates
-; ======================================================================
 
 MessageId=3000
 SymbolicName=TLS_CONFIGURED
@@ -214,9 +205,7 @@ Language=German
 Kein geeignetes Zertifikat gefunden. Kontext=%1 Fehler=%2 Probleme=%3
 .
 
-; ======================================================================
-; 4000-4099 Sessions, Tokens & Recording
-; ======================================================================
+; 4000-4099 Sessions, Tokens and Recording
 
 MessageId=4000
 SymbolicName=SESSION_OPENED
@@ -314,9 +303,7 @@ Language=German
 Aufnahmefehler. Kontext=%1 Pfad=%2 Fehler=%3
 .
 
-; ======================================================================
 ; 5000-5099 Authentication / Authorization
-; ======================================================================
 
 MessageId=5001
 SymbolicName=JWT_REJECTED
@@ -366,9 +353,7 @@ Language=German
 Auth-Zusammenfassung. Kontext=%1 IntervallSek=%2 JwtOk=%3 JwtAbgelehnt=%4 Verweigert=%5 NachGrund=%6
 .
 
-; ======================================================================
 ; 6000-6099 Agent Integration
-; ======================================================================
 
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
@@ -430,9 +415,7 @@ Language=German
 PEDM aktiviert. Kontext=%1
 .
 
-; ======================================================================
 ; 7000-7099 Health
-; ======================================================================
 
 MessageId=7010
 SymbolicName=RECORDING_STORAGE_LOW
@@ -446,9 +429,105 @@ Language=German
 Aufnahmespeicher niedrig. Kontext=%1 VerbleibendeBytes=%2 Schwelle=%3
 .
 
-; ======================================================================
+; 8000-8099 Package Broker / Policy Management
+
+MessageId=8000
+SymbolicName=POLICY_WRITE_ATTEMPTED
+Language=English
+Policy management write attempted. Context=%1 ActorSid=%2 ActorExe=%3 Intent=%4 Path=%5
+.
+Language=French
+Tentative d’écriture de politique. Contexte=%1 SidActeur=%2 ExeActeur=%3 Intention=%4 Chemin=%5
+.
+Language=German
+Richtlinien-Schreibvorgang versucht. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Absicht=%4 Pfad=%5
+.
+
+MessageId=8001
+SymbolicName=POLICY_WRITE_DENIED
+Language=English
+Policy management write denied. Context=%1 ActorSid=%2 ActorExe=%3 Intent=%4 Path=%5 Reason=%6
+.
+Language=French
+Écriture de politique refusée. Contexte=%1 SidActeur=%2 ExeActeur=%3 Intention=%4 Chemin=%5 Raison=%6
+.
+Language=German
+Richtlinien-Schreibvorgang verweigert. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Absicht=%4 Pfad=%5 Grund=%6
+.
+
+MessageId=8002
+SymbolicName=POLICY_CREATE_FAILED
+Language=English
+Policy creation failed. Context=%1 ActorSid=%2 ActorExe=%3 Intent=%4 Path=%5 Operation=%6 Outcome=%7 Reason=%8
+.
+Language=French
+Échec de la création de politique. Contexte=%1 SidActeur=%2 ExeActeur=%3 Intention=%4 Chemin=%5 Opération=%6 Résultat=%7 Raison=%8
+.
+Language=German
+Richtlinienerstellung fehlgeschlagen. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Absicht=%4 Pfad=%5 Vorgang=%6 Ergebnis=%7 Grund=%8
+.
+
+MessageId=8003
+SymbolicName=POLICY_CREATE_SUCCEEDED
+Language=English
+Policy creation succeeded. Context=%1 ActorSid=%2 ActorExe=%3 Path=%4 OldId=%5 OldRevision=%6 NewId=%7 NewRevision=%8 Intent=%9 Operation=%10 Outcome=%11
+.
+Language=French
+Création de politique réussie. Contexte=%1 SidActeur=%2 ExeActeur=%3 Chemin=%4 AncienId=%5 AncienneRévision=%6 NouvelId=%7 NouvelleRévision=%8 Intention=%9 Opération=%10 Résultat=%11
+.
+Language=German
+Richtlinie erfolgreich erstellt. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Pfad=%4 AlteId=%5 AlteRevision=%6 NeueId=%7 NeueRevision=%8 Absicht=%9 Vorgang=%10 Ergebnis=%11
+.
+
+MessageId=8004
+SymbolicName=POLICY_CHANGE_FAILED
+Language=English
+Policy change failed. Context=%1 ActorSid=%2 ActorExe=%3 Intent=%4 Path=%5 Operation=%6 Outcome=%7 Reason=%8
+.
+Language=French
+Échec de la modification de politique. Contexte=%1 SidActeur=%2 ExeActeur=%3 Intention=%4 Chemin=%5 Opération=%6 Résultat=%7 Raison=%8
+.
+Language=German
+Richtlinienänderung fehlgeschlagen. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Absicht=%4 Pfad=%5 Vorgang=%6 Ergebnis=%7 Grund=%8
+.
+
+MessageId=8005
+SymbolicName=POLICY_CHANGE_SUCCEEDED
+Language=English
+Policy change succeeded. Context=%1 ActorSid=%2 ActorExe=%3 Path=%4 OldId=%5 OldRevision=%6 NewId=%7 NewRevision=%8 Intent=%9 Operation=%10 Outcome=%11
+.
+Language=French
+Modification de politique réussie. Contexte=%1 SidActeur=%2 ExeActeur=%3 Chemin=%4 AncienId=%5 AncienneRévision=%6 NouvelId=%7 NouvelleRévision=%8 Intention=%9 Opération=%10 Résultat=%11
+.
+Language=German
+Richtlinie erfolgreich geändert. Kontext=%1 AkteurSid=%2 AkteurExe=%3 Pfad=%4 AlteId=%5 AlteRevision=%6 NeueId=%7 NeueRevision=%8 Absicht=%9 Vorgang=%10 Ergebnis=%11
+.
+
+MessageId=8010
+SymbolicName=POLICY_EXTERNAL_CHANGE_APPLIED
+Language=English
+External policy change applied. Context=%1 Path=%2 NewId=%3 NewRevision=%4
+.
+Language=French
+Modification externe de la politique appliquée. Contexte=%1 Chemin=%2 NouvelId=%3 NouvelleRévision=%4
+.
+Language=German
+Externe Richtlinienänderung angewendet. Kontext=%1 Pfad=%2 NeueId=%3 NeueRevision=%4
+.
+
+MessageId=8011
+SymbolicName=POLICY_EXTERNAL_CHANGE_REJECTED
+Language=English
+External policy change rejected. Context=%1 Path=%2 Reason=%3
+.
+Language=French
+Modification externe de la politique rejetée. Contexte=%1 Chemin=%2 Raison=%3
+.
+Language=German
+Externe Richtlinienänderung abgelehnt. Kontext=%1 Pfad=%2 Grund=%3
+.
+
 ; 9000-9099 Diagnostics
-; ======================================================================
 
 MessageId=9001
 SymbolicName=DEBUG_OPTIONS_ENABLED
