@@ -756,7 +756,6 @@ async fn replace_policy_response_by_pipe(
         "ExpectedStoreToken": expected_store_token,
         "Operation": operation,
         "ConflictHandling": conflict_handling,
-        "WarningsAcknowledged": true,
         "Draft": validation["CanonicalDraft"],
         "ValidationReceipt": validation["ValidationReceipt"]
     });
@@ -1210,16 +1209,9 @@ async fn warnings_identity_and_receipts(
         "ExpectedStoreToken": current["Management"]["StoreToken"],
         "Operation": "ReplaceIdentity",
         "ConflictHandling": "Reject",
-        "WarningsAcknowledged": false,
         "Draft": validation["CanonicalDraft"],
         "ValidationReceipt": validation["ValidationReceipt"]
     });
-    let warning = send_replacement(&agent.pipe_name, &replacement).await?;
-    ensure!(
-        warning.status == 409 && warning.json()?["Code"] == "WarningConfirmationRequired",
-        "unacknowledged warnings were not rejected"
-    );
-    replacement["WarningsAcknowledged"] = json!(true);
     replacement["Draft"]["Metadata"]["Publisher"] = json!("Tampered after validation");
     let tampered = send_replacement(&agent.pipe_name, &replacement).await?;
     ensure!(
@@ -1245,12 +1237,11 @@ async fn warnings_identity_and_receipts(
         replaced["Policy"]["Metadata"]["Id"] == "tests.replaced-identity"
             && replaced["Policy"]["Metadata"]["Revision"] == 1
             && replaced["Policy"]["PolicyFormatVersion"] == "1.7.3",
-        "ReplaceIdentity did not preserve the canonical contract and reset revision"
+        "advisory findings did not permit the canonical identity replacement"
     );
     wait_for_log(agent, "Policy change succeeded").await?;
     wait_for_log(agent, "replace_identity").await?;
     wait_for_log(agent, "invalid_receipt").await?;
-    wait_for_log(agent, "warnings_not_acknowledged").await?;
     Ok(replaced)
 }
 
