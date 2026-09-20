@@ -5,11 +5,11 @@ use std::collections::BTreeSet;
 use chrono::Utc;
 use now_policy::{
     Decision, PackageIdentifier, PackageIdentifierCondition, PolicyDocument, PolicyEnforcement, PolicyFormatVersion,
-    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId,
+    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId, SourceName,
 };
 use now_policy_api::{self as api, PackageRequest};
 
-use super::evaluate;
+use super::{evaluate, source_name_is_unambiguous};
 
 fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
     PolicyDocument {
@@ -126,6 +126,52 @@ fn deny_unmatched_package() {
     let result = evaluate(&policy, &request);
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn unicode_case_equivalent_source_deny_outranks_allow() {
+    let policy = make_policy(
+        Decision::Deny,
+        vec![
+            PolicyRule {
+                id: ResourceId::from("allow-any"),
+                enabled: true,
+                priority: 100,
+                decision: Decision::Allow,
+                reason: None,
+                match_criteria: PolicyMatch::default(),
+                constraints: None,
+            },
+            PolicyRule {
+                id: ResourceId::from("deny-corp"),
+                enabled: true,
+                priority: 100,
+                decision: Decision::Deny,
+                reason: None,
+                match_criteria: PolicyMatch {
+                    source_names: BTreeSet::from([SourceName::parse("CÖRP").expect("valid source")]),
+                    ..Default::default()
+                },
+                constraints: None,
+            },
+        ],
+    );
+    let mut request = make_request(api::Operation::Install, "Example.Package");
+    request.manager = api::ManagerName::PowerShell;
+    request.source.name = "cörp".to_owned();
+
+    let result = evaluate(&policy, &request);
+
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-corp");
+}
+
+#[test]
+fn default_ignorable_source_spelling_is_rejected_before_evaluation() {
+    assert!(!source_name_is_unambiguous("PS\u{00AD}Gallery"));
+    assert!(!source_name_is_unambiguous("PSGallery "));
+    assert!(!source_name_is_unambiguous(" PSGallery"));
+    assert!(source_name_is_unambiguous("PSGallery"));
 }
 
 #[test]

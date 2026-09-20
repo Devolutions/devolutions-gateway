@@ -1791,6 +1791,7 @@ dependencies = [
  "uuid",
  "win-api-wrappers",
  "windows 0.61.3",
+ "windows-registry 0.5.3",
  "x509-parser",
 ]
 
@@ -4843,6 +4844,7 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
+ "unicode-normalization",
  "uuid",
  "widestring 1.2.1",
  "win-api-wrappers",

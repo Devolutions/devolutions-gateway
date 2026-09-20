@@ -26,6 +26,7 @@ use now_policy_api::{
 use now_policy_server_template::{
     MAX_POLICY_MANAGEMENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer,
 };
+use tokio::sync::watch;
 use tracing::{info, trace, warn};
 use win_api_wrappers::identity::sid::Sid;
 
@@ -112,7 +113,25 @@ struct EvaluatedRequest {
 }
 
 /// Build the axum router for a single authenticated pipe client.
+#[cfg(test)]
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
+    build_router_for_client_with_optional_policy_write_deadline(state, client, None)
+}
+
+/// Build the router and signal when the exact helper policy-write authorization completes.
+pub(crate) fn build_router_for_client_with_policy_write_deadline(
+    state: Arc<BrokerState>,
+    client: PipeClient,
+    policy_write_deadline: watch::Sender<bool>,
+) -> axum::Router {
+    build_router_for_client_with_optional_policy_write_deadline(state, client, Some(policy_write_deadline))
+}
+
+fn build_router_for_client_with_optional_policy_write_deadline(
+    state: Arc<BrokerState>,
+    client: PipeClient,
+    policy_write_deadline: Option<watch::Sender<bool>>,
+) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection {
         state: Arc::clone(&state),
         client: client.clone(),
@@ -120,6 +139,7 @@ pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClien
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
         .layer(middleware::from_fn(reject_duplicate_policy_json_members))
         .layer(middleware::from_fn_with_state(state, authenticate_policy_management))
+        .layer(Extension(policy_write_deadline))
         .layer(Extension(client))
 }
 
@@ -292,6 +312,7 @@ fn reject_duplicate_json_members(bytes: &[u8]) -> Result<(), serde_json::Error> 
 async fn authenticate_policy_management(
     State(state): State<Arc<BrokerState>>,
     Extension(client): Extension<PipeClient>,
+    Extension(policy_write_deadline): Extension<Option<watch::Sender<bool>>>,
     request: Request,
     next: Next,
 ) -> Response {
@@ -307,7 +328,13 @@ async fn authenticate_policy_management(
             | (&Method::PUT, "/v1/policy")
     );
     if protected {
-        if let Err(error) = client.validate_connection(state.skip_signature_validation) {
+        let policy_write = matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy"));
+        let authentication = if policy_write {
+            client.validate_policy_write(state.skip_signature_validation)
+        } else {
+            client.validate_connection(state.skip_signature_validation)
+        };
+        if let Err(error) = authentication {
             if let Some(audit) = write_audit {
                 audit.denied(crate::audit::DenialReason::AuthenticationFailed);
             }
@@ -320,6 +347,9 @@ async fn authenticate_policy_management(
                 )),
             )
                 .into_response();
+        }
+        if policy_write && let Some(policy_write_deadline) = policy_write_deadline {
+            let _ = policy_write_deadline.send(true);
         }
         let authenticated = POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request));
         return if let Some(audit) = write_audit {
@@ -724,6 +754,17 @@ impl BrokerState {
         reason = "the shared API contract requires ErrorResponse values"
     )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
+        if !evaluator::source_name_is_unambiguous(&request.source.name) {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: package source name has ambiguous spelling"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "package source name has unsupported leading, trailing, or default-ignorable characters",
+            ));
+        }
+
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
         // their content yet. Running them elevated would grant arbitrary elevated
@@ -1068,6 +1109,45 @@ mod tests {
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
             assert_eq!(response_json(response).await["Code"], "MalformedDraft");
         }
+    }
+
+    #[cfg(feature = "dev-skip-broker-signature")]
+    #[tokio::test]
+    async fn authorized_policy_write_extends_only_its_connection_deadline() {
+        let client = PipeClient::test_with_authority(true, true).expect("create elevated test client");
+        let state = shared_state(None);
+        let draft = serde_json::json!({
+            "PolicyFormatVersion": "1.0.0",
+            "Metadata": { "Id": "replacement", "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny" },
+            "Rules": []
+        });
+        let validation = state.policy_store.validate_draft(&draft);
+        let replacement = serde_json::json!({
+            "RequestKind": "PolicyReplacementRequest",
+            "RequestVersion": "1.0",
+            "ExpectedStoreToken": state.policy_store.management_snapshot().store_token,
+            "Operation": "Create",
+            "ConflictHandling": "Reject",
+            "Draft": draft,
+            "ValidationReceipt": validation.validation_receipt.expect("valid receipt"),
+        });
+        let (deadline, mut extended) = watch::channel(false);
+        let mut router = build_router_for_client_with_policy_write_deadline(state, client, deadline);
+        let response = router
+            .call(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/v1/policy")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&replacement).expect("serialize request")))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router is infallible");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(*extended.borrow_and_update());
     }
 
     #[cfg(feature = "dev-skip-broker-signature")]

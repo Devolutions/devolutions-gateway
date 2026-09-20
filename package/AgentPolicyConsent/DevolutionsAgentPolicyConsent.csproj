@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <PublishAot Condition="'$(PublishAot)' == ''">true</PublishAot>
+    <SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DevolutionsAgentPolicyConsent</AssemblyName>
+    <RootNamespace>DevolutionsAgentPolicyConsent</RootNamespace>
+    <Product>Devolutions Agent Policy Consent</Product>
+    <Company>Devolutions Inc.</Company>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevolutionsAgentPolicyConsent.Tests" />
+  </ItemGroup>
+</Project>

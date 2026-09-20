@@ -9,7 +9,7 @@ use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
-use super::wildcard::wildcard_any;
+use super::wildcard::{literal_case_insensitive_match, wildcard_any};
 
 pub(super) fn rule_matches(
     rule: &PolicyRule,
@@ -21,7 +21,7 @@ pub(super) fn rule_matches(
 
     operations_match(request.operation, &m.operations)
         && managers_match(request.manager, &m.managers)
-        && source_names_match(&request.source.name, &m.source_names)
+        && source_names_match(request.manager, &request.source.name, &m.source_names)
         && package_identifiers_match(&request.package.id, &m.package_identifiers)
         && versions_match(effective_version, &m.version)
         && scopes_match(request.options.scope, &m.scopes)
@@ -129,8 +129,18 @@ fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elev
     allowed.is_empty() || allowed.contains(&policy_elevation(elevation))
 }
 
-fn source_names_match(value: &str, allowed: &BTreeSet<now_policy::SourceName>) -> bool {
-    allowed.is_empty() || allowed.iter().any(|source| source.as_ref().eq_ignore_ascii_case(value))
+fn source_names_match(
+    manager: now_policy_api::ManagerName,
+    value: &str,
+    allowed: &BTreeSet<now_policy::SourceName>,
+) -> bool {
+    allowed.is_empty()
+        || allowed.iter().any(|source| match manager {
+            now_policy_api::ManagerName::PowerShell | now_policy_api::ManagerName::PowerShell7 => {
+                literal_case_insensitive_match(value, source.as_ref())
+            }
+            _ => source.as_ref().eq_ignore_ascii_case(value),
+        })
 }
 
 fn package_identifiers_match(
@@ -260,6 +270,20 @@ mod tests {
             source_names: BTreeSet::from([now_policy::SourceName::parse("wing*").expect("valid source")]),
             ..Default::default()
         }));
+    }
+
+    #[test]
+    fn non_powershell_source_names_remain_canonically_distinct() {
+        let mut request = request();
+        request.manager = api::ManagerName::Scoop;
+        request.source.name = "CO\u{0308}RP".to_owned();
+        let flags = RequestFlags::from_request(&request);
+        let rule = rule(PolicyMatch {
+            source_names: BTreeSet::from([now_policy::SourceName::parse("CÖRP").expect("valid source")]),
+            ..Default::default()
+        });
+
+        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
     }
 
     #[test]
