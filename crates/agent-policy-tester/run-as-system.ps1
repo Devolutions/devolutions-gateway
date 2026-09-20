@@ -4,11 +4,18 @@ $workspacePath = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $testerPath = Join-Path $workspacePath "target/debug/agent-policy-tester.exe"
 $agentPath = Join-Path $workspacePath "target/debug/devolutions-agent.exe"
 $outputPath = Join-Path $PSScriptRoot "agent-policy-tester.out"
-$stagingPath = Join-Path $env:ProgramData "dgw-agent-policy-tester-$([guid]::NewGuid().ToString('N'))"
+$stagingPath = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) "dgw-agent-policy-tester-$([guid]::NewGuid().ToString('N'))"
 $stagedTesterPath = Join-Path $stagingPath "agent-policy-tester.exe"
+$exitCode = 1
 
 try {
     Set-Content -LiteralPath $outputPath -Value ""
+    if (-not [System.Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        throw "This runner requires LocalSystem"
+    }
+    if ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($workspacePath)).DriveType -ne 'Fixed') {
+        throw "Use a local fixed-volume workspace path visible to LocalSystem, not a mapped drive"
+    }
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -61,7 +68,6 @@ public static class AgentPolicyTesterNativeDirectory
     if (Get-ChildItem -LiteralPath $stagingPath -Force) {
         throw "The atomically protected staged tester directory was not empty"
     }
-
     Copy-Item -LiteralPath $testerPath -Destination $stagedTesterPath
     & icacls.exe $stagedTesterPath /setowner '*S-1-5-18' 2>&1 | Out-File $outputPath -Append
     if ($LASTEXITCODE -ne 0) {
@@ -76,7 +82,7 @@ public static class AgentPolicyTesterNativeDirectory
     "Staged policy tester at $stagedTesterPath" | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagingPath | Format-List Owner, Sddl | Out-File $outputPath -Append
     Get-Acl -LiteralPath $stagedTesterPath | Format-List Owner, Sddl | Out-File $outputPath -Append
-    & $stagedTesterPath $agentPath 2>&1 | Out-File $outputPath -Append
+    & $stagedTesterPath $agentPath elevated 2>&1 | Out-File $outputPath -Append
     $exitCode = $LASTEXITCODE
 } catch {
     $_ | Out-File $outputPath -Append
@@ -88,6 +94,7 @@ public static class AgentPolicyTesterNativeDirectory
         } catch {
             if ($attempt -eq 19) {
                 "Failed to remove $stagingPath after 20 attempts: $_" | Out-File $outputPath -Append
+                $exitCode = 1
             } else {
                 Start-Sleep -Milliseconds 250
             }
