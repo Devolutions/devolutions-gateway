@@ -311,7 +311,7 @@ public sealed class ProtocolTests
     public void RequestRejectsUnknownJsonMembers()
     {
         string json =
-            $$"""{"protocolVersion":"2.0","requestId":"{{RequestId}}","operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","warningsAcknowledged":false,"draft":{},"command":"cmd.exe"}""";
+            $$"""{"protocolVersion":"2.0","requestId":"{{RequestId}}","operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","draft":{},"command":"cmd.exe"}""";
 
         Assert.Throws<JsonException>(
             () => JsonSerializer.Deserialize(json, ProtocolJsonContext.Default.ElevationRequest));
@@ -328,7 +328,6 @@ public sealed class ProtocolTests
             "ConfirmOverwrite",
             "token",
             "receipt",
-            true,
             draft.RootElement.Clone());
 
         using JsonDocument official = JsonDocument.Parse(BrokerClient.CreateOfficialRequest(request));
@@ -340,22 +339,22 @@ public sealed class ProtocolTests
             "ExpectedStoreToken",
             "Operation",
             "ConflictHandling",
-            "WarningsAcknowledged",
             "Draft",
             "ValidationReceipt",
         ], names);
     }
 
     [Fact]
-    public void RequestRequiresEveryMemberAndObjectDraft()
+    public void RequestRejectsLegacyAcknowledgementMember()
     {
-        string missingAcknowledgement =
-            $$$"""{"protocolVersion":"2.0","requestId":"{{{RequestId}}}","operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","draft":{}}""";
+        string legacyAcknowledgement = string.Concat("Warnings", "Acknowledged");
+        string requestJson =
+            $$"""{"protocolVersion":"2.0","requestId":"{{RequestId}}","operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","draft":{},"{{legacyAcknowledgement}}":false}""";
         Assert.Throws<JsonException>(
-            () => JsonSerializer.Deserialize(missingAcknowledgement, ProtocolJsonContext.Default.ElevationRequest));
+            () => JsonSerializer.Deserialize(requestJson, ProtocolJsonContext.Default.ElevationRequest));
 
         using JsonDocument draft = JsonDocument.Parse("[]");
-        ElevationRequest request = new("2.0", RequestId, "Update", "Reject", "a", "b", false, draft.RootElement);
+        ElevationRequest request = new("2.0", RequestId, "Update", "Reject", "a", "b", draft.RootElement);
         Assert.Throws<ProtocolException>(() => Protocol.ValidateRequest(request));
     }
 
@@ -363,7 +362,7 @@ public sealed class ProtocolTests
     public void RequestRejectsExplicitNullRequiredMembers()
     {
         string nullRequestId =
-            """{"protocolVersion":"2.0","requestId":null,"operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","warningsAcknowledged":false,"draft":{}}""";
+            """{"protocolVersion":"2.0","requestId":null,"operation":"Update","conflictHandling":"Reject","expectedStoreToken":"a","validationReceipt":"b","draft":{}}""";
 
         ElevationRequest request = JsonSerializer.Deserialize(
             nullRequestId,
@@ -400,7 +399,6 @@ public sealed class ProtocolTests
             "Reject",
             "token",
             "receipt",
-            false,
             draft.RootElement.Clone());
 
         ElevationResponse response = await BrokerClient.ReplaceAsync(request, CancellationToken.None);
@@ -422,7 +420,6 @@ public sealed class ProtocolTests
             conflictHandling,
             "a",
             "b",
-            false,
             draft.RootElement);
 
         Assert.Throws<ProtocolException>(() => Protocol.ValidateRequest(request));

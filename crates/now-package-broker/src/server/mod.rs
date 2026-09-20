@@ -1129,7 +1129,6 @@ mod tests {
             "ExpectedStoreToken": state.policy_store.management_snapshot().store_token,
             "Operation": "Create",
             "ConflictHandling": "Reject",
-            "WarningsAcknowledged": false,
             "Draft": draft,
             "ValidationReceipt": validation.validation_receipt.expect("valid receipt"),
         });

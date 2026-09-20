@@ -106,7 +106,6 @@ internal static class BrokerClient
         writer.WriteString("ExpectedStoreToken", request.ExpectedStoreToken);
         writer.WriteString("Operation", request.Operation);
         writer.WriteString("ConflictHandling", request.ConflictHandling);
-        writer.WriteBoolean("WarningsAcknowledged", request.WarningsAcknowledged);
         writer.WritePropertyName("Draft");
         request.Draft.WriteTo(writer);
         writer.WriteString("ValidationReceipt", request.ValidationReceipt);
