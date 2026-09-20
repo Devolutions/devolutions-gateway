@@ -214,7 +214,6 @@ internal sealed record ElevationRequest(
     [property: JsonRequired] string ConflictHandling,
     [property: JsonRequired] string ExpectedStoreToken,
     [property: JsonRequired] string ValidationReceipt,
-    [property: JsonRequired] bool WarningsAcknowledged,
     [property: JsonRequired] JsonElement Draft);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
