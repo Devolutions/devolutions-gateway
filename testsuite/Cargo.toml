@@ -39,6 +39,7 @@ camino = "1"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
+http-client-proxy = { path = "../crates/http-client-proxy" }
 ipnetwork = "0.20"
 jmux-proto = { path = "../crates/jmux-proto" }
 libsql = { version = "0.9", default-features = false, features = ["core"] }
