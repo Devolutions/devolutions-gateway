@@ -32,6 +32,31 @@ pub struct AgentTunnelConfig {
     pub listen_port: Option<u16>,
 }
 
+#[derive(Clone, TypedBuilder)]
+pub struct SubscriberConfig {
+    #[builder(setter(into))]
+    url: String,
+    #[builder(setter(into))]
+    token: String,
+}
+
+#[derive(Clone, Copy)]
+pub enum ProxyMode {
+    Off,
+    System,
+    Manual,
+}
+
+impl fmt::Display for ProxyMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Off => f.write_str("Off"),
+            Self::System => f.write_str("System"),
+            Self::Manual => f.write_str("Manual"),
+        }
+    }
+}
+
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
     #[builder(default, setter(into))]
@@ -60,6 +85,12 @@ pub struct DgwConfig {
     /// Agent tunnel (QUIC) configuration.
     #[builder(default, setter(into))]
     agent_tunnel: Option<AgentTunnelConfig>,
+    /// Subscriber configuration.
+    #[builder(default, setter(into))]
+    subscriber: Option<SubscriberConfig>,
+    /// Proxy mode override.
+    #[builder(default, setter(into))]
+    proxy_mode: Option<ProxyMode>,
 }
 
 fn find_unused_port() -> u16 {
@@ -104,6 +135,8 @@ impl DgwConfigHandle {
             enable_unstable,
             recording_path,
             agent_tunnel,
+            subscriber,
+            proxy_mode,
         } = config;
 
         let tempdir = tempfile::tempdir().context("create tempdir")?;
@@ -137,6 +170,30 @@ impl DgwConfigHandle {
             String::new()
         };
 
+        let subscriber_json = subscriber
+            .map(|subscriber| {
+                format!(
+                    r#",
+    "Subscriber": {{
+        "Url": "{}",
+        "Token": "{}"
+    }}"#,
+                    subscriber.url, subscriber.token
+                )
+            })
+            .unwrap_or_default();
+
+        let proxy_json = proxy_mode
+            .map(|proxy_mode| {
+                format!(
+                    r#",
+    "Proxy": {{
+        "Mode": "{proxy_mode}"
+    }}"#
+                )
+            })
+            .unwrap_or_default();
+
         let hostname_json = hostname
             .map(|hostname| {
                 format!(
@@ -168,7 +225,7 @@ impl DgwConfigHandle {
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
         "enable_unstable": {enable_unstable}
-    }}{recording_path_json}{agent_tunnel_json}
+    }}{recording_path_json}{agent_tunnel_json}{subscriber_json}{proxy_json}
 }}"#
         );
 

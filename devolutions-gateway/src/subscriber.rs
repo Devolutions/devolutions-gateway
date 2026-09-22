@@ -98,6 +98,10 @@ pub async fn send_message(
     let op = || async {
         let response = client
             .post(subscriber.url.clone())
+            .header(
+                reqwest::header::USER_AGENT,
+                concat!("Devolutions-Gateway/", env!("CARGO_PKG_VERSION")),
+            )
             .header("Authorization", format!("Bearer {}", subscriber.token))
             .json(message)
             .send()
