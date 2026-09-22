@@ -2,7 +2,6 @@ use core::fmt;
 use std::path::Path;
 
 use anyhow::Context as _;
-use serde::Serialize;
 use tempfile::TempDir;
 use typed_builder::TypedBuilder;
 
@@ -33,8 +32,7 @@ pub struct AgentTunnelConfig {
     pub listen_port: Option<u16>,
 }
 
-#[derive(Clone, TypedBuilder, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Clone, TypedBuilder)]
 pub struct SubscriberConfig {
     #[builder(setter(into))]
     url: String,
@@ -42,11 +40,21 @@ pub struct SubscriberConfig {
     token: String,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy)]
 pub enum ProxyMode {
     Off,
     System,
     Manual,
+}
+
+impl fmt::Display for ProxyMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Off => f.write_str("Off"),
+            Self::System => f.write_str("System"),
+            Self::Manual => f.write_str("Manual"),
+        }
+    }
 }
 
 #[derive(TypedBuilder)]
@@ -164,32 +172,26 @@ impl DgwConfigHandle {
 
         let subscriber_json = subscriber
             .map(|subscriber| {
-                serde_json::to_string(&subscriber)
-                    .context("serialize subscriber configuration")
-                    .map(|subscriber| {
-                        format!(
-                            r#",
-    "Subscriber": {subscriber}"#
-                        )
-                    })
+                format!(
+                    r#",
+    "Subscriber": {{
+        "Url": "{}",
+        "Token": "{}"
+    }}"#,
+                    subscriber.url, subscriber.token
+                )
             })
-            .transpose()?
             .unwrap_or_default();
 
         let proxy_json = proxy_mode
             .map(|proxy_mode| {
-                serde_json::to_string(&proxy_mode)
-                    .context("serialize proxy mode")
-                    .map(|proxy_mode| {
-                        format!(
-                            r#",
+                format!(
+                    r#",
     "Proxy": {{
-        "Mode": {proxy_mode}
+        "Mode": "{proxy_mode}"
     }}"#
-                        )
-                    })
+                )
             })
-            .transpose()?
             .unwrap_or_default();
 
         let hostname_json = hostname
