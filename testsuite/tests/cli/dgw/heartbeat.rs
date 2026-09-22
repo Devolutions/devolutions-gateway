@@ -1,8 +1,8 @@
 //! Heartbeat API tests.
 
 use anyhow::Context as _;
-use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
-use testsuite::dgw_config::{DgwConfig, DgwConfigHandle};
+use testsuite::cli::start_dgw;
+use testsuite::dgw_config::DgwConfig;
 
 /// Scope token with `gateway.heartbeat.read` scope.
 ///
@@ -10,21 +10,6 @@ use testsuite::dgw_config::{DgwConfig, DgwConfigHandle};
 /// - Header: `{"typ":"JWT","alg":"RS256"}`
 /// - Payload: `{"type":"scope","jti":"...","scope":"gateway.heartbeat.read",...}`
 const HEARTBEAT_SCOPE_TOKEN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJ0eXBlIjoic2NvcGUiLCJqdGkiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDMiLCJpYXQiOjE3MzM2Njk5OTksImV4cCI6MzMzMTU1MzU5OSwibmJmIjoxNzMzNjY5OTk5LCJzY29wZSI6ImdhdGV3YXkuaGVhcnRiZWF0LnJlYWQifQ.aW52YWxpZC1zaWduYXR1cmUtYnV0LXZhbGlkYXRpb24tZGlzYWJsZWQ";
-
-/// Starts a gateway instance and waits until its HTTP port is ready.
-async fn start_gateway(config_handle: &DgwConfigHandle) -> anyhow::Result<tokio::process::Child> {
-    let process = dgw_tokio_cmd()
-        .env("DGATEWAY_CONFIG_PATH", config_handle.config_dir())
-        .kill_on_drop(true)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("failed to start Devolutions Gateway")?;
-
-    wait_for_tcp_port(config_handle.http_port()).await?;
-
-    Ok(process)
-}
 
 /// Calls `GET /jet/heartbeat` and returns the parsed JSON body.
 async fn get_heartbeat(http_port: u16) -> anyhow::Result<serde_json::Value> {
@@ -88,7 +73,7 @@ async fn heartbeat_reports_disk_space_when_recording_dir_not_yet_created() -> an
         .init()
         .context("init config")?;
 
-    let mut process = start_gateway(&config_handle).await?;
+    let mut process = start_dgw(&config_handle).await?;
 
     let heartbeat = get_heartbeat(config_handle.http_port())
         .await

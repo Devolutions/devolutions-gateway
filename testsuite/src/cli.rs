@@ -2,6 +2,8 @@
 
 use std::sync::LazyLock;
 
+use anyhow::Context as _;
+
 static JETSOCAT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
     let mut build = escargot::CargoBuild::new()
         .manifest_path("../jetsocat/Cargo.toml")
@@ -63,6 +65,28 @@ pub fn dgw_tokio_cmd() -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(&*DGW_BIN_PATH);
     cmd.env("RUST_BACKTRACE", "0");
     cmd
+}
+
+/// Starts Devolutions Gateway and waits for its HTTP listener.
+///
+/// The caller must keep `config_handle` alive until the process exits because it owns the
+/// temporary configuration directory.
+pub async fn start_dgw(config_handle: &crate::dgw_config::DgwConfigHandle) -> anyhow::Result<tokio::process::Child> {
+    let mut process = dgw_tokio_cmd()
+        .env("DGATEWAY_CONFIG_PATH", config_handle.config_dir())
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("start Devolutions Gateway")?;
+
+    if let Err(error) = wait_for_tcp_port(config_handle.http_port()).await {
+        let _ = process.kill().await;
+        let _ = process.wait().await;
+        return Err(error).context("wait for Devolutions Gateway HTTP listener");
+    }
+
+    Ok(process)
 }
 
 static AGENT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {

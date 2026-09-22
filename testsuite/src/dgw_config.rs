@@ -2,6 +2,7 @@ use core::fmt;
 use std::path::Path;
 
 use anyhow::Context as _;
+use serde::Serialize;
 use tempfile::TempDir;
 use typed_builder::TypedBuilder;
 
@@ -32,6 +33,22 @@ pub struct AgentTunnelConfig {
     pub listen_port: Option<u16>,
 }
 
+#[derive(Clone, TypedBuilder, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SubscriberConfig {
+    #[builder(setter(into))]
+    url: String,
+    #[builder(setter(into))]
+    token: String,
+}
+
+#[derive(Clone, Copy, Serialize)]
+pub enum ProxyMode {
+    Off,
+    System,
+    Manual,
+}
+
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
     #[builder(default, setter(into))]
@@ -60,6 +77,12 @@ pub struct DgwConfig {
     /// Agent tunnel (QUIC) configuration.
     #[builder(default, setter(into))]
     agent_tunnel: Option<AgentTunnelConfig>,
+    /// Subscriber configuration.
+    #[builder(default, setter(into))]
+    subscriber: Option<SubscriberConfig>,
+    /// Proxy mode override.
+    #[builder(default, setter(into))]
+    proxy_mode: Option<ProxyMode>,
 }
 
 fn find_unused_port() -> u16 {
@@ -104,6 +127,8 @@ impl DgwConfigHandle {
             enable_unstable,
             recording_path,
             agent_tunnel,
+            subscriber,
+            proxy_mode,
         } = config;
 
         let tempdir = tempfile::tempdir().context("create tempdir")?;
@@ -137,6 +162,36 @@ impl DgwConfigHandle {
             String::new()
         };
 
+        let subscriber_json = subscriber
+            .map(|subscriber| {
+                serde_json::to_string(&subscriber)
+                    .context("serialize subscriber configuration")
+                    .map(|subscriber| {
+                        format!(
+                            r#",
+    "Subscriber": {subscriber}"#
+                        )
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        let proxy_json = proxy_mode
+            .map(|proxy_mode| {
+                serde_json::to_string(&proxy_mode)
+                    .context("serialize proxy mode")
+                    .map(|proxy_mode| {
+                        format!(
+                            r#",
+    "Proxy": {{
+        "Mode": {proxy_mode}
+    }}"#
+                        )
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
+
         let hostname_json = hostname
             .map(|hostname| {
                 format!(
@@ -168,7 +223,7 @@ impl DgwConfigHandle {
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
         "enable_unstable": {enable_unstable}
-    }}{recording_path_json}{agent_tunnel_json}
+    }}{recording_path_json}{agent_tunnel_json}{subscriber_json}{proxy_json}
 }}"#
         );
 

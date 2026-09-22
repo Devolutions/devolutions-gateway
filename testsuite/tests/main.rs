@@ -6,6 +6,5 @@ mod agent_tunnel;
 mod cli;
 mod mcp_proxy;
 mod network_scanner;
-mod subscriber;
 mod sysevent;
 mod timing;
