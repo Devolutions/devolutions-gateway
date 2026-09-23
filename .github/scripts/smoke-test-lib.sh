@@ -182,6 +182,28 @@ check_config_file_permissions() {
     fi
 }
 
+check_service_not_auto_started() {
+    if ! systemd_and_unit_available; then
+        info "systemd not available — skipping auto-start check"
+        return
+    fi
+    # The service requires a provisioner key to start. Since the key is not
+    # present immediately after install, auto-starting the service would cause
+    # it to fail immediately. The postinst is therefore expected to only enable
+    # the service, not start it. A status of "active" or "failed" both indicate
+    # the postinst incorrectly attempted to start the service.
+    local status
+    status=$(systemctl is-active devolutions-gateway 2>/dev/null || true)
+    case "$status" in
+        inactive)
+            pass "Service is inactive after install (not auto-started)" ;;
+        active|failed|activating)
+            fail "Service was auto-started after install ($status) — postinst should only enable, not start" ;;
+        *)
+            warn "Unexpected service state after install: $status" ;;
+    esac
+}
+
 check_provisioner_key() {
     info "Generating RSA-2048 provisioner key pair with openssl…"
     KEY_LOG=$(mktemp)
