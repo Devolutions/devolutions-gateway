@@ -43,6 +43,51 @@ pub fn handle(
     (websocket_compat(ws), close_handle)
 }
 
+pub fn handle_messages(
+    ws: WebSocket,
+    shutdown_signal: impl transport::KeepAliveShutdown,
+    keep_alive_interval: time::Duration,
+) -> (
+    impl futures::Stream<Item = Result<Bytes, axum::Error>>
+    + futures::Sink<Bytes, Error = axum::Error>
+    + Unpin
+    + Send
+    + 'static,
+    transport::CloseWebSocketHandle,
+) {
+    let ws = transport::Shared::new(ws);
+
+    let close_handle = transport::spawn_websocket_sentinel_task(
+        ws.shared().with(|message: transport::WsWriteMsg| {
+            future::ready(Result::<_, axum::Error>::Ok(match message {
+                transport::WsWriteMsg::Ping => ws::Message::Ping(Bytes::new()),
+                transport::WsWriteMsg::Close(frame) => ws::Message::Close(Some(CloseFrame {
+                    code: frame.code,
+                    reason: frame.message.into(),
+                })),
+            }))
+        }),
+        shutdown_signal,
+        keep_alive_interval,
+    );
+
+    let messages = ws
+        .take_while(|item| future::ready(!matches!(item, Ok(ws::Message::Close(_)))))
+        .filter_map(|item| {
+            item.map(|msg| match msg {
+                ws::Message::Text(s) => Some(Bytes::from(s)),
+                ws::Message::Binary(data) => Some(data),
+                ws::Message::Ping(_) | ws::Message::Pong(_) => None,
+                ws::Message::Close(_) => None,
+            })
+            .transpose()
+            .pipe(future::ready)
+        })
+        .with(|item: Bytes| futures::future::ready(Ok::<_, axum::Error>(ws::Message::Binary(item))));
+
+    (messages, close_handle)
+}
+
 fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
     let ws_compat = ws
         .filter_map(|item| {
