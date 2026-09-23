@@ -88,7 +88,28 @@ Manifest types:
 
 ### Recording manifest
 
+A Gateway recording folder holds a `recording.json` manifest that lists its files in playback order:
+
+```json
+{
+  "sessionId": "39174dbd-ac5f-4af8-a372-03dc89362a0f",
+  "startTime": 1758470400,
+  "duration": 161,
+  "files": [
+    { "fileName": "recording-0.webm", "startTime": 1758470400, "duration": 161 },
+    { "fileName": "recording-1.slog", "startTime": 1758470400, "duration": 161 }
+  ]
+}
+```
+
+| Term | Meaning | Count for 5 `.webm` + 1 `.slog` |
+| --- | --- | --- |
+| file | One entry in `files` | 6 |
+| artifact | One file plus its kind (`RecordingArtifact`) | 6 |
+| viewer | The window that shows a recording: a player for media, the log viewer for `.slog` | 2 |
+
 `getArtifacts(manifest)` turns a Gateway `recording.json` into one `RecordingArtifact` per file, in manifest order.
+A `null` or `undefined` manifest returns `[]`.
 File names are dropped before classification unless they use only ASCII letters, digits, `.`, `_`, and `-`, contain no `..`, and aren't just `.`, because a manifest name ends up in a token-bearing pull URL.
 
 ```ts
@@ -106,6 +127,8 @@ const logs = artifacts.filter((artifact) => artifact.kind === SessionRecordingKi
 | `SessionRecordingKind.Terminal` | `.trp`, `.cast` |
 | `SessionRecordingKind.Log` | `.slog` |
 | `SessionRecordingKind.Unknown` | anything else |
+
+Kinds group files by the viewer that opens them, so `.trp` and `.cast` are both `Terminal` even though their content types differ.
 
 This mirrors the C# `GatewayRecordingManifest` in Remote Desktop Manager, so both hosts classify a manifest identically.
 
