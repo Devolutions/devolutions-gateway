@@ -5,7 +5,7 @@
                 <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
                 <String Id="FeaturePsuDescription">Active l'agent distant pour PowerShell Universal.</String>
                 <String Id="FeaturePsuName">Agent PowerShell Universal</String>
-                <String Id="FeatureSessionDescription">Installe l'extension RDP</String>
+                <String Id="FeatureSessionDescription">Active les fonctionnalités de session RDP telles que l'exécution à distance, les sessions Jump et la déconnexion à distance.</String>
                 <String Id="FeatureSessionName">Extension RDP</String>
                 <String Id="Language">1036</String>
                 <String Id="ProductDescription">Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway.</String>
@@ -57,12 +57,12 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
                     <!-- dialogs.agentTunnel -->
                 <String Id="AgentTunnelDlgDescription">Connectez cet agent à une passerelle Devolutions.</String>
-                <String Id="AgentTunnelDlgDomainsHint">Facultatif. Un nom exact ne correspond qu'à lui-même. Utilisez un caractère générique explicite comme *.example.com pour les sous-domaines.</String>
-                <String Id="AgentTunnelDlgDetectedDomainOption">Le domaine DNS {0} a été détecté. Annoncer ses sous-domaines avec {1} ?</String>
-                <String Id="AgentTunnelDlgNoDetectedDomain">Aucun domaine DNS n'a été détecté. Entrez des noms exacts ou des routes génériques explicites ci-dessous au besoin.</String>
                 <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">La route DNS suggérée {0} est déjà incluse.</String>
+                <String Id="AgentTunnelDlgDetectedDomainOption">Le domaine DNS {0} a été détecté. Annoncer ses sous-domaines avec {1} ?</String>
+                <String Id="AgentTunnelDlgDomainsHint">Facultatif. Un nom exact ne correspond qu'à lui-même. Utilisez un caractère générique explicite comme *.example.com pour les sous-domaines.</String>
                 <String Id="AgentTunnelDlgDomainsLabel">Routes DNS annoncées :</String>
                 <String Id="AgentTunnelDlgEnrollmentStringLabel">Chaîne d'enrôlement (fournie par l'opérateur de votre passerelle) :</String>
+                <String Id="AgentTunnelDlgNoDetectedDomain">Aucun domaine DNS n'a été détecté. Entrez des noms exacts ou des routes génériques explicites ci-dessous au besoin.</String>
                 <String Id="AgentTunnelDlgSubnetsHint">Facultatif. Plages CIDR séparées par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Si laissé vide, les sous-réseaux locaux de l'agent sont détectés automatiquement.</String>
                 <String Id="AgentTunnelDlgSubnetsLabel">Sous-réseaux annoncés :</String>
                 <String Id="AgentTunnelDlgTitle">Tunnel d'agent</String>

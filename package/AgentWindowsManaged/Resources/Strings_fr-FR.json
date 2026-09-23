@@ -24,7 +24,7 @@
         },
         {
           "id": "FeatureSessionDescription",
-          "text": "Installe l'extension RDP"
+          "text": "Active les fonctionnalités de session RDP telles que l'exécution à distance, les sessions Jump et la déconnexion à distance."
         },
         {
           "id": "FeatureAgentTunnelName",

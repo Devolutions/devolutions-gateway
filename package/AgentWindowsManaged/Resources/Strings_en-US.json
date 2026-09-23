@@ -48,7 +48,7 @@
         },
         {
           "id": "FeatureSessionDescription",
-          "text": "Installs the RDP Extension"
+          "text": "Enables RDP session features such as remote execution, jump sessions and remote logoff."
         },
         {
           "id": "FeatureAgentTunnelName",
