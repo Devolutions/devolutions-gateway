@@ -34,14 +34,17 @@ notify = { version = "7", default-features = false }
 http-body-util = "0.1"
 mime = "0.3"
 now-policy = "=0.5.0"
-now-policy-api = "=0.6.0"
-now-policy-server-template = "=0.6.0"
+now-policy-api = "=0.7.0"
+now-policy-server-template = "=0.7.0"
 parking_lot = "0.12"
 regex = "1"
 semver = "1"
 serde = "1"
 serde_json = "1"
 sha2 = "0.10"
+sysevent = { path = "../sysevent" }
+agent-sysevent-codes = { path = "../agent-sysevent-codes" }
+sysevent-winevent = { path = "../sysevent-winevent" }
 tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
 tokio-util = "0.7"
 tower-service = "0.3"
