@@ -89,7 +89,7 @@ Manifest types:
 ### Recording manifest
 
 `getArtifacts(manifest)` turns a Gateway `recording.json` into one `RecordingArtifact` per file, in manifest order.
-File names are dropped before classification unless they use only ASCII letters, digits, `.`, `_`, and `-`, and contain no `..`, because a manifest name ends up in a token-bearing pull URL.
+File names are dropped before classification unless they use only ASCII letters, digits, `.`, `_`, and `-`, contain no `..`, and aren't just `.`, because a manifest name ends up in a token-bearing pull URL.
 
 ```ts
 import { getArtifacts, SessionRecordingKind } from '@devolutions/session-recording-log';

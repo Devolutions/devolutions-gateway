@@ -70,9 +70,11 @@ export function classifyFileName(fileName: string): SessionRecordingKind {
 /**
  * Manifest names are Gateway-generated ASCII, so anything outside this allowlist could redirect or
  * reshape the token-bearing pull URL. Unexpected names are dropped rather than sanitized.
+ *
+ * Stricter than C#: a bare `.` is rejected because URL resolution removes it as a path segment.
  */
 export function isSafeFileName(fileName: string | null | undefined): boolean {
-  if (!fileName || fileName.includes('..')) {
+  if (typeof fileName !== 'string' || fileName === '.' || fileName.includes('..')) {
     return false;
   }
 

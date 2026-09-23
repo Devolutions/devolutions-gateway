@@ -16,6 +16,7 @@ const unsafeFileNames = [
   'sub/recording-0.slog',
   'sub\\recording-0.slog',
   '',
+  '.',
   'recording?token=x.slog',
   'recording#frag.slog',
   'recording%2e%2e.slog',
@@ -81,6 +82,10 @@ describe('getArtifacts', () => {
 
   it.each(unsafeFileNames)('drops %j', (fileName) => {
     expect(getArtifacts({ files: [{ fileName }] })).toEqual([]);
+  });
+
+  it('drops non-string file names without throwing', () => {
+    expect(getArtifacts({ files: [{ fileName: 5 as unknown as string }] })).toEqual([]);
   });
 
   it('preserves manifest order', () => {
