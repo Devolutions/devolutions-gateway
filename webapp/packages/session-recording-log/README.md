@@ -1,6 +1,6 @@
 # @devolutions/session-recording-log
 
-Framework-agnostic models, parser, ordering, and in-file search for Session Recording Log (`.slog`) files.
+Framework-agnostic models, parser, ordering, and in-file search for Session Recording Log (`.slog`) files, plus Gateway recording manifest classification.
 
 ## Features
 
@@ -10,6 +10,7 @@ Framework-agnostic models, parser, ordering, and in-file search for Session Reco
 - Non-mutating display-order helper (sort by `seq`, tie-break on `sourceIndex`).
 - Bounded in-memory search over visible fields with optional event/warning-linked filtering.
 - Hardened bounds for large/malformed inputs (line size, string length, parameter count, depth, entry/scan caps).
+- Gateway `recording.json` manifest classification into video, terminal, and log artifacts, grouped into the viewers a recording can offer.
 
 ## Usage
 
@@ -72,6 +73,88 @@ Public API:
 - `getSessionRecordingLogDisplayEntries(parseResult)`
 - `searchSessionRecordingLogEntries(entries, query, options?)`
 - `isSessionRecordingLogFileName(fileName)`
+- `classifyFileName(fileName)`
+- `isSafeFileName(fileName)`
+- `getArtifacts(manifest)`
+- `getRecordingViewers(manifest)`
+- `SessionRecordingKind`
+
+Manifest types:
+
+- `GatewayRecordingManifest`
+- `GatewayRecordingManifestFile`
+- `RecordingArtifact`
+- `RecordingViewers`
+
+### Recording manifest
+
+A Gateway recording folder holds a `recording.json` manifest that lists its files in playback order:
+
+```json
+{
+  "sessionId": "39174dbd-ac5f-4af8-a372-03dc89362a0f",
+  "startTime": 1758470400,
+  "duration": 161,
+  "files": [
+    { "fileName": "recording-0.webm", "startTime": 1758470400, "duration": 161 },
+    { "fileName": "recording-1.slog", "startTime": 1758470400, "duration": 161 }
+  ]
+}
+```
+
+| Term | Meaning | Count for 5 `.webm` + 1 `.slog` |
+| --- | --- | --- |
+| file | One entry in `files` | 6 |
+| artifact | One file plus its kind (`RecordingArtifact`) | 6 |
+| viewer | The window that shows a recording: a player for media, the log viewer for `.slog` | 2 |
+
+`getArtifacts(manifest)` turns a Gateway `recording.json` into one `RecordingArtifact` per file, in manifest order.
+A `null` or `undefined` manifest returns `[]`.
+File names are dropped before classification unless they use only ASCII letters, digits, `.`, `_`, and `-`, contain no `..`, and aren't just `.`, because a manifest name ends up in a token-bearing pull URL.
+
+```ts
+import { getArtifacts, SessionRecordingKind } from '@devolutions/session-recording-log';
+
+const artifacts = getArtifacts(manifest);
+const logs = artifacts.filter((artifact) => artifact.kind === SessionRecordingKind.Log);
+```
+
+`SessionRecordingKind` members name the concept, not the file extension:
+
+| Kind | File extensions |
+| --- | --- |
+| `SessionRecordingKind.Video` | `.webm` |
+| `SessionRecordingKind.Terminal` | `.trp`, `.cast` |
+| `SessionRecordingKind.Log` | `.slog` |
+| `SessionRecordingKind.Unknown` | anything else |
+
+Kinds group files by the viewer that opens them, so `.trp` and `.cast` are both `Terminal` even though their content types differ.
+
+This mirrors the C# `GatewayRecordingManifest` in Remote Desktop Manager, so both hosts classify a manifest identically.
+
+### Recording viewers
+
+`getRecordingViewers(manifest)` groups the same files into a `RecordingViewers` object: the viewers a recording can offer, at most one media player and one log viewer.
+A recording with five video clips and one log offers two viewers, not six.
+
+```ts
+import { getRecordingViewers } from '@devolutions/session-recording-log';
+
+const { media, log, unknownCount } = getRecordingViewers(manifest);
+```
+
+| Field | Contents |
+| --- | --- |
+| `media` | `{ kind, files, duration }` for video or terminal files, or `undefined` |
+| `log` | `{ files, duration }` for `.slog` files, or `undefined` |
+| `unknownCount` | Files not returned: unknown kinds, plus media files that differ from the first media file's kind |
+
+Files keep manifest order.
+A group's `duration` sums its files' durations, skipping any that are missing or not positive.
+Unsafe file names are dropped and not counted.
+
+Every viewer is returned.
+Unlike C# `RecordingArtifact.SelectPrimary`, this package never picks one; the host lets the user choose.
 
 Host contract:
 
@@ -144,6 +227,7 @@ session-recording-log/
     index.ts
     parser.test.ts
     helpers.test.ts
+    manifest.test.ts
   README.md
   package.json
   package.dist.json

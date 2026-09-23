@@ -1,12 +1,23 @@
-export { isSessionRecordingLogFileName } from './manifest';
+export type {
+  GatewayRecordingManifest,
+  GatewayRecordingManifestFile,
+  RecordingArtifact,
+  RecordingViewers,
+} from './manifest';
+export {
+  classifyFileName,
+  getArtifacts,
+  getRecordingViewers,
+  isSafeFileName,
+  isSessionRecordingLogFileName,
+  SessionRecordingKind,
+} from './manifest';
 export type {
   ParsedSessionRecordingLog,
   ParsedSessionRecordingLogEntry,
   ParseSessionRecordingLogOptions,
   SearchableSessionRecordingLogField,
   SearchSessionRecordingLogOptions,
-  SessionRecordingArtifact,
-  SessionRecordingArtifactContent,
   SessionRecordingLogCompletionState,
   SessionRecordingLogEntry,
   SessionRecordingLogKnownEvent,
