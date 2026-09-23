@@ -53,7 +53,7 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureSessionName = "FeatureSessionName";		
 		/// <summary>
-		/// Installs the RDP Extension
+		/// Enables RDP session features such as remote execution, jump sessions and remote logoff.
 		/// </summary>
 		public const string FeatureSessionDescription = "FeatureSessionDescription";		
 		/// <summary>
@@ -223,15 +223,15 @@ namespace DevolutionsAgent.Resources
 		/// <summary>
 		/// The DNS domain {0} was detected. Advertise its subdomains as {1}?
 		/// </summary>
-		public const string AgentTunnelDlgDetectedDomainOption = "AgentTunnelDlgDetectedDomainOption";
+		public const string AgentTunnelDlgDetectedDomainOption = "AgentTunnelDlgDetectedDomainOption";		
 		/// <summary>
 		/// No DNS domain was detected. Enter exact names or explicit wildcard routes below if needed.
 		/// </summary>
-		public const string AgentTunnelDlgNoDetectedDomain = "AgentTunnelDlgNoDetectedDomain";
+		public const string AgentTunnelDlgNoDetectedDomain = "AgentTunnelDlgNoDetectedDomain";		
 		/// <summary>
 		/// The suggested DNS route {0} is already included.
 		/// </summary>
-		public const string AgentTunnelDlgDetectedDomainAlreadyIncluded = "AgentTunnelDlgDetectedDomainAlreadyIncluded";
+		public const string AgentTunnelDlgDetectedDomainAlreadyIncluded = "AgentTunnelDlgDetectedDomainAlreadyIncluded";		
 		/// <summary>
 		/// PowerShell Universal Agent
 		/// </summary>
