@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="sv-se" Codepage="1252" Language="1053" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="FeatureAgentDescription">Installerar tjänsten Devolutions Agent</String>
+  <String Id="FeatureAgentName">Devolutions Agent</String>
+  <String Id="FeatureAgentTunnelDescription">Ansluter agenten till en Devolutions Gateway. Kräver en registreringssträng från gatewayoperatören.</String>
+  <String Id="FeatureAgentTunnelName">Agenttunnel</String>
+  <String Id="FeatureAgentUpdaterDescription">Aktiverar uppdateraren för Devolutions Gateway</String>
+  <String Id="FeatureAgentUpdaterName">Devolutions Gateway-uppdaterare</String>
+  <String Id="FeaturePedmDescription">Aktiverar PEDM-funktioner och installerar skalutökningen</String>
+  <String Id="FeaturePedmName">Devolutions PEDM</String>
+  <String Id="FeaturePsuDescription">Aktiverar fjärragenten för PowerShell Universal.</String>
+  <String Id="FeaturePsuName">PowerShell Universal Agent</String>
+  <String Id="FeatureSessionDescription">Installerar RDP-utökningen</String>
+  <String Id="FeatureSessionName">RDP-utökning</String>
+  <String Id="Language">1053</String>
+  <String Id="ProductDescription">Systemomfattande tjänst som utökar funktionerna i Devolutions Gateway.</String>
+  <String Id="VendorFullName">Devolutions Inc.</String>
+  <String Id="VendorName">Devolutions</String>
+  <String Id="Dotnet48IsRequired">Produkten kräver Microsoft .NET Framework 4.8. Vill du hämta den nu?</String>
+  <String Id="NewerInstalled">En nyare version av produkten är redan installerad.</String>
+  <String Id="OS2Old">Produkten kräver minst Windows 8 eller Windows Server 2012 R2</String>
+  <String Id="ThereIsAProblemWithTheEnteredData">Det finns ett problem med angivna data. Rätta felet och försök igen.</String>
+  <String Id="x64VersionRequired">Du måste installera 64-bitarsversionen av produkten på 64-bitars Windows.</String>
+  <String Id="x86VersionRequired">Du måste installera 32-bitarsversionen av produkten på 32-bitars Windows.</String>
+  <String Id="SearchButton">Sök</String>
+  <String Id="ViewButton">Visa</String>
+  <String Id="ViewLogButton">Visa logg</String>
+  <String Id="Group_InstallLocation">Installationsplats</String>
+  <String Id="Property_Directory">Katalog</String>
+  <String Id="ExperimentalLabel">Experimentell</String>
+  <String Id="UACPromptLabel">Vänta tills UAC-prompten visas.
+
+Om den visas minimerad aktiverar du den från aktivitetsfältet.</String>
+  <String Id="Filter_AllFiles">Alla filer</String>
+  <String Id="AgentDlg_Title">Installera [ProductName]</String>
+  <String Id="BrowseDlgDescription">Bläddra till målmappen</String>
+  <String Id="BrowseDlgTitle">Byt målmapp</String>
+  <String Id="InstallDirDlgDescription">Klicka på Nästa för att installera i standardmappen eller på Ändra för att välja en annan.</String>
+  <String Id="InstallDirDlgTitle">Målmapp</String>
+  <String Id="ProgressDlgTitleChanging">Ändrar [ProductName]</String>
+  <String Id="ProgressDlgTitleInstalling">Installerar [ProductName]</String>
+  <String Id="ProgressDlgTitleRemoving">Tar bort [ProductName]</String>
+  <String Id="ProgressDlgTitleRepairing">Reparerar [ProductName]</String>
+  <String Id="ProgressDlgTitleUpdating">Uppdaterar [ProductName]</String>
+  <String Id="VerifyReadyDlgChangeTitle">Redo att ändra [ProductName]</String>
+  <String Id="VerifyReadyDlgInstallTitle">Redo att installera [ProductName]</String>
+  <String Id="VerifyReadyDlgRemoveTitle">Redo att ta bort [ProductName]</String>
+  <String Id="VerifyReadyDlgRepairTitle">Redo att reparera [ProductName]</String>
+  <String Id="VerifyReadyDlgUpdateTitle">Redo att uppdatera [ProductName]</String>
+  <String Id="WelcomeDlgTitle">Välkommen till installationsguiden för [ProductName] 20[ProductVersion]</String>
+  <String Id="AgentTunnelDlgDescription">Anslut den här agenten till en Devolutions Gateway.</String>
+  <String Id="AgentTunnelDlgDomainsHint">Valfritt. Exakta namn matchar bara sig själva. Använd ett uttryckligt jokertecken, till exempel *.example.com, för att matcha underdomäner.</String>
+  <String Id="AgentTunnelDlgDetectedDomainOption">DNS-domänen {0} upptäcktes. Annonsera dess underdomäner som {1}?</String>
+  <String Id="AgentTunnelDlgNoDetectedDomain">Ingen DNS-domän upptäcktes. Ange exakta namn eller uttryckliga jokerteckenvägar nedan vid behov.</String>
+  <String Id="AgentTunnelDlgDetectedDomainAlreadyIncluded">Den föreslagna DNS-vägen {0} ingår redan.</String>
+  <String Id="AgentTunnelDlgDomainsLabel">Annonsera DNS-vägar:</String>
+  <String Id="AgentTunnelDlgEnrollmentStringLabel">Registreringssträng (tillhandahålls av gatewayoperatören):</String>
+  <String Id="AgentTunnelDlgSubnetsHint">Valfritt. Kommaavgränsade CIDR-intervall, till exempel 10.10.0.0/24, 192.168.1.0/24. Om fältet lämnas tomt upptäcks agentens lokala undernät automatiskt.</String>
+  <String Id="AgentTunnelDlgSubnetsLabel">Annonsera undernät:</String>
+  <String Id="AgentTunnelDlgTitle">Agenttunnel</String>
+  <String Id="PsuDlgAgentIdHint">Valfritt. Stabilt agent-ID. Standardvärdet är datornamnet.</String>
+  <String Id="PsuDlgAgentIdLabel">Agent-ID:</String>
+  <String Id="PsuDlgAppTokenHint">Krävs. Tokenvärde eller ett hemlighetsnamn som löses vid körning.</String>
+  <String Id="PsuDlgAppTokenLabel">Apptoken:</String>
+  <String Id="PsuDlgAppTokenRequired">En apptoken krävs. Ange tokenvärdet eller ett hemlighetsnamn, eller gå tillbaka och avmarkera funktionen PowerShell Universal Agent.</String>
+  <String Id="PsuDlgAppTokenSecretOption">Hemlighetsnamn</String>
+  <String Id="PsuDlgAppTokenValueOption">Tokenvärde</String>
+  <String Id="PsuDlgDescription">Konfigurera hur agenten ansluter till PowerShell Universal.</String>
+  <String Id="PsuDlgDisplayNameHint">Valfritt. Namnet som visas i PowerShell Universal. Standardvärdet är agent-ID:t.</String>
+  <String Id="PsuDlgDisplayNameLabel">Visningsnamn:</String>
+  <String Id="PsuDlgServerUnreachable">Det gick inte att nå PowerShell Universal-servern ({0}).
+
+Vill du fortsätta ändå?</String>
+  <String Id="PsuDlgServerUrlHint">Krävs. PowerShell Universal-slutpunkt, till exempel http://localhost:5000.</String>
+  <String Id="PsuDlgServerUrlInvalid">Server-URL:en måste vara en absolut http- eller https-URL, till exempel http://localhost:5000.</String>
+  <String Id="PsuDlgServerUrlLabel">Server-URL:</String>
+  <String Id="PsuDlgServerUrlRequired">En server-URL krävs. Ange PowerShell Universal-slutpunkten, eller gå tillbaka och avmarkera funktionen PowerShell Universal Agent.</String>
+  <String Id="PsuDlgTitle">PowerShell Universal Agent</String>
+</WixLocalization>
