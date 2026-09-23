@@ -15,7 +15,7 @@ import { RecordingLogSearchField } from './recordingLogSearchField';
  */
 export interface RecordingLogSearchHit { 
     /**
-     * The entry, as recorded
+     * The entry, exactly as written in the file
      */
     entry: object;
     /**

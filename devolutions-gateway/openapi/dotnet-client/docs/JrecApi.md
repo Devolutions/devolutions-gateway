@@ -520,7 +520,7 @@ catch (ApiException e)
 
 Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
 
-The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when `__debug__.enable_unstable` is set.
+The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  Entries without the `timestamp`, `seq`, `event`, and `description` fields are not searched, and strings are matched on their first 4,096 UTF-16 code units, like the log viewers.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  At most four searches run at the same time; further requests wait.  This route is unstable and only available when `__debug__.enable_unstable` is set.
 
 ### Example
 ```csharp

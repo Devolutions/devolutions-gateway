@@ -1439,7 +1439,7 @@ Searches the Session Recording Log (`.slog`) artifacts of recordings stored on t
 
 ===== Description
 
-The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when `__debug__.enable_unstable` is set.
+The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  Entries without the `timestamp`, `seq`, `event`, and `description` fields are not searched, and strings are matched on their first 4,096 UTF-16 code units, like the log viewers.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  At most four searches run at the same time; further requests wait.  This route is unstable and only available when `__debug__.enable_unstable` is set.
 
 
 // markup not found, no include::{specDir}jet/jrec/search/POST/spec.adoc[opts=optional]
@@ -5349,7 +5349,7 @@ One Session Recording Log entry matching the search
 | X
 | 
 |   Object  
-| The entry, as recorded
+| The entry, exactly as written in the file
 |     
 
 | fileName
@@ -5434,7 +5434,7 @@ Session Recording Log search request
 | 
 | X
 |   List   of <<UUID>>
-| Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing.
+| Recordings to search, in the order results are returned  When omitted, recordings stored on this instance are searched newest first, up to the 10,000 most recently modified ones. An empty list searches nothing.
 | uuid    
 
 | to
@@ -5484,7 +5484,7 @@ Session Recording Log search result
 | X
 | 
 |   Boolean  
-| A scan bound was reached, so some entries were not searched
+| A scan bound was reached or an oversized line was skipped, so some entries were not searched
 |     
 
 |===

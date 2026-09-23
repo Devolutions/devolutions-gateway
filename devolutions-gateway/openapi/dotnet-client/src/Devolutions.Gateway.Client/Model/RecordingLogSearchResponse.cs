@@ -44,7 +44,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="hits">Matching entries, ordered by recording, then by manifest file order, then by line (required).</param>
         /// <param name="limitReached">The hit limit or the response size bound was reached, so more matches may exist (required).</param>
         /// <param name="notFoundRecordingIds">Listed recordings that are not stored on this instance or have no readable manifest (required).</param>
-        /// <param name="scanLimitReached">A scan bound was reached, so some entries were not searched (required).</param>
+        /// <param name="scanLimitReached">A scan bound was reached or an oversized line was skipped, so some entries were not searched (required).</param>
         public RecordingLogSearchResponse(List<RecordingLogSearchHit> hits = default(List<RecordingLogSearchHit>), bool limitReached = default(bool), List<Guid> notFoundRecordingIds = default(List<Guid>), bool scanLimitReached = default(bool))
         {
             // to ensure "hits" is required (not null)
@@ -85,9 +85,9 @@ namespace Devolutions.Gateway.Client.Model
         public List<Guid> NotFoundRecordingIds { get; set; }
 
         /// <summary>
-        /// A scan bound was reached, so some entries were not searched
+        /// A scan bound was reached or an oversized line was skipped, so some entries were not searched
         /// </summary>
-        /// <value>A scan bound was reached, so some entries were not searched</value>
+        /// <value>A scan bound was reached or an oversized line was skipped, so some entries were not searched</value>
         [DataMember(Name = "scanLimitReached", IsRequired = true, EmitDefaultValue = true)]
         public bool ScanLimitReached { get; set; }
 

@@ -3,23 +3,31 @@
 //! Matching mirrors `searchSessionRecordingLogEntries` in `webapp/packages/session-recording-log`.
 //! The query is a plain substring matched against the visible entry fields, ignoring case unless requested otherwise.
 //! There is no fuzzy matching, tokenization, or regular expression support.
+//! Entries the package parser discards are not searched, and strings are matched on the part the parser keeps.
 //! Keep both implementations in sync when changing the searchable fields or the matching rules.
 //!
 //! The search only knows the generic `.slog` entry fields, never a particular producer.
-//! Hits carry the whole entry as recorded, so new producers and new fields need no change here.
+//! Hits carry the whole entry as written, so new producers and new fields need no change here.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::SystemTime;
 
 use anyhow::Context as _;
 use axum::Json;
 use axum::extract::State;
 use camino::Utf8Path;
 use hyper::StatusCode;
+use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use super::is_safe_recording_file_name;
@@ -31,16 +39,33 @@ use crate::token::RecordingFileType;
 /// Maximum number of recordings a single request may list.
 const MAX_RECORDING_IDS: usize = 1_000;
 
+/// Maximum number of recordings searched when the request lists none.
+///
+/// The most recently modified recording folders are kept.
+const MAX_SEARCHED_RECORDINGS: usize = 10_000;
+
+/// Searches running at the same time; further requests wait for a slot.
+const MAX_CONCURRENT_SEARCHES: usize = 4;
+
 /// Hit limit applied when the request does not specify one.
 const DEFAULT_HIT_LIMIT: usize = 100;
 
 /// Upper bound for the requested hit limit.
 const MAX_HIT_LIMIT: usize = 1_000;
 
+/// Strings are matched on their first 4,096 UTF-16 code units, like the parser package's `maxStringLength`.
+const MAX_STRING_LENGTH: usize = 4_096;
+
 /// Maximum query length, in characters.
 ///
-/// The parser package truncates entry strings to 4,096 characters, so a longer query cannot match what viewers show.
-const MAX_QUERY_LENGTH: usize = 4_096;
+/// A longer query cannot match the strings the parser package keeps.
+const MAX_QUERY_LENGTH: usize = MAX_STRING_LENGTH;
+
+/// Parameters past this count are not matched, like the parser package's `maxParameterCount`.
+const MAX_PARAMETER_COUNT: usize = 200;
+
+/// Largest `seq` the parser package accepts (`Number.MAX_SAFE_INTEGER`).
+const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 /// Maximum number of values in the event type filter.
 const MAX_EVENT_TYPES: usize = 32;
@@ -60,6 +85,8 @@ const MAX_SCANNED_BYTES_PER_REQUEST: usize = 256 * 1024 * 1024;
 /// Source bytes of the entries returned by one request, bounding the response size.
 const MAX_HIT_BYTES_PER_REQUEST: usize = 16 * 1024 * 1024;
 
+static SEARCH_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_SEARCHES);
+
 /// Session Recording Log search request
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
@@ -67,7 +94,8 @@ const MAX_HIT_BYTES_PER_REQUEST: usize = 16 * 1024 * 1024;
 pub(crate) struct RecordingLogSearchRequest {
     /// Recordings to search, in the order results are returned
     ///
-    /// When omitted, every recording stored on this instance is searched, newest first.
+    /// When omitted, recordings stored on this instance are searched newest first,
+    /// up to the 10,000 most recently modified ones.
     /// An empty list searches nothing.
     recording_ids: Option<Vec<Uuid>>,
     /// Text to look for; an empty query matches every entry
@@ -100,7 +128,7 @@ pub(crate) struct RecordingLogSearchResponse {
     not_found_recording_ids: Vec<Uuid>,
     /// The hit limit or the response size bound was reached, so more matches may exist
     limit_reached: bool,
-    /// A scan bound was reached, so some entries were not searched
+    /// A scan bound was reached or an oversized line was skipped, so some entries were not searched
     scan_limit_reached: bool,
 }
 
@@ -115,9 +143,9 @@ pub(crate) struct RecordingLogSearchHit {
     file_name: String,
     /// One-based line number of the entry in the file
     line_number: usize,
-    /// The entry, as recorded
+    /// The entry, exactly as written in the file
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
-    entry: Map<String, Value>,
+    entry: Box<RawValue>,
     /// Fields matched by the query; empty when the query is empty
     matched_fields: Vec<RecordingLogSearchField>,
 }
@@ -161,7 +189,12 @@ const SEARCHED_STRING_FIELDS: [(&str, RecordingLogSearchField); 6] = [
 /// Matching ignores case unless `caseSensitive` is set.
 /// There is no fuzzy matching.
 ///
+/// Entries without the `timestamp`, `seq`, `event`, and `description` fields are not searched,
+/// and strings are matched on their first 4,096 UTF-16 code units, like the log viewers.
+///
 /// `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.
+///
+/// At most four searches run at the same time; further requests wait.
 ///
 /// This route is unstable and only available when `__debug__.enable_unstable` is set.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -187,16 +220,38 @@ pub(crate) async fn search_recording_logs(
     let options = SearchOptions::from_request(request)?;
     let recording_path = conf_handle.get_conf().recording_path.clone();
 
-    let response = tokio::task::spawn_blocking(move || search(&recording_path, &options))
-        .await
-        .map_err(HttpError::internal().with_msg("recording log search failed").err())?
-        .map_err(HttpError::internal().with_msg("recording log search failed").err())?;
+    let permit = SEARCH_PERMITS.acquire().await.map_err(
+        HttpError::internal()
+            .with_msg("recording log search is unavailable")
+            .err(),
+    )?;
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancelled));
+
+    let response = tokio::task::spawn_blocking(move || {
+        // The permit moves into the task, so a cancelled request keeps its slot until the scan actually stops.
+        let _permit = permit;
+        search(&recording_path, &options, &cancelled)
+    })
+    .await
+    .map_err(HttpError::internal().with_msg("recording log search failed").err())?
+    .map_err(HttpError::internal().with_msg("recording log search failed").err())?;
 
     Ok(Json(response))
 }
 
+/// Tells the blocking scan to stop when the request is dropped, for instance on disconnect or timeout.
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 enum RecordingSelection {
-    /// Every recording stored on this instance, newest first.
+    /// The most recently modified recordings stored on this instance, newest first.
     All,
     /// INVARIANT: No duplicates, and at most `MAX_RECORDING_IDS` items.
     Listed(Vec<Uuid>),
@@ -273,6 +328,8 @@ impl SearchOptions {
     }
 
     fn matches(&self, value: &str) -> bool {
+        let value = visible_text(value);
+
         if self.case_sensitive {
             value.contains(self.query.as_str())
         } else {
@@ -314,17 +371,34 @@ struct ScanState {
     budget_exhausted: bool,
 }
 
-fn search(recording_root: &Utf8Path, options: &SearchOptions) -> anyhow::Result<RecordingLogSearchResponse> {
+fn search(
+    recording_root: &Utf8Path,
+    options: &SearchOptions,
+    cancelled: &AtomicBool,
+) -> anyhow::Result<RecordingLogSearchResponse> {
+    let mut state = ScanState::default();
     let mut not_found_recording_ids = Vec::new();
 
     // Resolve every recording before scanning, so `notFoundRecordingIds` is complete even when a limit stops the scan.
     let targets = match &options.recordings {
         RecordingSelection::All => {
-            let mut targets: Vec<RecordingTarget> = list_recording_ids(recording_root)?
-                .into_iter()
-                .filter_map(|recording_id| read_recording_target(recording_root, recording_id))
-                .filter(|target| !target.log_file_names.is_empty())
-                .collect();
+            let (recording_ids, truncated) =
+                most_recent_recordings(list_recording_dirs(recording_root)?, MAX_SEARCHED_RECORDINGS);
+            state.scan_limit_reached = truncated;
+
+            let mut targets = Vec::with_capacity(recording_ids.len());
+
+            for recording_id in recording_ids {
+                if cancelled.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                if let Some(target) = read_recording_target(recording_root, recording_id)
+                    && !target.log_file_names.is_empty()
+                {
+                    targets.push(target);
+                }
+            }
 
             targets.sort_by(|a, b| {
                 b.start_time
@@ -348,19 +422,17 @@ fn search(recording_root: &Utf8Path, options: &SearchOptions) -> anyhow::Result<
         }
     };
 
-    let mut state = ScanState::default();
-
     'recordings: for target in targets {
         let recording_dir = recording_root.join(target.recording_id.to_string());
 
         for file_name in target.log_file_names {
             let path = recording_dir.join(&file_name);
 
-            if let Err(error) = search_file(&path, target.recording_id, &file_name, options, &mut state) {
+            if let Err(error) = search_file(&path, target.recording_id, &file_name, options, cancelled, &mut state) {
                 debug!(%path, error = format!("{error:#}"), "Failed to search recording log file");
             }
 
-            if state.limit_reached || state.budget_exhausted {
+            if state.limit_reached || state.budget_exhausted || cancelled.load(Ordering::Relaxed) {
                 break 'recordings;
             }
         }
@@ -374,7 +446,8 @@ fn search(recording_root: &Utf8Path, options: &SearchOptions) -> anyhow::Result<
     })
 }
 
-fn list_recording_ids(recording_root: &Utf8Path) -> anyhow::Result<Vec<Uuid>> {
+/// Lists the recording folders stored on this instance, with their modification time when available.
+fn list_recording_dirs(recording_root: &Utf8Path) -> anyhow::Result<Vec<(Uuid, Option<SystemTime>)>> {
     if !recording_root.exists() {
         // The recording directory is created lazily, so a missing directory means there is no recording yet.
         return Ok(Vec::new());
@@ -382,19 +455,42 @@ fn list_recording_ids(recording_root: &Utf8Path) -> anyhow::Result<Vec<Uuid>> {
 
     let read_dir = std::fs::read_dir(recording_root).context("failed to read recording directory")?;
 
-    let recording_ids = read_dir
+    let recording_dirs = read_dir
         .filter_map(|entry| {
             let entry = entry.ok()?;
+            let metadata = entry.metadata().ok()?;
 
-            if !entry.file_type().ok()?.is_dir() {
+            if !metadata.is_dir() {
                 return None;
             }
 
-            Uuid::parse_str(entry.file_name().to_str()?).ok()
+            let recording_id = Uuid::parse_str(entry.file_name().to_str()?).ok()?;
+
+            Some((recording_id, metadata.modified().ok()))
         })
         .collect();
 
-    Ok(recording_ids)
+    Ok(recording_dirs)
+}
+
+/// Keeps at most `max` recordings, preferring the most recently modified ones.
+///
+/// Returns whether any recording was dropped.
+fn most_recent_recordings(mut recording_dirs: Vec<(Uuid, Option<SystemTime>)>, max: usize) -> (Vec<Uuid>, bool) {
+    let truncated = recording_dirs.len() > max;
+
+    if truncated {
+        // Newest first; folders without a modification time sort last.
+        recording_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+        recording_dirs.truncate(max);
+    }
+
+    let recording_ids = recording_dirs
+        .into_iter()
+        .map(|(recording_id, _)| recording_id)
+        .collect();
+
+    (recording_ids, truncated)
 }
 
 /// Returns `None` when the recording has no readable manifest.
@@ -450,6 +546,7 @@ fn search_file(
     recording_id: Uuid,
     file_name: &str,
     options: &SearchOptions,
+    cancelled: &AtomicBool,
     state: &mut ScanState,
 ) -> io::Result<()> {
     let mut reader = BufReader::new(File::open(path)?);
@@ -457,6 +554,10 @@ fn search_file(
     let mut line_number = 0;
 
     loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         if line_number >= MAX_SCANNED_LINES_PER_FILE {
             if has_more_data(&mut reader)? {
                 state.scan_limit_reached = true;
@@ -474,17 +575,23 @@ fn search_file(
             return Ok(());
         }
 
-        let (status, consumed) = read_bounded_line(&mut reader, &mut line)?;
-
-        if status == LineStatus::EndOfFile {
-            return Ok(());
-        }
-
+        let remaining_budget = MAX_SCANNED_BYTES_PER_REQUEST.saturating_sub(state.scanned_bytes);
+        let (status, consumed) = read_bounded_line(&mut reader, &mut line, remaining_budget)?;
         state.scanned_bytes = state.scanned_bytes.saturating_add(consumed);
-        line_number += 1;
 
-        if status == LineStatus::TooLong {
-            continue;
+        match status {
+            LineStatus::EndOfFile => return Ok(()),
+            LineStatus::BudgetExhausted => {
+                state.scan_limit_reached = true;
+                state.budget_exhausted = true;
+                return Ok(());
+            }
+            LineStatus::TooLong => {
+                line_number += 1;
+                state.scan_limit_reached = true;
+                continue;
+            }
+            LineStatus::Complete => line_number += 1,
         }
 
         let Some((entry, matched_fields)) = match_entry(&line, options) else {
@@ -516,13 +623,20 @@ enum LineStatus {
     EndOfFile,
     Complete,
     TooLong,
+    /// `max_consume` bytes were consumed before the end of the line.
+    BudgetExhausted,
 }
 
 /// Reads the next line into `line`, without its line feed.
 ///
 /// Only the first `MAX_LINE_LENGTH_BYTES` bytes are buffered; a longer line is consumed and reported as too long.
+/// At most `max_consume` bytes are consumed from the reader, whatever the line length.
 /// Returns the line status and the number of bytes consumed from the reader.
-fn read_bounded_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> io::Result<(LineStatus, usize)> {
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    line: &mut Vec<u8>,
+    max_consume: usize,
+) -> io::Result<(LineStatus, usize)> {
     line.clear();
 
     let mut consumed = 0;
@@ -543,8 +657,13 @@ fn read_bounded_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> io::Resul
             return Ok((status, consumed));
         }
 
-        let newline_position = available.iter().position(|&byte| byte == b'\n');
-        let chunk = &available[..newline_position.unwrap_or(available.len())];
+        if consumed >= max_consume {
+            return Ok((LineStatus::BudgetExhausted, consumed));
+        }
+
+        let allowed = &available[..available.len().min(max_consume - consumed)];
+        let newline_position = allowed.iter().position(|&byte| byte == b'\n');
+        let chunk = &allowed[..newline_position.unwrap_or(allowed.len())];
 
         if !too_long {
             if line.len() + chunk.len() > MAX_LINE_LENGTH_BYTES {
@@ -571,27 +690,31 @@ fn read_bounded_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> io::Resul
     }
 }
 
-/// Returns the entry and its matched fields when the line is a JSON object matching the search.
-fn match_entry(line: &[u8], options: &SearchOptions) -> Option<(Map<String, Value>, Vec<RecordingLogSearchField>)> {
+/// Returns the entry and its matched fields when the line is an entry matching the search.
+fn match_entry(line: &[u8], options: &SearchOptions) -> Option<(Box<RawValue>, Vec<RecordingLogSearchField>)> {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
 
     if line.iter().all(u8::is_ascii_whitespace) {
         return None;
     }
 
-    let Ok(Value::Object(entry)) = serde_json::from_slice::<Value>(line) else {
+    let Ok(Value::Object(fields)) = serde_json::from_slice::<Value>(line) else {
         return None;
     };
 
+    if !has_required_fields(&fields) {
+        return None;
+    }
+
     if !options.event_types.is_empty() {
-        let event = entry.get("event").and_then(Value::as_str)?;
+        let event = fields.get("event").and_then(Value::as_str)?;
 
         if !options.event_types.iter().any(|event_type| event_type == event) {
             return None;
         }
     }
 
-    if !options.is_within_time_range(&entry) {
+    if !options.is_within_time_range(&fields) {
         return None;
     }
 
@@ -599,27 +722,15 @@ fn match_entry(line: &[u8], options: &SearchOptions) -> Option<(Map<String, Valu
 
     if !options.query.is_empty() {
         for (key, field) in SEARCHED_STRING_FIELDS {
-            if let Some(value) = entry.get(key).and_then(Value::as_str)
+            if let Some(value) = fields.get(key).and_then(Value::as_str)
                 && options.matches(value)
             {
                 matched_fields.push(field);
             }
         }
 
-        if let Some(Value::Object(parameters)) = entry.get("parameters") {
-            let key_matched = parameters.keys().any(|key| options.matches(key));
-            let value_matched = parameters
-                .values()
-                .filter_map(Value::as_str)
-                .any(|value| options.matches(value));
-
-            if key_matched {
-                matched_fields.push(RecordingLogSearchField::ParameterKey);
-            }
-
-            if value_matched {
-                matched_fields.push(RecordingLogSearchField::ParameterValue);
-            }
+        if matches!(fields.get("parameters"), Some(Value::Object(_))) {
+            match_parameters(line, options, &mut matched_fields);
         }
 
         if matched_fields.is_empty() {
@@ -627,11 +738,148 @@ fn match_entry(line: &[u8], options: &SearchOptions) -> Option<(Map<String, Valu
         }
     }
 
+    let entry = serde_json::from_slice(line).ok()?;
+
     Some((entry, matched_fields))
+}
+
+/// Mirrors the parser package, which discards entries without these fields.
+fn has_required_fields(fields: &Map<String, Value>) -> bool {
+    let has_event = fields
+        .get("event")
+        .and_then(Value::as_str)
+        .is_some_and(|event| event.encode_utf16().count() <= MAX_STRING_LENGTH);
+    let has_seq = fields
+        .get("seq")
+        .and_then(Value::as_u64)
+        .is_some_and(|seq| seq <= MAX_SAFE_INTEGER);
+    let has_timestamp = fields.get("timestamp").is_some_and(Value::is_string);
+    let has_description = fields.get("description").is_some_and(Value::is_string);
+
+    has_event && has_seq && has_timestamp && has_description
+}
+
+/// Matches the parameters in the order they are written, like the parser package.
+///
+/// Parameters whose value is not a string are dropped by the parser, so neither their key nor their value matches.
+fn match_parameters(line: &[u8], options: &SearchOptions, matched_fields: &mut Vec<RecordingLogSearchField>) {
+    // `serde_json::Map` sorts keys, so the parameters are read again in their written order.
+    #[derive(Deserialize)]
+    struct LineParameters {
+        #[serde(default, deserialize_with = "deserialize_ordered_object")]
+        parameters: Option<Vec<(String, Value)>>,
+    }
+
+    let parameters = serde_json::from_slice::<LineParameters>(line)
+        .ok()
+        .and_then(|line| line.parameters)
+        .unwrap_or_default();
+
+    let mut seen_keys = HashSet::new();
+
+    for (key, value) in parameters.iter().take(MAX_PARAMETER_COUNT) {
+        let Some(value) = value.as_str() else {
+            continue;
+        };
+
+        // The parser discards a parameter whose truncated key collides with an earlier one.
+        if !seen_keys.insert(visible_text(key)) {
+            continue;
+        }
+
+        if options.matches(key) {
+            push_unique(matched_fields, RecordingLogSearchField::ParameterKey);
+        }
+
+        if options.matches(value) {
+            push_unique(matched_fields, RecordingLogSearchField::ParameterValue);
+        }
+    }
+}
+
+fn push_unique(matched_fields: &mut Vec<RecordingLogSearchField>, field: RecordingLogSearchField) {
+    if !matched_fields.contains(&field) {
+        matched_fields.push(field);
+    }
+}
+
+/// Deserializes a JSON object into its entries in written order, and any other JSON value into `None`.
+fn deserialize_ordered_object<'de, D>(deserializer: D) -> Result<Option<Vec<(String, Value)>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    struct OrderedObjectVisitor;
+
+    impl<'de> Visitor<'de> for OrderedObjectVisitor {
+        type Value = Option<Vec<(String, Value)>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("any JSON value")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut entries = Vec::new();
+
+            while let Some(entry) = map.next_entry::<String, Value>()? {
+                entries.push(entry);
+            }
+
+            Ok(Some(entries))
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+
+            Ok(None)
+        }
+
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(OrderedObjectVisitor)
+}
+
+/// Returns the part of a string the parser package keeps: its first `MAX_STRING_LENGTH` UTF-16 code units.
+fn visible_text(value: &str) -> &str {
+    let mut code_units = 0;
+
+    for (index, character) in value.char_indices() {
+        code_units += character.len_utf16();
+
+        if code_units > MAX_STRING_LENGTH {
+            return &value[..index];
+        }
+    }
+
+    value
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use camino::Utf8PathBuf;
 
     use super::*;
@@ -688,6 +936,17 @@ mod tests {
         }
     }
 
+    /// One valid `session.action` line, with its line feed.
+    fn action(seq: u64, description: &str) -> String {
+        let entry = serde_json::json!({
+            "timestamp": "2026-07-15T21:30:00.000Z",
+            "seq": seq,
+            "event": "session.action",
+            "description": description,
+        });
+        format!("{entry}\n")
+    }
+
     fn request(recording_ids: Option<Vec<Uuid>>, query: &str) -> RecordingLogSearchRequest {
         RecordingLogSearchRequest {
             recording_ids,
@@ -708,11 +967,19 @@ mod tests {
     }
 
     fn run(root: &Utf8Path, request: RecordingLogSearchRequest) -> RecordingLogSearchResponse {
-        search(root, &options(request)).expect("search")
+        search(root, &options(request), &AtomicBool::new(false)).expect("search")
     }
 
     fn instant(value: &str) -> OffsetDateTime {
         OffsetDateTime::parse(value, &Rfc3339).expect("valid RFC 3339 instant")
+    }
+
+    fn entry_of(hit: &RecordingLogSearchHit) -> Value {
+        serde_json::from_str(hit.entry.get()).expect("entry is JSON")
+    }
+
+    fn lines_of(response: &RecordingLogSearchResponse) -> Vec<usize> {
+        response.hits.iter().map(|hit| hit.line_number).collect()
     }
 
     #[test]
@@ -727,10 +994,22 @@ mod tests {
         assert_eq!(hit.recording_id, id);
         assert_eq!(hit.file_name, "recording-0.slog");
         assert_eq!(hit.line_number, 2);
-        assert_eq!(hit.entry["seq"], 1);
+        assert_eq!(entry_of(hit)["seq"], 1);
         assert_eq!(hit.matched_fields, [RecordingLogSearchField::ParameterValue]);
         assert!(!response.limit_reached);
         assert!(!response.scan_limit_reached);
+    }
+
+    #[test]
+    fn returns_entries_exactly_as_written() {
+        let fixture = Fixture::new();
+        let line = r#"{"seq":7,"timestamp":"2026-07-15T21:30:00.000Z","event":"session.action","description":"Bob","zeta":1,"alpha":2}"#;
+        let id = fixture.add_recording(0, &[("recording-0.slog", &format!("  {line}  \r\n"))]);
+
+        let response = run(&fixture.root, request(Some(vec![id]), "bob"));
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].entry.get(), line);
     }
 
     #[test]
@@ -765,6 +1044,66 @@ mod tests {
     }
 
     #[test]
+    fn reports_parameter_matches_in_written_order() {
+        let fixture = Fixture::new();
+        let line = r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":0,"event":"session.action","description":"Edited","parameters":{"zeta":"needle","alphaNeedle":"none"}}"#;
+        let id = fixture.add_recording(0, &[("recording-0.slog", &format!("{line}\n"))]);
+
+        let response = run(&fixture.root, request(Some(vec![id]), "needle"));
+
+        assert_eq!(
+            response.hits[0].matched_fields,
+            [
+                RecordingLogSearchField::ParameterValue,
+                RecordingLogSearchField::ParameterKey
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_parameters_the_parser_drops() {
+        let fixture = Fixture::new();
+        let line = r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":0,"event":"session.action","description":"Edited","parameters":{"needle":1}}"#;
+        let id = fixture.add_recording(0, &[("recording-0.slog", &format!("{line}\n"))]);
+
+        let response = run(&fixture.root, request(Some(vec![id]), "needle"));
+
+        assert!(response.hits.is_empty());
+    }
+
+    #[test]
+    fn searches_only_entries_the_parser_keeps() {
+        let fixture = Fixture::new();
+        let long_event = "e".repeat(MAX_STRING_LENGTH + 1);
+        let invalid_lines = [
+            r#"{"seq":0,"event":"session.action","description":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","event":"session.action","description":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":0,"description":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":0,"event":"session.action","object":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":-1,"event":"session.action","description":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":9007199254740992,"event":"session.action","description":"Bob"}"#.to_owned(),
+            r#"{"timestamp":"2026-07-15T21:30:00.000Z","seq":"0","event":"session.action","description":"Bob"}"#.to_owned(),
+            format!(r#"{{"timestamp":"2026-07-15T21:30:00.000Z","seq":0,"event":"{long_event}","description":"Bob"}}"#),
+        ];
+        let contents = format!("{}\n{}", invalid_lines.join("\n"), action(1, "Bob"));
+        let id = fixture.add_recording(0, &[("recording-0.slog", &contents)]);
+
+        let response = run(&fixture.root, request(Some(vec![id]), "bob"));
+
+        assert_eq!(lines_of(&response), [invalid_lines.len() + 1]);
+    }
+
+    #[test]
+    fn matches_only_the_text_the_parser_keeps() {
+        let fixture = Fixture::new();
+        let description = format!("{}needle", "\u{1F600}".repeat(MAX_STRING_LENGTH / 2));
+        let id = fixture.add_recording(0, &[("recording-0.slog", &action(0, &description))]);
+
+        assert!(run(&fixture.root, request(Some(vec![id]), "needle")).hits.is_empty());
+        assert_eq!(run(&fixture.root, request(Some(vec![id]), "\u{1F600}")).hits.len(), 1);
+    }
+
+    #[test]
     fn empty_query_returns_every_entry_of_the_requested_event_types() {
         let fixture = Fixture::new();
         let id = fixture.add_recording(0, &[("recording-0.slog", SAMPLE_LOG)]);
@@ -773,18 +1112,16 @@ mod tests {
         request.event_types = vec!["session.action".to_owned()];
         let response = run(&fixture.root, request);
 
-        let lines: Vec<usize> = response.hits.iter().map(|hit| hit.line_number).collect();
-        assert_eq!(lines, [2, 3]);
+        assert_eq!(lines_of(&response), [2, 3]);
         assert!(response.hits.iter().all(|hit| hit.matched_fields.is_empty()));
     }
 
     #[test]
     fn time_range_includes_its_start_and_excludes_its_end() {
         let fixture = Fixture::new();
-        let contents = format!(
-            "{SAMPLE_LOG}{}\n",
-            r#"{"event":"session.action","description":"No timestamp"}"#
-        );
+        let invalid_timestamp =
+            r#"{"timestamp":"not a date","seq":3,"event":"session.action","description":"Invalid timestamp"}"#;
+        let contents = format!("{SAMPLE_LOG}{invalid_timestamp}\n");
         let id = fixture.add_recording(0, &[("recording-0.slog", &contents)]);
 
         let mut request = request(Some(vec![id]), "");
@@ -792,8 +1129,7 @@ mod tests {
         request.to = Some(instant("2026-07-15T21:20:00Z"));
         let response = run(&fixture.root, request);
 
-        let lines: Vec<usize> = response.hits.iter().map(|hit| hit.line_number).collect();
-        assert_eq!(lines, [2]);
+        assert_eq!(lines_of(&response), [2]);
     }
 
     #[test]
@@ -805,24 +1141,23 @@ mod tests {
         request.from = Some(instant("2026-07-15T17:19:00-04:00"));
         let response = run(&fixture.root, request);
 
-        let lines: Vec<usize> = response.hits.iter().map(|hit| hit.line_number).collect();
-        assert_eq!(lines, [2, 3]);
+        assert_eq!(lines_of(&response), [2, 3]);
     }
 
     #[test]
-    fn skips_malformed_and_oversized_lines() {
+    fn skips_malformed_lines_and_flags_oversized_ones() {
         let fixture = Fixture::new();
-        let oversized = format!(r#"{{"description":"Bob {}"}}"#, "x".repeat(MAX_LINE_LENGTH_BYTES));
+        let oversized = action(0, &format!("Bob {}", "x".repeat(MAX_LINE_LENGTH_BYTES)));
         let contents = format!(
-            "not json\n[\"Bob\"]\n{oversized}\n\n{}\r\n",
-            r#"{"event":"session.action","description":"Deleted User","object":"Bob Smith"}"#
+            "not json\n[\"Bob\"]\n{oversized}\n{}",
+            action(1, "Deleted User Bob Smith").replace('\n', "\r\n")
         );
         let id = fixture.add_recording(0, &[("recording-0.slog", &contents)]);
 
         let response = run(&fixture.root, request(Some(vec![id]), "bob"));
 
-        let lines: Vec<usize> = response.hits.iter().map(|hit| hit.line_number).collect();
-        assert_eq!(lines, [5]);
+        assert_eq!(lines_of(&response), [5]);
+        assert!(response.scan_limit_reached);
     }
 
     #[test]
@@ -831,16 +1166,10 @@ mod tests {
         let id = fixture.add_recording(
             0,
             &[
-                ("recording-0.webm", "Bob Smith"),
-                (
-                    "recording-1.slog",
-                    r#"{"event":"session.action","description":"Bob in clip 1"}"#,
-                ),
-                ("recording-2.cast", "Bob Smith"),
-                (
-                    "recording-3.slog",
-                    r#"{"event":"session.action","description":"Bob in clip 3"}"#,
-                ),
+                ("recording-0.webm", &action(0, "Bob in a video")),
+                ("recording-1.slog", &action(0, "Bob in clip 1")),
+                ("recording-2.cast", &action(0, "Bob in a terminal")),
+                ("recording-3.slog", &action(0, "Bob in clip 3")),
             ],
         );
 
@@ -853,11 +1182,7 @@ mod tests {
     #[test]
     fn ignores_unsafe_manifest_file_names() {
         let fixture = Fixture::new();
-        std::fs::write(
-            fixture.root.join("escape.slog"),
-            r#"{"event":"session.action","description":"Bob"}"#,
-        )
-        .expect("write file outside the recording");
+        std::fs::write(fixture.root.join("escape.slog"), action(0, "Bob")).expect("write file outside the recording");
         let id = fixture.add_recording(0, &[("../escape.slog", "")]);
 
         let response = run(&fixture.root, request(Some(vec![id]), "bob"));
@@ -910,6 +1235,7 @@ mod tests {
         let recordings: Vec<Uuid> = response.hits.iter().map(|hit| hit.recording_id).collect();
         assert_eq!(recordings, [newer, newer, older, older]);
         assert!(response.not_found_recording_ids.is_empty());
+        assert!(!response.scan_limit_reached);
     }
 
     #[test]
@@ -919,6 +1245,39 @@ mod tests {
         let response = run(&fixture.root.join("missing"), request(None, "bob"));
 
         assert!(response.hits.is_empty());
+    }
+
+    #[test]
+    fn keeps_the_most_recently_modified_recordings() {
+        let newest = SystemTime::now();
+        let older = newest.checked_sub(Duration::from_secs(60)).expect("representable time");
+        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+
+        let (recording_ids, truncated) =
+            most_recent_recordings(vec![(a, Some(older)), (b, None), (c, Some(newest))], 2);
+        assert_eq!(recording_ids, [c, a]);
+        assert!(truncated);
+
+        let (recording_ids, truncated) = most_recent_recordings(vec![(a, Some(older)), (b, None)], 2);
+        assert_eq!(recording_ids, [a, b]);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn a_cancelled_search_stops() {
+        let fixture = Fixture::new();
+        let id = fixture.add_recording(0, &[("recording-0.slog", SAMPLE_LOG)]);
+
+        for recordings in [None, Some(vec![id])] {
+            let response = search(
+                &fixture.root,
+                &options(request(recordings, "bob")),
+                &AtomicBool::new(true),
+            )
+            .expect("search");
+
+            assert!(response.hits.is_empty());
+        }
     }
 
     #[test]
@@ -941,29 +1300,58 @@ mod tests {
     #[test]
     fn stops_when_the_returned_entries_reach_the_response_size_bound() {
         let fixture = Fixture::new();
-        let description = format!("Bob {}", "x".repeat(200 * 1024));
-        let line = serde_json::json!({ "event": "session.action", "description": description }).to_string();
-        let contents = format!("{line}\n").repeat(MAX_HIT_BYTES_PER_REQUEST / line.len() + 2);
+        let line = action(0, &format!("Bob {}", "x".repeat(200 * 1024)));
+        let line_length = line.len() - 1;
+        let contents = line.repeat(MAX_HIT_BYTES_PER_REQUEST / line_length + 2);
         let id = fixture.add_recording(0, &[("recording-0.slog", &contents)]);
 
         let response = run(&fixture.root, request(Some(vec![id]), "bob"));
 
-        assert_eq!(response.hits.len(), MAX_HIT_BYTES_PER_REQUEST.div_ceil(line.len()));
+        assert_eq!(response.hits.len(), MAX_HIT_BYTES_PER_REQUEST.div_ceil(line_length));
         assert!(response.limit_reached);
     }
 
     #[test]
     fn reports_when_a_file_exceeds_the_scanned_line_bound() {
         let fixture = Fixture::new();
-        let line = r#"{"event":"session.action","description":"Unrelated"}"#;
-        let mut contents = format!("{line}\n").repeat(MAX_SCANNED_LINES_PER_FILE);
-        contents.push_str(r#"{"event":"session.action","description":"Bob"}"#);
+        let mut contents = action(0, "Unrelated").repeat(MAX_SCANNED_LINES_PER_FILE);
+        contents.push_str(&action(1, "Bob"));
         let id = fixture.add_recording(0, &[("recording-0.slog", &contents)]);
 
         let response = run(&fixture.root, request(Some(vec![id]), "bob"));
 
         assert!(response.hits.is_empty());
         assert!(response.scan_limit_reached);
+    }
+
+    #[test]
+    fn a_line_never_consumes_more_than_the_remaining_budget() {
+        let mut line = Vec::new();
+
+        let mut unterminated = io::Cursor::new(vec![b'x'; 1_000]);
+        let result = read_bounded_line(&mut unterminated, &mut line, 100).expect("read");
+        assert_eq!(result, (LineStatus::BudgetExhausted, 100));
+
+        let mut exact = io::Cursor::new(b"abc".to_vec());
+        let result = read_bounded_line(&mut exact, &mut line, 3).expect("read");
+        assert_eq!(result, (LineStatus::Complete, 3));
+        assert_eq!(line, b"abc");
+
+        let mut lines = io::Cursor::new(b"abc\ndef".to_vec());
+        assert_eq!(
+            read_bounded_line(&mut lines, &mut line, 100).expect("read"),
+            (LineStatus::Complete, 4)
+        );
+        assert_eq!(line, b"abc");
+        assert_eq!(
+            read_bounded_line(&mut lines, &mut line, 100).expect("read"),
+            (LineStatus::Complete, 3)
+        );
+        assert_eq!(line, b"def");
+        assert_eq!(
+            read_bounded_line(&mut lines, &mut line, 100).expect("read"),
+            (LineStatus::EndOfFile, 0)
+        );
     }
 
     #[test]

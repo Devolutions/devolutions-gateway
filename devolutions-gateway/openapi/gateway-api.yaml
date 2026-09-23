@@ -357,7 +357,12 @@ paths:
         Matching ignores case unless `caseSensitive` is set.
         There is no fuzzy matching.
 
+        Entries without the `timestamp`, `seq`, `event`, and `description` fields are not searched,
+        and strings are matched on their first 4,096 UTF-16 code units, like the log viewers.
+
         `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.
+
+        At most four searches run at the same time; further requests wait.
 
         This route is unstable and only available when `__debug__.enable_unstable` is set.
       operationId: SearchRecordingLogs
@@ -2261,7 +2266,7 @@ components:
       properties:
         entry:
           type: object
-          description: The entry, as recorded
+          description: The entry, exactly as written in the file
         fileName:
           type: string
           description: Name of the `.slog` file containing the entry
@@ -2311,7 +2316,8 @@ components:
           description: |-
             Recordings to search, in the order results are returned
 
-            When omitted, every recording stored on this instance is searched, newest first.
+            When omitted, recordings stored on this instance are searched newest first,
+            up to the 10,000 most recently modified ones.
             An empty list searches nothing.
           nullable: true
         to:
@@ -2344,7 +2350,7 @@ components:
           description: Listed recordings that are not stored on this instance or have no readable manifest
         scanLimitReached:
           type: boolean
-          description: A scan bound was reached, so some entries were not searched
+          description: A scan bound was reached or an oversized line was skipped, so some entries were not searched
     ScanOriginDto:
       type: string
       enum:

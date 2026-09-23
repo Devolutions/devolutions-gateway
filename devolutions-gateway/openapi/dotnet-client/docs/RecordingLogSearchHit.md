@@ -5,7 +5,7 @@ One Session Recording Log entry matching the search
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Entry** | **Object** | The entry, as recorded | 
+**Entry** | **Object** | The entry, exactly as written in the file | 
 **FileName** | **string** | Name of the &#x60;.slog&#x60; file containing the entry | 
 **LineNumber** | **int** | One-based line number of the entry in the file | 
 **MatchedFields** | [**List&lt;RecordingLogSearchField&gt;**](RecordingLogSearchField.md) | Fields matched by the query; empty when the query is empty | 

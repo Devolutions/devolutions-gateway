@@ -41,7 +41,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="from">Only entries whose &#x60;timestamp&#x60; is at or after this instant are considered.</param>
         /// <param name="limit">Maximum number of hits to return (default 100, capped at 1000).</param>
         /// <param name="query">Text to look for; an empty query matches every entry.</param>
-        /// <param name="recordingIds">Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing..</param>
+        /// <param name="recordingIds">Recordings to search, in the order results are returned  When omitted, recordings stored on this instance are searched newest first, up to the 10,000 most recently modified ones. An empty list searches nothing..</param>
         /// <param name="to">Only entries whose &#x60;timestamp&#x60; is before this instant are considered.</param>
         public RecordingLogSearchRequest(bool caseSensitive = default(bool), List<string> eventTypes = default(List<string>), DateTime? from = default(DateTime?), int? limit = default(int?), string query = default(string), List<Guid> recordingIds = default(List<Guid>), DateTime? to = default(DateTime?))
         {
@@ -90,9 +90,9 @@ namespace Devolutions.Gateway.Client.Model
         public string Query { get; set; }
 
         /// <summary>
-        /// Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing.
+        /// Recordings to search, in the order results are returned  When omitted, recordings stored on this instance are searched newest first, up to the 10,000 most recently modified ones. An empty list searches nothing.
         /// </summary>
-        /// <value>Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing.</value>
+        /// <value>Recordings to search, in the order results are returned  When omitted, recordings stored on this instance are searched newest first, up to the 10,000 most recently modified ones. An empty list searches nothing.</value>
         [DataMember(Name = "recordingIds", EmitDefaultValue = true)]
         public List<Guid> RecordingIds { get; set; }
 

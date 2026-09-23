@@ -27,7 +27,7 @@ export interface RecordingLogSearchResponse {
      */
     notFoundRecordingIds: Array<string>;
     /**
-     * A scan bound was reached, so some entries were not searched
+     * A scan bound was reached or an oversized line was skipped, so some entries were not searched
      */
     scanLimitReached: boolean;
 }

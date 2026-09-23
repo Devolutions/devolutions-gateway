@@ -34,7 +34,7 @@ export interface RecordingLogSearchRequest {
      */
     query?: string;
     /**
-     * Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing.
+     * Recordings to search, in the order results are returned  When omitted, recordings stored on this instance are searched newest first, up to the 10,000 most recently modified ones. An empty list searches nothing.
      */
     recordingIds?: Array<string> | null;
     /**

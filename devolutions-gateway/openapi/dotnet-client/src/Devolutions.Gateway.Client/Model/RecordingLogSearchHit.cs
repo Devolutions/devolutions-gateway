@@ -41,7 +41,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="RecordingLogSearchHit" /> class.
         /// </summary>
-        /// <param name="entry">The entry, as recorded (required).</param>
+        /// <param name="entry">The entry, exactly as written in the file (required).</param>
         /// <param name="fileName">Name of the &#x60;.slog&#x60; file containing the entry (required).</param>
         /// <param name="lineNumber">One-based line number of the entry in the file (required).</param>
         /// <param name="matchedFields">Fields matched by the query; empty when the query is empty (required).</param>
@@ -71,9 +71,9 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// The entry, as recorded
+        /// The entry, exactly as written in the file
         /// </summary>
-        /// <value>The entry, as recorded</value>
+        /// <value>The entry, exactly as written in the file</value>
         [DataMember(Name = "entry", IsRequired = true, EmitDefaultValue = true)]
         public Object Entry { get; set; }
 

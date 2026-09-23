@@ -93,6 +93,7 @@ fn add_recording(recording_path: &Path, start_time: i64, log: &str) -> anyhow::R
 fn log_line(timestamp: &str, description: &str, object: &str) -> String {
     let entry = json!({
         "timestamp": timestamp,
+        "seq": 0,
         "event": "session.action",
         "description": description,
         "object": object,
