@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
 | [**PullRecordingSession**](JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive |
+| [**SearchRecordingLogs**](JrecApi.md#searchrecordinglogs) | **POST** /jet/jrec/search | Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance |
 
 <a id="deletemanyrecordings"></a>
 # **DeleteManyRecordings**
@@ -397,7 +398,7 @@ catch (ApiException e)
 ### HTTP request headers
 
  - **Content-Type**: Not defined
- - **Accept**: application/octet-stream
+ - **Accept**: video/webm, application/x-asciicast, application/x-ndjson, application/json, application/octet-stream
 
 
 ### HTTP response details
@@ -510,6 +511,108 @@ catch (ApiException e)
 | **403** | Insufficient permissions |  -  |
 | **404** | Recording not found |  -  |
 | **413** | Recording package exceeds download size or file-count limits |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="searchrecordinglogs"></a>
+# **SearchRecordingLogs**
+> RecordingLogSearchResponse SearchRecordingLogs (RecordingLogSearchRequest recordingLogSearchRequest)
+
+Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
+
+The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when `__debug__.enable_unstable` is set.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class SearchRecordingLogsExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var recordingLogSearchRequest = new RecordingLogSearchRequest(); // RecordingLogSearchRequest | JSON-encoded search request
+
+            try
+            {
+                // Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
+                RecordingLogSearchResponse result = apiInstance.SearchRecordingLogs(recordingLogSearchRequest);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling JrecApi.SearchRecordingLogs: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the SearchRecordingLogsWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
+    ApiResponse<RecordingLogSearchResponse> response = apiInstance.SearchRecordingLogsWithHttpInfo(recordingLogSearchRequest);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling JrecApi.SearchRecordingLogsWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **recordingLogSearchRequest** | [**RecordingLogSearchRequest**](RecordingLogSearchRequest.md) | JSON-encoded search request |  |
+
+### Return type
+
+[**RecordingLogSearchResponse**](RecordingLogSearchResponse.md)
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Search results |  -  |
+| **400** | Bad request |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **413** | Too many recording IDs in one request |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

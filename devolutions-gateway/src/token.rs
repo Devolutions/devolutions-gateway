@@ -511,6 +511,8 @@ pub enum AccessScope {
     AgentDelete,
     #[serde(rename = "gateway.agent.read")]
     AgentRead,
+    #[serde(rename = "gateway.recordings.search")]
+    RecordingsSearch,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

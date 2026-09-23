@@ -12,7 +12,7 @@ use axum::extract::ws::{CloseFrame, WebSocket};
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
 use axum::response::Response;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use cadeau::xmf;
@@ -33,6 +33,8 @@ use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::{PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
+pub(crate) mod search;
+
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
@@ -48,7 +50,7 @@ const MAX_RECORDING_ZIP_FILES: usize = 128;
 const MAX_RECORDING_ZIP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new()
+    let mut router = Router::new()
         .route("/push/{id}", get(jrec_push))
         .route("/delete/{id}", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
@@ -57,8 +59,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/pull/{id}/{filename}", get(pull_recording_file))
         .route("/play", get(get_player))
         .route("/play/{*path}", get(get_player))
-        .route("/shadow/{id}", get(shadow_recording))
-        .with_state(state)
+        .route("/shadow/{id}", get(shadow_recording));
+
+    if state.conf_handle.get_conf().debug.enable_unstable {
+        router = router.route("/search", post(search::search_recording_logs));
+    }
+
+    router.with_state(state)
 }
 
 #[derive(Deserialize)]

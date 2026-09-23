@@ -126,6 +126,27 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <returns>ApiResponse of FileParameter</returns>
         ApiResponse<FileParameter> PullRecordingSessionWithHttpInfo(Guid id);
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <returns>RecordingLogSearchResponse</returns>
+        RecordingLogSearchResponse SearchRecordingLogs(RecordingLogSearchRequest recordingLogSearchRequest);
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <returns>ApiResponse of RecordingLogSearchResponse</returns>
+        ApiResponse<RecordingLogSearchResponse> SearchRecordingLogsWithHttpInfo(RecordingLogSearchRequest recordingLogSearchRequest);
         #endregion Synchronous Operations
     }
 
@@ -252,6 +273,29 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (FileParameter)</returns>
         System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of RecordingLogSearchResponse</returns>
+        System.Threading.Tasks.Task<RecordingLogSearchResponse> SearchRecordingLogsAsync(RecordingLogSearchRequest recordingLogSearchRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (RecordingLogSearchResponse)</returns>
+        System.Threading.Tasks.Task<ApiResponse<RecordingLogSearchResponse>> SearchRecordingLogsWithHttpInfoAsync(RecordingLogSearchRequest recordingLogSearchRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -861,6 +905,10 @@ namespace Devolutions.Gateway.Client.Api
 
             // to determine the Accept header
             string[] _accepts = new string[] {
+                "video/webm",
+                "application/x-asciicast",
+                "application/x-ndjson",
+                "application/json",
                 "application/octet-stream"
             };
 
@@ -928,6 +976,10 @@ namespace Devolutions.Gateway.Client.Api
 
             // to determine the Accept header
             string[] _accepts = new string[] {
+                "video/webm",
+                "application/x-asciicast",
+                "application/x-ndjson",
+                "application/json",
                 "application/octet-stream"
             };
 
@@ -1074,6 +1126,135 @@ namespace Devolutions.Gateway.Client.Api
             if (this.ExceptionFactory != null)
             {
                 Exception _exception = this.ExceptionFactory("PullRecordingSession", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <returns>RecordingLogSearchResponse</returns>
+        public RecordingLogSearchResponse SearchRecordingLogs(RecordingLogSearchRequest recordingLogSearchRequest)
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<RecordingLogSearchResponse> localVarResponse = SearchRecordingLogsWithHttpInfo(recordingLogSearchRequest);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <returns>ApiResponse of RecordingLogSearchResponse</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<RecordingLogSearchResponse> SearchRecordingLogsWithHttpInfo(RecordingLogSearchRequest recordingLogSearchRequest)
+        {
+            // verify the required parameter 'recordingLogSearchRequest' is set
+            if (recordingLogSearchRequest == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'recordingLogSearchRequest' when calling JrecApi->SearchRecordingLogs");
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.Data = recordingLogSearchRequest;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Post<RecordingLogSearchResponse>("/jet/jrec/search", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("SearchRecordingLogs", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of RecordingLogSearchResponse</returns>
+        public async System.Threading.Tasks.Task<RecordingLogSearchResponse> SearchRecordingLogsAsync(RecordingLogSearchRequest recordingLogSearchRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<RecordingLogSearchResponse> localVarResponse = await SearchRecordingLogsWithHttpInfoAsync(recordingLogSearchRequest, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="recordingLogSearchRequest">JSON-encoded search request</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (RecordingLogSearchResponse)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<RecordingLogSearchResponse>> SearchRecordingLogsWithHttpInfoAsync(RecordingLogSearchRequest recordingLogSearchRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            // verify the required parameter 'recordingLogSearchRequest' is set
+            if (recordingLogSearchRequest == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'recordingLogSearchRequest' when calling JrecApi->SearchRecordingLogs");
+
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.Data = recordingLogSearchRequest;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.PostAsync<RecordingLogSearchResponse>("/jet/jrec/search", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("SearchRecordingLogs", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 

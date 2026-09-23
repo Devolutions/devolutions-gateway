@@ -346,6 +346,46 @@ paths:
       security:
       - jrec_token:
         - pull
+  /jet/jrec/search:
+    post:
+      tags:
+      - Jrec
+      summary: Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
+      description: |-
+        The query is matched as a plain substring against the visible fields of each entry:
+        `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value.
+        Matching ignores case unless `caseSensitive` is set.
+        There is no fuzzy matching.
+
+        `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.
+
+        This route is unstable and only available when `__debug__.enable_unstable` is set.
+      operationId: SearchRecordingLogs
+      requestBody:
+        description: JSON-encoded search request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordingLogSearchRequest'
+        required: true
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordingLogSearchResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '413':
+          description: Too many recording IDs in one request
+      security:
+      - scope_token:
+        - gateway.recordings.search
   /jet/jrl:
     post:
       tags:
@@ -1326,6 +1366,7 @@ components:
       - gateway.net.monitor.drain
       - gateway.agent.delete
       - gateway.agent.read
+      - gateway.recordings.search
     AckRequest:
       type: object
       required:
@@ -2196,6 +2237,114 @@ components:
       enum:
       - Spki
       - Pkcs1
+    RecordingLogSearchField:
+      type: string
+      description: Session Recording Log entry field searched by the query
+      enum:
+      - timestamp
+      - description
+      - object
+      - actor
+      - host
+      - sessionType
+      - parameter-key
+      - parameter-value
+    RecordingLogSearchHit:
+      type: object
+      description: One Session Recording Log entry matching the search
+      required:
+      - recordingId
+      - fileName
+      - lineNumber
+      - entry
+      - matchedFields
+      properties:
+        entry:
+          type: object
+          description: The entry, as recorded
+        fileName:
+          type: string
+          description: Name of the `.slog` file containing the entry
+        lineNumber:
+          type: integer
+          description: One-based line number of the entry in the file
+          minimum: 0
+        matchedFields:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordingLogSearchField'
+          description: Fields matched by the query; empty when the query is empty
+        recordingId:
+          type: string
+          format: uuid
+          description: Recording containing the entry
+    RecordingLogSearchRequest:
+      type: object
+      description: Session Recording Log search request
+      properties:
+        caseSensitive:
+          type: boolean
+          description: Match case exactly instead of ignoring case
+        eventTypes:
+          type: array
+          items:
+            type: string
+          description: When not empty, only entries whose `event` is one of these values are considered
+        from:
+          type: string
+          format: date-time
+          description: Only entries whose `timestamp` is at or after this instant are considered
+          nullable: true
+        limit:
+          type: integer
+          description: Maximum number of hits to return (default 100, capped at 1000)
+          nullable: true
+          minimum: 0
+        query:
+          type: string
+          description: Text to look for; an empty query matches every entry
+        recordingIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |-
+            Recordings to search, in the order results are returned
+
+            When omitted, every recording stored on this instance is searched, newest first.
+            An empty list searches nothing.
+          nullable: true
+        to:
+          type: string
+          format: date-time
+          description: Only entries whose `timestamp` is before this instant are considered
+          nullable: true
+    RecordingLogSearchResponse:
+      type: object
+      description: Session Recording Log search result
+      required:
+      - hits
+      - notFoundRecordingIds
+      - limitReached
+      - scanLimitReached
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordingLogSearchHit'
+          description: Matching entries, ordered by recording, then by manifest file order, then by line
+        limitReached:
+          type: boolean
+          description: The hit limit or the response size bound was reached, so more matches may exist
+        notFoundRecordingIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Listed recordings that are not stored on this instance or have no readable manifest
+        scanLimitReached:
+          type: boolean
+          description: A scan bound was reached, so some entries were not searched
     ScanOriginDto:
       type: string
       enum:

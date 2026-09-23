@@ -59,6 +59,10 @@ docs/PreflightOperationKind.md
 docs/PreflightOutput.md
 docs/PreflightOutputKind.md
 docs/PubKeyFormat.md
+docs/RecordingLogSearchField.md
+docs/RecordingLogSearchHit.md
+docs/RecordingLogSearchRequest.md
+docs/RecordingLogSearchResponse.md
 docs/ScanOriginDto.md
 docs/ScanResultSourceDto.md
 docs/SessionInfo.md
@@ -158,6 +162,10 @@ src/Devolutions.Gateway.Client/Model/PreflightOperationKind.cs
 src/Devolutions.Gateway.Client/Model/PreflightOutput.cs
 src/Devolutions.Gateway.Client/Model/PreflightOutputKind.cs
 src/Devolutions.Gateway.Client/Model/PubKeyFormat.cs
+src/Devolutions.Gateway.Client/Model/RecordingLogSearchField.cs
+src/Devolutions.Gateway.Client/Model/RecordingLogSearchHit.cs
+src/Devolutions.Gateway.Client/Model/RecordingLogSearchRequest.cs
+src/Devolutions.Gateway.Client/Model/RecordingLogSearchResponse.cs
 src/Devolutions.Gateway.Client/Model/ScanOriginDto.cs
 src/Devolutions.Gateway.Client/Model/ScanResultSourceDto.cs
 src/Devolutions.Gateway.Client/Model/SessionInfo.cs

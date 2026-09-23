@@ -18,6 +18,10 @@ import { Observable }                                        from 'rxjs';
 
 // @ts-ignore
 import { DeleteManyResult } from '../model/deleteManyResult';
+// @ts-ignore
+import { RecordingLogSearchRequest } from '../model/recordingLogSearchRequest';
+// @ts-ignore
+import { RecordingLogSearchResponse } from '../model/recordingLogSearchResponse';
 
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS }                     from '../variables';
@@ -327,10 +331,10 @@ export class JrecService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public pullRecordingFile(id: string, filename: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<Blob>;
-    public pullRecordingFile(id: string, filename: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Blob>>;
-    public pullRecordingFile(id: string, filename: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Blob>>;
-    public pullRecordingFile(id: string, filename: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public pullRecordingFile(id: string, filename: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<Blob>;
+    public pullRecordingFile(id: string, filename: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Blob>>;
+    public pullRecordingFile(id: string, filename: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Blob>>;
+    public pullRecordingFile(id: string, filename: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (id === null || id === undefined) {
             throw new Error('Required parameter id was null or undefined when calling pullRecordingFile.');
         }
@@ -351,6 +355,10 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
+                'video/webm',
+                'application/x-asciicast',
+                'application/x-ndjson',
+                'application/json',
                 'application/octet-stream'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
@@ -436,6 +444,88 @@ export class JrecService {
             {
                 context: localVarHttpContext,
                 responseType: "blob",
+                withCredentials: this.configuration.withCredentials,
+                headers: localVarHeaders,
+                observe: observe,
+                transferCache: localVarTransferCache,
+                reportProgress: reportProgress
+            }
+        );
+    }
+
+    /**
+     * Searches the Session Recording Log (&#x60;.slog&#x60;) artifacts of recordings stored on this instance
+     * The query is matched as a plain substring against the visible fields of each entry: &#x60;timestamp&#x60;, &#x60;description&#x60;, &#x60;object&#x60;, &#x60;actor&#x60;, &#x60;host&#x60;, &#x60;sessionType&#x60;, and every parameter key and value. Matching ignores case unless &#x60;caseSensitive&#x60; is set. There is no fuzzy matching.  &#x60;from&#x60; and &#x60;to&#x60; filter on the entry &#x60;timestamp&#x60;; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when &#x60;__debug__.enable_unstable&#x60; is set.
+     * @param recordingLogSearchRequest JSON-encoded search request
+     * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
+     * @param reportProgress flag to report request and response progress.
+     */
+    public searchRecordingLogs(recordingLogSearchRequest: RecordingLogSearchRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<RecordingLogSearchResponse>;
+    public searchRecordingLogs(recordingLogSearchRequest: RecordingLogSearchRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<RecordingLogSearchResponse>>;
+    public searchRecordingLogs(recordingLogSearchRequest: RecordingLogSearchRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<RecordingLogSearchResponse>>;
+    public searchRecordingLogs(recordingLogSearchRequest: RecordingLogSearchRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+        if (recordingLogSearchRequest === null || recordingLogSearchRequest === undefined) {
+            throw new Error('Required parameter recordingLogSearchRequest was null or undefined when calling searchRecordingLogs.');
+        }
+
+        let localVarHeaders = this.defaultHeaders;
+
+        let localVarCredential: string | undefined;
+        // authentication (scope_token) required
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
+
+        let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
+        if (localVarHttpHeaderAcceptSelected === undefined) {
+            // to determine the Accept header
+            const httpHeaderAccepts: string[] = [
+                'application/json'
+            ];
+            localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
+        }
+        if (localVarHttpHeaderAcceptSelected !== undefined) {
+            localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
+        }
+
+        let localVarHttpContext: HttpContext | undefined = options && options.context;
+        if (localVarHttpContext === undefined) {
+            localVarHttpContext = new HttpContext();
+        }
+
+        let localVarTransferCache: boolean | undefined = options && options.transferCache;
+        if (localVarTransferCache === undefined) {
+            localVarTransferCache = true;
+        }
+
+
+        // to determine the Content-Type header
+        const consumes: string[] = [
+            'application/json'
+        ];
+        const httpContentTypeSelected: string | undefined = this.configuration.selectHeaderContentType(consumes);
+        if (httpContentTypeSelected !== undefined) {
+            localVarHeaders = localVarHeaders.set('Content-Type', httpContentTypeSelected);
+        }
+
+        let responseType_: 'text' | 'json' | 'blob' = 'json';
+        if (localVarHttpHeaderAcceptSelected) {
+            if (localVarHttpHeaderAcceptSelected.startsWith('text')) {
+                responseType_ = 'text';
+            } else if (this.configuration.isJsonMime(localVarHttpHeaderAcceptSelected)) {
+                responseType_ = 'json';
+            } else {
+                responseType_ = 'blob';
+            }
+        }
+
+        let localVarPath = `/jet/jrec/search`;
+        return this.httpClient.request<RecordingLogSearchResponse>('post', `${this.configuration.basePath}${localVarPath}`,
+            {
+                context: localVarHttpContext,
+                body: recordingLogSearchRequest,
+                responseType: <any>responseType_,
                 withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,
                 observe: observe,

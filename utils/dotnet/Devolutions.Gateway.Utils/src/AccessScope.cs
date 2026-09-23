@@ -22,6 +22,7 @@ public struct AccessScope
     public static AccessScope GatewayHeartbeatRead = new AccessScope("gateway.heartbeat.read");
     public static AccessScope GatewayRecordingDelete = new AccessScope("gateway.recording.delete");
     public static AccessScope GatewayRecordingsRead = new AccessScope("gateway.recordings.read");
+    public static AccessScope GatewayRecordingsSearch = new AccessScope("gateway.recordings.search");
     public static AccessScope GatewayUpdate = new AccessScope("gateway.update");
     public static AccessScope GatewayPreflight = new AccessScope("gateway.preflight");
     public static AccessScope GatewayTrafficClaim = new AccessScope("gateway.traffic.claim");

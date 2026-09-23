@@ -68,6 +68,10 @@ model/preflightOperationKind.ts
 model/preflightOutput.ts
 model/preflightOutputKind.ts
 model/pubKeyFormat.ts
+model/recordingLogSearchField.ts
+model/recordingLogSearchHit.ts
+model/recordingLogSearchRequest.ts
+model/recordingLogSearchResponse.ts
 model/scanOriginDto.ts
 model/scanResultSourceDto.ts
 model/sessionInfo.ts

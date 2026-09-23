@@ -1278,6 +1278,10 @@ Retrieves a recording file for a given session
 
 ===== Content Type
 
+* video/webm
+* application/x-asciicast
+* application/x-ndjson
+* application/json
 * application/octet-stream
 
 ===== Responses
@@ -1421,6 +1425,107 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/jrec/pull/\{id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.searchRecordingLogs]
+==== searchRecordingLogs
+
+`POST /jet/jrec/search`
+
+Searches the Session Recording Log (`.slog`) artifacts of recordings stored on this instance
+
+===== Description
+
+The query is matched as a plain substring against the visible fields of each entry: `timestamp`, `description`, `object`, `actor`, `host`, `sessionType`, and every parameter key and value. Matching ignores case unless `caseSensitive` is set. There is no fuzzy matching.  `from` and `to` filter on the entry `timestamp`; entries without a valid RFC 3339 timestamp are then excluded.  This route is unstable and only available when `__debug__.enable_unstable` is set.
+
+
+// markup not found, no include::{specDir}jet/jrec/search/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| RecordingLogSearchRequest
+| JSON-encoded search request <<RecordingLogSearchRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<RecordingLogSearchResponse>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Search results
+|  <<RecordingLogSearchResponse>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 413
+| Too many recording IDs in one request
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/search/POST/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -3371,6 +3476,7 @@ endif::internal-generation[]
 | gateway.net.monitor.drain
 | gateway.agent.delete
 | gateway.agent.read
+| gateway.recordings.search
 
 |===
 
@@ -5201,6 +5307,188 @@ Current auto-update schedule for Devolutions Agent.
 | Pkcs1
 
 |===
+
+
+[#RecordingLogSearchField]
+=== _RecordingLogSearchField_ 
+
+Session Recording Log entry field searched by the query
+
+
+
+
+[.fields-RecordingLogSearchField]
+[cols="1"]
+|===
+| Enum Values
+
+| timestamp
+| description
+| object
+| actor
+| host
+| sessionType
+| parameter-key
+| parameter-value
+
+|===
+
+
+[#RecordingLogSearchHit]
+=== _RecordingLogSearchHit_ 
+
+One Session Recording Log entry matching the search
+
+
+[.fields-RecordingLogSearchHit]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| entry
+| X
+| 
+|   Object  
+| The entry, as recorded
+|     
+
+| fileName
+| X
+| 
+|   String  
+| Name of the `.slog` file containing the entry
+|     
+
+| lineNumber
+| X
+| 
+|   Integer  
+| One-based line number of the entry in the file
+|     
+
+| matchedFields
+| X
+| 
+|   List   of <<RecordingLogSearchField>>
+| Fields matched by the query; empty when the query is empty
+|     
+
+| recordingId
+| X
+| 
+|   UUID  
+| Recording containing the entry
+| uuid    
+
+|===
+
+
+
+[#RecordingLogSearchRequest]
+=== _RecordingLogSearchRequest_ 
+
+Session Recording Log search request
+
+
+[.fields-RecordingLogSearchRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| caseSensitive
+| 
+| 
+|   Boolean  
+| Match case exactly instead of ignoring case
+|     
+
+| eventTypes
+| 
+| 
+|   List   of <<string>>
+| When not empty, only entries whose `event` is one of these values are considered
+|     
+
+| from
+| 
+| X
+|   Date  
+| Only entries whose `timestamp` is at or after this instant are considered
+| date-time    
+
+| limit
+| 
+| X
+|   Integer  
+| Maximum number of hits to return (default 100, capped at 1000)
+|     
+
+| query
+| 
+| 
+|   String  
+| Text to look for; an empty query matches every entry
+|     
+
+| recordingIds
+| 
+| X
+|   List   of <<UUID>>
+| Recordings to search, in the order results are returned  When omitted, every recording stored on this instance is searched, newest first. An empty list searches nothing.
+| uuid    
+
+| to
+| 
+| X
+|   Date  
+| Only entries whose `timestamp` is before this instant are considered
+| date-time    
+
+|===
+
+
+
+[#RecordingLogSearchResponse]
+=== _RecordingLogSearchResponse_ 
+
+Session Recording Log search result
+
+
+[.fields-RecordingLogSearchResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| hits
+| X
+| 
+|   List   of <<RecordingLogSearchHit>>
+| Matching entries, ordered by recording, then by manifest file order, then by line
+|     
+
+| limitReached
+| X
+| 
+|   Boolean  
+| The hit limit or the response size bound was reached, so more matches may exist
+|     
+
+| notFoundRecordingIds
+| X
+| 
+|   List   of <<UUID>>
+| Listed recordings that are not stored on this instance or have no readable manifest
+| uuid    
+
+| scanLimitReached
+| X
+| 
+|   Boolean  
+| A scan bound was reached, so some entries were not searched
+|     
+
+|===
+
 
 
 [#ScanOriginDto]
