@@ -1,6 +1,8 @@
 syntax = "proto3";
 package devolutions.agent.identity.channel.v1;
 
+option csharp_namespace = "Devolutions.AgentIdentity.Channel.V1";
+
 import "google/protobuf/timestamp.proto";
 
 service AgentChannel {

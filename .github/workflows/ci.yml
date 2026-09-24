@@ -1122,6 +1122,10 @@ jobs:
         run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
+      - name: Build agent identity channel package
+        run: ./crates/agent-identity-channel-proto/dotnet/build.ps1
+        shell: pwsh
+
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests

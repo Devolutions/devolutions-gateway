@@ -163,10 +163,13 @@ Body for every non-2xx response:
 ### 7.1 Service
 
 Package **[proposed]** `devolutions.agent.identity.channel.v1`.
+The `.proto` is the single source for every language: Rust (`agent-identity-channel-proto` crate) and .NET (`Devolutions.AgentIdentity.Channel` NuGet package, built from the same file in devolutions-gateway).
 
 ```proto
 syntax = "proto3";
 package devolutions.agent.identity.channel.v1;
+
+option csharp_namespace = "Devolutions.AgentIdentity.Channel.V1";
 
 import "google/protobuf/timestamp.proto";
 
