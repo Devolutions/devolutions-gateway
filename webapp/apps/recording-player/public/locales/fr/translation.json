@@ -6,6 +6,17 @@
     "unknownError": "Erreur inconnue, veuillez réessayer",
     "protocolError": "Une erreur s'est produite: {{error}}"
   },
+  "controls": {
+    "play": "Lire",
+    "pause": "Pause",
+    "mute": "Couper le son",
+    "unmute": "Réactiver le son",
+    "volume": "Volume",
+    "timeline": "Chronologie de l'enregistrement",
+    "fullscreen": "Plein écran",
+    "exitFullscreen": "Quitter le plein écran",
+    "clip": "Séquence"
+  },
   "ui": {
     "close": "Fermer"
   }
