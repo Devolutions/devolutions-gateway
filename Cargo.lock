@@ -98,6 +98,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-identity-mock"
+version = "0.0.0"
+dependencies = [
+ "agent-identity-channel-proto",
+ "anyhow",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "der 0.8.1",
+ "futures",
+ "http 1.4.2",
+ "http-body 1.1.0",
+ "http-body-util",
+ "hyper 1.10.1",
+ "hyper-util",
+ "p256",
+ "prost-types",
+ "rand 0.10.2",
+ "rcgen",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "spki 0.8.0",
+ "thiserror 2.0.20",
+ "time",
+ "tokio 1.52.3",
+ "tokio-rustls",
+ "tokio-stream",
+ "tonic 0.12.3",
+ "tower 0.5.3",
+ "tracing",
+ "uuid",
+ "x509-cert 0.3.0",
+]
+
+[[package]]
 name = "agent-policy-tester"
 version = "0.0.0"
 dependencies = [
@@ -7940,6 +7975,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite 0.2.17",
  "tokio 1.52.3",
+ "tokio-util",
 ]
 
 [[package]]
@@ -9673,6 +9709,8 @@ checksum = "105ef4642d9cb137ef83d623d0e4bf08b8adf69e9918ca904a174adb6d3d038b"
 dependencies = [
  "const-oid 0.10.2",
  "der 0.8.1",
+ "sha1 0.11.0",
+ "signature",
  "spki 0.8.0",
  "tls_codec",
 ]
