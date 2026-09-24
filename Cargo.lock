@@ -8176,7 +8176,12 @@ dependencies = [
  "gateway-db",
  "hex",
  "ipnetwork",
+ "ironrdp-connector",
+ "ironrdp-core 0.2.1",
+ "ironrdp-pdu",
+ "ironrdp-tokio",
  "jmux-proto",
+ "kdc",
  "libc",
  "libsql",
  "mcp-proxy",
@@ -8184,6 +8189,8 @@ dependencies = [
  "network-scanner-proto",
  "nonempty",
  "picky",
+ "picky-asn1-der",
+ "picky-krb",
  "private-fs",
  "proxy-socks",
  "quinn",
@@ -8212,6 +8219,7 @@ dependencies = [
  "webm-iterable",
  "win-api-wrappers",
  "windows 0.61.3",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
