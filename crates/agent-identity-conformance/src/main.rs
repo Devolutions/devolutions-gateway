@@ -109,10 +109,12 @@ struct Options {
     target: Option<TargetKind>,
     base_url: Option<String>,
     admin_token: Option<String>,
+    authority_id: Option<String>,
     agent_bin: Option<PathBuf>,
     ca_path: Option<PathBuf>,
     second_base_url: Option<String>,
     second_admin_token: Option<String>,
+    second_authority_id: Option<String>,
     second_ca_path: Option<PathBuf>,
     unprivileged_admin_token: Option<String>,
     key_backend: KeyBackend,
@@ -128,10 +130,12 @@ impl Default for Options {
             target: None,
             base_url: None,
             admin_token: None,
+            authority_id: None,
             agent_bin: None,
             ca_path: None,
             second_base_url: None,
             second_admin_token: None,
+            second_authority_id: None,
             second_ca_path: None,
             unprivileged_admin_token: None,
             key_backend: if cfg!(windows) {
@@ -171,10 +175,12 @@ impl Options {
                 }
                 "--base-url" => options.base_url = Some(value),
                 "--admin-token" => options.admin_token = Some(value),
+                "--authority-id" => options.authority_id = Some(value),
                 "--agent-bin" => options.agent_bin = Some(value.into()),
                 "--extra-trusted-root" => options.ca_path = Some(value.into()),
                 "--second-base-url" => options.second_base_url = Some(value),
                 "--second-admin-token" => options.second_admin_token = Some(value),
+                "--second-authority-id" => options.second_authority_id = Some(value),
                 "--second-extra-trusted-root" => options.second_ca_path = Some(value.into()),
                 "--unprivileged-admin-token" => options.unprivileged_admin_token = Some(value),
                 "--key-backend" => {
@@ -198,6 +204,7 @@ impl Options {
             self.base_url.context("--base-url is required")?,
             self.admin_token.context("--admin-token is required")?,
             self.ca_path.as_deref(),
+            self.authority_id.as_deref(),
         )?;
         let unprivileged_admin_token = if kind == TargetKind::Mock {
             Some(format!("{}-unprivileged", target.admin_token))
@@ -205,10 +212,19 @@ impl Options {
             self.unprivileged_admin_token
         };
         let second = match (self.second_base_url, self.second_admin_token) {
-            (Some(url), Some(token)) => Some(Target::new(url, token, self.second_ca_path.as_deref())?),
+            (Some(url), Some(token)) => Some(Target::new(
+                url,
+                token,
+                self.second_ca_path.as_deref(),
+                self.second_authority_id.as_deref(),
+            )?),
             (None, None) => None,
             _ => anyhow::bail!("second base URL and admin token must be supplied together"),
         };
+        ensure!(
+            second.is_some() || self.second_authority_id.is_none(),
+            "--second-authority-id requires a second target"
+        );
         tokio::fs::create_dir_all(&self.work_dir).await?;
         Ok(Context {
             target,
@@ -345,6 +361,7 @@ macro_rules! a {
 
 const TESTS: &[Test] = &[
     p!(p_trust_anchor_lists_roots),
+    p!(p_reset_rebases_root_validity, mock_only),
     p!(p_token_n_uses_consumed_then_exhausted),
     p!(p_token_concurrent_enrollment_respects_max_uses),
     p!(p_failed_enrollment_consumes_nothing),
@@ -355,6 +372,7 @@ const TESTS: &[Test] = &[
     p!(p_metadata_limits),
     p!(p_friendly_name_format),
     p!(p_device_cannot_impersonate_another),
+    p!(p_renew_digest_integrity),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
     p!(p_connect_signature_replayed_to_renew),
@@ -367,6 +385,7 @@ const TESTS: &[Test] = &[
     p!(p_delete_only_when_revoked_then_unknown),
     p!(p_channel_hello_updates_metadata_and_connected),
     p!(p_channel_proof_replay_fails),
+    p!(p_channel_revoked_before_hello),
     p!(p_channel_no_hello_timeout),
     p!(p_channel_unavailable_no_channel_url, mock_only),
     p!(p_request_renewal_connected_and_on_connect),

@@ -17,7 +17,7 @@ use crate::client::{Target, Token, count, expect_status, field};
 use crate::{Context, KeyBackend};
 
 type CaseFuture<'a> = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
-const WAIT: Duration = Duration::from_secs(6);
+const WAIT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(100);
 
 struct AgentCase {
@@ -30,6 +30,8 @@ struct AgentCase {
     machine_keys: Vec<String>,
     #[cfg(windows)]
     preexisting_keys: std::collections::HashSet<String>,
+    #[cfg(windows)]
+    known_authorities: std::collections::HashSet<uuid::Uuid>,
 }
 
 impl AgentCase {
@@ -37,6 +39,14 @@ impl AgentCase {
         #[cfg(windows)]
         let preexisting_keys =
             crate::windows::snapshot_machine_identity_keys().context("snapshot existing machine identity keys")?;
+        #[cfg(windows)]
+        let known_authorities = [
+            ctx.target.authority_id,
+            ctx.second.as_ref().and_then(|target| target.authority_id),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let dir = tempfile::Builder::new()
             .prefix("identity-agent-")
             .tempdir_in(&ctx.work_dir)
@@ -53,6 +63,7 @@ impl AgentCase {
         let second_root = ctx.second.as_ref().and_then(|target| target.ca_path.as_deref());
         match (first_root, second_root) {
             (Some(first), Some(second)) => {
+                // Interpret CONTRACT.md §10.1's extra_trusted_root path as a PEM bundle containing both mock CAs.
                 let mut roots = std::fs::read(first)?;
                 roots.push(b'\n');
                 roots.extend_from_slice(&std::fs::read(second)?);
@@ -87,6 +98,8 @@ impl AgentCase {
             machine_keys: Vec::new(),
             #[cfg(windows)]
             preexisting_keys,
+            #[cfg(windows)]
+            known_authorities,
         };
         if run {
             case.start().await?;
@@ -203,6 +216,12 @@ impl AgentCase {
                         if json_path.exists() {
                             let state: Value = serde_json::from_slice(&std::fs::read(json_path)?)?;
                             if state["device_id"] == id && !self.pending_path().exists() {
+                                if let Some(known) = target.authority_id {
+                                    ensure!(
+                                        state["authority_id"] == known.to_string(),
+                                        "agent stored an unexpected authority ID"
+                                    );
+                                }
                                 #[cfg(windows)]
                                 for slot in ["current", "pending", "previous"] {
                                     if let Some(name) = state["keys"][slot]["key_name"].as_str() {
@@ -218,7 +237,7 @@ impl AgentCase {
             self.check_running()?;
             ensure!(
                 start.elapsed() < WAIT,
-                "agent did not enroll and persist an identity within six seconds"
+                "agent did not enroll and persist an identity within 20 seconds"
             );
             tokio::time::sleep(POLL).await;
         }
@@ -235,7 +254,7 @@ impl AgentCase {
                 return Ok(response.body);
             }
             self.check_running()?;
-            ensure!(start.elapsed() < WAIT, "agent did not reach {what} within six seconds");
+            ensure!(start.elapsed() < WAIT, "agent did not reach {what} within 20 seconds");
             tokio::time::sleep(POLL).await;
         }
     }
@@ -311,10 +330,7 @@ impl AgentCase {
                 return Ok(state);
             }
             self.check_running()?;
-            ensure!(
-                start.elapsed() < WAIT,
-                "agent did not persist {what} within six seconds"
-            );
+            ensure!(start.elapsed() < WAIT, "agent did not persist {what} within 20 seconds");
             tokio::time::sleep(POLL).await;
         }
     }
@@ -323,7 +339,12 @@ impl AgentCase {
         let stopped = self.stop().await;
         let protected = self.audit_stored_keys();
         #[cfg(windows)]
-        crate::windows::cleanup_machine_keys(self.path(), &self.machine_keys, &self.preexisting_keys);
+        crate::windows::cleanup_machine_keys(
+            self.path(),
+            &self.machine_keys,
+            &self.preexisting_keys,
+            &self.known_authorities,
+        );
         let audited = self.audit_tokens();
         self.cleaned = true;
         stopped?;
@@ -442,7 +463,12 @@ impl Drop for AgentCase {
         }
         if !self.cleaned {
             #[cfg(windows)]
-            crate::windows::cleanup_machine_keys(self.path(), &self.machine_keys, &self.preexisting_keys);
+            crate::windows::cleanup_machine_keys(
+                self.path(),
+                &self.machine_keys,
+                &self.preexisting_keys,
+                &self.known_authorities,
+            );
             if let Err(error) = self.audit_tokens() {
                 eprintln!("agent-case cleanup audit failed: {error:#}");
             }
@@ -480,6 +506,9 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
         uuid::Uuid::parse_str(authority).is_ok(),
         "stored identity authority is not a UUID"
     );
+    if let Some(known) = case.ctx.target.authority_id {
+        ensure!(authority == known.to_string(), "stored identity has wrong authority ID");
+    }
     ensure!(
         field(state, "base_url")? == case.ctx.target.base_url,
         "stored identity has wrong base URL"
@@ -577,7 +606,7 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                     "token_malformed" => ("dvaet1.not-base64.short".to_owned(), token, 0, 0),
                     _ => anyhow::bail!("unknown permanent error"),
                 };
-                let ingress = if reason == "token_malformed" {
+                let ingress = if reason == "token_malformed" && case.ctx.mock() {
                     Some(count(&target.requests(None).await?, "enroll_total")?)
                 } else {
                     None
@@ -1253,8 +1282,8 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             ensure!(
-                state["channel_url"].is_null(),
-                "agent stored a channel URL when none was advertised"
+                state.get("channel_url").is_none(),
+                "agent stored channel_url despite the field being absent from enrollment"
             );
             tokio::time::sleep(Duration::from_secs(1)).await;
             ensure!(

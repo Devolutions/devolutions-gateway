@@ -14,6 +14,7 @@ pub(crate) struct Target {
     pub(crate) base_url: String,
     pub(crate) admin_token: String,
     pub(crate) ca_path: Option<PathBuf>,
+    pub(crate) authority_id: Option<uuid::Uuid>,
     pub(crate) http: reqwest::Client,
 }
 
@@ -24,7 +25,12 @@ pub(crate) struct Reply {
 }
 
 impl Target {
-    pub(crate) fn new(base_url: String, admin_token: String, ca_path: Option<&Path>) -> anyhow::Result<Self> {
+    pub(crate) fn new(
+        base_url: String,
+        admin_token: String,
+        ca_path: Option<&Path>,
+        authority_id: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let url = reqwest::Url::parse(&base_url).context("parse base URL")?;
         ensure!(url.scheme() == "https", "base URL must use https");
         ensure!(
@@ -36,10 +42,21 @@ impl Target {
             let pem = std::fs::read(path).context("read trusted root PEM")?;
             builder = builder.add_root_certificate(reqwest::Certificate::from_pem(&pem)?);
         }
+        let authority_id = authority_id
+            .map(|id| {
+                let parsed = uuid::Uuid::parse_str(id).context("invalid known authority ID")?;
+                ensure!(
+                    parsed.to_string() == id,
+                    "authority ID must be a lowercase hyphenated UUID"
+                );
+                Ok(parsed)
+            })
+            .transpose()?;
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
             admin_token,
             ca_path: ca_path.map(Path::to_path_buf),
+            authority_id,
             http: builder.build()?,
         })
     }
@@ -115,7 +132,15 @@ impl Target {
     }
 
     pub(crate) async fn reset(&self) -> anyhow::Result<()> {
-        expect_status(&self.control("reset", &json!({})).await?, 200)
+        let reply = self.control("reset", &json!({})).await?;
+        expect_status(&reply, 200)?;
+        if let Some(known) = self.authority_id {
+            ensure!(
+                reply.body["authority_id"] == known.to_string(),
+                "mock authority ID changed"
+            );
+        }
+        Ok(())
     }
 
     pub(crate) async fn requests(&self, token: Option<&Token>) -> anyhow::Result<Value> {
@@ -258,13 +283,18 @@ impl Identity {
             .map(|entry| entry.as_str().context("invalid chain entry").map(str::to_owned))
             .collect::<anyhow::Result<Vec<_>>>()?;
         ensure!(!chain.is_empty(), "empty certificate chain");
+        let channel_url = match reply.body.get("channel_url") {
+            None => None,
+            Some(Value::String(url)) => Some(url.clone()),
+            Some(_) => anyhow::bail!("enrollment channel_url must be a string when present"),
+        };
         Ok(Self {
             device_id: field(&reply.body, "device_id")?.to_owned(),
             authority_id: field(&reply.body, "authority_id")?.to_owned(),
             friendly_name: field(&reply.body, "friendly_name")?.to_owned(),
             thumbprint: crate::signer::thumbprint(&chain[0])?,
             certificate_chain: chain,
-            channel_url: reply.body["channel_url"].as_str().map(str::to_owned),
+            channel_url,
             key,
         })
     }
@@ -326,4 +356,36 @@ pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> 
     base64::engine::general_purpose::STANDARD
         .decode(certificate)
         .context("decode certificate")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enrollment_omission_differs_from_explicit_null() -> anyhow::Result<()> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let certificate = field(&vectors["keys"][0], "certificate")?;
+        let mut reply = Reply {
+            status: 200,
+            body: json!({
+                "authority_id": uuid::Uuid::new_v4(),
+                "device_id": uuid::Uuid::new_v4(),
+                "friendly_name": "test",
+                "certificate_chain": [certificate],
+            }),
+        };
+        ensure!(
+            Identity::from_enrollment(KeyPair::generate()?, &reply)?
+                .channel_url
+                .is_none(),
+            "omitted channel_url was not accepted"
+        );
+        reply.body["channel_url"] = Value::Null;
+        ensure!(
+            Identity::from_enrollment(KeyPair::generate()?, &reply).is_err(),
+            "explicit null channel_url was accepted"
+        );
+        Ok(())
+    }
 }

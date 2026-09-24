@@ -9,6 +9,7 @@ use p256::ecdsa::{Signature, VerifyingKey};
 use p256::pkcs8::{DecodePublicKey as _, EncodePublicKey as _};
 use rand::RngExt as _;
 use serde_json::{Value, json};
+use sha2::Digest as _;
 use time::format_description::well_known::Rfc3339;
 use tonic::Code;
 use x509_cert::Certificate;
@@ -216,7 +217,16 @@ fn assert_leaf_profile(leaf: &str, root: &str, device_id: &str, key: &KeyPair) -
     Ok(())
 }
 
-fn verify_chain(chain: &[String], roots: &Value) -> anyhow::Result<()> {
+async fn chain_evaluation_time(ctx: &Context) -> anyhow::Result<i64> {
+    if ctx.mock() {
+        let reply = ctx.target.control("time/advance", &json!({ "secs": 0 })).await?;
+        expect_status(&reply, 200)?;
+        return reply.body["now"].as_i64().context("mock omitted evaluation time");
+    }
+    Ok(time::OffsetDateTime::now_utc().unix_timestamp())
+}
+
+fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()> {
     ensure!(chain.len() >= 2, "certificate chain has no issuer");
     let certs = chain
         .iter()
@@ -234,27 +244,44 @@ fn verify_chain(chain: &[String], roots: &Value) -> anyhow::Result<()> {
             .context("chain issuer lacks key usage")?;
         ensure!(usage.key_cert_sign(), "chain issuer lacks keyCertSign");
     }
+    let anchors = roots["roots"].as_array().context("missing trust anchors")?;
+    let root_der = decoded_certificate(chain.last().context("missing chain root")?)?;
+    let published = anchors
+        .iter()
+        .map(|root| decoded_certificate(field(root, "certificate")?))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    ensure!(
+        published.iter().any(|root| root == &root_der),
+        "chain does not end at a published root"
+    );
+    for cert in &certs {
+        let validity = cert.tbs_certificate().validity();
+        let before = i64::try_from(validity.not_before.to_unix_duration().as_secs())?;
+        let after = i64::try_from(validity.not_after.to_unix_duration().as_secs())?;
+        ensure!(
+            before <= now && now < after,
+            "certificate chain element is not valid at evaluation time"
+        );
+    }
     for pair in certs.windows(2) {
         ensure!(
             pair[0].tbs_certificate().issuer() == pair[1].tbs_certificate().subject(),
             "certificate issuer mismatch"
         );
-        let issuance_time = pair[0].tbs_certificate().validity().not_before.to_unix_duration();
-        let issuer_validity = pair[1].tbs_certificate().validity();
-        ensure!(
-            issuer_validity.not_before.to_unix_duration() <= issuance_time
-                && issuance_time < issuer_validity.not_after.to_unix_duration(),
-            "chain issuer was not valid when it issued its child"
-        );
-        let key = VerifyingKey::from_public_key_der(&pair[1].tbs_certificate().subject_public_key_info().to_der()?)?;
-        let signature = Signature::from_der(pair[0].signature().as_bytes().context("certificate signature")?)?;
-        key.verify(&pair[0].tbs_certificate().to_der()?, &signature)?;
+        let issuer_key = pair[1].tbs_certificate().subject_public_key_info();
+        let p256_issuer = issuer_key.algorithm.oid.to_string() == "1.2.840.10045.2.1"
+            && issuer_key
+                .algorithm
+                .parameters
+                .as_ref()
+                .and_then(|parameters| parameters.decode_as::<der::asn1::ObjectIdentifier>().ok())
+                .is_some_and(|curve| curve.to_string() == "1.2.840.10045.3.1.7");
+        if p256_issuer {
+            let key = VerifyingKey::from_public_key_der(&issuer_key.to_der()?)?;
+            let signature = Signature::from_der(pair[0].signature().as_bytes().context("certificate signature")?)?;
+            key.verify(&pair[0].tbs_certificate().to_der()?, &signature)?;
+        }
     }
-    let anchors = roots["roots"].as_array().context("missing trust anchors")?;
-    ensure!(
-        anchors.iter().any(|root| root["certificate"] == chain[chain.len() - 1]),
-        "chain does not end at a published root"
-    );
     Ok(())
 }
 
@@ -266,7 +293,7 @@ pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<(
         assert_root(root)?;
     }
     let (_, identity) = issued(&ctx, "anchor").await?;
-    verify_chain(&identity.certificate_chain, &roots)?;
+    verify_chain(&identity.certificate_chain, &roots, chain_evaluation_time(&ctx).await?)?;
     ensure!(
         uuid::Uuid::parse_str(&identity.authority_id).is_ok(),
         "invalid authority ID"
@@ -278,6 +305,20 @@ pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<(
         &identity.device_id,
         &identity.key,
     )?;
+    Ok(())
+}
+
+pub(crate) async fn p_reset_rebases_root_validity(ctx: Context) -> anyhow::Result<()> {
+    let old = ctx.target.trust_anchor().await?;
+    ctx.target.advance(90 * 24 * 3600).await?;
+    ctx.target.reset().await?;
+    let roots = ctx.target.trust_anchor().await?;
+    ensure!(
+        roots["roots"][0]["thumbprint"] != old["roots"][0]["thumbprint"],
+        "mock reset retained the old root"
+    );
+    let (_, identity) = issued(&ctx, "after-reset").await?;
+    verify_chain(&identity.certificate_chain, &roots, chain_evaluation_time(&ctx).await?)?;
     Ok(())
 }
 
@@ -591,6 +632,54 @@ pub(crate) async fn p_device_cannot_impersonate_another(ctx: Context) -> anyhow:
     Ok(())
 }
 
+pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "original").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let key = KeyPair::generate()?;
+    let original = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "original" } }))?;
+    let changed = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "tampered" } }))?;
+    let mut last_nonce = String::new();
+    for (variant, replace_digest) in [("body only", false), ("body and digest", true)] {
+        let nonce = loop {
+            let nonce = fresh_nonce();
+            if nonce != last_nonce {
+                break nonce;
+            }
+        };
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut signed = identity
+            .key
+            .sign(&identity.thumbprint, "renew", Some(&original), now, now + 60, &nonce);
+        last_nonce = nonce;
+        if replace_digest {
+            signed.digest = Some(format!(
+                "sha-256=:{}:",
+                base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(&changed))
+            ));
+        }
+        expect_error(
+            &ctx.target.signed_renew(&changed, &signed, None).await?,
+            401,
+            "signature_invalid",
+        )
+        .with_context(|| format!("{variant} tampering"))?;
+        let after = device(&ctx.target, &identity.device_id).await?;
+        ensure!(
+            after["metadata"] == before["metadata"]
+                && after["certificates"] == before["certificates"]
+                && after["lastSeenAt"] == before["lastSeenAt"],
+            "{variant} tampering changed device state"
+        );
+        ensure!(
+            after["certificates"]
+                .as_array()
+                .is_some_and(|certs| certs.iter().all(|cert| cert["status"] != "pending")),
+            "{variant} tampering created a pending certificate"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "replay").await?;
     let new_key = KeyPair::generate()?;
@@ -707,7 +796,11 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
         .map(|item| item.as_str().context("chain item").map(str::to_owned))
         .collect::<anyhow::Result<Vec<_>>>()?;
     ensure!(!new_chain.is_empty(), "renewal returned no certificate");
-    verify_chain(&new_chain, &ctx.target.trust_anchor().await?)?;
+    verify_chain(
+        &new_chain,
+        &ctx.target.trust_anchor().await?,
+        chain_evaluation_time(&ctx).await?,
+    )?;
     assert_leaf_profile(
         &new_chain[0],
         new_chain.last().context("missing renewal issuer")?,
@@ -1043,6 +1136,41 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
+pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "before-revocation").await?;
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    let challenge = stream.challenge().await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    ensure!(before["connected"] == false, "device connected before Hello");
+    let authenticated = if ctx.mock() {
+        Some(count(&ctx.target.requests(None).await?, "authenticated_connects")?)
+    } else {
+        None
+    };
+    ctx.target.revoke(&identity.device_id).await?;
+    let revoked = device(&ctx.target, &identity.device_id).await?;
+    stream
+        .send_hello(&identity, &challenge, &[("hostname", "after-revocation")], None)
+        .await?;
+    let rejected = stream.closing_status(Duration::from_secs(3)).await?;
+    channel::expect_status(&rejected, Code::PermissionDenied, "device_revoked")?;
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        after["connected"] == false
+            && after["metadata"] == revoked["metadata"]
+            && after["certificates"] == revoked["certificates"]
+            && after["lastSeenAt"] == before["lastSeenAt"],
+        "revoked stream changed device state before Welcome"
+    );
+    if let Some(authenticated) = authenticated {
+        ensure!(
+            count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
+            "revoked stream was registered as authenticated"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "no-hello").await?;
     let initial = device(&ctx.target, &identity.device_id).await?;
@@ -1066,7 +1194,18 @@ pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<(
 
 pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow::Result<()> {
     ctx.target.faults(&json!({ "channel_available": false })).await?;
-    let (_, identity) = issued(&ctx, "unavailable").await?;
+    let token = token(&ctx, 1).await?;
+    let key = KeyPair::generate()?;
+    let reply = ctx
+        .target
+        .enroll(&token.text, &key, &json!({ "hostname": "unavailable" }))
+        .await?;
+    expect_status(&reply, 200)?;
+    ensure!(
+        reply.body.get("channel_url").is_none(),
+        "enroll included channel_url for unavailable channel"
+    );
+    let identity = Identity::from_enrollment(key, &reply)?;
     ensure!(
         identity.channel_url.is_none(),
         "enroll returned channel_url for unavailable channel"
@@ -1382,7 +1521,7 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
         assert_root(root)?;
     }
     let (_, identity) = issued(&ctx, "new-root").await?;
-    verify_chain(&identity.certificate_chain, &roots)?;
+    verify_chain(&identity.certificate_chain, &roots, chain_evaluation_time(&ctx).await?)?;
     let new_root = thumbprint(identity.certificate_chain.last().context("missing issued root")?)?;
     ensure!(new_root != old_thumb, "rotation issued from the old root");
     let record = device(&ctx.target, &identity.device_id).await?;
@@ -1475,7 +1614,7 @@ pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Conte
         .iter()
         .map(|value| value.as_str().context("chain item").map(str::to_owned))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    verify_chain(&new_chain, &roots)?;
+    verify_chain(&new_chain, &roots, chain_evaluation_time(&ctx).await?)?;
     ensure!(
         thumbprint(new_chain.last().context("root")?)? != original_root,
         "renewal issued under old root"
@@ -1877,4 +2016,39 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
         "signature_invalid",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_requires_published_root_validity_and_signed_p256_links() -> anyhow::Result<()> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let leaf = field(&vectors["keys"][0], "certificate")?.to_owned();
+        let root = field(&vectors["root"], "certificate")?.to_owned();
+        let chain = vec![leaf.clone(), root.clone()];
+        let anchors = json!({ "roots": [{ "certificate": root }] });
+        verify_chain(&chain, &anchors, 1_790_000_000)?;
+        ensure!(
+            verify_chain(&chain, &anchors, 1_790_000_000 + 10_000_000).is_err(),
+            "expired leaf was accepted"
+        );
+        ensure!(
+            verify_chain(&chain, &json!({ "roots": [] }), 1_790_000_000).is_err(),
+            "unpublished root was accepted"
+        );
+        ensure!(
+            verify_chain(std::slice::from_ref(&root), &anchors, 1_790_000_000).is_err(),
+            "root-only chain was accepted"
+        );
+        let mut tampered_leaf = decoded_certificate(&leaf)?;
+        *tampered_leaf.last_mut().context("missing certificate signature")? ^= 1;
+        let tampered = vec![base64::engine::general_purpose::STANDARD.encode(tampered_leaf), root];
+        ensure!(
+            verify_chain(&tampered, &anchors, 1_790_000_000).is_err(),
+            "invalid P-256 certificate signature was accepted"
+        );
+        Ok(())
+    }
 }
