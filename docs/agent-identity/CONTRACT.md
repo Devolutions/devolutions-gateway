@@ -1,8 +1,9 @@
-# Agent Identity — Contract (v0.3)
+# Agent Identity — Contract (draft v0.4)
 
-Status: v0.3, approved at the Phase 0 gate; decisions E1–E7 applied.
-Changes go through the contract owner and require approval.
-The channel `.proto` lives in `crates/agent-identity-channel-proto/proto/channel.proto` and the shared test vectors in `docs/agent-identity/test-vectors.json`.
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C13, orchestrator, 2026-09-25, pending Benoit's review).
+Owner: top-level orchestrator.
+Changes go lead → top-level → Benoit.
+Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
 Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
 
 ## 1. Conventions
@@ -33,19 +34,27 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
   The agent rejects a malformed token locally (`token_malformed`, local only, permanent).
 - The server stores only `SHA-256(secret)`.
 - Acceptance, consumption and idempotence follow the V1 plan (row exists, `used_count < max_uses`, `now < expires_at`; use consumed in the device-creating transaction; same CSR public key returns the existing device without consuming a use).
+- Evaluation order (C1): (1) authenticate the token (row exists and `SHA-256(secret)` matches) → else `token_invalid`; (2) validate the body, CSR and metadata → else `invalid_request`; (3) idempotence lookup on the CSR public key; (4) `token_expired`; (5) `token_exhausted`; (6) create the device.
+  Idempotence is checked before expiry and exhaustion so a lost response on a `max_uses = 1` token can be retried.
+- Idempotence match (C1), against every certificate the server has issued:
+  - Key of the current certificate of a non-revoked device → `200` with that device, its friendly name and its current chain; no use consumed; metadata and `last_seen_at` updated.
+  - Any certificate key of a revoked device → `device_revoked`.
+  - Key of a pending or retired certificate of a non-revoked device → `invalid_request` (a public key belongs to exactly one certificate lineage; it's never reused).
 - Idempotence applies only when the matching device is not revoked; for a revoked device, enroll returns `device_revoked`.
 
 ## 3. Metadata
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits **[proposed]**: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 8 KiB.
+- Limits **[proposed]**: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 8 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6).
+- `metadata` is required in enroll and renew bodies (an object, possibly empty); absent or not an object → `invalid_request` (C7).
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
 - Unknown keys within limits are stored as-is (informational only).
 - Friendly name: evaluated once at enrollment from the token's format.
-  Placeholders `{<known key>}` and `{token_name}`; `{{` and `}}` escape braces.
+  Placeholders `{<known key>}` and `{token_name}`; `{{` and `}}` escape braces; an unpaired `{` or `}` is rejected at token creation like an unknown placeholder.
   Unknown placeholders are rejected at token creation; missing values evaluate to empty.
   The result is trimmed and truncated to 255 characters; an empty result falls back to the device ID.
+  "Characters" means Unicode scalar values, here and in `PATCH /devices/{id}`; truncation never splits one (C6).
   Default format **[proposed]**: `{hostname}`.
 
 ## 4. Certificates
@@ -54,6 +63,8 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
 - DVLS: root P-256, 10 years, `CN=<product> Agent Identity Root <n>`, created on first use.
 - Leaf: P-256, `CN=<device_id>`, SAN URI `urn:uuid:<device_id>`, EKU clientAuth, KeyUsage digitalSignature, validity default 90 days, capped at the issuing root's `notAfter`.
 - The server ignores CSR subject and extensions; it only takes the public key (P-256 required, else `invalid_request`) and verifies the CSR self-signature (else `invalid_request`).
+- The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request` (C5).
+- The leaf lifetime is a server setting (default 90 days); conformance runs against a real server pass the configured value to the tester.
 
 ## 5. Agent-facing HTTP API (product-neutral)
 
@@ -108,6 +119,7 @@ Request:
 - Request: `{ "csr": "...", "metadata": { ... } }` for the new key.
 - `200`: `{ "certificate_chain": [ ... ] }`.
 - Idempotent on the new public key.
+- CSR key rules (C2): the key of the device's pending certificate → `200` replaying that pending chain (lost-response retry); the key of any other certificate the server has issued (this device's current or retired ones, or any certificate of another device) → `invalid_request`; otherwise a new pending certificate is issued.
 - At most one `pending` certificate per device: a renew with a different new key retires the previous pending certificate.
 - Accepted with a `current` or `pending` certificate that is unexpired, or expired by less than its own lifetime (`now < notAfter + (notAfter − notBefore)`).
 
@@ -120,6 +132,7 @@ Body for every non-2xx response:
 ```
 
 `server_time` is always present; agents use it only for `clock_skew`.
+This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, including framework-level failures (C8): malformed JSON or body → `400 invalid_request`; unknown route → `404 invalid_request`; wrong method → `405 invalid_request`; body too large → `413 invalid_request`.
 
 | Code | HTTP | Meaning | Agent class |
 |---|---|---|---|
@@ -147,7 +160,7 @@ Body for every non-2xx response:
 - Server checks, in this order:
   1. Parse; exactly one signature labelled `sig`; all parameters present; `alg` matches → else `signature_invalid`.
   2. `tag` matches the endpoint → else `signature_invalid`.
-  3. `expires − created ≤ 300`; `created ≤ now + 60`; `expires ≥ now − 60` → else `clock_skew`.
+  3. `0 < expires − created ≤ 300`; `created ≤ now + 60`; `expires ≥ now − 60` → else `clock_skew` (C4 adds the lower bound).
   4. Resolve `keyid` to a registered certificate with status `current` or `pending` → else `device_unknown`; device not revoked → else `device_revoked`; validity per endpoint → else `certificate_expired`.
   5. Verify `content-digest` (renew) and the signature → else `signature_invalid`.
   6. Atomically insert `(keyid, nonce)` into the nonce store; conflict → `signature_invalid`.
@@ -157,6 +170,7 @@ Body for every non-2xx response:
 - Libraries (approved, E4): Rust `httpsig` (signature base + custom `SigningKey`, `httpsig-hyper` for `content-digest` on `renew`); .NET NSign for signature base and ECDSA verification.
   Only the policy checks above (tag, window, key resolution, nonce commit) are our code; any other gap is escalated.
 - Shared test vectors (`docs/agent-identity/test-vectors.json`): fixed P-256 key, fixed requests for both tags, exact signature base strings, valid signatures, a channel proof (§7.3), and negative cases; plus RFC 9421 Appendix B.2.4 as a sanity check.
+  In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request.
 
 ## 7. Channel (gRPC)
 
@@ -269,9 +283,13 @@ message Reconnect {
 
 As in the V1 plan (agent steps 1–6, DVLS `pending`/`current`/`retired`, grace = one leaf lifetime; manual rotation with deadline, rate-limited `RenewRequested`, old root removed at deadline, pinned old-root certificates accepted until their expiry).
 Additions:
+- A certificate "authenticates" (C3) when a `renew` signed with it passes §6, or when a channel stream opened with it passes the §7.3 proof; the first such event for a `pending` certificate makes it `current` and retires the previous `current` certificate.
 - Renewal trigger: `notBefore + 2/3 × lifetime + jitter`, jitter uniform in `[0, 1/12 × lifetime]`.
 - The request-renewal flag is cleared when a certificate issued after the flag was set first authenticates.
 - Rotation `deadline`: RFC 3339 or the literal `"now"`; a value ≤ now is an emergency; absent → the maximum.
+- Rotation maximum (C10): the latest `notAfter` among the unexpired current certificates of non-revoked devices issued by the old root (now when there are none); an explicit later deadline → `400`.
+- Rotation pushes (C10): `RenewRequested{reason:"rotation"}` goes to connected old-root devices at a bounded rate (server setting; the mock defaults to 10/s) and keeps draining after the deadline, until every device connected on the old root has been notified; the persistent flag covers the rest.
+- At rotation start, the old root's private key is destroyed; the server keeps only what's needed to recognize pinned old-root certificates.
 
 ## 9. Admin HTTP API (DVLS-specific; mock implements it identically)
 
@@ -293,12 +311,15 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 ### 9.2 Devices
 
 - `GET /devices` query: `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25) **[DVLS convention replaces cursor]**, `view=summary|full`, `metadata=k1,k2`, `status=active|revoked|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (friendly-name substring, case-insensitive).
-  Ordered by `(createdAt, id)` ascending, so new enrollments never shift earlier pages.
+  Ordered by creation (C9): each device gets a strictly increasing creation key inside its creating transaction (e.g. an identity column), and listings sort by it; `created_at` is non-decreasing in that order.
+  A device created after a page was fetched never appears on that page or an earlier one.
 - Page shape (DVLS convention): `{ data: [...], currentPage, pageSize, totalCount, totalPages }`.
 - Summary: `{ id, friendlyName, status, connected, lastSeenAt, certificate: { notAfter, issuer } }` plus `metadata` subset when requested.
 - Full adds `metadata`, `certificates: [{ thumbprint, serialNumber, notBefore, notAfter, issuer, status }]`, `enrollmentToken: { id, name }`, `createdAt`, `revokedAt`, `renewalRequested`.
 - `status=expired`: not revoked and no `current` certificate unexpired.
 - `GET /devices/{id}` → full; `PATCH /devices/{id}` `{ friendlyName }` (1..255) → full.
+- `view=full` always includes all metadata; `metadata=k1,k2` only extends `summary`.
+- `pageNumber` beyond the last page returns an empty `data` array.
 - `POST /devices/{id}/revoke` → `204` (idempotent); `DELETE /devices/{id}` → `204`, or `409` unless revoked.
 - `POST /devices/{id}/request-renewal` → `202`.
 
@@ -306,6 +327,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 
 - `POST /ca/rotation` `{ deadline? }` → `202 Rotation`; `409` if one is in progress.
 - `GET /ca/rotation` → `Rotation`: `{ phase: "idle"|"rotating", oldRoot?: { thumbprint, notAfter }, newRoot?: { thumbprint, notAfter }, deadline?, activeDevicesOnOldRoot }`.
+- `activeDevicesOnOldRoot` counts non-revoked devices whose current certificate is unexpired and issued by the old root (C10).
 
 ## 10. Agent local contract (observable by the conformance tester)
 
@@ -337,7 +359,8 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 
 ### 10.2 Pending-enrollment file
 
-- Linux/macOS: `<data-dir>/identity/pending-enrollment.json`, owner root, mode `0600`, content `{ "version": 1, "token": "<token>" }`.
+- Linux/macOS: `<data-dir>/identity/pending-enrollment.json`, mode `0600`, owned by the account the agent service runs as (root in production; the CI user in tests), content `{ "version": 1, "token": "<token>" }` (C12).
+  The agent doesn't enforce the owner.
 - Windows: `<data-dir>\identity\pending-enrollment.dat`, protected DACL granting SYSTEM full control only, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)`.
 - The service reads it at start-up and polls for it (default every 5 s).
 - It enrolls with retry; deletes on success or `token_*` / `token_malformed`; keeps it on anything else.
@@ -381,6 +404,8 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - Serves under a configurable path prefix (the conformance run uses `/mock`), so the agent's path-prefix handling is exercised; the Docker DVLS target has no prefix.
 - Mock-only control API under `{u}/__mock__/`:
   - `POST faults` `{ drop_next_response?: "enroll"|"renew", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, rotation_rate_limit_per_sec? }`.
+  - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
   - `POST reset`.
-  - `POST time/advance` `{ secs }` (for grace and deadline tests).
+  - `POST time/advance` `{ secs }` (for grace and deadline tests); stream expiry and rotation deadlines are re-evaluated immediately on advance.
+  - `GET events?device_id=<uuid>` (C13): ordered channel and certificate events for that device (`stream_opened`, `stream_authenticated`, `stream_closed` with status, `cert_status_changed`), each with a monotonic sequence number, so make-before-break is asserted from ordering rather than polling.
 - Mock-only tests are skipped against DVLS.
