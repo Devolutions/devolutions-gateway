@@ -198,10 +198,48 @@ pub(crate) fn pending_acl_is_protected(path: &Path) -> anyhow::Result<()> {
     unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
     let acl = acl?;
     ensure!(
-        has_only_required_aces(&acl, &current_user_sid()?),
+        has_only_required_aces(&acl, &canonical_sddl_sid(&current_user_sid()?)?),
         "pending-file DACL grants access beyond SYSTEM and the current user"
     );
     Ok(())
+}
+
+/// Returns the SID as Windows writes it in SDDL, which uses aliases for some accounts
+/// (for example `LA` for the RID 500 administrator that GitHub-hosted runners use).
+fn canonical_sddl_sid(sid: &str) -> anyhow::Result<String> {
+    let sddl = wide(std::ffi::OsStr::new(&format!("D:(A;;FA;;;{sid})")));
+    let mut raw = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: sddl is NUL-terminated and raw is an output pointer owned by this function.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR::from_raw(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut raw,
+            None,
+        )?
+    };
+    let descriptor = SecurityDescriptor(raw);
+    let mut out = PWSTR::null();
+    // SAFETY: The descriptor is valid and the output string is owned until freed with LocalFree.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.0,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut out,
+            None,
+        )?
+    };
+    // SAFETY: The conversion returned a NUL-terminated string allocated for the caller.
+    let converted = unsafe { out.to_string() };
+    // SAFETY: LocalFree releases the SDDL string allocated by the conversion.
+    unsafe { LocalFree(Some(HLOCAL(out.0.cast()))) };
+    let converted = converted?;
+    converted
+        .strip_prefix("D:(A;;FA;;;")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .map(ToOwned::to_owned)
+        .with_context(|| format!("unexpected SDDL round-trip for {sid}: {converted}"))
 }
 
 fn has_only_required_aces(sddl: &str, user_sid: &str) -> bool {
@@ -495,6 +533,17 @@ mod tests {
     #[test]
     fn machine_key_snapshot_is_available() -> anyhow::Result<()> {
         let _ = snapshot_machine_identity_keys()?;
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_sddl_sid_uses_windows_aliases() -> anyhow::Result<()> {
+        assert_eq!(canonical_sddl_sid("S-1-5-18")?, "SY");
+        assert_eq!(canonical_sddl_sid("S-1-5-32-544")?, "BA");
+        let user = current_user_sid()?;
+        let canonical = canonical_sddl_sid(&user)?;
+        assert!(canonical == user || canonical.len() == 2, "{canonical}");
+        assert_eq!(canonical_sddl_sid(&canonical)?, canonical);
         Ok(())
     }
 
