@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Shared test vectors for docs/agent-identity/CONTRACT.md. Timestamps are Unix seconds. Signatures are ECDSA P-256 / SHA-256, raw r||s, RFC 6979 deterministic, so a conforming signer reproduces them byte for byte. Keys are test-only.",
-  "evaluation": "For http_signature.cases, a verifier holding the `registered` certificates, an empty nonce store and clock `now` returns `expected` (`ok` or a §5.4 error code) for a request to `endpoint` (renew or connect). `sequences` run their steps in order against one nonce store. Certificate validity follows §5.3 (renew grace) and §6 step 4.",
+  "evaluation": "For http_signature.cases, a verifier holding the `registered` certificates, an empty nonce store and clock `now` returns `expected` (`ok` or a §5.4 error code) for a request to `endpoint` (renew or connect). `sequences` run their steps in order against one nonce store. Certificate validity follows §5.3 (renew grace) and §6 step 4. In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request. Key-reuse rules (C1, C2) depend on server state and are covered by the conformance suite, not by these vectors.",
   "keys": [
     {
       "name": "device-a",
@@ -73,6 +73,11 @@
     },
     "bad_self_signature": {
       "csr": "MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIQ==",
+      "expected": "invalid_request"
+    },
+    "ecdsa_with_sha384": {
+      "description": "P-256 key, valid self-signature, but ecdsa-with-SHA384 (C5)",
+      "csr": "MIHeMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR6cXjU+of41UrSnye8ZPR+eWbO+iX8PmF3wr+M+hcCUDsIpslxpBvzF+rCSn71i/KTEy7DN7nNACTpnTi/Dw53oBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAwNIADBFAiBNgmWgLSfRzZUfQ0ekRHuWAxykPFM2kldj6HG9AmI95AIhAO2CNabxb9oxsM96ZvU0Zf6OZFKhEcRuW7XtRKYDIDBN",
       "expected": "invalid_request"
     }
   },
@@ -454,6 +459,36 @@
           "signature": "sig=:pz7QriQQk0aMhEGmtRZWOGtG3X1hRs+w51dtxmUUV5DlyiH2cqE0YbLk3sVAPi8WWxmHhB+FKsDYtCp/NZRIxQ==:"
         },
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000301;nonce=\"kJGSk5SVlpeYmZqbnJ2enw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "clock_skew",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "window_zero",
+        "description": "expires - created = 0 (step 3, C4)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000000;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:j2eawAPy1mWJIWVPfXWQIBTplLhs5ARQW10SXKKjWBKhU3bv1Jc/n7xRF9Fz18PDhLjZwB6KxnHkTiRdWDFy5g==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000000;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "clock_skew",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "window_negative",
+        "description": "expires - created = -1 (step 3, C4)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1789999999;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:WrhXta+qzgW+M6FCST65mVrvwiyRNcQuH7luw/t5d2dNDzgVH0kFn5+4tjtipSDISqKUK0TOslTufVNoLvfJJg==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1789999999;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
         "expected": "clock_skew",
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
