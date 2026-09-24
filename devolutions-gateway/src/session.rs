@@ -276,6 +276,31 @@ impl SessionMessageSender {
 
 pub struct SessionMessageReceiver(mpsc::Receiver<SessionManagerMessage>);
 
+#[cfg(test)]
+impl SessionMessageReceiver {
+    /// Acts as a session manager with no running session, and reports the ID of every session it is asked to kill.
+    pub(crate) fn spawn_mock(mut self) -> mpsc::UnboundedReceiver<Uuid> {
+        let (kill_tx, kill_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(msg) = self.0.recv().await {
+                match msg {
+                    SessionManagerMessage::GetInfo { channel, .. } => {
+                        let _ = channel.send(None);
+                    }
+                    SessionManagerMessage::Kill { id, channel } => {
+                        let _ = kill_tx.send(id);
+                        let _ = channel.send(KillResult::NotFound);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        kill_rx
+    }
+}
+
 pub fn session_manager_channel() -> (SessionMessageSender, SessionMessageReceiver) {
     mpsc::channel(64).pipe(|(tx, rx)| (SessionMessageSender(tx), SessionMessageReceiver(rx)))
 }

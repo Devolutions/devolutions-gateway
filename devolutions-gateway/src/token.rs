@@ -327,11 +327,38 @@ impl RecordingFileType {
             RecordingFileType::SessionRecordingLog => Self::SLOG_CONTENT_TYPE,
         }
     }
+
+    pub const fn category(self) -> RecordingFileCategory {
+        match self {
+            RecordingFileType::WebM | RecordingFileType::TRP | RecordingFileType::Asciicast => {
+                RecordingFileCategory::Media
+            }
+            RecordingFileType::SessionRecordingLog => RecordingFileCategory::Log,
+        }
+    }
 }
 
 impl fmt::Display for RecordingFileType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.format_name())
+    }
+}
+
+/// A session can have one media push and one log push running at the same time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordingFileCategory {
+    /// The video or terminal stream people replay.
+    Media,
+    /// The event log written next to the media stream.
+    Log,
+}
+
+impl fmt::Display for RecordingFileCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RecordingFileCategory::Media => write!(f, "media"),
+            RecordingFileCategory::Log => write!(f, "log"),
+        }
     }
 }
 
@@ -1925,6 +1952,20 @@ mod tests {
 
         for (recording_file_type, expected_content_type) in expected {
             assert_eq!(recording_file_type.content_type(), expected_content_type);
+        }
+    }
+
+    #[test]
+    fn recording_file_types_have_categories() {
+        let expected = [
+            (RecordingFileType::WebM, RecordingFileCategory::Media),
+            (RecordingFileType::TRP, RecordingFileCategory::Media),
+            (RecordingFileType::Asciicast, RecordingFileCategory::Media),
+            (RecordingFileType::SessionRecordingLog, RecordingFileCategory::Log),
+        ];
+
+        for (recording_file_type, expected_category) in expected {
+            assert_eq!(recording_file_type.category(), expected_category);
         }
     }
 }

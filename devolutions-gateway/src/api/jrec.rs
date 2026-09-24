@@ -31,7 +31,7 @@ use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::{PushOutcome, RecordingMessageSender};
-use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
+use crate::token::{JrecTokenClaims, RecordingFileCategory, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
@@ -997,8 +997,8 @@ async fn shadow_recording(
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
-    let Some(recording_path) = recording_files.last() else {
-        warn!(%id, "Shadow recording rejected: no recording files found");
+    let Some(recording_path) = last_media_file(&recording_files) else {
+        warn!(%id, "Shadow recording rejected: no media recording file found");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
@@ -1011,6 +1011,14 @@ async fn shadow_recording(
             let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
         }))
     }
+}
+
+fn last_media_file(recording_files: &[Utf8PathBuf]) -> Option<&Utf8PathBuf> {
+    recording_files.iter().rev().find(|path| {
+        path.extension()
+            .and_then(RecordingFileType::from_extension)
+            .is_some_and(|file_type| file_type.category() == RecordingFileCategory::Media)
+    })
 }
 
 #[cfg(test)]
@@ -1030,6 +1038,38 @@ mod tests {
         assert!(!is_safe_recording_file_name("../secret.webm"));
         assert!(!is_safe_recording_file_name("a/b.webm"));
         assert!(!is_safe_recording_file_name("a\\b.webm"));
+    }
+
+    #[test]
+    fn shadow_picks_last_media_file() {
+        let files = |names: &[&str]| names.iter().map(Utf8PathBuf::from).collect::<Vec<_>>();
+
+        let media_then_log = files(&["rec/recording-0.webm", "rec/recording-1.slog"]);
+        assert_eq!(
+            last_media_file(&media_then_log),
+            Some(&Utf8PathBuf::from("rec/recording-0.webm"))
+        );
+
+        let reconnected = files(&[
+            "rec/recording-0.slog",
+            "rec/recording-1.trp",
+            "rec/recording-2.slog",
+            "rec/recording-3.trp",
+        ]);
+        assert_eq!(
+            last_media_file(&reconnected),
+            Some(&Utf8PathBuf::from("rec/recording-3.trp"))
+        );
+
+        let media_only = files(&["rec/recording-0.cast"]);
+        assert_eq!(
+            last_media_file(&media_only),
+            Some(&Utf8PathBuf::from("rec/recording-0.cast"))
+        );
+
+        assert_eq!(last_media_file(&files(&["rec/recording-0.slog"])), None);
+        assert_eq!(last_media_file(&files(&["rec/recording-0"])), None);
+        assert_eq!(last_media_file(&[]), None);
     }
 
     #[test]

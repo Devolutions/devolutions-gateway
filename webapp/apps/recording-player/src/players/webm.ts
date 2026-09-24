@@ -15,8 +15,10 @@ export async function handleWebm(gatewayApi: GatewayAccessApi) {
   videoPlayer.setAttribute('autoplay', '');
   document.body.appendChild(videoPlayer);
 
+  const webmFiles = gatewayApi.info().recordingInfo.files.filter((file) => file.fileName.endsWith('.webm'));
+
   videoPlayer.play(
-    gatewayApi.info().recordingInfo.files.map((file) => ({
+    webmFiles.map((file) => ({
       src: gatewayApi.staticRecordingUrl(file.fileName),
       type: 'video/webm',
       duration: file.duration,

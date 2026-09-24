@@ -22,7 +22,7 @@ use video_streamer::SignalWriter;
 
 use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
-use crate::token::{JrecTokenClaims, RecordingFileType};
+use crate::token::{JrecTokenClaims, RecordingFileCategory, RecordingFileType};
 
 const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
 const BUFFER_WRITER_SIZE: usize = 64 * 1024;
@@ -138,13 +138,17 @@ where
                 let mut file = BufWriter::with_capacity(BUFFER_WRITER_SIZE, file);
                 let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
+                let is_media = file_type.category() == RecordingFileCategory::Media;
                 let signal_loop = tokio::spawn({
                     let recordings = recordings.clone();
                     async move {
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    recordings.new_chunk_appended(session_id)?;
+                                    // Shadow streamers only follow the media file.
+                                    if is_media {
+                                        recordings.new_chunk_appended(session_id)?;
+                                    }
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -181,7 +185,10 @@ where
 
         info!(?res, "Recording finished");
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        recordings
+            .disconnect(session_id, file_type)
+            .await
+            .context("disconnect")?;
 
         res
     }
@@ -241,6 +248,29 @@ struct OnGoingRecording {
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
+    /// Manifest index of the file written by the connected media push.
+    media_file: Option<usize>,
+    /// Manifest index of the file written by the connected log push.
+    log_file: Option<usize>,
+    /// Once a media push connected, only media pushes drive `state`, the TTL and the recording policy.
+    has_media: bool,
+}
+
+impl OnGoingRecording {
+    fn connected_file_mut(&mut self, category: RecordingFileCategory) -> &mut Option<usize> {
+        match category {
+            RecordingFileCategory::Media => &mut self.media_file,
+            RecordingFileCategory::Log => &mut self.log_file,
+        }
+    }
+
+    fn is_driven_by(&self, category: RecordingFileCategory) -> bool {
+        category == RecordingFileCategory::Media || !self.has_media
+    }
+
+    fn has_connected_push(&self) -> bool {
+        self.media_file.is_some() || self.log_file.is_some()
+    }
 }
 
 enum RecordingManagerMessage {
@@ -252,6 +282,7 @@ enum RecordingManagerMessage {
     },
     Disconnect {
         id: Uuid,
+        file_type: RecordingFileType,
     },
     GetState {
         id: Uuid,
@@ -288,7 +319,11 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("file_type", file_type)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::Disconnect { id, file_type } => f
+                .debug_struct("Disconnect")
+                .field("id", id)
+                .field("file_type", file_type)
+                .finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -340,9 +375,9 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn disconnect(&self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<()> {
         self.channel
-            .send(RecordingManagerMessage::Disconnect { id })
+            .send(RecordingManagerMessage::Disconnect { id, file_type })
             .await
             .ok()
             .context("couldn't send Remove message")
@@ -510,10 +545,12 @@ impl RecordingManagerTask {
     ) -> anyhow::Result<Utf8PathBuf> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
-        if let Some(ongoing) = self.ongoing_recordings.get(&id)
-            && matches!(ongoing.state, OnGoingRecordingState::Connected)
+        let category = file_type.category();
+
+        if let Some(ongoing) = self.ongoing_recordings.get_mut(&id)
+            && ongoing.connected_file_mut(category).is_some()
         {
-            anyhow::bail!("concurrent recording for the same session is not supported");
+            anyhow::bail!("concurrent {category} recording for the same session is not supported");
         }
 
         let recording_path = self.recordings_path.join(id.to_string());
@@ -573,6 +610,7 @@ impl RecordingManagerTask {
             (initial_manifest, recording_file)
         };
 
+        let file_idx = manifest.files.len() - 1;
         let active_recording_count = self.rx.active_recordings.insert(id);
 
         // NOTE: the session associated to this recording is not always running through the Devolutions Gateway.
@@ -588,16 +626,30 @@ impl RecordingManagerTask {
             .map(|info| info.recording_policy)
             .unwrap_or(false);
 
-        self.ongoing_recordings.insert(
-            id,
-            OnGoingRecording {
-                state: OnGoingRecordingState::Connected,
-                manifest,
-                manifest_path,
-                session_must_be_recorded,
-                disconnected_ttl,
-            },
-        );
+        let ongoing = self.ongoing_recordings.entry(id).or_insert_with(|| OnGoingRecording {
+            state: OnGoingRecordingState::Connected,
+            manifest: manifest.clone(),
+            manifest_path,
+            session_must_be_recorded,
+            disconnected_ttl,
+            media_file: None,
+            log_file: None,
+            has_media: false,
+        });
+
+        ongoing.manifest = manifest;
+        *ongoing.connected_file_mut(category) = Some(file_idx);
+
+        if category == RecordingFileCategory::Media {
+            ongoing.has_media = true;
+        }
+
+        if ongoing.is_driven_by(category) {
+            ongoing.state = OnGoingRecordingState::Connected;
+            ongoing.session_must_be_recorded = session_must_be_recorded;
+            ongoing.disconnected_ttl = disconnected_ttl;
+        }
+
         let ongoing_recording_count = self.ongoing_recordings.len();
 
         // Sanity check
@@ -612,23 +664,27 @@ impl RecordingManagerTask {
         Ok(recording_file)
     }
 
-    async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
+    async fn handle_disconnect(&mut self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<()> {
         let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
             return Err(anyhow::anyhow!("unknown recording for ID {id}"));
         };
 
-        if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
-            anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
-        }
+        let category = file_type.category();
+
+        let Some(file_idx) = ongoing.connected_file_mut(category).take() else {
+            anyhow::bail!("a {category} recording not connected can’t be disconnected (there is probably a bug)");
+        };
 
         let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-        ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
+        if ongoing.is_driven_by(category) {
+            ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
+        }
 
         let current_file = ongoing
             .manifest
             .files
-            .last_mut()
+            .get_mut(file_idx)
             .context("no recording file (this is a bug)")?;
         current_file.duration = end_time - current_file.start_time;
 
@@ -648,7 +704,9 @@ impl RecordingManagerTask {
             .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
 
         // Notify all the streamers that recording has ended.
-        if let Some(notify) = self.recording_end_notifier.get(&id) {
+        if category == RecordingFileCategory::Media
+            && let Some(notify) = self.recording_end_notifier.get(&id)
+        {
             notify.notify_waiters();
         }
 
@@ -676,7 +734,7 @@ impl RecordingManagerTask {
     }
 
     fn handle_remove(&mut self, id: Uuid) {
-        if let Some(ongoing) = self.ongoing_recordings.get(&id) {
+        if let Some(ongoing) = self.ongoing_recordings.get_mut(&id) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let disconnected_ttl_secs = i64::try_from(ongoing.disconnected_ttl.as_secs()).expect("TTL can’t be so big");
 
@@ -684,11 +742,8 @@ impl RecordingManagerTask {
                 // NOTE: Comparing with disconnected_ttl_secs - 1 just in case the sleep returns faster than expected.
                 // (I don’t know if this can actually happen in practice, but it’s better to be safe than sorry.)
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
-                    debug!(%id, "Mark recording as terminated");
-                    self.rx.active_recordings.remove(id);
-
                     // Check the recording policy of the associated session and kill it if necessary.
-                    if ongoing.session_must_be_recorded {
+                    if core::mem::take(&mut ongoing.session_must_be_recorded) {
                         tokio::spawn({
                             let session_manager_handle = self.session_manager_handle.clone();
 
@@ -721,6 +776,14 @@ impl RecordingManagerTask {
                         });
                     }
 
+                    // The log push can outlive the media stream, and its manifest entry is completed on disconnect.
+                    if ongoing.has_connected_push() {
+                        debug!(%id, "Media stream expired while a log push is still connected");
+                        return;
+                    }
+
+                    debug!(%id, "Mark recording as terminated");
+                    self.rx.active_recordings.remove(id);
                     self.ongoing_recordings.remove(&id);
                     self.recording_end_notifier.remove(&id);
                 }
@@ -802,8 +865,8 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(e) = manager.handle_disconnect(id).await {
+                    RecordingManagerMessage::Disconnect { id, file_type } => {
+                        if let Err(e) = manager.handle_disconnect(id, file_type).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
@@ -894,11 +957,18 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id).await {
+        if let RecordingManagerMessage::Disconnect { id, file_type } = msg {
+            if let Err(e) = manager.handle_disconnect(id, file_type).await {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
-            manager.ongoing_recordings.remove(&id);
+
+            if manager
+                .ongoing_recordings
+                .get(&id)
+                .is_some_and(|ongoing| !ongoing.has_connected_push())
+            {
+                manager.ongoing_recordings.remove(&id);
+            }
         }
     }
 
@@ -962,5 +1032,249 @@ async fn remux(input_path: Utf8PathBuf) {
         debug!(%input_path, "Successfully remuxed video recording");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::session_manager_channel;
+
+    struct Harness {
+        manager: RecordingManagerTask,
+        kills: mpsc::UnboundedReceiver<Uuid>,
+        _recordings_dir: tempfile::TempDir,
+    }
+
+    fn harness() -> Harness {
+        let recordings_dir = tempfile::tempdir().expect("temp dir");
+        let recordings_path = Utf8PathBuf::from_path_buf(recordings_dir.path().to_path_buf()).expect("UTF-8 path");
+        let (_, rx) = recording_message_channel();
+        let (session_manager_handle, session_manager_rx) = session_manager_channel();
+        let kills = session_manager_rx.spawn_mock();
+        let (job_queue_handle, _) = JobQueueHandle::new();
+
+        Harness {
+            manager: RecordingManagerTask::new(rx, recordings_path, session_manager_handle, job_queue_handle),
+            kills,
+            _recordings_dir: recordings_dir,
+        }
+    }
+
+    impl Harness {
+        async fn connect(&mut self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<Utf8PathBuf> {
+            self.manager.handle_connect(id, file_type, Duration::ZERO).await
+        }
+
+        async fn disconnect(&mut self, id: Uuid, file_type: RecordingFileType) {
+            self.manager
+                .handle_disconnect(id, file_type)
+                .await
+                .expect("disconnect connected push");
+        }
+
+        fn ongoing(&mut self, id: Uuid) -> &mut OnGoingRecording {
+            self.manager.ongoing_recordings.get_mut(&id).expect("ongoing recording")
+        }
+
+        fn is_connected(&mut self, id: Uuid) -> bool {
+            matches!(self.ongoing(id).state, OnGoingRecordingState::Connected)
+        }
+
+        fn is_terminated(&self, id: Uuid) -> bool {
+            !self.manager.ongoing_recordings.contains_key(&id) && !self.manager.rx.active_recordings.contains(id)
+        }
+
+        fn manifest_file_names(&mut self, id: Uuid) -> Vec<String> {
+            self.ongoing(id)
+                .manifest
+                .files
+                .iter()
+                .map(|file| file.file_name.clone())
+                .collect()
+        }
+
+        async fn expect_kill(&mut self, id: Uuid) {
+            let killed = tokio::time::timeout(Duration::from_secs(5), self.kills.recv())
+                .await
+                .expect("kill request");
+            assert_eq!(killed, Some(id));
+        }
+
+        fn expect_no_kill(&mut self) {
+            assert!(self.kills.try_recv().is_err(), "unexpected kill request");
+        }
+    }
+
+    #[tokio::test]
+    async fn media_and_log_pushes_are_accepted_concurrently() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        let media_file = h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        let log_file = h
+            .connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+
+        assert_eq!(media_file.file_name(), Some("recording-0.webm"));
+        assert_eq!(log_file.file_name(), Some("recording-1.slog"));
+        assert!(h.is_connected(id));
+
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+
+        let manifest_path = h.ongoing(id).manifest_path.clone();
+        let manifest = JrecManifest::read_from_file(&manifest_path).expect("manifest on disk");
+        let file_names: Vec<_> = manifest.files.iter().map(|file| file.file_name.as_str()).collect();
+        assert_eq!(file_names, ["recording-0.webm", "recording-1.slog"]);
+    }
+
+    #[tokio::test]
+    async fn second_media_push_is_rejected() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("first media push");
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+
+        for file_type in [
+            RecordingFileType::WebM,
+            RecordingFileType::TRP,
+            RecordingFileType::Asciicast,
+        ] {
+            assert!(
+                h.connect(id, file_type).await.is_err(),
+                "{file_type} push must be rejected"
+            );
+        }
+
+        assert_eq!(h.manifest_file_names(id), ["recording-0.webm", "recording-1.slog"]);
+        assert!(h.is_connected(id));
+    }
+
+    #[tokio::test]
+    async fn second_log_push_is_rejected() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("first log push");
+        h.connect(id, RecordingFileType::TRP).await.expect("media push");
+
+        assert!(h.connect(id, RecordingFileType::SessionRecordingLog).await.is_err());
+
+        assert_eq!(h.manifest_file_names(id), ["recording-0.slog", "recording-1.trp"]);
+        assert!(h.is_connected(id));
+    }
+
+    #[tokio::test]
+    async fn log_disconnect_does_not_terminate_or_kill() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+        h.ongoing(id).session_must_be_recorded = true;
+
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+        h.manager.handle_remove(id);
+
+        assert!(h.is_connected(id));
+        assert!(h.manager.rx.active_recordings.contains(id));
+        assert!(h.ongoing(id).session_must_be_recorded);
+        h.expect_no_kill();
+
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+        h.expect_kill(id).await;
+    }
+
+    #[tokio::test]
+    async fn log_connect_does_not_revive_disconnected_media() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+
+        assert!(!h.is_connected(id));
+    }
+
+    #[tokio::test]
+    async fn media_expiry_with_log_connected_kills_once_and_waits_for_log() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+        h.ongoing(id).session_must_be_recorded = true;
+
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.manager.handle_remove(id);
+
+        h.expect_kill(id).await;
+        assert!(!h.is_connected(id));
+        assert!(h.manager.rx.active_recordings.contains(id));
+
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+        h.expect_no_kill();
+    }
+
+    #[tokio::test]
+    async fn media_only_session_is_unchanged() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        assert!(h.connect(id, RecordingFileType::WebM).await.is_err());
+
+        h.disconnect(id, RecordingFileType::WebM).await;
+        assert!(!h.is_connected(id));
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media reconnect");
+        assert!(h.is_connected(id));
+        assert_eq!(h.manifest_file_names(id), ["recording-0.webm", "recording-1.webm"]);
+
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+    }
+
+    #[tokio::test]
+    async fn log_only_session_is_unchanged() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+        assert!(h.is_connected(id));
+        assert!(h.manager.rx.active_recordings.contains(id));
+        h.ongoing(id).session_must_be_recorded = true;
+
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+        assert!(!h.is_connected(id));
+
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+        h.expect_kill(id).await;
     }
 }
