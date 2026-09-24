@@ -374,8 +374,31 @@ pub(crate) fn assert_non_exportable(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn cleanup_machine_keys(dir: &Path, known_keys: &[String], preexisting: &HashSet<String>) {
-    let names = cleanup_candidates(dir, known_keys, preexisting);
+pub(crate) fn cleanup_machine_keys(
+    dir: &Path,
+    known_keys: &[String],
+    preexisting: &HashSet<String>,
+    known_authorities: &HashSet<uuid::Uuid>,
+) {
+    if known_authorities.is_empty() {
+        match snapshot_machine_identity_keys() {
+            Ok(keys) => {
+                let mut leftovers = keys.difference(preexisting).cloned().collect::<Vec<_>>();
+                leftovers.sort_unstable();
+                eprintln!(
+                    "skipping machine key cleanup without --authority-id; leftover candidates: {}",
+                    if leftovers.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        leftovers.join(", ")
+                    }
+                );
+            }
+            Err(error) => eprintln!("skipping machine key cleanup; could not list leftover candidates: {error:#}"),
+        }
+        return;
+    }
+    let names = cleanup_candidates(dir, known_keys, preexisting, known_authorities);
     if names.is_empty() {
         return;
     }
@@ -393,9 +416,13 @@ pub(crate) fn cleanup_machine_keys(dir: &Path, known_keys: &[String], preexistin
     }
 }
 
-fn cleanup_candidates(dir: &Path, known_keys: &[String], preexisting: &HashSet<String>) -> HashSet<String> {
+fn cleanup_candidates(
+    dir: &Path,
+    known_keys: &[String],
+    preexisting: &HashSet<String>,
+    known_authorities: &HashSet<uuid::Uuid>,
+) -> HashSet<String> {
     let mut names = known_keys.iter().cloned().collect::<HashSet<_>>();
-    let mut authorities = HashSet::new();
     let authorities_dir = dir.join("identity").join("authorities");
     if let Ok(entries) = std::fs::read_dir(authorities_dir) {
         for entry in entries.flatten() {
@@ -405,12 +432,6 @@ fn cleanup_candidates(dir: &Path, known_keys: &[String], preexisting: &HashSet<S
             let Ok(state) = serde_json::from_slice::<serde_json::Value>(&contents) else {
                 continue;
             };
-            if let Some(id) = state["authority_id"]
-                .as_str()
-                .and_then(|id| uuid::Uuid::parse_str(id).ok())
-            {
-                authorities.insert(id.to_string());
-            }
             for slot in ["current", "pending", "previous"] {
                 if let Some(name) = state["keys"][slot]["key_name"].as_str() {
                     names.insert(name.to_owned());
@@ -420,7 +441,7 @@ fn cleanup_candidates(dir: &Path, known_keys: &[String], preexisting: &HashSet<S
     }
     names.retain(|name| {
         !preexisting.contains(name)
-            && authorities.iter().any(|authority| {
+            && known_authorities.iter().any(|authority| {
                 name.strip_prefix(&format!("DevolutionsAgent-Identity-{authority}-"))
                     .is_some_and(|generation| {
                         !generation.is_empty()
@@ -508,10 +529,12 @@ mod tests {
         )?;
         let selected = cleanup_candidates(
             dir.path(),
-            &[current.clone(), previous.clone(), unrelated],
+            &[current.clone(), previous.clone(), unrelated.clone()],
             &HashSet::from([previous]),
+            &HashSet::from([authority]),
         );
         assert_eq!(selected, HashSet::from([current]));
+        assert!(cleanup_candidates(dir.path(), &[unrelated], &HashSet::new(), &HashSet::new()).is_empty());
         Ok(())
     }
 }

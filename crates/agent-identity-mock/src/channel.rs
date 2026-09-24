@@ -20,7 +20,7 @@ use tonic::{Code, Request, Response, Status, Streaming};
 use uuid::Uuid;
 
 use crate::app::App;
-use crate::httpsig::{Endpoint, Rejection, verify_request};
+use crate::httpsig::{CertStatus, Endpoint, Rejection, verify_request};
 use crate::name_eval;
 use crate::proof::verify_channel_proof;
 use crate::state::{StreamHandle, StreamPush};
@@ -213,22 +213,47 @@ async fn run_stream(
         let now = app.now();
         let mut state = app.state.lock().await;
         state.tick(now);
-        state.note_cert_authenticated(device_id, &cert_thumbprint);
-        let reason = state.devices.get_mut(&device_id).and_then(|device| {
-            device.metadata = metadata;
-            device.last_seen_at = Some(now);
-            device.renewal_requested.as_ref().map(|f| f.reason.as_str())
-        });
-        state.streams.insert(
-            stream_id,
-            StreamHandle {
-                device_id,
-                cert_thumbprint: cert_thumbprint.clone(),
-                tx: push_tx,
-            },
-        );
-        state.requests.authenticated_connects += 1;
-        reason
+        let rejection = match state.lookup_cert(&cert_thumbprint) {
+            Some(cert)
+                if cert.device_id == device_id && matches!(cert.status, CertStatus::Current | CertStatus::Pending) =>
+            {
+                if cert.revoked {
+                    Some(Rejection::DeviceRevoked)
+                } else if cert.not_before > now || now >= cert.not_after {
+                    Some(Rejection::CertificateExpired)
+                } else {
+                    None
+                }
+            }
+            _ => Some(Rejection::DeviceUnknown),
+        };
+        if let Some(rejection) = rejection {
+            Err(rejection)
+        } else {
+            state.note_cert_authenticated(device_id, &cert_thumbprint);
+            let reason = state.devices.get_mut(&device_id).and_then(|device| {
+                device.metadata = metadata;
+                device.last_seen_at = Some(now);
+                device.renewal_requested.as_ref().map(|f| f.reason.as_str())
+            });
+            state.streams.insert(
+                stream_id,
+                StreamHandle {
+                    device_id,
+                    cert_thumbprint: cert_thumbprint.clone(),
+                    tx: push_tx,
+                },
+            );
+            state.requests.authenticated_connects += 1;
+            Ok(reason)
+        }
+    };
+    let renewal_reason = match renewal_reason {
+        Ok(reason) => reason,
+        Err(rejection) => {
+            close_with(&out, rejection_status(rejection)).await;
+            return;
+        }
     };
 
     let now = app.now();

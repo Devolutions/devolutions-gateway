@@ -144,13 +144,10 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
 /// offset; creates a fresh root; keeps `authority_id`, the TLS certificate and the
 /// admin token.
 async fn reset(AxumState(app): AxumState<Arc<App>>) -> Response {
-    let now = app.now();
     let mut state = app.state.lock().await;
-    match state.reset(now) {
-        Ok(()) => {
-            app.clock.reset();
-            Json(json!({ "authority_id": app.authority_id })).into_response()
-        }
+    app.clock.reset();
+    match state.reset(app.now()) {
+        Ok(()) => Json(json!({ "authority_id": app.authority_id })).into_response(),
         Err(err) => control_error(&ApiError::internal(format!("reset failed: {err:#}"))),
     }
 }

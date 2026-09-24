@@ -11,6 +11,7 @@ struct Mock {
     child: Child,
     base_url: String,
     ca_path: PathBuf,
+    authority_id: String,
     admin_token: String,
 }
 
@@ -48,6 +49,7 @@ async fn start_mock(state_dir: &Path) -> anyhow::Result<Mock> {
         child,
         base_url: ready["base_url"].as_str().context("mock base_url")?.to_owned(),
         ca_path: PathBuf::from(ready["tls_ca_pem"].as_str().context("mock tls_ca_pem")?),
+        authority_id: ready["authority_id"].as_str().context("mock authority_id")?.to_owned(),
         admin_token: token,
     })
 }
@@ -68,12 +70,16 @@ async fn conformance() -> anyhow::Result<()> {
         .arg(&first.base_url)
         .arg("--admin-token")
         .arg(&first.admin_token)
+        .arg("--authority-id")
+        .arg(&first.authority_id)
         .arg("--extra-trusted-root")
         .arg(&first.ca_path)
         .arg("--second-base-url")
         .arg(&second.base_url)
         .arg("--second-admin-token")
         .arg(&second.admin_token)
+        .arg("--second-authority-id")
+        .arg(&second.authority_id)
         .arg("--second-extra-trusted-root")
         .arg(&second.ca_path)
         .arg("--agent-bin")
