@@ -2,12 +2,13 @@
 //! opening-signature check (§6, `tag="connect"`), the challenge/proof handshake
 //! (§7.3), and contract-driven termination (§7.4).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use agent_identity_channel_proto::agent_channel_server::AgentChannel;
 use agent_identity_channel_proto::{
-    AgentMessage, Challenge, RenewRequested, ServerMessage, Welcome, agent_message, server_message,
+    AgentMessage, Challenge, Reconnect, RenewRequested, ServerMessage, Welcome, agent_message, server_message,
 };
 use futures::StreamExt as _;
 use rand::RngExt as _;
@@ -80,29 +81,37 @@ impl AgentChannel for ChannelService {
         let auth = {
             let mut state = app.state.lock().await;
             state.tick(now);
+            state.requests.connect += 1;
             if !state.faults.channel_available {
                 // §7.5: the channel is not hosted.
                 return Err(Status::unavailable("channel not available"));
             }
-            let state = &mut *state;
-            let crate::state::State {
-                devices,
-                cert_index,
-                nonces,
-                ..
-            } = state;
-            let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
-            verify_request(
-                Endpoint::Connect,
-                "POST",
-                signature_input.as_deref(),
-                signature.as_deref(),
-                None,
-                &[],
-                now,
-                &mut lookup,
-                nonces,
-            )
+            let result = {
+                let crate::state::State {
+                    devices,
+                    cert_index,
+                    nonces,
+                    ..
+                } = &mut *state;
+                let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
+                verify_request(
+                    Endpoint::Connect,
+                    "POST",
+                    signature_input.as_deref(),
+                    signature.as_deref(),
+                    None,
+                    &[],
+                    now,
+                    &mut lookup,
+                    nonces,
+                )
+            };
+            if let Ok(auth) = &result
+                && state.is_connected(auth.device_id())
+            {
+                state.requests.overlap_open += 1;
+            }
+            result
         };
         let auth = auth.map_err(rejection_status)?;
 
@@ -218,6 +227,7 @@ async fn run_stream(
                 tx: push_tx,
             },
         );
+        state.requests.authenticated_connects += 1;
         reason
     };
 
@@ -235,6 +245,7 @@ async fn run_stream(
     }
 
     // §7.3 step 5: the request-renewal flag is pushed on every connect until renewed.
+    let mut awaiting_ack = HashSet::new();
     if let Some(reason) = renewal_reason {
         let message = server_message(
             Uuid::new_v4().to_string(),
@@ -243,6 +254,7 @@ async fn run_stream(
                 reason: reason.to_owned(),
             }),
         );
+        awaiting_ack.insert(message.id.clone());
         if !send(&out, message).await {
             app.state.lock().await.streams.remove(&stream_id);
             return;
@@ -256,7 +268,13 @@ async fn run_stream(
         tokio::select! {
             message = client.next() => {
                 match message {
-                    // Ack and unknown payloads are ignored (§7.3).
+                    Some(Ok(AgentMessage {
+                        correlation_id: Some(correlation),
+                        payload: Some(agent_message::Payload::Ack(_)),
+                        ..
+                    })) if awaiting_ack.remove(&correlation) => {
+                        app.state.lock().await.requests.correlated_acks += 1;
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => break,
                 }
@@ -268,6 +286,19 @@ async fn run_stream(
                             Uuid::new_v4().to_string(),
                             None,
                             server_message::Payload::RenewRequested(RenewRequested {
+                                reason: reason.to_owned(),
+                            }),
+                        );
+                        awaiting_ack.insert(message.id.clone());
+                        if !send(&out, message).await {
+                            break;
+                        }
+                    }
+                    Some(StreamPush::Reconnect(reason)) => {
+                        let message = server_message(
+                            Uuid::new_v4().to_string(),
+                            None,
+                            server_message::Payload::Reconnect(Reconnect {
                                 reason: reason.to_owned(),
                             }),
                         );

@@ -44,7 +44,7 @@ struct RegisteredVector {
     not_after: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct SigCase {
     name: String,
     endpoint: String,
@@ -257,4 +257,86 @@ fn rfc9421_b_2_4() {
     let signature = Signature::from_slice(&sig_bytes).expect("raw r||s");
     let actual = key.verify(case.signature_base.as_bytes(), &signature).is_ok();
     assert_eq!(actual, case.expected_valid, "rfc9421_b_2_4");
+}
+
+#[test]
+fn malformed_nonce_and_keyid_are_rejected() {
+    let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
+    let registry = registry(&vectors.http_signature.registered);
+    let valid = vectors
+        .http_signature
+        .cases
+        .iter()
+        .find(|case| case.name == "valid_renew")
+        .expect("valid_renew exists");
+    for (original, replacement) in [
+        ("AAECAwQFBgcICQoLDA0ODw", "AAECAwQFBgcICQoLDA0ODw=="),
+        ("AAECAwQFBgcICQoLDA0ODw", "AAECAwQFBgcICQoLDA0OD"),
+        ("AAECAwQFBgcICQoLDA0ODw", "AAECAwQFBgcICQoLDA0OD!"),
+        (
+            "9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w",
+            "9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w=",
+        ),
+        (
+            "9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w",
+            "9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7",
+        ),
+    ] {
+        let mut case = valid.clone();
+        case.expected = "signature_invalid".to_owned();
+        case.now = 1_790_001_000;
+        *case.headers.get_mut("signature-input").expect("signature-input") =
+            case.headers["signature-input"].replace(original, replacement);
+        assert_eq!(
+            run_case(&registry, &mut NonceStore::default(), &case),
+            "signature_invalid",
+            "malformed parameter: {replacement}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_signature_parameter_is_rejected() {
+    let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
+    let registry = registry(&vectors.http_signature.registered);
+    let mut case = vectors
+        .http_signature
+        .cases
+        .iter()
+        .find(|case| case.name == "valid_renew")
+        .expect("valid_renew exists")
+        .clone();
+    case.expected = "signature_invalid".to_owned();
+    case.now = 1_790_001_000;
+    case.headers
+        .get_mut("signature-input")
+        .expect("signature-input")
+        .push_str(";created=1790000000");
+    assert_eq!(
+        run_case(&registry, &mut NonceStore::default(), &case),
+        "signature_invalid"
+    );
+}
+
+#[test]
+fn inner_list_requires_space_between_items() {
+    assert!(crate::sfv::parse_dictionary("sig=(\"a\" \"b\")").is_some());
+    assert!(crate::sfv::parse_dictionary("sig=(\"a\"\"b\")").is_none());
+    assert!(crate::sfv::parse_dictionary("sig=(\"a\"\t\"b\")").is_none());
+}
+
+#[test]
+fn parameter_separator_rejects_horizontal_tab() {
+    assert!(crate::sfv::parse_dictionary("sig=(\"@method\"); created=1").is_some());
+    assert!(crate::sfv::parse_dictionary("sig=(\"@method\");\tcreated=1").is_none());
+}
+
+#[test]
+fn nonce_conflict_keeps_original_expiry_through_boundary() {
+    let mut store = NonceStore::default();
+    assert!(store.insert_fresh("key", "nonce", 120, 0));
+    assert!(!store.insert_fresh("key", "nonce", 61, 0));
+    assert!(!store.insert_fresh("key", "nonce", 120, 62));
+    assert!(!store.insert_fresh("key", "nonce", 120, 120));
+    assert!(store.insert_fresh("key", "nonce", 200, 121));
 }

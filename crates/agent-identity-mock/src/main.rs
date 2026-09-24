@@ -126,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
         authority_id: Uuid::new_v4(),
         base_url: base_url.clone(),
         prefix: args.path_prefix,
+        unprivileged_token: format!("{}-unprivileged", args.admin_token),
         admin_token: args.admin_token,
         clock,
         state: Mutex::new(state),

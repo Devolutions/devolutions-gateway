@@ -51,6 +51,7 @@ The channel gRPC method is `POST <prefix>/devolutions.agent.identity.channel.v1.
 ### Admin (CONTRACT.md §9), `Authorization: Bearer <admin-token>`
 
 Missing or invalid admin auth returns 401 `{ "error", "message" }`; all admin errors use that shape with the matching HTTP status.
+For permission tests, `<admin-token>-unprivileged` is authenticated without Agent identity management permission and returns 403.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -74,6 +75,8 @@ Missing or invalid admin auth returns 401 `{ "error", "message" }`; all admin er
 | POST | `/__mock__/faults` | Merges fields: `{ drop_next_response?: "enroll"\|"renew"\|null, clock_skew_secs?: int\|null, leaf_lifetime_secs?: int\|null, channel_available?: bool, rotation_rate_limit_per_sec?: int\|null }`; absent keys keep their value, `null` clears; responds with the merged faults. `drop_next_response` is one-shot: the next such request is processed and committed, then the connection aborts without a response. |
 | POST | `/__mock__/reset` | Clears tokens, devices, nonces, faults, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `device_unknown`. Responds `{ "authority_id" }`. |
 | POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock; rotation deadlines are applied lazily on the next request and by a 1 s ticker. Responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
+| GET | `/__mock__/requests?token_id=<uuid>` | Reports per-token `enroll` attempts, total `enroll_total`, `renew`, `connect`, `authenticated_connects`, `correlated_acks`, `overlap_open`, and `active_streams`; omit `token_id` for total enroll attempts. Reset clears all counters. |
+| POST | `/__mock__/reconnect` | `{ "device_id": "<uuid>" }` pushes `Reconnect{reason:"mock"}` to the device's live streams; responds 202. |
 
 ## Tests
 

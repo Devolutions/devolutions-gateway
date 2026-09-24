@@ -113,10 +113,12 @@ fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError
 
 async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     app.tick().await;
+    app.state.lock().await.requests.enroll_total += 1;
     let secret = match parse_bearer(&headers) {
         Ok(secret) => secret,
         Err(err) => return api_error_response(&app, &err),
     };
+    app.state.lock().await.observe_enroll(&secret);
     let (csr_der, metadata) = match parse_csr_body(&body) {
         Ok(parsed) => parsed,
         Err(err) => return api_error_response(&app, &err),
@@ -164,6 +166,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     app.tick().await;
     let now = app.now();
     let mut state = app.state.lock().await;
+    state.requests.renew += 1;
 
     // §6 verification, checks in the contract's order.
     let auth = {

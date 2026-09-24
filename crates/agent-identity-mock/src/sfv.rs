@@ -160,6 +160,12 @@ impl Parser<'_> {
         }
     }
 
+    fn skip_sp(&mut self) {
+        while self.peek() == Some(b' ') {
+            self.pos += 1;
+        }
+    }
+
     fn parse_key(&mut self) -> Option<String> {
         let start = self.pos;
         match self.peek()? {
@@ -178,7 +184,7 @@ impl Parser<'_> {
         let mut params = Vec::new();
         while self.peek() == Some(b';') {
             self.pos += 1;
-            self.skip_ows();
+            self.skip_sp();
             let key = self.parse_key()?;
             let value = if self.peek() == Some(b'=') {
                 self.pos += 1;
@@ -201,13 +207,17 @@ impl Parser<'_> {
         self.expect(b'(')?;
         let mut items = Vec::new();
         loop {
-            self.skip_ows();
+            let start = self.pos;
+            while self.peek() == Some(b' ') {
+                self.pos += 1;
+            }
             match self.peek()? {
                 b')' => {
                     self.pos += 1;
                     break;
                 }
-                _ => items.push(self.parse_list_item()?),
+                _ if items.is_empty() || self.pos > start => items.push(self.parse_list_item()?),
+                _ => return None,
             }
         }
         let params = self.parse_params()?;
