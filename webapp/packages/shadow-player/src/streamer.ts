@@ -122,7 +122,7 @@ export class ShadowPlayer extends HTMLElement {
   connectedCallback(): void {
     this.init();
     document.addEventListener('fullscreenchange', this.onFullscreenChange);
-    const src = this.getAttribute('src');
+    const src = this.getAttribute('src') ?? this._src;
     if (src !== null && !this.websocket) {
       this.srcChange(src);
     }

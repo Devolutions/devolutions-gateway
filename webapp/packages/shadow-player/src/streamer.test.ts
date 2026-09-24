@@ -319,6 +319,28 @@ describe('ShadowPlayer', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('reopens the srcChange source after the element is reattached', () => {
+    const player = new ShadowPlayer();
+    document.body.appendChild(player);
+    player.srcChange('ws://example.test');
+    expect(mocks.sockets).toHaveLength(1);
+
+    player.remove();
+    document.body.appendChild(player);
+    expect(mocks.sockets).toHaveLength(2);
+    mocks.sockets[1].emitOpen();
+    expect(mocks.sockets[1].sent).toEqual([{ type: 'start' }]);
+  });
+
+  it('does not reopen after the src attribute is removed', () => {
+    const { player } = createPlayer();
+    player.removeAttribute('src');
+
+    player.remove();
+    document.body.appendChild(player);
+    expect(mocks.sockets).toHaveLength(1);
+  });
+
   it('rejects a segment boundary before metadata', async () => {
     const { socket } = createPlayer();
 
