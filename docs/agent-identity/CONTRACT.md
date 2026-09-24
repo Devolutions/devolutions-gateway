@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C13, orchestrator, 2026-09-25, pending Benoit's review).
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C14, orchestrator, 2026-09-25, pending Benoit's review).
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -397,6 +397,22 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 ### 10.4 CLI
 
 - `devolutions-agent identity enroll <token>` (decided, E3; `enroll` stays Agent Tunnel's): validates the token format, writes the pending file, prints where it was written, exits 0.
+
+### 10.5 Metadata sent by the agent (C14)
+
+- The agent sends a metadata object (§3) at enroll, at renew and in every `Hello`, collected at send time (so it reflects current values).
+- Always present, non-empty: `hostname`, `os_name`, `os_version`, `arch`, `agent_version`.
+- Present when the OS provides a value: `fqdn`, `domain`, `machine_id`.
+- No other keys in V1.
+- Value conventions (informational, but stable so servers can display and filter them consistently):
+  - `hostname`: the OS host name, without domain.
+  - `arch`: Rust `std::env::consts::ARCH` naming (`x86_64`, `aarch64`, `x86`).
+  - `agent_version`: the agent's own product version string, the same one the binary's version resource and package report.
+  - `machine_id`: Windows SMBIOS system UUID, lowercase hyphenated; Linux `/etc/machine-id` as-is; macOS `IOPlatformUUID`, lowercase hyphenated.
+- The agent never sends a value that violates §3:
+  - It removes C0/C1 control characters and truncates to 1024 UTF-8 bytes on a character boundary.
+  - An optional key whose value is empty after that is omitted.
+  - A required key that ends up empty gets the value `unknown`.
 
 ## 11. Mock server (conformance only)
 
