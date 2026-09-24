@@ -15,5 +15,6 @@ prost-types = "0.13"
 tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
 
 [build-dependencies]
+prost-build = "0.13"
 protoc-bin-vendored = "3"
 tonic-build = "0.12"
