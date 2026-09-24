@@ -318,7 +318,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
     "identity": {
       "renewal_after_secs": 5,
       "disable_jitter": true,
-      "extra_trusted_root": "C:\\path\\mock-ca.pem",
+      "extra_trusted_root": "C:\\path\\mock-cas.pem",
       "backoff_max_secs": 2,
       "pending_poll_interval_ms": 200,
       "acl_grant_current_user": true
@@ -327,6 +327,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 }
 ```
 
+- `__debug__.identity.extra_trusted_root`: path to a PEM file with one or more certificates; each one is added to the TLS trust store in addition to the OS store (test use; multi-authority runs put both mock CAs in one bundle).
 - `__debug__.identity.acl_grant_current_user` (Windows only, test use): the key-store key DACL and the pending-file reader also grant the agent process's user, so CI can run the agent as a normal process.
   The pending file is still written with a protected DACL; the tester adds the same user when it stands in for the MSI.
   Like the other `__debug__` knobs, it's never set by the MSI.
