@@ -150,8 +150,8 @@ pub struct Cert {
     /// Thumbprint of the issuing root.
     pub issuer: String,
     pub status: CertStatus,
-    /// Unix seconds; used for the renewal-requested flag clearing rule (§8).
-    pub issued_at: i64,
+    /// Monotonic issuance order, including certificates issued in the same second.
+    pub issued_seq: u64,
 }
 
 /// A registered device (§9.2).
@@ -173,8 +173,8 @@ pub struct Device {
 
 pub struct RenewalFlag {
     pub reason: RenewReason,
-    /// Unix seconds.
-    pub set_at: i64,
+    /// First issuance order eligible to clear this flag.
+    pub min_issued_seq: u64,
 }
 
 impl Device {
@@ -201,6 +201,7 @@ impl Device {
 /// Pushed into a live channel stream's task.
 pub enum StreamPush {
     RenewRequested(&'static str),
+    Reconnect(&'static str),
     /// Pending cert authenticated elsewhere: close with OK (§7.4).
     CloseOk,
     /// Device revoked: close PERMISSION_DENIED + `device_revoked`.
@@ -226,6 +227,17 @@ pub struct Rotation {
     pub push_queue: VecDeque<Uuid>,
 }
 
+#[derive(Default)]
+pub struct RequestCounts {
+    pub enroll_by_token: HashMap<Uuid, u64>,
+    pub enroll_total: u64,
+    pub renew: u64,
+    pub connect: u64,
+    pub authenticated_connects: u64,
+    pub correlated_acks: u64,
+    pub overlap_open: u64,
+}
+
 pub struct State {
     pub tokens: HashMap<Uuid, Token>,
     /// SHA-256(secret) → token ID (§2).
@@ -239,6 +251,7 @@ pub struct State {
     pub rotation: Option<Rotation>,
     pub nonces: NonceStore,
     pub faults: Faults,
+    pub requests: RequestCounts,
     /// Authenticated live channel streams, by stream ID.
     pub streams: HashMap<Uuid, StreamHandle>,
     pub root_seq: u32,
@@ -257,6 +270,7 @@ impl State {
             rotation: None,
             nonces: NonceStore::default(),
             faults: Faults::default(),
+            requests: RequestCounts::default(),
             streams: HashMap::new(),
             root_seq: 1,
             serial_seq: 100,
@@ -266,6 +280,14 @@ impl State {
     /// The root new leaves are issued from (the newest one, §9.3).
     pub fn issuing_root(&self) -> &RootCa {
         self.roots.last().expect("at least one root")
+    }
+
+    pub fn observe_enroll(&mut self, secret: &[u8; 32]) {
+        use sha2::Digest as _;
+        let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
+        if let Some(id) = self.token_hashes.get(&hash) {
+            *self.requests.enroll_by_token.entry(*id).or_default() += 1;
+        }
     }
 
     /// Resolves a certificate thumbprint for the §6 verifier.
@@ -338,7 +360,7 @@ impl State {
         }
         let device = self.devices.get_mut(&device_id).expect("device exists");
         if let Some(flag) = &device.renewal_requested
-            && device.certs[idx].issued_at > flag.set_at
+            && device.certs[idx].issued_seq >= flag.min_issued_seq
         {
             device.renewal_requested = None;
         }
@@ -403,6 +425,7 @@ impl State {
             )
         };
         let friendly_name = name_eval::render_friendly_name(&format, &metadata, &token_name, device_id);
+        let issued_seq = self.serial_seq;
         let leaf = self.issue_leaf(device_id, &csr_key, now)?;
         let root_der = self.issuing_root().cert_der.clone();
         let cert = Cert {
@@ -414,7 +437,7 @@ impl State {
             not_after: leaf.not_after,
             issuer: self.issuing_root().thumbprint.clone(),
             status: CertStatus::Current,
-            issued_at: now,
+            issued_seq,
         };
         let token_record = self.tokens.get(&token_id).expect("token exists");
         let device = Device {
@@ -497,6 +520,7 @@ impl State {
             }
         }
 
+        let issued_seq = self.serial_seq;
         let leaf = self.issue_leaf(device_id, &csr_key, now)?;
         let root_der = self.issuing_root().cert_der.clone();
         let issuer = self.issuing_root().thumbprint.clone();
@@ -518,7 +542,7 @@ impl State {
             not_after: leaf.not_after,
             issuer,
             status: CertStatus::Pending,
-            issued_at: now,
+            issued_seq,
         });
         device.metadata = metadata;
         device.last_seen_at = Some(now);
@@ -553,14 +577,15 @@ impl State {
     }
 
     /// §9.2 request-renewal: sets the flag (reason `admin`) and pushes to live streams.
-    pub fn request_renewal(&mut self, device_id: Uuid, now: i64) -> Result<(), ApiError> {
+    pub fn request_renewal(&mut self, device_id: Uuid) -> Result<(), ApiError> {
+        let min_issued_seq = self.serial_seq;
         let device = self
             .devices
             .get_mut(&device_id)
             .ok_or_else(|| ApiError::not_found("unknown device"))?;
         device.renewal_requested = Some(RenewalFlag {
             reason: RenewReason::Admin,
-            set_at: now,
+            min_issued_seq,
         });
         self.push_to_device(device_id, &PushKind::RenewRequested("admin"));
         Ok(())
@@ -595,12 +620,13 @@ impl State {
         // Flag every active device on the old root; connected ones get a rate-limited
         // RenewRequested push.
         let mut push_queue = VecDeque::new();
+        let min_issued_seq = self.serial_seq;
         for device in self.devices.values_mut() {
             let on_old_root = !device.revoked() && device.current_cert().is_some_and(|c| c.issuer == old_root);
             if on_old_root {
                 device.renewal_requested = Some(RenewalFlag {
                     reason: RenewReason::Rotation,
-                    set_at: now,
+                    min_issued_seq,
                 });
                 if self.streams.values().any(|s| s.device_id == device.id) {
                     push_queue.push_back(device.id);
@@ -685,6 +711,7 @@ impl State {
         self.cert_index.clear();
         self.nonces = NonceStore::default();
         self.faults = Faults::default();
+        self.requests = RequestCounts::default();
         self.rotation = None;
         self.root_seq += 1;
         self.roots = vec![RootCa::generate(self.root_seq, now)?];
@@ -755,6 +782,7 @@ pub fn lookup_cert(
 /// Cloneable push description (sending borrows the channel).
 pub enum PushKind {
     RenewRequested(&'static str),
+    Reconnect(&'static str),
     CloseOk,
     CloseRevoked,
     CloseUnknown,
@@ -764,6 +792,7 @@ impl PushKind {
     fn send(&self, tx: &mpsc::Sender<StreamPush>) -> Result<(), ()> {
         let push = match self {
             PushKind::RenewRequested(reason) => StreamPush::RenewRequested(reason),
+            PushKind::Reconnect(reason) => StreamPush::Reconnect(reason),
             PushKind::CloseOk => StreamPush::CloseOk,
             PushKind::CloseRevoked => StreamPush::CloseRevoked,
             PushKind::CloseUnknown => StreamPush::CloseUnknown,

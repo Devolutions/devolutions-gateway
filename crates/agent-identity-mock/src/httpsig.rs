@@ -3,8 +3,11 @@
 //! The single entry point is [`verify_request`]; the HTTP server, the gRPC channel and
 //! the in-crate vector test all go through it.
 
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Verifier as _;
 use p256::ecdsa::{Signature, VerifyingKey};
 use sha2::Digest as _;
@@ -95,10 +98,14 @@ pub struct NonceStore {
 impl NonceStore {
     /// Atomically inserts `(keyid, nonce)`. Returns `false` on conflict.
     pub fn insert_fresh(&mut self, keyid: &str, nonce: &str, keep_until: i64, now: i64) -> bool {
-        self.entries.retain(|_, until| *until > now);
-        self.entries
-            .insert((keyid.to_owned(), nonce.to_owned()), keep_until)
-            .is_none()
+        self.entries.retain(|_, until| *until >= now);
+        match self.entries.entry((keyid.to_owned(), nonce.to_owned())) {
+            Entry::Vacant(entry) => {
+                entry.insert(keep_until);
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
     }
 }
 
@@ -208,7 +215,12 @@ pub fn verify_request(
     let keyid = str_param(inner, "keyid")?;
     let alg = str_param(inner, "alg")?;
     let tag = str_param(inner, "tag")?;
-    if alg != PROFILE_ALG {
+    let mut param_keys = HashSet::new();
+    if inner.params.iter().any(|param| !param_keys.insert(param.key.as_str()))
+        || !valid_base64url_bytes(nonce, 16)
+        || !valid_base64url_bytes(keyid, 32)
+        || alg != PROFILE_ALG
+    {
         return Err(Rejection::SignatureInvalid);
     }
 
@@ -295,6 +307,12 @@ fn str_param<'a>(inner: &'a sfv::InnerList, key: &str) -> Result<&'a str, Reject
         sfv::ItemValue::Str(s) => Ok(s),
         _ => Err(Rejection::SignatureInvalid),
     }
+}
+
+fn valid_base64url_bytes(value: &str, expected_len: usize) -> bool {
+    URL_SAFE_NO_PAD
+        .decode(value)
+        .is_ok_and(|decoded| decoded.len() == expected_len && URL_SAFE_NO_PAD.encode(decoded) == value)
 }
 
 /// `Content-Digest: sha-256=:<base64>:  ` (RFC 9530), computed over the exact body bytes.

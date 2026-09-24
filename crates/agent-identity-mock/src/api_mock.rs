@@ -3,22 +3,63 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::State as AxumState;
+use axum::extract::{Query, State as AxumState};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse as _, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use uuid::Uuid;
 
 use crate::app::{App, rfc3339};
-use crate::state::{ApiError, DropTarget, Faults};
+use crate::state::{ApiError, DropTarget, Faults, PushKind};
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/__mock__/faults", post(faults))
         .route("/__mock__/reset", post(reset))
         .route("/__mock__/time/advance", post(time_advance))
+        .route("/__mock__/requests", get(requests))
+        .route("/__mock__/reconnect", post(reconnect))
         .with_state(app)
+}
+
+#[derive(Deserialize)]
+struct RequestQuery {
+    token_id: Option<Uuid>,
+}
+
+async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<RequestQuery>) -> Json<Value> {
+    let state = app.state.lock().await;
+    let enroll = query.token_id.map_or_else(
+        || state.requests.enroll_by_token.values().sum(),
+        |id| state.requests.enroll_by_token.get(&id).copied().unwrap_or(0),
+    );
+    Json(json!({
+        "enroll": enroll,
+        "enroll_total": state.requests.enroll_total,
+        "renew": state.requests.renew,
+        "connect": state.requests.connect,
+        "authenticated_connects": state.requests.authenticated_connects,
+        "correlated_acks": state.requests.correlated_acks,
+        "overlap_open": state.requests.overlap_open,
+        "active_streams": state.streams.len(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ReconnectRequest {
+    device_id: Uuid,
+}
+
+async fn reconnect(AxumState(app): AxumState<Arc<App>>, Json(request): Json<ReconnectRequest>) -> Response {
+    let mut state = app.state.lock().await;
+    if !state.devices.contains_key(&request.device_id) {
+        return control_error(&ApiError::not_found("unknown device"));
+    }
+    state.push_to_device(request.device_id, &PushKind::Reconnect("mock"));
+    StatusCode::ACCEPTED.into_response()
 }
 
 fn control_error(err: &ApiError) -> Response {

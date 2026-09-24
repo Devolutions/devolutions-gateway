@@ -1,0 +1,42 @@
+[package]
+name = "agent-identity-conformance"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Independent Agent Identity V1 conformance runner"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-identity-channel-proto = { path = "../agent-identity-channel-proto" }
+anyhow = "1"
+base64 = "0.22"
+der = "0.8"
+futures = "0.3"
+http = "1"
+p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+rand = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time", "process", "fs", "sync"] }
+tokio-stream = "0.1"
+tonic = { version = "0.12", features = ["transport", "tls", "tls-webpki-roots"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["v4"] }
+x509-cert = { version = "0.3", features = ["builder"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
+] }

@@ -50,6 +50,18 @@ async fn admin_auth(AxumState(app): AxumState<Arc<App>>, request: Request, next:
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v == expected);
+    let unprivileged = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == format!("Bearer {}", app.unprivileged_token));
+    if unprivileged {
+        return admin_error(&ApiError::new(
+            403,
+            "forbidden",
+            "missing Agent identity management permission",
+        ));
+    }
     if !ok {
         return admin_error(&ApiError::new(401, "unauthorized", "missing or invalid bearer token"));
     }
@@ -448,9 +460,8 @@ async fn delete_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>
 
 async fn request_renewal(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
-    let now = app.now();
     let mut state = app.state.lock().await;
-    match state.request_renewal(id, now) {
+    match state.request_renewal(id) {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(err) => admin_error(&err),
     }

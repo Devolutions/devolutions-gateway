@@ -16,6 +16,7 @@ pub struct App {
     /// e.g. `/mock`.
     pub prefix: String,
     pub admin_token: String,
+    pub unprivileged_token: String,
     pub clock: MockClock,
     pub state: Mutex<State>,
 }

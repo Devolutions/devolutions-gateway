@@ -64,13 +64,7 @@ fn valid_metadata_key(key: &str) -> bool {
 /// Validates a friendly-name format at token creation: placeholders must be known and
 /// braces balanced. Returns a message for a 400 on violation.
 pub fn validate_friendly_name_format(format: &str) -> Result<(), String> {
-    walk_format(format, &mut |name| {
-        if KNOWN_KEYS.contains(&name) || name == "token_name" {
-            Ok(())
-        } else {
-            Err(format!("unknown placeholder {{{name}}}"))
-        }
-    })
+    parse_format(format).map(|_| ())
 }
 
 /// Renders the friendly name: validated format, missing values evaluate to empty,
@@ -83,18 +77,20 @@ pub fn render_friendly_name(
     device_id: uuid::Uuid,
 ) -> String {
     let mut out = String::new();
-    // The format was validated at token creation; ignore errors here.
-    let _ = walk_format(format, &mut |name| {
-        let value = if name == "token_name" {
-            Some(token_name.to_owned())
-        } else {
-            metadata.get(name).and_then(Value::as_str).map(ToOwned::to_owned)
-        };
-        if let Some(value) = value {
-            out.push_str(&value);
+    // The format was validated at token creation.
+    if let Ok(parts) = parse_format(format) {
+        for part in parts {
+            match part {
+                FormatPart::Literal(text) => out.push_str(text),
+                FormatPart::Placeholder("token_name") => out.push_str(token_name),
+                FormatPart::Placeholder(name) => {
+                    if let Some(value) = metadata.get(name).and_then(Value::as_str) {
+                        out.push_str(value);
+                    }
+                }
+            }
         }
-        Ok(())
-    });
+    }
     let trimmed = out.trim();
     let truncated: String = trimmed.chars().take(MAX_FRIENDLY_NAME_CHARS).collect();
     if truncated.is_empty() {
@@ -104,15 +100,22 @@ pub fn render_friendly_name(
     }
 }
 
-/// Walks a format string, calling `placeholder` for each `{name}`. `{{` and `}}` are
-/// escapes. Errors on unclosed `{`.
-fn walk_format(format: &str, placeholder: &mut dyn FnMut(&str) -> Result<(), String>) -> Result<(), String> {
+enum FormatPart<'a> {
+    Literal(&'a str),
+    Placeholder(&'a str),
+}
+
+fn parse_format(format: &str) -> Result<Vec<FormatPart<'_>>, String> {
     let mut rest = format;
+    let mut parts = Vec::new();
     while let Some(pos) = rest.find(['{', '}']) {
+        parts.push(FormatPart::Literal(&rest[..pos]));
         let tail = &rest[pos..];
         if let Some(stripped) = tail.strip_prefix("{{") {
+            parts.push(FormatPart::Literal("{"));
             rest = stripped;
         } else if let Some(stripped) = tail.strip_prefix("}}") {
+            parts.push(FormatPart::Literal("}"));
             rest = stripped;
         } else if let Some(stripped) = tail.strip_prefix('{') {
             let end = stripped.find('}').ok_or_else(|| "unclosed `{` in format".to_owned())?;
@@ -120,12 +123,32 @@ fn walk_format(format: &str, placeholder: &mut dyn FnMut(&str) -> Result<(), Str
             if name.is_empty() {
                 return Err("empty placeholder in format".to_owned());
             }
-            placeholder(name)?;
+            if !KNOWN_KEYS.contains(&name) && name != "token_name" {
+                return Err(format!("unknown placeholder {{{name}}}"));
+            }
+            parts.push(FormatPart::Placeholder(name));
             rest = &stripped[end + 1..];
         } else {
-            // A lone `}` is a literal.
+            parts.push(FormatPart::Literal("}"));
             rest = &tail[1..];
         }
     }
-    Ok(())
+    parts.push(FormatPart::Literal(rest));
+    Ok(parts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friendly_name_preserves_literals_and_brace_escapes() {
+        let mut metadata = Map::new();
+        metadata.insert("hostname".to_owned(), Value::String("host".to_owned()));
+        let format = "  {hostname}-{{ok}}-{token_name}-{fqdn}  ";
+        validate_friendly_name_format(format).expect("valid format");
+        let rendered = render_friendly_name(format, &metadata, "token", uuid::Uuid::nil());
+        assert_eq!(rendered, "host-{ok}-token-");
+        assert!(validate_friendly_name_format("{unknown}").is_err());
+    }
 }
