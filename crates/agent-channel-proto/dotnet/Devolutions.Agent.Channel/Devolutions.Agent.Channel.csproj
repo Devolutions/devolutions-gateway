@@ -3,14 +3,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackageId>Devolutions.AgentIdentity.Channel</PackageId>
+    <PackageId>Devolutions.Agent.Channel</PackageId>
     <OutputType>Library</OutputType>
     <Authors>Devolutions Inc.</Authors>
     <Company>Devolutions Inc.</Company>
-    <AssemblyTitle>Devolutions Agent Identity Channel</AssemblyTitle>
-    <Description>gRPC and Protobuf types for the Devolutions Agent identity channel</Description>
+    <AssemblyTitle>Devolutions Agent Channel</AssemblyTitle>
+    <Description>gRPC and Protobuf types for the Devolutions Agent channel</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
-    <RootNamespace>Devolutions.AgentIdentity.Channel</RootNamespace>
+    <RootNamespace>Devolutions.Agent.Channel</RootNamespace>
     <Version>2026.9.25</Version>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
