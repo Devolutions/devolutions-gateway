@@ -13,13 +13,15 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, rfc3339};
-use crate::state::{ApiError, DropTarget, Faults, PushKind};
+use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, PushKind};
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/__mock__/faults", post(faults))
         .route("/__mock__/reset", post(reset))
         .route("/__mock__/time/advance", post(time_advance))
+        .route("/__mock__/events", get(events))
+        .route("/__mock__/handshake", post(handshake))
         .route("/__mock__/requests", get(requests))
         .route("/__mock__/reconnect", post(reconnect))
         .with_state(app)
@@ -45,7 +47,37 @@ async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Reque
         "correlated_acks": state.requests.correlated_acks,
         "overlap_open": state.requests.overlap_open,
         "active_streams": state.streams.len(),
+        "paused_hellos": state.paused_hellos.len(),
     }))
+}
+
+#[derive(Deserialize)]
+struct EventQuery {
+    device_id: Uuid,
+}
+
+async fn events(AxumState(app): AxumState<Arc<App>>, Query(query): Query<EventQuery>) -> Json<Value> {
+    let state = app.state.lock().await;
+    Json(json!({
+        "events": state.events.iter()
+            .filter(|event| event.device_id == query.device_id)
+            .map(|event| &event.body)
+            .collect::<Vec<_>>(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct HandshakeRequest {
+    pause: bool,
+}
+
+async fn handshake(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let request: HandshakeRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(_) => return control_error(&ApiError::invalid_request("body requires a boolean pause field")),
+    };
+    app.handshake_gate.send_replace(!request.pause);
+    Json(json!({ "paused": request.pause })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -76,6 +108,14 @@ fn faults_view(faults: &Faults) -> Value {
             DropTarget::Enroll => "enroll",
             DropTarget::Renew => "renew",
         }),
+        "fail_next_response": faults.fail_next_response.map(|fault| json!({
+            "endpoint": match fault.endpoint {
+                DropTarget::Enroll => "enroll",
+                DropTarget::Renew => "renew",
+            },
+            "status": fault.status,
+            "error": fault.error,
+        })),
         "clock_skew_secs": faults.clock_skew_secs,
         "leaf_lifetime_secs": faults.leaf_lifetime_secs,
         "channel_available": faults.channel_available,
@@ -99,6 +139,46 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     let mut state = app.state.lock().await;
     for (key, value) in patch {
         match key.as_str() {
+            "fail_next_response" => match value {
+                Value::Null => state.faults.fail_next_response = None,
+                Value::Object(fields) => {
+                    let endpoint = match fields.get("endpoint").and_then(Value::as_str) {
+                        Some("enroll") => DropTarget::Enroll,
+                        Some("renew") => DropTarget::Renew,
+                        _ => return invalid("fail_next_response.endpoint must be enroll or renew"),
+                    };
+                    let Some(status) = fields
+                        .get("status")
+                        .and_then(Value::as_u64)
+                        .and_then(|status| u16::try_from(status).ok())
+                        .filter(|status| (400..=599).contains(status))
+                    else {
+                        return invalid("fail_next_response.status must be 400..599");
+                    };
+                    let error = match fields.get("error") {
+                        None => None,
+                        Some(Value::String(value)) => Some(match value.as_str() {
+                            "token_invalid" => "token_invalid",
+                            "token_exhausted" => "token_exhausted",
+                            "token_expired" => "token_expired",
+                            "device_revoked" => "device_revoked",
+                            "device_unknown" => "device_unknown",
+                            "certificate_expired" => "certificate_expired",
+                            "signature_invalid" => "signature_invalid",
+                            "clock_skew" => "clock_skew",
+                            "invalid_request" => "invalid_request",
+                            _ => return invalid("fail_next_response.error must be a §5.4 error code"),
+                        }),
+                        Some(_) => return invalid("fail_next_response.error must be a §5.4 error code"),
+                    };
+                    state.faults.fail_next_response = Some(FailNextResponse {
+                        endpoint,
+                        status,
+                        error,
+                    });
+                }
+                _ => return invalid("fail_next_response must be an object or null"),
+            },
             "drop_next_response" => match value {
                 Value::Null => state.faults.drop_next_response = None,
                 Value::String(s) if s == "enroll" => state.faults.drop_next_response = Some(DropTarget::Enroll),
@@ -146,6 +226,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
 async fn reset(AxumState(app): AxumState<Arc<App>>) -> Response {
     let mut state = app.state.lock().await;
     app.clock.reset();
+    app.handshake_gate.send_replace(true);
     match state.reset(app.now()) {
         Ok(()) => Json(json!({ "authority_id": app.authority_id })).into_response(),
         Err(err) => control_error(&ApiError::internal(format!("reset failed: {err:#}"))),

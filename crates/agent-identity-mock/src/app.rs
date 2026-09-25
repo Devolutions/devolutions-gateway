@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
 use crate::clock::MockClock;
@@ -18,6 +18,8 @@ pub struct App {
     pub admin_token: String,
     pub unprivileged_token: String,
     pub clock: MockClock,
+    /// Mock-only barrier for proving that a key survives until Hello authenticates.
+    pub handshake_gate: watch::Sender<bool>,
     pub state: Mutex<State>,
 }
 

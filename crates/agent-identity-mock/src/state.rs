@@ -1,11 +1,12 @@
 //! In-memory state and business logic (CONTRACT.md §2–§9, §11). One mutex around
 //! `State` makes enrollment and rotation critical sections trivially correct.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use p256::ecdsa::VerifyingKey;
 use rand::RngExt as _;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -71,10 +72,18 @@ pub enum DropTarget {
     Renew,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct FailNextResponse {
+    pub endpoint: DropTarget,
+    pub status: u16,
+    pub error: Option<&'static str>,
+}
+
 /// §11 fault knobs. Merged field-by-field by `POST __mock__/faults`.
 #[derive(Debug, Clone)]
 pub struct Faults {
     pub drop_next_response: Option<DropTarget>,
+    pub fail_next_response: Option<FailNextResponse>,
     pub clock_skew_secs: Option<i64>,
     pub leaf_lifetime_secs: Option<i64>,
     pub channel_available: bool,
@@ -85,6 +94,7 @@ impl Default for Faults {
     fn default() -> Self {
         Self {
             drop_next_response: None,
+            fail_next_response: None,
             clock_skew_secs: None,
             leaf_lifetime_secs: None,
             channel_available: true,
@@ -159,6 +169,8 @@ pub struct Device {
     pub id: Uuid,
     pub friendly_name: String,
     pub metadata: Map<String, Value>,
+    /// Strictly increasing creation order, even for enrollments in the same second.
+    pub created_seq: u64,
     /// Unix seconds.
     pub created_at: i64,
     /// Unix seconds.
@@ -208,6 +220,8 @@ pub enum StreamPush {
     CloseRevoked,
     /// Device or certificate vanished (delete, reset): close with `device_unknown`.
     CloseUnknown,
+    /// The mock clock reached the certificate's `notAfter`.
+    CloseExpired,
 }
 
 pub struct StreamHandle {
@@ -223,8 +237,6 @@ pub struct Rotation {
     pub new_root: String,
     /// Unix seconds.
     pub deadline: i64,
-    /// Connected devices still waiting for their rate-limited rotation push.
-    pub push_queue: VecDeque<Uuid>,
 }
 
 #[derive(Default)]
@@ -238,6 +250,11 @@ pub struct RequestCounts {
     pub overlap_open: u64,
 }
 
+pub struct Event {
+    pub device_id: Uuid,
+    pub body: Value,
+}
+
 pub struct State {
     pub tokens: HashMap<Uuid, Token>,
     /// SHA-256(secret) → token ID (§2).
@@ -245,6 +262,8 @@ pub struct State {
     pub devices: HashMap<Uuid, Device>,
     /// Certificate thumbprint → device.
     pub cert_index: HashMap<String, Uuid>,
+    /// Issued keys remain reserved after a revoked device is deleted.
+    deleted_revoked_keys: HashSet<Vec<u8>>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
     pub roots: Vec<RootCa>,
@@ -254,8 +273,21 @@ pub struct State {
     pub requests: RequestCounts,
     /// Authenticated live channel streams, by stream ID.
     pub streams: HashMap<Uuid, StreamHandle>,
+    /// Signed openings that have received a Challenge but not passed Hello proof.
+    pub challenged_streams: HashMap<Uuid, StreamHandle>,
+    /// Valid Hello proofs held before authentication by the mock-only handshake barrier.
+    pub paused_hellos: HashSet<Uuid>,
+    closed_streams: HashSet<Uuid>,
+    pub events: Vec<Event>,
+    pub next_event_seq: u64,
+    /// Pending pushes survive the deadline that ends the public rotation phase.
+    pub rotation_push_queue: VecDeque<(Uuid, String)>,
+    /// Sliding one-second rate window, shared across requests and rotation phases.
+    pub rotation_push_times: VecDeque<Instant>,
     pub root_seq: u32,
     pub serial_seq: u64,
+    pub next_device_seq: u64,
+    pub last_created_at: i64,
 }
 
 impl State {
@@ -266,15 +298,73 @@ impl State {
             token_hashes: HashMap::new(),
             devices: HashMap::new(),
             cert_index: HashMap::new(),
+            deleted_revoked_keys: HashSet::new(),
             roots: vec![root],
             rotation: None,
             nonces: NonceStore::default(),
             faults: Faults::default(),
             requests: RequestCounts::default(),
             streams: HashMap::new(),
+            challenged_streams: HashMap::new(),
+            paused_hellos: HashSet::new(),
+            closed_streams: HashSet::new(),
+            events: Vec::new(),
+            next_event_seq: 1,
+            rotation_push_queue: VecDeque::new(),
+            rotation_push_times: VecDeque::new(),
             root_seq: 1,
             serial_seq: 100,
+            next_device_seq: 1,
+            last_created_at: now,
         })
+    }
+
+    pub fn record_event(&mut self, device_id: Uuid, event_type: &str, fields: Value) {
+        let mut body = fields.as_object().cloned().expect("event fields are an object");
+        body.insert("seq".to_owned(), json!(self.next_event_seq));
+        body.insert("type".to_owned(), json!(event_type));
+        body.insert("device_id".to_owned(), json!(device_id));
+        self.events.push(Event {
+            device_id,
+            body: Value::Object(body),
+        });
+        self.next_event_seq += 1;
+    }
+
+    fn cert_status_changed(&mut self, device_id: Uuid, thumbprint: &str, from: Option<CertStatus>, to: CertStatus) {
+        let mut fields = json!({
+            "cert_thumbprint": thumbprint,
+            "to": to.as_str(),
+        });
+        if let Some(from) = from {
+            fields["from"] = json!(from.as_str());
+        }
+        self.record_event(device_id, "cert_status_changed", fields);
+    }
+
+    pub fn close_stream(
+        &mut self,
+        stream_id: Uuid,
+        device_id: Uuid,
+        cert_thumbprint: &str,
+        status: &str,
+        error_code: Option<&str>,
+    ) {
+        self.streams.remove(&stream_id);
+        self.challenged_streams.remove(&stream_id);
+        self.paused_hellos.remove(&stream_id);
+        if !self.devices.contains_key(&device_id) || !self.closed_streams.insert(stream_id) {
+            return;
+        }
+        let mut fields = json!({
+            "stream_id": stream_id,
+            "cert_thumbprint": cert_thumbprint,
+            "status": status,
+        });
+        if let Some(error_code) = error_code {
+            fields["error_code"] = json!(error_code);
+        }
+        self.record_event(device_id, "stream_closed", fields);
     }
 
     /// The root new leaves are issued from (the newest one, §9.3).
@@ -287,6 +377,24 @@ impl State {
         let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
         if let Some(id) = self.token_hashes.get(&hash) {
             *self.requests.enroll_by_token.entry(*id).or_default() += 1;
+        }
+    }
+
+    pub fn token_id(&self, secret: &[u8; 32]) -> Option<Uuid> {
+        use sha2::Digest as _;
+        let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
+        self.token_hashes.get(&hash).copied()
+    }
+
+    pub fn fail_next_response(&mut self, endpoint: DropTarget) -> Option<FailNextResponse> {
+        if self
+            .faults
+            .fail_next_response
+            .is_some_and(|fault| fault.endpoint == endpoint)
+        {
+            self.faults.fail_next_response.take()
+        } else {
+            None
         }
     }
 
@@ -343,9 +451,10 @@ impl State {
         let Some(idx) = device.certs.iter().position(|c| c.thumbprint == cert_thumbprint) else {
             return;
         };
-        if device.certs[idx].status == CertStatus::Pending {
+        let promoted = device.certs[idx].status == CertStatus::Pending;
+        let retired = if promoted {
             device.certs[idx].status = CertStatus::Current;
-            let retired: Vec<String> = device
+            device
                 .certs
                 .iter_mut()
                 .filter(|c| c.status == CertStatus::Current && c.thumbprint != cert_thumbprint)
@@ -353,16 +462,26 @@ impl State {
                     c.status = CertStatus::Retired;
                     c.thumbprint.clone()
                 })
-                .collect();
-            for thumbprint in retired {
-                self.push_to_cert_streams(&thumbprint, &PushKind::CloseOk);
-            }
-        }
-        let device = self.devices.get_mut(&device_id).expect("device exists");
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         if let Some(flag) = &device.renewal_requested
             && device.certs[idx].issued_seq >= flag.min_issued_seq
         {
             device.renewal_requested = None;
+        }
+        if promoted {
+            self.cert_status_changed(
+                device_id,
+                cert_thumbprint,
+                Some(CertStatus::Pending),
+                CertStatus::Current,
+            );
+        }
+        for thumbprint in retired {
+            self.cert_status_changed(device_id, &thumbprint, Some(CertStatus::Current), CertStatus::Retired);
+            self.push_to_cert_streams(&thumbprint, &PushKind::CloseOk);
         }
     }
 
@@ -374,9 +493,7 @@ impl State {
         metadata: Map<String, Value>,
         now: i64,
     ) -> Result<EnrollOutcome, ApiError> {
-        use sha2::Digest as _;
-        let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
-        let token_id = *self.token_hashes.get(&hash).ok_or_else(ApiError::token_invalid)?;
+        let token_id = self.token_id(secret).ok_or_else(ApiError::token_invalid)?;
 
         let csr_key = crate::csr::check_csr(csr_der)
             .map_err(|_| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
@@ -385,14 +502,25 @@ impl State {
         // Idempotence on the CSR public key (§2): an existing device with the same key
         // is returned without consuming a use; revoked devices reject.
         let csr_key_der = ca::public_key_der(&csr_key);
-        let existing = self
-            .devices
-            .values()
-            .find(|d| d.certs.iter().any(|c| ca::public_key_der(&c.public_key) == csr_key_der));
-        if let Some(device) = existing {
-            if device.revoked() {
+        let existing = self.devices.values().find_map(|device| {
+            device
+                .certs
+                .iter()
+                .find(|cert| ca::public_key_der(&cert.public_key) == csr_key_der)
+                .map(|cert| (device.id, device.revoked(), cert.status))
+        });
+        if let Some((device_id, revoked, status)) = existing {
+            if revoked {
                 return Err(ApiError::device_revoked());
             }
+            if status != CertStatus::Current {
+                return Err(ApiError::invalid_request(
+                    "CSR key belongs to a pending or retired certificate",
+                ));
+            }
+            let device = self.devices.get_mut(&device_id).expect("matching device exists");
+            device.metadata = metadata;
+            device.last_seen_at = Some(now);
             let device_id = device.id;
             let friendly_name = device.friendly_name.clone();
             let chain = self.chain_for_current(device_id)?;
@@ -401,6 +529,9 @@ impl State {
                 friendly_name,
                 certificate_chain: chain,
             });
+        }
+        if self.deleted_revoked_keys.contains(&csr_key_der) {
+            return Err(ApiError::device_revoked());
         }
 
         let token = self.tokens.get(&token_id).expect("hash index consistent");
@@ -411,11 +542,10 @@ impl State {
             return Err(ApiError::token_exhausted());
         }
 
-        // Device-creating critical section: consume the use and create the device.
+        // Both issuance and token consumption happen under the device-creating state lock.
         let device_id = Uuid::new_v4();
         let (format, token_name) = {
-            let token = self.tokens.get_mut(&token_id).expect("hash index consistent");
-            token.used_count += 1;
+            let token = self.tokens.get(&token_id).expect("hash index consistent");
             (
                 token
                     .friendly_name_format
@@ -427,6 +557,10 @@ impl State {
         let friendly_name = name_eval::render_friendly_name(&format, &metadata, &token_name, device_id);
         let issued_seq = self.serial_seq;
         let leaf = self.issue_leaf(device_id, &csr_key, now)?;
+        self.tokens
+            .get_mut(&token_id)
+            .expect("hash index consistent")
+            .used_count += 1;
         let root_der = self.issuing_root().cert_der.clone();
         let cert = Cert {
             thumbprint: leaf.thumbprint.clone(),
@@ -439,21 +573,27 @@ impl State {
             status: CertStatus::Current,
             issued_seq,
         };
-        let token_record = self.tokens.get(&token_id).expect("token exists");
+        let cert_thumbprint = cert.thumbprint.clone();
+        let created_at = now.max(self.last_created_at);
+        self.last_created_at = created_at;
+        let created_seq = self.next_device_seq;
+        self.next_device_seq += 1;
         let device = Device {
             id: device_id,
             friendly_name: friendly_name.clone(),
             metadata,
-            created_at: now,
+            created_seq,
+            created_at,
             last_seen_at: Some(now),
             revoked_at: None,
             renewal_requested: None,
             token_id,
-            token_name: token_record.name.clone(),
+            token_name,
             certs: vec![cert],
         };
         self.cert_index.insert(leaf.thumbprint, device_id);
         self.devices.insert(device_id, device);
+        self.cert_status_changed(device_id, &cert_thumbprint, None, CertStatus::Current);
         Ok(EnrollOutcome {
             device_id,
             friendly_name,
@@ -486,13 +626,13 @@ impl State {
     /// key and the one-pending rule.
     pub fn renew(
         &mut self,
-        device_id: Uuid,
-        authenticated_thumbprint: &str,
+        auth: &crate::httpsig::AuthenticatedDevice,
         csr_der: &[u8],
         metadata: Map<String, Value>,
         now: i64,
     ) -> Result<Vec<Vec<u8>>, ApiError> {
-        self.note_cert_authenticated(device_id, authenticated_thumbprint);
+        let device_id = auth.device_id();
+        self.note_cert_authenticated(device_id, auth.cert_thumbprint());
 
         let csr_key = crate::csr::check_csr(csr_der)
             .map_err(|_| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
@@ -500,39 +640,54 @@ impl State {
 
         let csr_key_der = ca::public_key_der(&csr_key);
 
-        // Idempotence on the new public key: replay the matching pending certificate.
-        // A renew to the current key is treated as a no-op replay of the current chain.
-        {
-            let device = self.devices.get(&device_id).expect("authenticated device exists");
-            for cert in &device.certs {
-                if ca::public_key_der(&cert.public_key) == csr_key_der {
-                    let root = self
-                        .roots
-                        .iter()
-                        .find(|r| r.thumbprint == cert.issuer)
-                        .expect("issuing root is known");
-                    let chain = vec![cert.der.clone(), root.cert_der.clone()];
-                    let device = self.devices.get_mut(&device_id).expect("device exists");
-                    device.metadata = metadata;
-                    device.last_seen_at = Some(now);
-                    return Ok(chain);
-                }
+        // Only a still-pending certificate of this device is a lost-response replay.
+        let existing = self.devices.values().find_map(|device| {
+            device
+                .certs
+                .iter()
+                .find(|cert| ca::public_key_der(&cert.public_key) == csr_key_der)
+                .map(|cert| (device.id, cert.status, cert.der.clone(), cert.issuer.clone()))
+        });
+        if let Some((owner, status, cert_der, issuer)) = existing {
+            if owner != device_id || status != CertStatus::Pending {
+                return Err(ApiError::invalid_request("CSR key belongs to an issued certificate"));
             }
+            let root = self
+                .roots
+                .iter()
+                .find(|root| root.thumbprint == issuer)
+                .expect("issuing root is known");
+            let chain = vec![cert_der, root.cert_der.clone()];
+            let device = self.devices.get_mut(&device_id).expect("device exists");
+            device.metadata = metadata;
+            device.last_seen_at = Some(now);
+            return Ok(chain);
+        }
+        if self.deleted_revoked_keys.contains(&csr_key_der) {
+            return Err(ApiError::invalid_request("CSR key belongs to an issued certificate"));
         }
 
         let issued_seq = self.serial_seq;
         let leaf = self.issue_leaf(device_id, &csr_key, now)?;
         let root_der = self.issuing_root().cert_der.clone();
         let issuer = self.issuing_root().thumbprint.clone();
-        let device = self.devices.get_mut(&device_id).expect("device exists");
-
-        // At most one pending certificate: a different new key retires the old pending.
-        for cert in &mut device.certs {
-            if cert.status == CertStatus::Pending {
-                cert.status = CertStatus::Retired;
-            }
+        let retired = {
+            let device = self.devices.get_mut(&device_id).expect("device exists");
+            device
+                .certs
+                .iter_mut()
+                .filter(|cert| cert.status == CertStatus::Pending)
+                .map(|cert| {
+                    cert.status = CertStatus::Retired;
+                    cert.thumbprint.clone()
+                })
+                .collect::<Vec<_>>()
+        };
+        for thumbprint in retired {
+            self.cert_status_changed(device_id, &thumbprint, Some(CertStatus::Pending), CertStatus::Retired);
         }
         self.cert_index.insert(leaf.thumbprint.clone(), device_id);
+        let device = self.devices.get_mut(&device_id).expect("device exists");
         device.certs.push(Cert {
             thumbprint: leaf.thumbprint.clone(),
             der: leaf.der.clone(),
@@ -546,6 +701,7 @@ impl State {
         });
         device.metadata = metadata;
         device.last_seen_at = Some(now);
+        self.cert_status_changed(device_id, &leaf.thumbprint, None, CertStatus::Pending);
         Ok(vec![leaf.der, root_der])
     }
 
@@ -571,8 +727,29 @@ impl State {
         if !device.revoked() {
             return Err(ApiError::conflict("device must be revoked before deletion"));
         }
+        let issued_keys = device
+            .certs
+            .iter()
+            .map(|cert| ca::public_key_der(&cert.public_key))
+            .collect::<Vec<_>>();
         self.push_to_device(device_id, &PushKind::CloseUnknown);
+        let live = self
+            .streams
+            .iter()
+            .filter(|(_, stream)| stream.device_id == device_id)
+            .map(|(id, stream)| (*id, stream.cert_thumbprint.clone()))
+            .collect::<Vec<_>>();
+        for (stream_id, thumbprint) in live {
+            self.close_stream(
+                stream_id,
+                device_id,
+                &thumbprint,
+                "UNAUTHENTICATED",
+                Some("device_unknown"),
+            );
+        }
         self.devices.remove(&device_id);
+        self.deleted_revoked_keys.extend(issued_keys);
         Ok(())
     }
 
@@ -599,37 +776,42 @@ impl State {
             return Err(ApiError::conflict("a rotation is already in progress"));
         }
         let old_root = self.issuing_root().thumbprint.clone();
-        let deadline = match deadline {
-            Some(d) => d,
-            None => self
-                .devices
-                .values()
-                .filter(|d| !d.revoked())
-                .filter_map(|d| d.current_cert())
-                .filter(|c| c.issuer == old_root)
-                .map(|c| c.not_after)
-                .max()
-                .unwrap_or(now),
-        };
-        self.root_seq += 1;
-        let new_root = RootCa::generate(self.root_seq, now)
+        let maximum = self
+            .devices
+            .values()
+            .filter(|device| !device.revoked())
+            .filter_map(Device::current_cert)
+            .filter(|cert| cert.issuer == old_root && now < cert.not_after)
+            .map(|cert| cert.not_after)
+            .max()
+            .unwrap_or(now);
+        let deadline = deadline.unwrap_or(maximum);
+        if deadline > maximum {
+            return Err(ApiError::invalid_request(
+                "rotation deadline exceeds the latest active old-root certificate",
+            ));
+        }
+        let new_root = RootCa::generate(self.root_seq + 1, now)
             .map_err(|e| ApiError::internal(format!("failed to generate root: {e:#}")))?;
+        self.issuing_root_mut().key = None;
+        self.root_seq += 1;
         let new_root_thumbprint = new_root.thumbprint.clone();
         self.roots.push(new_root);
 
-        // Flag every active device on the old root; connected ones get a rate-limited
-        // RenewRequested push.
-        let mut push_queue = VecDeque::new();
+        // The flag covers offline devices; a live, unexpired old-root connection also
+        // enters the rate-limited push queue, which survives the rotation deadline.
         let min_issued_seq = self.serial_seq;
         for device in self.devices.values_mut() {
             let on_old_root = !device.revoked() && device.current_cert().is_some_and(|c| c.issuer == old_root);
             if on_old_root {
+                let can_push = device.current_cert().is_some_and(|cert| now < cert.not_after)
+                    && self.streams.values().any(|stream| stream.device_id == device.id);
                 device.renewal_requested = Some(RenewalFlag {
                     reason: RenewReason::Rotation,
                     min_issued_seq,
                 });
-                if self.streams.values().any(|s| s.device_id == device.id) {
-                    push_queue.push_back(device.id);
+                if can_push {
+                    self.rotation_push_queue.push_back((device.id, old_root.clone()));
                 }
             }
         }
@@ -637,51 +819,104 @@ impl State {
             old_root,
             new_root: new_root_thumbprint,
             deadline,
-            push_queue,
         });
-        self.drain_rotation_pushes();
+        self.drain_rotation_pushes(now);
         Ok(())
     }
 
-    /// Sends queued rotation pushes up to the per-call budget of the configured rate
-    /// (each call represents one second of budget).
-    fn drain_rotation_pushes(&mut self) {
-        let budget = self
-            .faults
-            .rotation_rate_limit_per_sec
-            .map_or(usize::MAX, |r| r as usize);
-        let mut batch = Vec::new();
-        if let Some(rotation) = &mut self.rotation {
-            while batch.len() < budget {
-                let Some(device_id) = rotation.push_queue.pop_front() else {
-                    break;
-                };
-                batch.push(device_id);
-            }
+    fn issuing_root_mut(&mut self) -> &mut RootCa {
+        self.roots.last_mut().expect("at least one root")
+    }
+
+    /// Sends at most the configured number of pushes within any rolling second.
+    fn drain_rotation_pushes(&mut self, mock_now: i64) {
+        let now = Instant::now();
+        while self
+            .rotation_push_times
+            .front()
+            .is_some_and(|sent| now.duration_since(*sent) >= Duration::from_secs(1))
+        {
+            self.rotation_push_times.pop_front();
         }
-        for device_id in batch {
-            // Re-check: the device may have been deleted meanwhile.
-            if self.devices.contains_key(&device_id) {
+        let limit = self.faults.rotation_rate_limit_per_sec.unwrap_or(10) as usize;
+        while self.rotation_push_times.len() < limit {
+            let Some((device_id, old_root)) = self.rotation_push_queue.pop_front() else {
+                break;
+            };
+            let eligible = self.devices.get(&device_id).is_some_and(|device| {
+                !device.revoked()
+                    && device.current_cert().is_some_and(|cert| {
+                        cert.issuer == old_root && cert.not_before <= mock_now && mock_now < cert.not_after
+                    })
+            });
+            if eligible && self.is_connected(device_id) {
                 self.push_to_device(device_id, &PushKind::RenewRequested("rotation"));
+                self.rotation_push_times.push_back(now);
             }
         }
     }
 
     /// Non-revoked devices whose current certificate was issued by the old root (§9.3
     /// `activeDevicesOnOldRoot`).
-    pub fn active_devices_on_old_root(&self) -> u64 {
+    pub fn active_devices_on_old_root(&self, now: i64) -> u64 {
         let Some(rotation) = &self.rotation else {
             return 0;
         };
         self.devices
             .values()
-            .filter(|d| !d.revoked() && d.current_cert().is_some_and(|c| c.issuer == rotation.old_root))
+            .filter(|d| {
+                !d.revoked()
+                    && d.current_cert()
+                        .is_some_and(|c| c.issuer == rotation.old_root && now < c.not_after)
+            })
             .count() as u64
     }
 
     /// Lazy rotation deadline handling: called on every request and by a 1 s ticker.
     /// When the mock clock reaches the deadline the old root leaves `trust-anchor`.
     pub fn tick(&mut self, now: i64) {
+        let expired_challenges = self
+            .challenged_streams
+            .iter()
+            .filter(|(_, stream)| {
+                self.lookup_cert(&stream.cert_thumbprint)
+                    .is_some_and(|cert| now >= cert.not_after)
+            })
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for stream_id in expired_challenges {
+            if let Some(stream) = self.challenged_streams.remove(&stream_id) {
+                let _ = PushKind::CloseExpired.send(&stream.tx);
+                self.close_stream(
+                    stream_id,
+                    stream.device_id,
+                    &stream.cert_thumbprint,
+                    "UNAUTHENTICATED",
+                    Some("certificate_expired"),
+                );
+            }
+        }
+        let expired = self
+            .streams
+            .iter()
+            .filter_map(|(id, stream)| {
+                let reason = match self.lookup_cert(&stream.cert_thumbprint) {
+                    None => Some(("UNAUTHENTICATED", "device_unknown", PushKind::CloseUnknown)),
+                    Some(cert) if cert.revoked => Some(("PERMISSION_DENIED", "device_revoked", PushKind::CloseRevoked)),
+                    Some(cert) if now >= cert.not_after => {
+                        Some(("UNAUTHENTICATED", "certificate_expired", PushKind::CloseExpired))
+                    }
+                    Some(_) => None,
+                }?;
+                Some((*id, reason))
+            })
+            .collect::<Vec<_>>();
+        for (stream_id, (status, code, push)) in expired {
+            if let Some(stream) = self.streams.remove(&stream_id) {
+                let _ = push.send(&stream.tx);
+                self.close_stream(stream_id, stream.device_id, &stream.cert_thumbprint, status, Some(code));
+            }
+        }
         if let Some(rotation) = &self.rotation
             && now >= rotation.deadline
         {
@@ -690,9 +925,8 @@ impl State {
                 root.published = false;
             }
             self.rotation = None;
-            return;
         }
-        self.drain_rotation_pushes();
+        self.drain_rotation_pushes(now);
     }
 
     /// §11 reset: clears tokens, devices, nonces, faults, rotation and the clock
@@ -704,15 +938,28 @@ impl State {
                 let _ = PushKind::CloseUnknown.send(&handle.tx);
             }
         }
+        for handle in self.challenged_streams.values() {
+            let _ = PushKind::CloseUnknown.send(&handle.tx);
+        }
         self.streams.clear();
+        self.challenged_streams.clear();
+        self.paused_hellos.clear();
+        self.closed_streams.clear();
         self.tokens.clear();
         self.token_hashes.clear();
         self.devices.clear();
         self.cert_index.clear();
+        self.deleted_revoked_keys.clear();
         self.nonces = NonceStore::default();
         self.faults = Faults::default();
         self.requests = RequestCounts::default();
         self.rotation = None;
+        self.rotation_push_queue.clear();
+        self.rotation_push_times.clear();
+        self.events.clear();
+        self.next_event_seq = 1;
+        self.next_device_seq = 1;
+        self.last_created_at = now;
         self.root_seq += 1;
         self.roots = vec![RootCa::generate(self.root_seq, now)?];
         Ok(())
@@ -786,6 +1033,7 @@ pub enum PushKind {
     CloseOk,
     CloseRevoked,
     CloseUnknown,
+    CloseExpired,
 }
 
 impl PushKind {
@@ -796,7 +1044,51 @@ impl PushKind {
             PushKind::CloseOk => StreamPush::CloseOk,
             PushKind::CloseRevoked => StreamPush::CloseRevoked,
             PushKind::CloseUnknown => StreamPush::CloseUnknown,
+            PushKind::CloseExpired => StreamPush::CloseExpired,
         };
         tx.try_send(push).map_err(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+
+    use super::*;
+
+    #[test]
+    fn rotation_destroys_the_old_signing_key() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let old_root = state.issuing_root().thumbprint.clone();
+        state
+            .start_rotation(None, now)
+            .expect("rotation without devices succeeds");
+        assert!(
+            state
+                .roots
+                .iter()
+                .find(|root| root.thumbprint == old_root)
+                .expect("old root remains for pinned certificates")
+                .key
+                .is_none()
+        );
+        assert!(state.issuing_root().key.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn failed_issuance_does_not_consume_an_enrollment_use() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let expired_root = state.issuing_root().not_after;
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, expired_root + 60, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        assert!(state.enroll(&secret, &csr, Map::new(), expired_root).is_err());
+        assert_eq!(state.tokens[&token_id].used_count, 0);
+        assert!(state.devices.is_empty());
+        Ok(())
     }
 }

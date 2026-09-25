@@ -7,15 +7,18 @@ use std::os::windows::io::FromRawHandle as _;
 use std::path::Path;
 
 use anyhow::{Context as _, ensure};
-use windows::Win32::Foundation::{GENERIC_WRITE, HLOCAL, LocalFree, NTE_BAD_KEYSET, NTE_NO_MORE_ITEMS, NTE_NOT_FOUND};
+use windows::Win32::Foundation::{
+    CloseHandle, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree, NTE_BAD_KEYSET, NTE_NO_MORE_ITEMS, NTE_NOT_FOUND,
+};
 use windows::Win32::Security::Authorization::{
     ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
     GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::Cryptography::{
-    CERT_KEY_SPEC, CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CryptProtectData, CryptUnprotectData,
-    MS_KEY_STORAGE_PROVIDER, NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE,
-    NCRYPT_MACHINE_KEY_FLAG, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NCRYPT_PROV_HANDLE, NCryptDeleteKey, NCryptEnumKeys,
+    BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_PUBLIC_P256_MAGIC, CERT_KEY_SPEC, CRYPT_INTEGER_BLOB,
+    CRYPTPROTECT_LOCAL_MACHINE, CryptProtectData, CryptUnprotectData, MS_KEY_STORAGE_PROVIDER,
+    NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE, NCRYPT_MACHINE_KEY_FLAG,
+    NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NCRYPT_PROV_HANDLE, NCRYPT_SECURITY_DESCR_PROPERTY, NCryptDeleteKey, NCryptEnumKeys,
     NCryptExportKey, NCryptFreeBuffer, NCryptFreeObject, NCryptGetProperty, NCryptKeyName, NCryptOpenKey,
     NCryptOpenStorageProvider,
 };
@@ -24,9 +27,54 @@ use windows::Win32::Security::{
     SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE};
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
+};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 const ENTROPY: &[u8] = b"Devolutions.Agent.PendingEnrollment.v1";
+
+pub(crate) struct AgentJob(HANDLE);
+
+// SAFETY: This wrapper owns the OS handle, and Windows job handles are valid across threads.
+unsafe impl Send for AgentJob {}
+// SAFETY: No operation mutates the handle through a shared reference.
+unsafe impl Sync for AgentJob {}
+
+impl AgentJob {
+    pub(crate) fn attach(pid: u32) -> anyhow::Result<Self> {
+        // SAFETY: A private, unnamed job has no borrowed security attributes or name.
+        let job = Self(unsafe { CreateJobObjectW(None, None)? });
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: The job and limits buffer are valid for this synchronous call.
+        unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())?,
+            )?
+        };
+        // SAFETY: The child PID came from the process just spawned by this test.
+        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid)? };
+        // SAFETY: Both handles remain open until the assignment returns.
+        let assigned = unsafe { AssignProcessToJobObject(job.0, process) };
+        // SAFETY: OpenProcess returned an owned handle.
+        unsafe { CloseHandle(process)? };
+        assigned?;
+        Ok(job)
+    }
+}
+
+impl Drop for AgentJob {
+    fn drop(&mut self) {
+        // SAFETY: Closing our only job handle kills its entire process tree.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
 
 fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
     value.encode_wide().chain(Some(0)).collect()
@@ -176,16 +224,30 @@ pub(crate) fn pending_acl_is_protected(path: &Path) -> anyhow::Result<()> {
     };
     ensure!(result.0 == 0, "could not read pending-file DACL ({})", result.0);
     let descriptor = SecurityDescriptor(raw);
+    let acl = protected_dacl_sddl(descriptor.0)?;
+    let user_sid = canonical_sddl_sid(&current_user_sid()?)?;
+    let expected_aces = format!("(A;;FA;;;SY)(A;;FA;;;{user_sid})");
+    ensure!(
+        has_only_required_aces(&acl, &user_sid),
+        "pending-file DACL grants access beyond SYSTEM and the current user: actual SDDL {acl}; expected ACEs {expected_aces}"
+    );
+    Ok(())
+}
+
+fn protected_dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> anyhow::Result<String> {
     let mut control = 0;
     let mut revision = 0;
     // SAFETY: The security descriptor remains live until the function returns.
-    unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision)? };
-    ensure!(control & SE_DACL_PROTECTED.0 != 0, "pending-file DACL is not protected");
+    unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision)? };
+    ensure!(
+        control & SE_DACL_PROTECTED.0 != 0,
+        "security descriptor DACL is not protected"
+    );
     let mut sddl = PWSTR::null();
     // SAFETY: The descriptor is valid and the output string is owned until freed with LocalFree.
     unsafe {
         ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.0,
+            descriptor,
             SDDL_REVISION_1,
             DACL_SECURITY_INFORMATION,
             &mut sddl,
@@ -196,12 +258,7 @@ pub(crate) fn pending_acl_is_protected(path: &Path) -> anyhow::Result<()> {
     let acl = unsafe { sddl.to_string() };
     // SAFETY: LocalFree releases the SDDL string allocated by the conversion.
     unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
-    let acl = acl?;
-    ensure!(
-        has_only_required_aces(&acl, &canonical_sddl_sid(&current_user_sid()?)?),
-        "pending-file DACL grants access beyond SYSTEM and the current user"
-    );
-    Ok(())
+    acl.map_err(Into::into)
 }
 
 /// Returns the SID as Windows writes it in SDDL, which uses aliases for some accounts
@@ -412,31 +469,118 @@ pub(crate) fn assert_non_exportable(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn assert_machine_key_acl(name: &str) -> anyhow::Result<()> {
+    let provider = Provider::open()?;
+    let key = provider.key(name)?.context("machine key not found for ACL check")?;
+    let mut needed = 0;
+    // SAFETY: A null output buffer asks NCrypt for the security descriptor length.
+    let _ = unsafe {
+        NCryptGetProperty(
+            NCRYPT_HANDLE(key.0.0),
+            NCRYPT_SECURITY_DESCR_PROPERTY,
+            None,
+            &mut needed,
+            DACL_SECURITY_INFORMATION,
+        )
+    };
+    ensure!(needed > 0, "machine key has no readable security descriptor");
+    let mut bytes = vec![0u8; usize::try_from(needed)?];
+    // SAFETY: The writable buffer is at least the size NCrypt reported.
+    unsafe {
+        NCryptGetProperty(
+            NCRYPT_HANDLE(key.0.0),
+            NCRYPT_SECURITY_DESCR_PROPERTY,
+            Some(&mut bytes),
+            &mut needed,
+            DACL_SECURITY_INFORMATION,
+        )?
+    };
+    let acl = protected_dacl_sddl(PSECURITY_DESCRIPTOR(bytes.as_mut_ptr().cast()))?;
+    let user_sid = canonical_sddl_sid(&current_user_sid()?)?;
+    ensure!(
+        has_only_required_aces(&acl, &user_sid),
+        "machine-key DACL grants access beyond SYSTEM and the current user: actual SDDL {acl}; expected ACEs (A;;FA;;;SY)(A;;FA;;;{user_sid})"
+    );
+    Ok(())
+}
+
+pub(crate) fn machine_public_key(name: &str) -> anyhow::Result<Vec<u8>> {
+    let provider = Provider::open()?;
+    let key = provider
+        .key(name)?
+        .context("machine key not found for public-key check")?;
+    let mut needed = 0;
+    // SAFETY: A null output buffer asks NCrypt for the public blob length.
+    let _ = unsafe {
+        NCryptExportKey(
+            key.0,
+            None,
+            BCRYPT_ECCPUBLIC_BLOB,
+            None,
+            None,
+            &mut needed,
+            NCRYPT_FLAGS(0),
+        )
+    };
+    ensure!(needed >= 72, "machine key has no P-256 public blob");
+    let mut bytes = vec![0u8; usize::try_from(needed)?];
+    // SAFETY: The buffer has the length NCrypt requested for the public blob.
+    unsafe {
+        NCryptExportKey(
+            key.0,
+            None,
+            BCRYPT_ECCPUBLIC_BLOB,
+            None,
+            Some(&mut bytes),
+            &mut needed,
+            NCRYPT_FLAGS(0),
+        )?
+    };
+    let magic = u32::from_le_bytes(bytes[0..4].try_into()?);
+    let coordinate_len = u32::from_le_bytes(bytes[4..8].try_into()?);
+    ensure!(
+        magic == BCRYPT_ECDSA_PUBLIC_P256_MAGIC && coordinate_len == 32 && needed == 72,
+        "machine key is not an ECDSA P-256 public key"
+    );
+    let mut sec1 = Vec::with_capacity(65);
+    sec1.push(4);
+    sec1.extend_from_slice(&bytes[8..72]);
+    Ok(sec1)
+}
+
 pub(crate) fn cleanup_machine_keys(
     dir: &Path,
     known_keys: &[String],
     preexisting: &HashSet<String>,
     known_authorities: &HashSet<uuid::Uuid>,
+    should_delete: bool,
 ) {
-    if known_authorities.is_empty() {
-        match snapshot_machine_identity_keys() {
-            Ok(keys) => {
-                let mut leftovers = keys.difference(preexisting).cloned().collect::<Vec<_>>();
-                leftovers.sort_unstable();
-                eprintln!(
-                    "skipping machine key cleanup without --authority-id; leftover candidates: {}",
-                    if leftovers.is_empty() {
-                        "none".to_owned()
-                    } else {
-                        leftovers.join(", ")
-                    }
-                );
-            }
-            Err(error) => eprintln!("skipping machine key cleanup; could not list leftover candidates: {error:#}"),
+    let after = match snapshot_machine_identity_keys() {
+        Ok(keys) => keys,
+        Err(error) => {
+            eprintln!("skipping machine key cleanup; could not enumerate keys: {error:#}");
+            return;
         }
+    };
+    let names = teardown_candidates(dir, known_keys, preexisting, &after, known_authorities);
+    if !should_delete || known_authorities.is_empty() {
+        let candidates = if known_authorities.is_empty() {
+            after.difference(preexisting).cloned().collect::<HashSet<_>>()
+        } else {
+            names
+        };
+        let mut leftovers = candidates.into_iter().collect::<Vec<_>>();
+        leftovers.sort_unstable();
+        eprintln!(
+            "skipping machine key cleanup (DVLS needs --cleanup-machine-keys; deletion needs --authority-id); leftover candidates: {}",
+            if leftovers.is_empty() {
+                "none".to_owned()
+            } else {
+                leftovers.join(", ")
+            }
+        );
         return;
     }
-    let names = cleanup_candidates(dir, known_keys, preexisting, known_authorities);
     if names.is_empty() {
         return;
     }
@@ -452,6 +596,37 @@ pub(crate) fn cleanup_machine_keys(
             std::mem::forget(key);
         }
     }
+}
+
+fn teardown_candidates(
+    dir: &Path,
+    known_keys: &[String],
+    preexisting: &HashSet<String>,
+    after: &HashSet<String>,
+    known_authorities: &HashSet<uuid::Uuid>,
+) -> HashSet<String> {
+    let mut names = cleanup_candidates(dir, known_keys, preexisting, known_authorities);
+    names.extend(
+        after
+            .difference(preexisting)
+            .filter(|name| matches_known_authority(name, known_authorities))
+            .cloned(),
+    );
+    names.retain(|name| after.contains(name));
+    names
+}
+
+fn matches_known_authority(name: &str, authorities: &HashSet<uuid::Uuid>) -> bool {
+    authorities.iter().any(|authority| {
+        name.strip_prefix(&format!("DevolutionsAgent-Identity-{authority}-"))
+            .is_some_and(|generation| {
+                !generation.is_empty()
+                    && generation.len() <= 64
+                    && generation
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+            })
+    })
 }
 
 fn cleanup_candidates(
@@ -477,19 +652,7 @@ fn cleanup_candidates(
             }
         }
     }
-    names.retain(|name| {
-        !preexisting.contains(name)
-            && known_authorities.iter().any(|authority| {
-                name.strip_prefix(&format!("DevolutionsAgent-Identity-{authority}-"))
-                    .is_some_and(|generation| {
-                        !generation.is_empty()
-                            && generation.len() <= 64
-                            && generation
-                                .chars()
-                                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                    })
-            })
-    });
+    names.retain(|name| !preexisting.contains(name) && matches_known_authority(name, known_authorities));
     names
 }
 
@@ -524,6 +687,7 @@ mod tests {
     fn pending_acl_rejects_extra_allow_ace() {
         let sid = "S-1-5-21-42";
         assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)", sid));
+        assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;LA)", "LA"));
         assert!(!has_only_required_aces(
             "D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)(A;;FA;;;WD)",
             sid
@@ -585,5 +749,26 @@ mod tests {
         assert_eq!(selected, HashSet::from([current]));
         assert!(cleanup_candidates(dir.path(), &[unrelated], &HashSet::new(), &HashSet::new()).is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn teardown_finds_orphans_without_an_identity_file() {
+        let authority = uuid::Uuid::new_v4();
+        let orphan = format!("DevolutionsAgent-Identity-{authority}-orphan");
+        let unrelated = format!("DevolutionsAgent-Identity-{}-other", uuid::Uuid::new_v4());
+        let preexisting = HashSet::from([format!("DevolutionsAgent-Identity-{authority}-preexisting")]);
+        let after = HashSet::from([
+            orphan.clone(),
+            unrelated,
+            preexisting.iter().next().expect("preexisting").clone(),
+        ]);
+        let selected = teardown_candidates(
+            Path::new("nonexistent-agent-identity-fixture"),
+            &[],
+            &preexisting,
+            &after,
+            &HashSet::from([authority]),
+        );
+        assert_eq!(selected, HashSet::from([orphan]));
     }
 }

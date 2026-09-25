@@ -26,6 +26,7 @@ pub fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
     if metadata.len() > MAX_METADATA_KEYS {
         return Err(format!("metadata has more than {MAX_METADATA_KEYS} keys"));
     }
+    let mut total = 0usize;
     for (key, value) in metadata {
         if !valid_metadata_key(key) {
             return Err(format!("invalid metadata key {key:?}"));
@@ -44,9 +45,9 @@ pub fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
         {
             return Err(format!("metadata value for {key:?} contains control characters"));
         }
+        total += key.len() + value.len();
     }
-    let total = serde_json::to_vec(metadata).map_err(|_| "metadata is not serializable".to_owned())?;
-    if total.len() > MAX_METADATA_TOTAL_BYTES {
+    if total > MAX_METADATA_TOTAL_BYTES {
         return Err(format!("metadata object exceeds {MAX_METADATA_TOTAL_BYTES} bytes"));
     }
     Ok(())
@@ -129,8 +130,7 @@ fn parse_format(format: &str) -> Result<Vec<FormatPart<'_>>, String> {
             parts.push(FormatPart::Placeholder(name));
             rest = &stripped[end + 1..];
         } else {
-            parts.push(FormatPart::Literal("}"));
-            rest = &tail[1..];
+            return Err("unpaired `}` in format".to_owned());
         }
     }
     parts.push(FormatPart::Literal(rest));

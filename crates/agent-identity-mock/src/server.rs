@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower::{Service, ServiceExt as _};
 
-use crate::api_agent::DROP_HEADER;
+use crate::api_agent::{DROP_HEADER, INJECTED_HEADER};
 use crate::app::App;
 use crate::channel::ChannelService;
 
@@ -45,6 +45,7 @@ impl std::error::Error for ConnectionAborted {}
 #[derive(Clone)]
 pub struct Dispatcher {
     prefix: Arc<String>,
+    app: Arc<App>,
     grpc: AgentChannelServer<ChannelService>,
     rest: Router,
 }
@@ -70,6 +71,7 @@ impl Dispatcher {
             });
         Self {
             prefix: Arc::new(app.prefix.clone()),
+            app: Arc::clone(&app),
             grpc: AgentChannelServer::new(ChannelService { app }),
             rest,
         }
@@ -112,6 +114,20 @@ impl Dispatcher {
         if response.headers_mut().remove(DROP_HEADER).is_some() {
             // The fault fired: commit happened; abort without responding (§11).
             return Err(ConnectionAborted);
+        }
+        let injected = response.headers_mut().remove(INJECTED_HEADER).is_some();
+        if !injected
+            && (stripped == "/api/agent-identity/v1" || stripped.starts_with("/api/agent-identity/v1/"))
+            && matches!(response.status().as_u16(), 400 | 404 | 405 | 413)
+        {
+            let status = response.status().as_u16();
+            let message = match status {
+                404 => "unknown agent-identity route",
+                405 => "method not allowed",
+                413 => "agent-identity request body is too large",
+                _ => "invalid agent-identity request",
+            };
+            response = crate::api_agent::agent_error(&self.app, status, "invalid_request", message);
         }
         Ok(response.map(|body| body.map_err(|e| -> BoxError { Box::new(e) }).boxed_unsync()))
     }

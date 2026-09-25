@@ -80,8 +80,8 @@ struct ProofCase {
 
 #[derive(Deserialize)]
 struct CsrSection {
-    valid: CsrCase,
-    bad_self_signature: CsrCase,
+    #[serde(flatten)]
+    cases: HashMap<String, CsrCase>,
 }
 
 #[derive(Deserialize)]
@@ -225,10 +225,8 @@ fn channel_proof_cases() {
 #[test]
 fn csr_cases() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
-    for (name, case) in [
-        ("valid", &vectors.csr.valid),
-        ("bad_self_signature", &vectors.csr.bad_self_signature),
-    ] {
+    assert!(!vectors.csr.cases.is_empty(), "CSR cases are missing");
+    for (name, case) in &vectors.csr.cases {
         let der = STANDARD.decode(&case.csr).expect("valid csr base64");
         match (check_csr(&der), case.expected.as_str()) {
             (Ok(key), "ok") => {

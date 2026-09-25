@@ -32,6 +32,7 @@ It then writes `<state-dir>/ready.json` atomically (temp file + rename):
 All time in the mock is the mock clock: real time plus an offset.
 `POST __mock__/time/advance` adds to the offset and `faults.clock_skew_secs` adds a skew on top.
 Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `last_seen_at` all use it.
+Advancing the clock immediately closes expired streams and applies rotation deadlines.
 
 ## Routes
 
@@ -42,10 +43,11 @@ All paths below are relative to `base_url` (i.e. they include the path prefix).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/agent-identity/v1/trust-anchor` | `{ "roots": [ { "certificate" (base64 DER), "thumbprint", "not_before", "not_after" } ] }`; two roots while a rotation is in progress. |
-| POST | `/api/agent-identity/v1/enroll` | `Authorization: Bearer <dvaet1 token>`; body `{ "csr": "<base64 DER PKCS#10>", "metadata"?: {...} }`. |
+| POST | `/api/agent-identity/v1/enroll` | `Authorization: Bearer <dvaet1 token>`; body `{ "csr": "<base64 DER PKCS#10>", "metadata": {...} }`. |
 | POST | `/api/agent-identity/v1/renew` | RFC 9421-signed with `tag="renew"`; `Content-Digest` over the exact body bytes. |
 
 Non-2xx agent-facing responses carry `{ "error", "message", "server_time" }` with the §5.4 codes.
+Enrollment and renewal both require a `metadata` object, which may be empty.
 The channel gRPC method is `POST <prefix>/devolutions.agent.identity.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with an `error-code` trailer (§7.4).
 
 ### Admin (CONTRACT.md §9), `Authorization: Bearer <admin-token>`
@@ -59,25 +61,32 @@ For permission tests, `<admin-token>-unprivileged` is authenticated without Agen
 | GET | `/api/v3/agent-identity/enrollment-tokens` | `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25); DVLS page shape `{ data, currentPage, pageSize, totalCount, totalPages }`. |
 | GET | `/api/v3/agent-identity/enrollment-tokens/{id}` | `TokenRecord`; 404 when unknown or deleted. |
 | DELETE | `/api/v3/agent-identity/enrollment-tokens/{id}` | 204; enrollment with it afterwards yields `token_invalid`. |
-| GET | `/api/v3/agent-identity/devices` | Query: `pageNumber`, `pageSize`, `view=summary\|full`, `metadata=k1,k2`, `status=active\|revoked\|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (case-insensitive friendly-name substring); ordered by `(createdAt, id)`. |
+| GET | `/api/v3/agent-identity/devices` | Query: `pageNumber`, `pageSize`, `view=summary\|full`, `metadata=k1,k2`, `status=active\|revoked\|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (case-insensitive friendly-name substring); ordered by creation. |
 | GET | `/api/v3/agent-identity/devices/{id}` | Full view. |
 | PATCH | `/api/v3/agent-identity/devices/{id}` | `{ "friendlyName" }` (1..255 chars) → full view. |
 | POST | `/api/v3/agent-identity/devices/{id}/revoke` | 204, idempotent; closes live streams PERMISSION_DENIED + `device_revoked`. |
 | DELETE | `/api/v3/agent-identity/devices/{id}` | 204, or 409 unless the device is revoked. |
 | POST | `/api/v3/agent-identity/devices/{id}/request-renewal` | 202; sets the flag and pushes `RenewRequested{reason:"admin"}` to live streams. |
-| POST | `/api/v3/agent-identity/ca/rotation` | Body `{ "deadline"?: "<RFC 3339>" \| "now" }`; 202 → `Rotation`; 409 while one is in progress. |
+| POST | `/api/v3/agent-identity/ca/rotation` | Body `{ "deadline"?: "<RFC 3339>" \| "now" }`; 202 → `Rotation`; 400 if the deadline exceeds the last unexpired current old-root certificate; 409 while rotating. |
 | GET | `/api/v3/agent-identity/ca/rotation` | `{ phase: "idle"\|"rotating", oldRoot?, newRoot?, deadline?, activeDevicesOnOldRoot }`. |
 
 ### Mock control (CONTRACT.md §11), no auth
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/__mock__/faults` | Merges fields: `{ drop_next_response?: "enroll"\|"renew"\|null, clock_skew_secs?: int\|null, leaf_lifetime_secs?: int\|null, channel_available?: bool, rotation_rate_limit_per_sec?: int\|null }`; absent keys keep their value, `null` clears; responds with the merged faults. `drop_next_response` is one-shot: the next such request is processed and committed, then the connection aborts without a response. |
+| POST | `/__mock__/faults` | Merges `drop_next_response`, `fail_next_response`, `clock_skew_secs`, `leaf_lifetime_secs`, `channel_available` and `rotation_rate_limit_per_sec`; absent keys retain their value, and `null` clears optional fields. |
 | POST | `/__mock__/reset` | Clears tokens, devices, nonces, faults, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `device_unknown`. Responds `{ "authority_id" }`. |
-| POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock; rotation deadlines are applied lazily on the next request and by a 1 s ticker. Responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
-| GET | `/__mock__/requests?token_id=<uuid>` | Reports per-token `enroll` attempts, total `enroll_total`, `renew`, `connect`, `authenticated_connects`, `correlated_acks`, `overlap_open`, and `active_streams`; omit `token_id` for total enroll attempts. Reset clears all counters. |
+| POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock and immediately applies stream expiry and rotation deadlines; responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
+| GET | `/__mock__/events?device_id=<uuid>` | Returns `{ "events": [...] }` in increasing `seq` order: `stream_opened`, `stream_authenticated`, `stream_closed` (with `status` and optional `error_code`), and `cert_status_changed`. |
+| POST | `/__mock__/handshake` | Test-only `{ "pause": true\|false }` holds valid Hello proofs before authentication so key-deletion ordering can be checked; reset releases the barrier. |
+| GET | `/__mock__/requests?token_id=<uuid>` | Reports per-token `enroll` attempts, total `enroll_total`, `renew`, `connect`, `authenticated_connects`, `correlated_acks`, `overlap_open` (only after proof), `active_streams`, and `paused_hellos`; omit `token_id` for total enroll attempts. Reset clears all counters. |
 | POST | `/__mock__/reconnect` | `{ "device_id": "<uuid>" }` pushes `Reconnect{reason:"mock"}` to the device's live streams; responds 202. |
+
+`drop_next_response` processes the next matching request, then aborts the connection without replying.
+`fail_next_response` rejects it before processing with `{ "endpoint": "enroll"|"renew", "status": 400..599, "error"?: "<§5.4 code>" }`; without `error`, the response body is empty.
+Rotation pushes default to 10 per rolling second and continue after an emergency deadline until the queue drains.
+The old root's signing key is discarded when rotation starts.
 
 ## Tests
 
-`cargo test -p agent-identity-mock` runs the in-crate vector test, which replays every case of `docs/agent-identity/test-vectors.json` through the same verifier, channel-proof and CSR-check functions the server uses.
+`cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.

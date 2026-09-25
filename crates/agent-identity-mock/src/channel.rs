@@ -78,6 +78,9 @@ impl AgentChannel for ChannelService {
         let signature = header_bytes("signature");
 
         let now = app.now();
+        let stream_id = Uuid::new_v4();
+        let (out_tx, out_rx) = mpsc::channel(32);
+        let (push_tx, push_rx) = mpsc::channel(32);
         let auth = {
             let mut state = app.state.lock().await;
             state.tick(now);
@@ -106,18 +109,28 @@ impl AgentChannel for ChannelService {
                     nonces,
                 )
             };
-            if let Ok(auth) = &result
-                && state.is_connected(auth.device_id())
-            {
-                state.requests.overlap_open += 1;
+            if let Ok(auth) = &result {
+                state.challenged_streams.insert(
+                    stream_id,
+                    StreamHandle {
+                        device_id: auth.device_id(),
+                        cert_thumbprint: auth.cert_thumbprint().to_owned(),
+                        tx: push_tx.clone(),
+                    },
+                );
+                state.record_event(
+                    auth.device_id(),
+                    "stream_opened",
+                    serde_json::json!({
+                        "stream_id": stream_id,
+                        "cert_thumbprint": auth.cert_thumbprint(),
+                    }),
+                );
             }
             result
         };
         let auth = auth.map_err(rejection_status)?;
 
-        let (out_tx, out_rx) = mpsc::channel(32);
-        let (push_tx, push_rx) = mpsc::channel(32);
-        let stream_id = Uuid::new_v4();
         tokio::spawn(run_stream(
             app,
             stream_id,
@@ -147,6 +160,54 @@ async fn close_with(out: &mpsc::Sender<Result<ServerMessage, Status>>, status: S
     let _ = out.send(Err(status)).await;
 }
 
+async fn finish_stream(
+    app: &App,
+    stream_id: Uuid,
+    device_id: Uuid,
+    cert_thumbprint: &str,
+    status: &str,
+    error_code: Option<&str>,
+) {
+    app.state
+        .lock()
+        .await
+        .close_stream(stream_id, device_id, cert_thumbprint, status, error_code);
+}
+
+async fn close_opening_push(
+    app: &App,
+    out: &mpsc::Sender<Result<ServerMessage, Status>>,
+    stream_id: Uuid,
+    device_id: Uuid,
+    cert_thumbprint: &str,
+    push: Option<StreamPush>,
+) {
+    let (code, error_code) = match push {
+        Some(StreamPush::CloseExpired) => (Code::Unauthenticated, "certificate_expired"),
+        Some(StreamPush::CloseUnknown) => (Code::Unauthenticated, "device_unknown"),
+        Some(StreamPush::CloseRevoked) => (Code::PermissionDenied, "device_revoked"),
+        Some(StreamPush::CloseOk) => {
+            finish_stream(app, stream_id, device_id, cert_thumbprint, "OK", None).await;
+            return;
+        }
+        _ => (Code::Unauthenticated, "signature_invalid"),
+    };
+    close_with(out, error_status(code, error_code)).await;
+    finish_stream(
+        app,
+        stream_id,
+        device_id,
+        cert_thumbprint,
+        if code == Code::PermissionDenied {
+            "PERMISSION_DENIED"
+        } else {
+            "UNAUTHENTICATED"
+        },
+        Some(error_code),
+    )
+    .await;
+}
+
 async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
@@ -171,14 +232,30 @@ async fn run_stream(
         }),
     );
     if !send(&out, challenge_msg).await {
+        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
         return;
     }
 
     // Step 3: wait for the Hello, bound to this stream's challenge and the connect nonce.
-    let hello = match tokio::time::timeout(HELLO_TIMEOUT, client.next()).await {
-        Ok(Some(Ok(message))) => message,
-        Ok(Some(Err(_))) | Ok(None) | Err(_) => {
-            close_with(&out, error_status(Code::Unauthenticated, "signature_invalid")).await;
+    let hello = tokio::select! {
+        result = tokio::time::timeout(HELLO_TIMEOUT, client.next()) => match result {
+            Ok(Some(Ok(message))) => message,
+            Ok(Some(Err(_))) | Ok(None) | Err(_) => {
+                close_with(&out, error_status(Code::Unauthenticated, "signature_invalid")).await;
+                finish_stream(
+                    &app,
+                    stream_id,
+                    device_id,
+                    &cert_thumbprint,
+                    "UNAUTHENTICATED",
+                    Some("signature_invalid"),
+                )
+                .await;
+                return;
+            }
+        },
+        push = push_rx.recv() => {
+            close_opening_push(&app, &out, stream_id, device_id, &cert_thumbprint, push).await;
             return;
         }
     };
@@ -192,6 +269,15 @@ async fn run_stream(
         };
     if !hello_ok {
         close_with(&out, error_status(Code::Unauthenticated, "signature_invalid")).await;
+        finish_stream(
+            &app,
+            stream_id,
+            device_id,
+            &cert_thumbprint,
+            "UNAUTHENTICATED",
+            Some("signature_invalid"),
+        )
+        .await;
         return;
     }
     let Some(agent_message::Payload::Hello(hello_payload)) = hello.payload else {
@@ -205,7 +291,44 @@ async fn run_stream(
         .collect();
     if name_eval::validate_metadata(&metadata).is_err() {
         close_with(&out, error_status(Code::InvalidArgument, "invalid_request")).await;
+        finish_stream(
+            &app,
+            stream_id,
+            device_id,
+            &cert_thumbprint,
+            "INVALID_ARGUMENT",
+            Some("invalid_request"),
+        )
+        .await;
         return;
+    }
+
+    let mut gate = app.handshake_gate.subscribe();
+    if !*gate.borrow() {
+        app.state.lock().await.paused_hellos.insert(stream_id);
+        loop {
+            if *gate.borrow_and_update() {
+                break;
+            }
+            tokio::select! {
+                changed = gate.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                }
+                push = push_rx.recv() => {
+                    close_opening_push(&app, &out, stream_id, device_id, &cert_thumbprint, push).await;
+                    return;
+                }
+                message = client.next() => {
+                    if message.is_none_or(|message| message.is_err()) {
+                        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+                        return;
+                    }
+                }
+            }
+        }
+        app.state.lock().await.paused_hellos.remove(&stream_id);
     }
 
     // Step 4: only now does anything happen server-side.
@@ -230,6 +353,18 @@ async fn run_stream(
         if let Some(rejection) = rejection {
             Err(rejection)
         } else {
+            state.challenged_streams.remove(&stream_id);
+            if state.is_connected(device_id) {
+                state.requests.overlap_open += 1;
+            }
+            state.record_event(
+                device_id,
+                "stream_authenticated",
+                serde_json::json!({
+                    "stream_id": stream_id,
+                    "cert_thumbprint": cert_thumbprint,
+                }),
+            );
             state.note_cert_authenticated(device_id, &cert_thumbprint);
             let reason = state.devices.get_mut(&device_id).and_then(|device| {
                 device.metadata = metadata;
@@ -252,6 +387,19 @@ async fn run_stream(
         Ok(reason) => reason,
         Err(rejection) => {
             close_with(&out, rejection_status(rejection)).await;
+            finish_stream(
+                &app,
+                stream_id,
+                device_id,
+                &cert_thumbprint,
+                if rejection == Rejection::DeviceRevoked {
+                    "PERMISSION_DENIED"
+                } else {
+                    "UNAUTHENTICATED"
+                },
+                Some(rejection.code()),
+            )
+            .await;
             return;
         }
     };
@@ -265,7 +413,7 @@ async fn run_stream(
         }),
     );
     if !send(&out, welcome).await {
-        app.state.lock().await.streams.remove(&stream_id);
+        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
         return;
     }
 
@@ -281,7 +429,7 @@ async fn run_stream(
         );
         awaiting_ack.insert(message.id.clone());
         if !send(&out, message).await {
-            app.state.lock().await.streams.remove(&stream_id);
+            finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
             return;
         }
     }
@@ -289,6 +437,7 @@ async fn run_stream(
     // §7.4 termination handling.
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut termination = ("OK", None);
     loop {
         tokio::select! {
             message = client.next() => {
@@ -335,10 +484,17 @@ async fn run_stream(
                     Some(StreamPush::CloseOk) => break,
                     Some(StreamPush::CloseRevoked) => {
                         close_with(&out, error_status(Code::PermissionDenied, "device_revoked")).await;
+                        termination = ("PERMISSION_DENIED", Some("device_revoked"));
                         break;
                     }
                     Some(StreamPush::CloseUnknown) => {
                         close_with(&out, error_status(Code::Unauthenticated, "device_unknown")).await;
+                        termination = ("UNAUTHENTICATED", Some("device_unknown"));
+                        break;
+                    }
+                    Some(StreamPush::CloseExpired) => {
+                        close_with(&out, error_status(Code::Unauthenticated, "certificate_expired")).await;
+                        termination = ("UNAUTHENTICATED", Some("certificate_expired"));
                         break;
                     }
                     None => break,
@@ -351,23 +507,35 @@ async fn run_stream(
                 let outcome = {
                     let state = app.state.lock().await;
                     match state.lookup_cert(&cert_thumbprint) {
-                        None => Some(error_status(Code::Unauthenticated, "device_unknown")),
-                        Some(cert) if cert.revoked => {
-                            Some(error_status(Code::PermissionDenied, "device_revoked"))
-                        }
-                        Some(cert) if now >= cert.not_after => {
-                            Some(error_status(Code::Unauthenticated, "certificate_expired"))
-                        }
+                        None => Some(Rejection::DeviceUnknown),
+                        Some(cert) if cert.revoked => Some(Rejection::DeviceRevoked),
+                        Some(cert) if now >= cert.not_after => Some(Rejection::CertificateExpired),
                         Some(_) => None,
                     }
                 };
-                if let Some(status) = outcome {
-                    close_with(&out, status).await;
+                if let Some(rejection) = outcome {
+                    close_with(&out, rejection_status(rejection)).await;
+                    termination = (
+                        if rejection == Rejection::DeviceRevoked {
+                            "PERMISSION_DENIED"
+                        } else {
+                            "UNAUTHENTICATED"
+                        },
+                        Some(rejection.code()),
+                    );
                     break;
                 }
             }
         }
     }
 
-    app.state.lock().await.streams.remove(&stream_id);
+    finish_stream(
+        &app,
+        stream_id,
+        device_id,
+        &cert_thumbprint,
+        termination.0,
+        termination.1,
+    )
+    .await;
 }
