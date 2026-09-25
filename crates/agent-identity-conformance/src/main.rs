@@ -542,6 +542,7 @@ const TESTS: &[Test] = &[
     p!(p_device_cannot_impersonate_another),
     p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
+    p!(p_signature_parameter_order_accepted).channel(),
     p!(p_renew_rejects_sha384_csr),
     p!(p_same_tag_covered_components_rejected),
     p!(p_same_tag_connect_components_rejected).channel(),
