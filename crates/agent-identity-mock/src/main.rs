@@ -129,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
         unprivileged_token: format!("{}-unprivileged", args.admin_token),
         admin_token: args.admin_token,
         clock,
+        handshake_gate: tokio::sync::watch::channel(true).0,
         state: Mutex::new(state),
     });
 

@@ -36,6 +36,7 @@ struct Test {
     kind: Kind,
     mock_only: bool,
     needs_second: bool,
+    needs_channel: bool,
     run: TestFn,
 }
 
@@ -46,6 +47,7 @@ impl Test {
             kind: Kind::Protocol,
             mock_only,
             needs_second: false,
+            needs_channel: false,
             run,
         }
     }
@@ -56,12 +58,18 @@ impl Test {
             kind: Kind::Agent,
             mock_only,
             needs_second: false,
+            needs_channel: false,
             run,
         }
     }
 
     const fn second(mut self) -> Self {
         self.needs_second = true;
+        self
+    }
+
+    const fn channel(mut self) -> Self {
+        self.needs_channel = true;
         self
     }
 }
@@ -93,6 +101,12 @@ struct Context {
     second: Option<Target>,
     target_kind: TargetKind,
     disposable_dvls_target: bool,
+    dvls_rotation_window_secs: u64,
+    leaf_lifetime_secs: u64,
+    expect_channel: bool,
+    channel_available: bool,
+    cleanup_machine_keys: bool,
+    agent_version: Option<String>,
     unprivileged_admin_token: Option<String>,
     agent_bin: PathBuf,
     key_backend: KeyBackend,
@@ -122,6 +136,12 @@ struct Options {
     filter: String,
     list: bool,
     disposable_dvls_target: bool,
+    dvls_rotation_window_secs: u64,
+    leaf_lifetime_secs: u64,
+    expect_channel: bool,
+    allow_incomplete: bool,
+    cleanup_machine_keys: bool,
+    agent_version: Option<String>,
 }
 
 impl Default for Options {
@@ -147,6 +167,12 @@ impl Default for Options {
             filter: String::new(),
             list: false,
             disposable_dvls_target: false,
+            dvls_rotation_window_secs: 60,
+            leaf_lifetime_secs: 90 * 24 * 3600,
+            expect_channel: true,
+            allow_incomplete: false,
+            cleanup_machine_keys: false,
+            agent_version: None,
         }
     }
 }
@@ -164,6 +190,18 @@ impl Options {
                 options.disposable_dvls_target = true;
                 continue;
             }
+            if flag == "--allow-incomplete" {
+                options.allow_incomplete = true;
+                continue;
+            }
+            if flag == "--cleanup-machine-keys" {
+                options.cleanup_machine_keys = true;
+                continue;
+            }
+            if flag == "--no-expect-channel" {
+                options.expect_channel = false;
+                continue;
+            }
             let value = args.next().with_context(|| format!("missing value for {flag}"))?;
             match flag.as_str() {
                 "--target" => {
@@ -177,12 +215,34 @@ impl Options {
                 "--admin-token" => options.admin_token = Some(value),
                 "--authority-id" => options.authority_id = Some(value),
                 "--agent-bin" => options.agent_bin = Some(value.into()),
+                "--agent-version" => {
+                    ensure!(!value.is_empty(), "--agent-version must not be empty");
+                    options.agent_version = Some(value);
+                }
                 "--extra-trusted-root" => options.ca_path = Some(value.into()),
                 "--second-base-url" => options.second_base_url = Some(value),
                 "--second-admin-token" => options.second_admin_token = Some(value),
                 "--second-authority-id" => options.second_authority_id = Some(value),
                 "--second-extra-trusted-root" => options.second_ca_path = Some(value.into()),
                 "--unprivileged-admin-token" => options.unprivileged_admin_token = Some(value),
+                "--expect-channel" => {
+                    options.expect_channel = value.parse().context("--expect-channel must be true or false")?
+                }
+                "--leaf-lifetime-secs" => {
+                    options.leaf_lifetime_secs = value
+                        .parse()
+                        .context("--leaf-lifetime-secs must be a positive integer")?;
+                    ensure!(options.leaf_lifetime_secs > 0, "--leaf-lifetime-secs must be positive");
+                }
+                "--dvls-rotation-window-secs" => {
+                    options.dvls_rotation_window_secs = value
+                        .parse()
+                        .context("--dvls-rotation-window-secs must be a positive integer")?;
+                    ensure!(
+                        options.dvls_rotation_window_secs > 0,
+                        "--dvls-rotation-window-secs must be positive"
+                    );
+                }
                 "--key-backend" => {
                     options.key_backend = match value.as_str() {
                         "key-store" => KeyBackend::KeyStore,
@@ -225,12 +285,29 @@ impl Options {
             second.is_some() || self.second_authority_id.is_none(),
             "--second-authority-id requires a second target"
         );
+        if kind == TargetKind::Mock {
+            target.reset().await?;
+            if let Some(other) = &second {
+                other.reset().await?;
+            }
+        }
+        let channel_available = if self.expect_channel {
+            true
+        } else {
+            target.channel_available().await?
+        };
         tokio::fs::create_dir_all(&self.work_dir).await?;
         Ok(Context {
             target,
             second,
             target_kind: kind,
             disposable_dvls_target: self.disposable_dvls_target,
+            dvls_rotation_window_secs: self.dvls_rotation_window_secs,
+            leaf_lifetime_secs: self.leaf_lifetime_secs,
+            expect_channel: self.expect_channel,
+            channel_available,
+            cleanup_machine_keys: self.cleanup_machine_keys,
+            agent_version: self.agent_version,
             unprivileged_admin_token,
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
             key_backend: self.key_backend,
@@ -260,85 +337,119 @@ async fn run() -> anyhow::Result<()> {
         return Ok(());
     }
     ensure!(!selected.is_empty(), "no tests match the filter");
+    let allow_incomplete = options.allow_incomplete;
     let context = options.context().await?;
     let start = Instant::now();
-    let mut pass = 0;
-    let mut fail = 0;
-    let mut skip = 0;
+    let mut totals = [0u32; 4];
+    let mut protocol_elapsed = Duration::ZERO;
+    let mut agent_elapsed = Duration::ZERO;
+    let mut non_pass = Vec::new();
     for test in selected {
         let test_start = Instant::now();
-        if context.target_kind == TargetKind::Dvls
+        let outcome = if test.mock_only && !context.mock() {
+            Outcome::NotApplicable("requires the mock-only control API")
+        } else if test.name == "a_key_non_exportable" && !cfg!(windows) {
+            Outcome::NotApplicable("Windows key-store test")
+        } else if test.name == "a_file_backend_permissions" && !cfg!(unix) {
+            Outcome::NotApplicable("Unix file-backend test")
+        } else if test.needs_channel && !context.expect_channel && !context.channel_available {
+            Outcome::NotApplicable("channel_url absent and --expect-channel=false")
+        } else if context.target_kind == TargetKind::Dvls
             && !context.disposable_dvls_target
             && (test.name.starts_with("p_rotation_") || test.name.starts_with("a_rotation_"))
         {
-            println!("SKIP {} (0 ms): rotation requires --disposable-dvls-target", test.name);
-            skip += 1;
-            continue;
-        }
-        if test.name == "p_admin_permission_denied" && context.unprivileged_admin_token.is_none() {
-            println!("SKIP {} (0 ms): requires --unprivileged-admin-token", test.name);
-            skip += 1;
-            continue;
-        }
-        if (test.mock_only && !context.mock())
-            || (test.needs_second && context.second.is_none())
-            || (test.name == "a_key_non_exportable" && (!cfg!(windows) || context.key_backend != KeyBackend::KeyStore))
-            || (test.name == "a_file_backend_permissions" && (!cfg!(unix) || context.key_backend != KeyBackend::File))
-        {
-            println!("SKIP {} (0 ms)", test.name);
-            skip += 1;
-            continue;
-        }
-        let result = async {
-            if context.mock() {
-                context.target.reset().await?;
-                if test.needs_second {
-                    context
-                        .second
-                        .as_ref()
-                        .context("missing second target")?
-                        .reset()
-                        .await?;
-                }
-            }
-            (test.run)(context.clone()).await
-        };
-        let timeout = if test.kind == Kind::Protocol && test.name == "p_channel_no_hello_timeout" {
-            Duration::from_secs(20)
+            Outcome::Skip("rotation requires --disposable-dvls-target")
+        } else if test.name == "p_stream_closes_at_not_after" && !context.mock() && context.leaf_lifetime_secs > 30 {
+            Outcome::Skip("real-target stream expiry requires --leaf-lifetime-secs <= 30")
+        } else if test.name == "p_admin_permission_denied" && context.unprivileged_admin_token.is_none() {
+            Outcome::Skip("requires --unprivileged-admin-token")
+        } else if test.needs_second && context.second.is_none() {
+            Outcome::Skip("requires a second authority (--second-base-url and --second-admin-token)")
+        } else if test.name == "a_key_non_exportable" && context.key_backend != KeyBackend::KeyStore {
+            Outcome::Skip("requires --key-backend key-store")
+        } else if test.name == "a_file_backend_permissions" && context.key_backend != KeyBackend::File {
+            Outcome::Skip("requires --key-backend file")
         } else {
-            Duration::from_secs(90)
+            let result = async {
+                if context.mock() {
+                    context.target.reset().await?;
+                    if test.needs_second {
+                        context
+                            .second
+                            .as_ref()
+                            .context("missing second target")?
+                            .reset()
+                            .await?;
+                    }
+                }
+                (test.run)(context.clone()).await
+            };
+            let timeout = if test.name == "p_channel_no_hello_timeout" {
+                Duration::from_secs(20)
+            } else if !context.mock() && test.name.starts_with("a_rotation_") {
+                Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(60))
+            } else if !context.mock() && test.name.starts_with("p_rotation_") {
+                Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(30))
+            } else {
+                Duration::from_secs(90)
+            };
+            match tokio::time::timeout(timeout, result).await {
+                Ok(Ok(())) => Outcome::Pass,
+                Ok(Err(error)) => Outcome::Fail(format!("{error:#}")),
+                Err(_) => Outcome::Fail("timed out".to_owned()),
+            }
         };
-        match tokio::time::timeout(timeout, result).await {
-            Ok(Ok(())) => {
-                println!("PASS {} ({} ms)", test.name, test_start.elapsed().as_millis());
-                pass += 1;
-            }
-            Ok(Err(error)) => {
-                println!(
-                    "FAIL {} ({} ms): {error:#}",
-                    test.name,
-                    test_start.elapsed().as_millis()
-                );
-                fail += 1;
-            }
-            Err(_) => {
-                println!(
-                    "FAIL {} ({} ms): timed out",
-                    test.name,
-                    test_start.elapsed().as_millis()
-                );
-                fail += 1;
-            }
+        let elapsed = test_start.elapsed();
+        match test.kind {
+            Kind::Protocol => protocol_elapsed += elapsed,
+            Kind::Agent => agent_elapsed += elapsed,
+        }
+        let (index, label, reason) = match outcome {
+            Outcome::Pass => (0, "PASS", None),
+            Outcome::Fail(reason) => (1, "FAIL", Some(reason)),
+            Outcome::Skip(reason) => (2, "SKIP", Some(reason.to_owned())),
+            Outcome::NotApplicable(reason) => (3, "N/A", Some(reason.to_owned())),
+        };
+        totals[index] += 1;
+        if let Some(reason) = reason {
+            println!("{label} {} ({} ms): {reason}", test.name, elapsed.as_millis());
+            non_pass.push((label, test.name, reason));
+        } else {
+            println!("{label} {} ({} ms)", test.name, elapsed.as_millis());
         }
     }
     println!(
-        "SUMMARY PASS {pass} FAIL {fail} SKIP {skip} ({} ms)",
+        "SUMMARY PASS {} FAIL {} SKIP {} N/A {} ({} ms)",
+        totals[0],
+        totals[1],
+        totals[2],
+        totals[3],
         start.elapsed().as_millis()
     );
-    if fail != 0 {
-        std::process::exit(1);
+    println!(
+        "SUMMARY DURATION protocol={} ms agent={} ms",
+        protocol_elapsed.as_millis(),
+        agent_elapsed.as_millis()
+    );
+    for (label, name, reason) in non_pass {
+        println!("NON-PASS {label} {name}: {reason}");
+    }
+    if totals[1] != 0 || (totals[2] != 0 && !allow_incomplete) {
+        anyhow::bail!(
+            "conformance failed: {} failures, {} incomplete skips{}",
+            totals[1],
+            totals[2],
+            if allow_incomplete { " (allowed)" } else { "" }
+        );
     }
     Ok(())
+}
+
+enum Outcome {
+    Pass,
+    Fail(String),
+    Skip(&'static str),
+    NotApplicable(&'static str),
 }
 
 macro_rules! p {
@@ -361,6 +472,7 @@ macro_rules! a {
 
 const TESTS: &[Test] = &[
     p!(p_trust_anchor_lists_roots),
+    p!(p_channel_url_expectation),
     p!(p_reset_rebases_root_validity, mock_only),
     p!(p_token_n_uses_consumed_then_exhausted),
     p!(p_token_concurrent_enrollment_respects_max_uses),
@@ -369,65 +481,82 @@ const TESTS: &[Test] = &[
     p!(p_token_expired, mock_only),
     p!(p_enroll_idempotent_same_key),
     p!(p_enroll_revoked_same_key_rejected),
+    p!(p_enroll_certificate_key_reuse_rules),
+    p!(p_renew_certificate_key_reuse_rules),
     p!(p_metadata_limits),
     p!(p_friendly_name_format),
     p!(p_device_cannot_impersonate_another),
+    p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
+    p!(p_signature_parser_wire_negatives),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
     p!(p_connect_signature_replayed_to_renew),
+    p!(p_renew_signature_rejected_on_connect).channel(),
     p!(p_renew_happy_path),
     p!(p_renew_idempotent_lost_response, mock_only),
     p!(p_renew_second_pending_retires_first),
+    p!(p_retired_pending_certificate_cannot_connect).channel(),
     p!(p_renew_within_grace, mock_only),
     p!(p_renew_beyond_grace, mock_only),
     p!(p_revocation_blocks_renew_and_connect),
+    p!(p_revocation_blocks_connect).channel(),
     p!(p_delete_only_when_revoked_then_unknown),
-    p!(p_channel_hello_updates_metadata_and_connected),
-    p!(p_channel_proof_replay_fails),
-    p!(p_channel_revoked_before_hello),
-    p!(p_channel_no_hello_timeout),
+    p!(p_deleted_certificate_cannot_connect).channel(),
+    p!(p_channel_hello_updates_metadata_and_connected).channel(),
+    p!(p_handshake_barrier_holds_authentication, mock_only).channel(),
+    p!(p_channel_proof_replay_fails).channel(),
+    p!(p_channel_revoked_before_hello).channel(),
+    p!(p_channel_no_hello_timeout).channel(),
     p!(p_channel_unavailable_no_channel_url, mock_only),
-    p!(p_request_renewal_connected_and_on_connect),
-    p!(p_request_renewal_flag_cleared_after_new_cert),
-    p!(p_reconnect_push_and_handoff, mock_only),
-    p!(p_revocation_closes_stream),
-    p!(p_stream_closes_at_not_after, mock_only),
-    p!(p_pending_cert_auth_retires_old_and_closes_streams),
+    p!(p_request_renewal_connected_and_on_connect).channel(),
+    p!(p_request_renewal_flag_cleared_on_signed_renew),
+    p!(p_request_renewal_flag_cleared_after_new_cert).channel(),
+    p!(p_reconnect_push_and_handoff, mock_only).channel(),
+    p!(p_revocation_closes_stream).channel(),
+    p!(p_stream_closes_at_not_after).channel(),
+    p!(p_challenged_stream_expires_on_advance, mock_only).channel(),
+    p!(p_pending_cert_auth_retires_old_and_closes_streams).channel(),
     p!(p_rotation_publishes_both_roots_and_issues_from_new),
     p!(p_rotation_status_counts),
     p!(p_rotation_conflict_409),
-    p!(p_rotation_deadline_removes_old_root, mock_only),
+    p!(p_rotation_deadline_bound, mock_only),
+    p!(p_rotation_push_rate_survives_deadline, mock_only).channel(),
+    p!(p_rotation_deadline_removes_old_root),
     p!(p_rotation_old_root_cert_renewable_after_deadline, mock_only),
     p!(p_rotation_emergency_deadline, mock_only),
-    p!(p_rotation_request_renewal_pushed),
+    p!(p_rotation_request_renewal_pushed).channel(),
     p!(p_listing_pagination_stable_during_concurrent_enrollment),
     p!(p_listing_views_filters_and_bounds),
     p!(p_admin_tokens_crud_and_states),
     p!(p_admin_requires_auth),
     p!(p_admin_permission_denied),
+    p!(p_rotation_admin_write_requires_auth),
     p!(p_error_body_shape),
+    p!(p_mock_fault_response_not_processed, mock_only),
     a!(a_pending_file_enroll_success),
     a!(a_pending_file_deleted_on_permanent_error),
     a!(a_pending_file_kept_on_transient_error),
     a!(a_token_never_logged),
     a!(a_same_token_no_enrollment),
-    a!(a_same_token_rejected_identity_no_enrollment),
+    a!(a_same_token_rejected_identity_no_enrollment).channel(),
     a!(a_different_token_replaces_identity),
+    a!(a_rejected_identity_replaced).channel(),
     a!(a_cli_identity_enroll_writes_pending_file),
-    a!(a_renewal_happy_path),
-    a!(a_renewal_lost_response_retried, mock_only),
-    a!(a_channel_connected_and_metadata),
-    a!(a_make_before_break_on_renewal),
-    a!(a_request_renewal_connected),
-    a!(a_request_renewal_while_offline),
-    a!(a_reconnect_make_before_break, mock_only),
-    a!(a_revocation_stops_agent),
-    a!(a_device_unknown_recorded, mock_only),
+    a!(a_renewal_happy_path).channel(),
+    a!(a_renewal_lost_response_retried, mock_only).channel(),
+    a!(a_channel_connected_and_metadata).channel(),
+    a!(a_make_before_break_on_renewal).channel(),
+    a!(a_old_key_survives_unavailable_channel, mock_only).channel(),
+    a!(a_request_renewal_connected).channel(),
+    a!(a_request_renewal_while_offline).channel(),
+    a!(a_reconnect_make_before_break, mock_only).channel(),
+    a!(a_revocation_stops_agent).channel(),
+    a!(a_device_unknown_recorded, mock_only).channel(),
     a!(a_no_channel_when_absent, mock_only),
-    a!(a_multi_authority).second(),
+    a!(a_multi_authority).second().channel(),
     a!(a_key_non_exportable),
     a!(a_file_backend_permissions),
-    a!(a_rotation_migrates_connected_agent),
+    a!(a_rotation_migrates_connected_agent).channel(),
     a!(a_rotation_migrates_on_schedule, mock_only),
 ];

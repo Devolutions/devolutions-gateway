@@ -75,6 +75,16 @@ pub enum CertStatus {
     Retired,
 }
 
+impl CertStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Pending => "pending",
+            Self::Retired => "retired",
+        }
+    }
+}
+
 /// What the verifier needs to know about the certificate behind a `keyid`.
 #[derive(Debug, Clone)]
 pub struct RegisteredCert {
@@ -230,7 +240,7 @@ pub fn verify_request(
     }
 
     // Step 3: signature window.
-    if expires - created > MAX_WINDOW_SECS
+    if !(1..=MAX_WINDOW_SECS).contains(&(expires - created))
         || created > now + CLOCK_TOLERANCE_SECS
         || expires < now - CLOCK_TOLERANCE_SECS
     {

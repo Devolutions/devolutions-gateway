@@ -87,11 +87,7 @@ impl Target {
         let response = request.send().await.context("send HTTP request")?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await.context("read HTTP response")?;
-        let body = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).context("decode JSON response")?
-        };
+        let body = decode_reply_body(path, status, &bytes)?;
         Ok(Reply { status, body })
     }
 
@@ -143,6 +139,27 @@ impl Target {
         Ok(())
     }
 
+    pub(crate) async fn channel_available(&self) -> anyhow::Result<bool> {
+        let token = self.create_token(1, Duration::from_secs(3600), None).await?;
+        let key = KeyPair::generate()?;
+        let reply = self.enroll(&token.text, &key, &json!({})).await?;
+        let identity = Identity::from_enrollment(key, &reply)?;
+        self.revoke(&identity.device_id).await?;
+        expect_status(
+            &self
+                .admin(Method::DELETE, &format!("/devices/{}", identity.device_id), None)
+                .await?,
+            204,
+        )?;
+        expect_status(
+            &self
+                .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
+                .await?,
+            204,
+        )?;
+        Ok(identity.channel_url.is_some())
+    }
+
     pub(crate) async fn requests(&self, token: Option<&Token>) -> anyhow::Result<Value> {
         let path = token.map_or_else(
             || "/__mock__/requests".to_owned(),
@@ -151,6 +168,31 @@ impl Target {
         let reply = self.send(Method::GET, &path, None, None, None).await?;
         expect_status(&reply, 200)?;
         Ok(reply.body)
+    }
+
+    pub(crate) async fn events(&self, device_id: &str) -> anyhow::Result<Vec<Value>> {
+        let reply = self
+            .send(
+                Method::GET,
+                &format!("/__mock__/events?device_id={device_id}"),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        expect_status(&reply, 200)?;
+        let events = reply.body["events"].as_array().context("mock events are missing")?;
+        let mut previous = 0;
+        for event in events {
+            ensure!(
+                event["device_id"] == device_id,
+                "mock event belongs to the wrong device"
+            );
+            let seq = count(event, "seq")?;
+            ensure!(seq > previous, "mock event sequences are not strictly increasing");
+            previous = seq;
+        }
+        Ok(events.clone())
     }
 
     pub(crate) async fn faults(&self, faults: &Value) -> anyhow::Result<()> {
@@ -258,6 +300,13 @@ impl Target {
     }
 }
 
+fn decode_reply_body(path: &str, status: u16, bytes: &[u8]) -> anyhow::Result<Value> {
+    if bytes.is_empty() || (path.starts_with("/api/v3/agent-identity") && !(200..300).contains(&status)) {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(bytes).context("decode JSON response")
+}
+
 pub(crate) struct Token {
     pub(crate) text: String,
     pub(crate) id: String,
@@ -361,6 +410,20 @@ pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_denials_are_status_only_but_agent_errors_need_json() -> anyhow::Result<()> {
+        let opaque = b"<html>access denied</html>";
+        ensure!(
+            decode_reply_body("/api/v3/agent-identity/devices", 403, opaque)?.is_null(),
+            "admin denial required a JSON body"
+        );
+        ensure!(
+            decode_reply_body("/api/agent-identity/v1/renew", 401, opaque).is_err(),
+            "agent-facing error accepted a non-JSON body"
+        );
+        Ok(())
+    }
 
     #[test]
     fn enrollment_omission_differs_from_explicit_null() -> anyhow::Result<()> {

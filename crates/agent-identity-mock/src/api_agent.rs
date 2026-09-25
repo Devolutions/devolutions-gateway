@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::State as AxumState;
+use axum::extract::{DefaultBodyLimit, State as AxumState};
 use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse as _, Response};
@@ -14,17 +14,19 @@ use serde_json::{Map, Value, json};
 
 use crate::app::{App, rfc3339};
 use crate::httpsig::{Endpoint, Rejection, verify_request};
-use crate::state::{ApiError, DropTarget};
+use crate::state::{ApiError, DropTarget, FailNextResponse};
 
 /// Header set on a success response when `faults.drop_next_response` fires; the
 /// dispatcher turns it into a connection abort without a response (§11).
 pub const DROP_HEADER: &str = "x-mock-drop";
+pub const INJECTED_HEADER: &str = "x-mock-injected";
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/agent-identity/v1/trust-anchor", get(trust_anchor))
         .route("/api/agent-identity/v1/enroll", post(enroll))
         .route("/api/agent-identity/v1/renew", post(renew))
+        .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(app)
 }
 
@@ -48,6 +50,20 @@ pub fn api_error_response(app: &App, err: &ApiError) -> Response {
 
 pub fn rejection_response(app: &App, rejection: Rejection) -> Response {
     agent_error(app, rejection.http_status(), rejection.code(), rejection.code())
+}
+
+fn injected_response(app: &App, fault: FailNextResponse) -> Response {
+    let mut response = if let Some(code) = fault.error {
+        agent_error(app, fault.status, code, "injected mock response")
+    } else {
+        StatusCode::from_u16(fault.status)
+            .expect("validated mock fault status")
+            .into_response()
+    };
+    response
+        .headers_mut()
+        .insert(INJECTED_HEADER, "1".parse().expect("static value"));
+    response
 }
 
 async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
@@ -90,7 +106,7 @@ fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
     Ok(secret)
 }
 
-/// Parses an enroll/renew body: `{ "csr": "<base64 DER>", "metadata"?: {...} }`.
+/// Parses an enroll/renew body: `{ "csr": "<base64 DER>", "metadata": {...} }`.
 fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError> {
     let value: Value = serde_json::from_slice(body).map_err(|_| ApiError::invalid_request("malformed JSON body"))?;
     let object = value
@@ -103,11 +119,11 @@ fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError
     let csr_der = base64::engine::general_purpose::STANDARD
         .decode(csr)
         .map_err(|_| ApiError::invalid_request("`csr` is not valid base64"))?;
-    let metadata = match object.get("metadata") {
-        None => Map::new(),
-        Some(Value::Object(map)) => map.clone(),
-        Some(_) => return Err(ApiError::invalid_request("`metadata` must be an object")),
-    };
+    let metadata = object
+        .get("metadata")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| ApiError::invalid_request("`metadata` must be an object"))?;
     Ok((csr_der, metadata))
 }
 
@@ -118,7 +134,15 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
         Ok(secret) => secret,
         Err(err) => return api_error_response(&app, &err),
     };
-    app.state.lock().await.observe_enroll(&secret);
+    let mut state = app.state.lock().await;
+    state.observe_enroll(&secret);
+    if state.token_id(&secret).is_none() {
+        return api_error_response(&app, &ApiError::token_invalid());
+    }
+    if let Some(fault) = state.fail_next_response(DropTarget::Enroll) {
+        return injected_response(&app, fault);
+    }
+    drop(state);
     let (csr_der, metadata) = match parse_csr_body(&body) {
         Ok(parsed) => parsed,
         Err(err) => return api_error_response(&app, &err),
@@ -167,6 +191,9 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     let now = app.now();
     let mut state = app.state.lock().await;
     state.requests.renew += 1;
+    if let Some(fault) = state.fail_next_response(DropTarget::Renew) {
+        return injected_response(&app, fault);
+    }
 
     // §6 verification, checks in the contract's order.
     let auth = {
@@ -203,8 +230,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
         Ok(parsed) => parsed,
         Err(err) => return api_error_response(&app, &err),
     };
-    let device_id = auth.device_id();
-    let chain = match state.renew(device_id, auth.cert_thumbprint(), &csr_der, metadata, now) {
+    let chain = match state.renew(&auth, &csr_der, metadata, now) {
         Ok(chain) => chain,
         Err(err) => return api_error_response(&app, &err),
     };

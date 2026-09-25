@@ -59,6 +59,9 @@ async fn conformance() -> anyhow::Result<()> {
     let project_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("workspace root")?;
+    let agent_version = std::fs::read_to_string(project_dir.join("VERSION")).context("read workspace VERSION")?;
+    let agent_version = agent_version.trim();
+    ensure!(!agent_version.is_empty(), "workspace VERSION is empty");
     let work_dir = project_dir.join("target").join("agent-identity-integration");
     std::fs::create_dir_all(&work_dir)?;
     let first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(&work_dir)?;
@@ -84,6 +87,8 @@ async fn conformance() -> anyhow::Result<()> {
         .arg(&second.ca_path)
         .arg("--agent-bin")
         .arg(cli::agent_path())
+        .arg("--agent-version")
+        .arg(agent_version)
         .arg("--work-dir")
         .arg(first_dir.path().join("runner"))
         .kill_on_drop(true);

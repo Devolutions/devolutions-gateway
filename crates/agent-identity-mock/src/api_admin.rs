@@ -96,12 +96,12 @@ fn parse_page_params(query: &HashMap<String, String>) -> Result<(u64, u64), ApiE
     Ok((page_number, page_size))
 }
 
-/// Paginates a (createdAt, id)-sorted list into the DVLS page shape.
+/// Paginates a creation-order-sorted list into the DVLS page shape.
 fn paginate(items: Vec<Value>, page_number: u64, page_size: u64) -> Value {
     let total_count = items.len() as u64;
     let total_pages = total_count.div_ceil(page_size);
-    let start = ((page_number - 1) * page_size).min(total_count);
-    let end = (start + page_size).min(total_count);
+    let start = page_number.saturating_sub(1).saturating_mul(page_size).min(total_count);
+    let end = start.saturating_add(page_size).min(total_count);
     let data: Vec<Value> = items
         .into_iter()
         .skip(usize::try_from(start).unwrap_or(usize::MAX))
@@ -262,12 +262,9 @@ fn metadata_subset(device: &Device, keys: &[String]) -> Value {
     Value::Object(map)
 }
 
-fn device_full(app: &App, state: &State, device: &Device, metadata_keys: Option<&[String]>) -> Value {
+fn device_full(app: &App, state: &State, device: &Device) -> Value {
     let mut view = device_summary(app, state, device, None);
-    view["metadata"] = match metadata_keys {
-        Some(keys) => metadata_subset(device, keys),
-        None => Value::Object(device.metadata.clone()),
-    };
+    view["metadata"] = Value::Object(device.metadata.clone());
     view["certificates"] = Value::Array(
         device
             .certs
@@ -389,14 +386,13 @@ async fn list_devices(AxumState(app): AxumState<Arc<App>>, Query(query): Query<H
                     .is_none_or(|q| d.friendly_name.to_lowercase().contains(&q.to_lowercase()))
         })
         .collect();
-    // (createdAt, id) ascending: new enrollments never shift earlier pages.
-    devices.sort_by_key(|d| (d.created_at, d.id));
+    devices.sort_by_key(|device| device.created_seq);
 
     let views: Vec<Value> = devices
         .into_iter()
         .map(|d| {
             if query.view_full {
-                device_full(&app, &state, d, query.metadata_keys.as_deref())
+                device_full(&app, &state, d)
             } else {
                 device_summary(&app, &state, d, query.metadata_keys.as_deref())
             }
@@ -409,7 +405,7 @@ async fn get_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -
     app.tick().await;
     let state = app.state.lock().await;
     match state.devices.get(&id) {
-        Some(device) => Json(device_full(&app, &state, device, None)).into_response(),
+        Some(device) => Json(device_full(&app, &state, device)).into_response(),
         None => admin_error(&ApiError::not_found("unknown device")),
     }
 }
@@ -436,7 +432,7 @@ async fn patch_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>,
     };
     device.friendly_name = request.friendly_name;
     let device = state.devices.get(&id).expect("device exists");
-    Json(device_full(&app, &state, device, None)).into_response()
+    Json(device_full(&app, &state, device)).into_response()
 }
 
 async fn revoke_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
@@ -474,7 +470,7 @@ struct StartRotationRequest {
     deadline: Option<String>,
 }
 
-fn rotation_view(state: &State) -> Value {
+fn rotation_view(state: &State, now: i64) -> Value {
     match &state.rotation {
         None => json!({ "phase": "idle", "activeDevicesOnOldRoot": 0 }),
         Some(rotation) => {
@@ -488,7 +484,7 @@ fn rotation_view(state: &State) -> Value {
             let mut view = json!({
                 "phase": "rotating",
                 "deadline": rfc3339(rotation.deadline),
-                "activeDevicesOnOldRoot": state.active_devices_on_old_root(),
+                "activeDevicesOnOldRoot": state.active_devices_on_old_root(now),
             });
             if let Some(old) = root_view(&rotation.old_root) {
                 view["oldRoot"] = old;
@@ -522,7 +518,7 @@ async fn start_rotation(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Res
     };
     let mut state = app.state.lock().await;
     match state.start_rotation(deadline, now) {
-        Ok(()) => (StatusCode::ACCEPTED, Json(rotation_view(&state))).into_response(),
+        Ok(()) => (StatusCode::ACCEPTED, Json(rotation_view(&state, now))).into_response(),
         Err(err) => admin_error(&err),
     }
 }
@@ -530,5 +526,5 @@ async fn start_rotation(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Res
 async fn get_rotation(AxumState(app): AxumState<Arc<App>>) -> Response {
     app.tick().await;
     let state = app.state.lock().await;
-    Json(rotation_view(&state)).into_response()
+    Json(rotation_view(&state, app.now())).into_response()
 }

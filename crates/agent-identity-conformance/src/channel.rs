@@ -94,7 +94,11 @@ impl ChannelStream {
     }
 
     pub(crate) async fn next(&mut self) -> anyhow::Result<ServerMessage> {
-        tokio::time::timeout(Duration::from_secs(5), self.stream.message())
+        self.next_with_timeout(Duration::from_secs(5)).await
+    }
+
+    pub(crate) async fn next_with_timeout(&mut self, timeout: Duration) -> anyhow::Result<ServerMessage> {
+        tokio::time::timeout(timeout, self.stream.message())
             .await
             .context("timed out waiting for channel message")??
             .context("channel closed unexpectedly")

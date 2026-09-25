@@ -90,7 +90,8 @@ fn new_builder(
 /// A root CA (§4, §8).
 pub struct RootCa {
     pub name: Name,
-    pub key: SigningKey,
+    /// Dropped as soon as the root stops issuing during a rotation.
+    pub key: Option<SigningKey>,
     pub cert_der: Vec<u8>,
     pub thumbprint: String,
     /// Unix seconds.
@@ -126,7 +127,7 @@ impl RootCa {
         Ok(Self {
             thumbprint: thumbprint(&cert_der),
             name,
-            key,
+            key: Some(key),
             cert_der,
             not_before,
             not_after,
@@ -156,7 +157,11 @@ pub fn issue_leaf(
     lifetime_secs: i64,
 ) -> anyhow::Result<Leaf> {
     let not_before = now;
-    let not_after = (now + lifetime_secs).min(root.not_after);
+    let not_after = now
+        .checked_add(lifetime_secs)
+        .context("leaf validity end overflowed")?
+        .min(root.not_after);
+    anyhow::ensure!(not_after > not_before, "issuing root has expired");
     let subject = Name::from_str(&format!("CN={device_id}")).context("leaf name")?;
     let san_uri = Ia5String::new(&format!("urn:uuid:{device_id}")).context("leaf SAN URI")?;
     let mut builder = new_builder(&root.name, &subject, public_key, serial, not_before, not_after)?;
@@ -176,7 +181,7 @@ pub fn issue_leaf(
         .add_extension(&SubjectAltName(vec![GeneralName::UniformResourceIdentifier(san_uri)]))
         .context("add subject alternative name")?;
     let cert = builder
-        .build::<_, DerSignature>(&root.key)
+        .build::<_, DerSignature>(root.key.as_ref().context("issuing root key was destroyed")?)
         .context("sign leaf certificate")?;
     let der = cert.to_der().context("encode leaf certificate")?;
     Ok(Leaf {
