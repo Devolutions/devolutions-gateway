@@ -28,10 +28,10 @@ impl App {
         self.clock.now()
     }
 
-    /// Lazy rotation-deadline handling, run at the start of every request (§9.3).
+    /// Re-evaluates certificate expiry and rotation completion before each request.
     pub async fn tick(self: &Arc<Self>) {
-        let now = self.now();
-        self.state.lock().await.tick(now);
+        let mut state = self.state.lock().await;
+        state.tick(self.now());
     }
 }
 

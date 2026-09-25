@@ -101,6 +101,8 @@ fn endpoint_of(name: &str) -> Endpoint {
     match name {
         "renew" => Endpoint::Renew,
         "connect" => Endpoint::Connect,
+        "confirm" => Endpoint::Confirm,
+        "check-in" => Endpoint::CheckIn,
         other => panic!("unknown endpoint {other}"),
     }
 }
@@ -149,7 +151,7 @@ fn run_case(registry: &HashMap<String, RegisteredCert>, nonces: &mut NonceStore,
     if case.expected == "ok"
         && let Ok(auth) = &result
     {
-        if endpoint == Endpoint::Renew {
+        if matches!(endpoint, Endpoint::Renew | Endpoint::CheckIn) {
             assert_eq!(
                 case.headers["content-digest"],
                 content_digest_header(body.as_bytes()),

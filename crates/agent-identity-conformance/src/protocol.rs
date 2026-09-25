@@ -107,12 +107,32 @@ async fn finish_rotation(ctx: &Context) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn has_certificate(device: &Value, thumbprint: &str, status: &str) -> bool {
+pub(crate) fn has_certificate(device: &Value, thumbprint: &str, status: &str) -> bool {
     device["certificates"].as_array().is_some_and(|certs| {
         certs
             .iter()
             .any(|cert| cert["thumbprint"] == thumbprint && cert["status"] == status)
     })
+}
+
+async fn next_config_update(
+    stream: &mut channel::ChannelStream,
+) -> anyhow::Result<(agent_channel_proto::ServerMessage, Value)> {
+    let message = stream.next().await?;
+    let Some(agent_channel_proto::server_message::Payload::ConfigUpdate(update)) = message.payload.as_ref() else {
+        anyhow::bail!("expected ConfigUpdate after config revision changed");
+    };
+    let config: Value = serde_json::from_str(&update.config_json).context("decode ConfigUpdate config_json")?;
+    ensure!(config.is_object(), "ConfigUpdate config_json is not an object");
+    Ok((message, config))
+}
+
+async fn check_in_config(target: &Target, identity: &Identity) -> anyhow::Result<Value> {
+    let reply = target.check_in(identity, &json!({})).await?;
+    expect_status(&reply, 200)?;
+    let config = reply.body["config"].clone();
+    ensure!(config.is_object(), "check-in response omitted its config object");
+    Ok(config)
 }
 
 async fn device(target: &Target, id: &str) -> anyhow::Result<Value> {
@@ -134,36 +154,43 @@ async fn assert_device_metadata_and_certificates_unchanged(
     Ok(())
 }
 
-async fn active_old_root_ids(target: &Target, issuer: &str) -> anyhow::Result<HashSet<String>> {
+async fn active_old_root_ids(ctx: &Context, issuer: &str) -> anyhow::Result<HashSet<String>> {
+    let now = chain_evaluation_time(ctx).await?;
     let mut page = 1;
     let mut ids = HashSet::new();
+    let mut seen = HashSet::new();
     loop {
-        let reply = target
+        let reply = ctx
+            .target
             .admin(
                 Method::GET,
-                &format!("/devices?status=active&issuer={issuer}&pageSize=100&pageNumber={page}"),
+                &format!("/devices?view=full&pageSize=100&pageNumber={page}"),
                 None,
             )
             .await?;
         expect_status(&reply, 200)?;
         let rows = reply.body["data"].as_array().context("old-root device page")?;
         for row in rows {
-            ensure!(
-                row["status"] == "active",
-                "old-root listing included an inactive device"
-            );
-            ensure!(
-                row["certificate"]["issuer"] == issuer,
-                "old-root listing included a different issuer"
-            );
-            ensure!(
-                ids.insert(field(row, "id")?.to_owned()),
-                "old-root listing repeated a device ID"
-            );
+            let id = field(row, "id")?.to_owned();
+            ensure!(seen.insert(id.clone()), "old-root listing repeated a device ID");
+            if row["status"] != "revoked" {
+                let certificates = row["certificates"]
+                    .as_array()
+                    .context("full device has no certificates")?;
+                for cert in certificates {
+                    if matches!(field(cert, "status")?, "current" | "pending")
+                        && field(cert, "issuer")? == issuer
+                        && time::OffsetDateTime::parse(field(cert, "notAfter")?, &Rfc3339)?.unix_timestamp() > now
+                    {
+                        ids.insert(id);
+                        break;
+                    }
+                }
+            }
         }
         if page >= count(&reply.body, "totalPages")? {
             ensure!(
-                ids.len() as u64 == count(&reply.body, "totalCount")?,
+                seen.len() as u64 == count(&reply.body, "totalCount")?,
                 "old-root listing count disagrees with all pages"
             );
             return Ok(ids);
@@ -416,24 +443,24 @@ pub(crate) async fn p_channel_url_expectation(ctx: Context) -> anyhow::Result<()
     let (_, identity) = issued(&ctx, "channel-availability").await?;
     if ctx.expect_channel {
         ensure!(
-            identity.channel_url.is_some(),
-            "enrollment omitted channel_url while --expect-channel=true"
+            identity.agent_channel_url.is_some(),
+            "enrollment omitted config.agent_channel_url while --expect-channel=true"
         );
     } else {
         ensure!(
-            identity.channel_url.is_some() == ctx.channel_available,
-            "enrollment channel_url availability changed during this run"
+            identity.agent_channel_url.is_some() == ctx.channel_available,
+            "enrollment config.agent_channel_url availability changed during this run"
         );
     }
-    if let Some(channel_url) = &identity.channel_url {
+    if let Some(channel_url) = &identity.agent_channel_url {
         ensure!(
             reqwest::Url::parse(channel_url)?.scheme() == "https",
-            "channel_url must use HTTPS"
+            "config.agent_channel_url must use HTTPS"
         );
         if ctx.mock() {
             ensure!(
                 channel_url == &ctx.target.base_url,
-                "mock channel_url does not include its path prefix"
+                "mock config.agent_channel_url does not include its path prefix"
             );
         }
     }
@@ -529,6 +556,78 @@ pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context
     ensure!(
         count(&devices.body, "totalCount")? == 5,
         "concurrent enrollment created unexpected devices"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_concurrent_same_key_enroll_replays_winner(ctx: Context) -> anyhow::Result<()> {
+    let token = token(&ctx, 1).await?;
+    let csr = KeyPair::generate()?.csr;
+    let body = json!({ "csr": csr, "metadata": { "hostname": "shared-key" } });
+    let barrier = Arc::new(Barrier::new(3));
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..2 {
+        let target = ctx.target.clone();
+        let secret = token.text.clone();
+        let body = body.clone();
+        let barrier = Arc::clone(&barrier);
+        tasks.spawn(async move {
+            barrier.wait().await;
+            target.agent(Method::POST, "/enroll", Some(&body), Some(&secret)).await
+        });
+    }
+    barrier.wait().await;
+    let mut replies = Vec::new();
+    while let Some(outcome) = tasks.join_next().await {
+        let reply = outcome??;
+        expect_status(&reply, 200)?;
+        replies.push(reply);
+    }
+    ensure!(
+        replies.len() == 2
+            && replies[0].body["device_id"] == replies[1].body["device_id"]
+            && replies[0].body["certificate_chain"] == replies[1].body["certificate_chain"]
+            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1
+            && count(&ctx.target.devices_for(&token, "").await?.body, "totalCount")? == 1,
+        "concurrent same-key enrolls did not replay one winning device and consume one use"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_concurrent_same_key_renew_replays_winner(ctx: Context) -> anyhow::Result<()> {
+    let (token, identity) = issued(&ctx, "shared-renew").await?;
+    let key = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "shared-renewal" } }))?;
+    let barrier = Arc::new(Barrier::new(3));
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..2 {
+        let target = ctx.target.clone();
+        let body = body.clone();
+        let headers = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
+        let barrier = Arc::clone(&barrier);
+        tasks.spawn(async move {
+            barrier.wait().await;
+            target.signed_renew(&body, &headers, None).await
+        });
+    }
+    barrier.wait().await;
+    let mut replies = Vec::new();
+    while let Some(outcome) = tasks.join_next().await {
+        let reply = outcome??;
+        expect_status(&reply, 200)?;
+        replies.push(reply);
+    }
+    let record = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        replies.len() == 2
+            && replies[0].body["certificate_chain"] == replies[1].body["certificate_chain"]
+            && record["certificates"].as_array().is_some_and(|certs| certs
+                .iter()
+                .filter(|cert| cert["status"] == "pending")
+                .count()
+                == 1)
+            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        "concurrent same-CSR renews issued more than one pending certificate"
     );
     Ok(())
 }
@@ -636,6 +735,12 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
         .enroll(&token.text, &key, &json!({ "hostname": "original" }))
         .await?;
     expect_status(&first, 200)?;
+    let before = device(&ctx.target, field(&first.body, "device_id")?).await?;
+    if ctx.mock() {
+        ctx.target.advance(2).await?;
+    } else {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
     let replay = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "changed" }))
@@ -657,10 +762,10 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
             "mock did not observe both enrollment requests"
         );
     }
-    let device = device(&ctx.target, field(&first.body, "device_id")?).await?;
+    let replayed_device = device(&ctx.target, field(&first.body, "device_id")?).await?;
     ensure!(
-        device["metadata"]["hostname"] == "changed",
-        "idempotent enrollment did not refresh metadata"
+        replayed_device["metadata"] == before["metadata"] && replayed_device["lastSeenAt"] == before["lastSeenAt"],
+        "idempotent enrollment changed metadata or last_seen_at"
     );
     if ctx.mock() {
         ctx.target.advance(3601).await?;
@@ -672,10 +777,57 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
         ensure!(
             expired_replay.body["device_id"] == first.body["device_id"]
                 && expired_replay.body["certificate_chain"] == first.body["certificate_chain"]
-                && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
-            "expired-token current-key replay created or consumed a device"
+                && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1
+                && device(&ctx.target, field(&first.body, "device_id")?).await?["metadata"] == before["metadata"],
+            "expired-token current-key replay created, consumed or changed a device"
         );
     }
+    Ok(())
+}
+
+pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
+    let token = token(&ctx, 2).await?;
+    let key = KeyPair::generate()?;
+    let first = ctx
+        .target
+        .enroll(&token.text, &key, &json!({ "hostname": "original" }))
+        .await?;
+    expect_status(&first, 200)?;
+    let device_id = field(&first.body, "device_id")?;
+    let before = device(&ctx.target, device_id).await?;
+    expect_status(
+        &ctx.target
+            .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
+            .await?,
+        204,
+    )?;
+    expect_status(&ctx.target.token_record(&token.id).await?, 404)?;
+    let replay = ctx
+        .target
+        .enroll(&token.text, &key, &json!({ "hostname": "must-not-replace" }))
+        .await?;
+    expect_status(&replay, 200)?;
+    ensure!(
+        replay.body["device_id"] == first.body["device_id"]
+            && replay.body["certificate_chain"] == first.body["certificate_chain"],
+        "deleted token could not recover its own committed enrollment"
+    );
+    let after = device(&ctx.target, device_id).await?;
+    ensure!(
+        after["metadata"] == before["metadata"] && after["lastSeenAt"] == before["lastSeenAt"],
+        "deleted-token replay changed device state"
+    );
+    expect_error(
+        &ctx.target
+            .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+            .await?,
+        401,
+        "token_invalid",
+    )?;
+    ensure!(
+        count(&ctx.target.devices_for(&token, "").await?.body, "totalCount")? == 1,
+        "deleted token issued a second device"
+    );
     Ok(())
 }
 
@@ -700,21 +852,32 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         .enroll(&original_token.text, &original_key, &json!({ "hostname": "original" }))
         .await?;
     let identity = Identity::from_enrollment(original_key, &first)?;
+    let original_device = device(&ctx.target, &identity.device_id).await?;
+    let original_name = field(&original_device, "friendlyName")?.to_owned();
     let other_token = token(&ctx, 1).await?;
+    expect_error(
+        &ctx.target
+            .enroll(&other_token.text, &identity.key, &json!({ "hostname": "foreign" }))
+            .await?,
+        400,
+        "invalid_request",
+    )?;
     let replay = ctx
         .target
-        .enroll(&other_token.text, &identity.key, &json!({ "hostname": "refreshed" }))
+        .enroll(&original_token.text, &identity.key, &json!({ "hostname": "refreshed" }))
         .await?;
     expect_status(&replay, 200)?;
     ensure!(
         replay.body["device_id"] == identity.device_id
-            && replay.body["certificate_chain"] == first.body["certificate_chain"]
-            && replay.body["friendly_name"] == first.body["friendly_name"],
+            && replay.body["certificate_chain"] == first.body["certificate_chain"],
         "current-key enrollment did not replay the existing device and current chain"
     );
+    let replayed_device = device(&ctx.target, &identity.device_id).await?;
     ensure!(
-        device(&ctx.target, &identity.device_id).await?["metadata"]["hostname"] == "refreshed",
-        "current-key replay did not update metadata"
+        replayed_device["metadata"] == original_device["metadata"]
+            && replayed_device["lastSeenAt"] == original_device["lastSeenAt"]
+            && replayed_device["friendlyName"] == original_name,
+        "current-key replay changed device metadata, last_seen_at or friendly name"
     );
     let first_pending = KeyPair::generate()?;
     expect_status(&ctx.target.renew(&identity, &first_pending, &json!({})).await?, 200)?;
@@ -829,9 +992,11 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
     let many = (0..33)
         .map(|n| (format!("k{n}"), json!("v")))
         .collect::<serde_json::Map<_, _>>();
-    let oversized_object = (0..9)
-        .map(|n| (format!("field{n}"), json!("a".repeat(1000))))
+    let exactly_16_kib = (0..16)
+        .map(|n| (format!("k{n:02}"), json!("a".repeat(1021))))
         .collect::<serde_json::Map<_, _>>();
+    let mut oversized_object = exactly_16_kib.clone();
+    oversized_object.insert("extra".to_owned(), json!("x"));
     let invalid = [
         json!({ "hostname": 42 }),
         json!({ "hostname": { "nested": "no" } }),
@@ -873,6 +1038,12 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
         count(&record.body, "usedCount")? == 1,
         "metadata validation used an incorrect size measure or consumed a failed request"
     );
+    expect_status(
+        &ctx.target
+            .enroll(&token.text, &KeyPair::generate()?, &Value::Object(exactly_16_kib))
+            .await?,
+        200,
+    )?;
     let key = KeyPair::generate()?;
     let enrolled = ctx
         .target
@@ -895,21 +1066,23 @@ pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
     let record = ctx.target.token_record(&token.id).await?;
     let name = field(&record.body, "name")?;
     let first_identity = identity(&ctx.target, &token, "hello").await?;
+    let first_name = field(&device(&ctx.target, &first_identity.device_id).await?, "friendlyName")?.to_owned();
     ensure!(
-        first_identity.friendly_name == format!("hello-{{ok}}-{name}-"),
-        "friendly name formatting incorrect: {}",
-        first_identity.friendly_name
+        first_name == format!("hello-{{ok}}-{name}-"),
+        "friendly name formatting incorrect: {first_name}"
     );
     let empty_token = ctx.target.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
     let empty = identity(&ctx.target, &empty_token, "").await?;
+    let empty_name = field(&device(&ctx.target, &empty.device_id).await?, "friendlyName")?.to_owned();
     ensure!(
-        empty.friendly_name == empty.device_id,
+        empty_name == empty.device_id,
         "empty friendly name did not fall back to device ID"
     );
     let long_token = ctx.target.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
     let long = identity(&ctx.target, &long_token, &"é".repeat(260)).await?;
+    let long_name = field(&device(&ctx.target, &long.device_id).await?, "friendlyName")?.to_owned();
     ensure!(
-        long.friendly_name.chars().count() == 255,
+        long_name.chars().count() == 255,
         "friendly name not limited to 255 characters"
     );
     let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
@@ -1211,6 +1384,237 @@ pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyho
     Ok(())
 }
 
+pub(crate) async fn p_channel_duplicate_signature_metadata_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "duplicate-channel-signature").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    for name in ["signature-input", "signature"] {
+        let failure = channel::open_with_duplicate_header(&ctx.target, &identity, name)
+            .await
+            .err()
+            .with_context(|| format!("duplicate {name} metadata opened a channel"))?;
+        channel::expect_status(
+            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+            Code::Unauthenticated,
+            "signature_invalid",
+        )?;
+    }
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        after["connected"] == false
+            && after["metadata"] == before["metadata"]
+            && after["lastSeenAt"] == before["lastSeenAt"],
+        "duplicate signed channel metadata authenticated or changed device state"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "confirm-cross-tag").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let connect_tag = identity.key.sign_now(&old_thumb, "connect", None);
+    expect_error(
+        &ctx.target.signed_confirm(&connect_tag, None).await?,
+        401,
+        "signature_invalid",
+    )?;
+    let csr = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
+    let renew_tag = identity.key.sign_now(&old_thumb, "renew", Some(&body));
+    expect_error(
+        &ctx.target.signed_confirm(&renew_tag, None).await?,
+        401,
+        "signature_invalid",
+    )?;
+    let new_key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
+
+    let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
+        .await
+        .err()
+        .context("confirm-tagged signature opened a channel")?;
+    channel::expect_status(
+        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        Code::Unauthenticated,
+        "signature_invalid",
+    )?;
+    let csr = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
+    let mut confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+    attach_content_digest(&mut confirm_tag, &body);
+    expect_error(
+        &ctx.target.signed_renew(&body, &confirm_tag, None).await?,
+        401,
+        "signature_invalid",
+    )?;
+    let unchanged = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&unchanged, &old_thumb, "current")
+            && has_certificate(&unchanged, &identity.thumbprint, "pending"),
+        "cross-tag probes changed certificate statuses"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "check-in").await?;
+    let enrolled = identity.config.clone();
+    let before = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        enrolled["revision"].as_u64().is_some(),
+        "enrollment did not provide an unsigned config revision"
+    );
+    if ctx.mock() {
+        ctx.target.advance(2).await?;
+    } else {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let current = ctx
+        .target
+        .check_in(&identity, &json!({ "hostname": "current-check-in" }))
+        .await?;
+    expect_status(&current, 200)?;
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        current.body["config"] == enrolled
+            && current.body["renewal_requested"] == false
+            && after["metadata"]["hostname"] == "current-check-in"
+            && time::OffsetDateTime::parse(field(&after, "lastSeenAt")?, &Rfc3339)?
+                > time::OffsetDateTime::parse(field(&before, "lastSeenAt")?, &Rfc3339)?,
+        "current-certificate check-in did not return config or refresh metadata and lastSeenAt"
+    );
+    expect_status(
+        &ctx.target
+            .admin(
+                Method::POST,
+                &format!("/devices/{}/request-renewal", identity.device_id),
+                None,
+            )
+            .await?,
+        202,
+    )?;
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let pending = ctx
+        .target
+        .check_in(&identity, &json!({ "hostname": "pending-check-in" }))
+        .await?;
+    expect_status(&pending, 200)?;
+    ensure!(
+        pending.body["config"] == enrolled
+            && pending.body["renewal_requested"] == true
+            && has_certificate(
+                &device(&ctx.target, &identity.device_id).await?,
+                &identity.thumbprint,
+                "pending"
+            )
+            && device(&ctx.target, &identity.device_id).await?["metadata"]["hostname"] == "pending-check-in",
+        "pending-certificate check-in did not return config, renewal flag or metadata"
+    );
+    let before_invalid = device(&ctx.target, &identity.device_id).await?;
+    let signed = identity.key.sign_now(&identity.thumbprint, "check-in", Some(b"{}"));
+    expect_error(
+        &ctx.target.signed_check_in(b"{}", &signed).await?,
+        400,
+        "invalid_request",
+    )?;
+    let undercovered_body = serde_json::to_vec(&json!({ "metadata": { "hostname": "undercovered" } }))?;
+    let mut undercovered = identity
+        .key
+        .sign_now(&identity.thumbprint, "check-in", Some(&undercovered_body));
+    undercovered.input = undercovered
+        .input
+        .replace("(\"@method\" \"content-digest\")", "(\"@method\")");
+    resign_input(&identity.key, &mut undercovered)?;
+    expect_error(
+        &ctx.target.signed_check_in(&undercovered_body, &undercovered).await?,
+        401,
+        "signature_invalid",
+    )?;
+    let body = serde_json::to_vec(&json!({ "metadata": { "hostname": "untampered" } }))?;
+    let signed = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
+    let tampered = serde_json::to_vec(&json!({ "metadata": { "hostname": "tampered" } }))?;
+    expect_error(
+        &ctx.target.signed_check_in(&tampered, &signed).await?,
+        401,
+        "signature_invalid",
+    )?;
+    let after_invalid = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        after_invalid["metadata"] == before_invalid["metadata"]
+            && after_invalid["lastSeenAt"] == before_invalid["lastSeenAt"],
+        "invalid check-in changed metadata or lastSeenAt"
+    );
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let confirmed = ctx.target.check_in(&identity, &json!({})).await?;
+    expect_status(&confirmed, 200)?;
+    ensure!(
+        confirmed.body["renewal_requested"] == false && confirmed.body["config"] == enrolled,
+        "confirm did not clear the check-in renewal flag"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_check_in_cross_tag_signatures_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "check-in-cross-tag").await?;
+    let body = serde_json::to_vec(&json!({ "metadata": {} }))?;
+    let check_in_tag = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
+    expect_error(
+        &ctx.target.signed_confirm(&check_in_tag, None).await?,
+        401,
+        "signature_invalid",
+    )?;
+    expect_error(
+        &ctx.target.signed_renew(&body, &check_in_tag, None).await?,
+        401,
+        "signature_invalid",
+    )?;
+
+    for tag in ["connect", "confirm"] {
+        let mut headers = identity.key.sign_now(&identity.thumbprint, tag, None);
+        attach_content_digest(&mut headers, &body);
+        expect_error(
+            &ctx.target.signed_check_in(&body, &headers).await?,
+            401,
+            "signature_invalid",
+        )?;
+    }
+    let csr = KeyPair::generate()?;
+    let renew_body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
+    let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", Some(&renew_body));
+    expect_error(
+        &ctx.target.signed_check_in(&renew_body, &renew_tag).await?,
+        401,
+        "signature_invalid",
+    )?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await?["certificates"]
+            .as_array()
+            .is_some_and(|certs| certs.len() == 1 && certs[0]["status"] == "current"),
+        "cross-tag check-in probes changed certificate statuses"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_check_in_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "check-in-to-connect").await?;
+    let body = serde_json::to_vec(&json!({ "metadata": {} }))?;
+    let headers = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
+    let failure = channel::open_with_headers(&ctx.target, &identity, headers)
+        .await
+        .err()
+        .context("check-in-tagged signature opened a channel")?;
+    channel::expect_status(
+        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        Code::Unauthenticated,
+        "signature_invalid",
+    )
+}
+
 fn resign_input(key: &KeyPair, headers: &mut SignedHeaders) -> anyhow::Result<()> {
     let input = headers
         .input
@@ -1252,6 +1656,7 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
         "wrong_label",
         "two_signatures",
         "digest_not_covered",
+        "two_digest_members",
         "bad_nonce",
         "der_signature",
         "truncated_signature",
@@ -1290,6 +1695,12 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
                     .replace("(\"@method\" \"content-digest\")", "(\"@method\")");
                 resign_input(&identity.key, &mut headers)?;
             }
+            "two_digest_members" => {
+                let digest = headers.digest.take().context("signed content digest")?;
+                let sha512 = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
+                headers.digest = Some(format!("{digest}, sha-512=:{sha512}:"));
+                resign_input(&identity.key, &mut headers)?;
+            }
             "bad_nonce" => {
                 headers.input = headers.input.replace(&headers.nonce, "not-base64url!");
                 resign_input(&identity.key, &mut headers)?;
@@ -1324,12 +1735,48 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
             "wire-negative variant {variant} changed device state"
         );
     }
+    for repeated in ["content-digest", "signature-input", "signature"] {
+        let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
+        let digest = signed.digest.as_deref().context("signed digest missing")?;
+        let mut headers = http::HeaderMap::new();
+        headers.insert("content-digest", digest.parse()?);
+        headers.insert("signature-input", signed.input.parse()?);
+        headers.insert("signature", signed.signature.parse()?);
+        let repeated_value = match repeated {
+            "content-digest" => digest,
+            "signature-input" => &signed.input,
+            "signature" => &signed.signature,
+            _ => unreachable!("all repeated names are known"),
+        };
+        headers.append(repeated, repeated_value.parse()?);
+        let response = ctx
+            .target
+            .http
+            .post(format!("{}/api/agent-identity/v1/renew", ctx.target.base_url))
+            .headers(headers)
+            .header("content-type", "application/json")
+            .body(body.clone())
+            .send()
+            .await?;
+        let reply = Reply {
+            status: response.status().as_u16(),
+            body: response.json().await?,
+        };
+        expect_error(&reply, 401, "signature_invalid")?;
+        let after = device(&ctx.target, &identity.device_id).await?;
+        ensure!(
+            after["metadata"] == original["metadata"]
+                && after["certificates"] == original["certificates"]
+                && after["lastSeenAt"] == original["lastSeenAt"],
+            "duplicate {repeated} headers changed device state"
+        );
+    }
     Ok(())
 }
 
 pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "unchanged").await?;
-    let original_name = identity.friendly_name.clone();
+    let original_name = field(&device(&ctx.target, &identity.device_id).await?, "friendlyName")?.to_owned();
     let new_key = KeyPair::generate()?;
     let reply = signed_renew(&ctx.target, &identity, &new_key, &json!({ "hostname": "updated" })).await?;
     expect_status(&reply, 200)?;
@@ -1366,10 +1813,13 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
         pending["metadata"]["hostname"] == "updated",
         "renewal metadata not updated"
     );
-    let next_key = KeyPair::generate()?;
+    let replay_key = KeyPair {
+        key: identity.key.key.clone(),
+        csr: identity.key.csr.clone(),
+    };
     expect_status(
         &ctx.target
-            .renew(&identity, &next_key, &json!({ "hostname": "after-auth" }))
+            .renew(&identity, &replay_key, &json!({ "hostname": "pending-replay" }))
             .await?,
         200,
     )?;
@@ -1377,9 +1827,188 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
         has_certificate(
             &device(&ctx.target, &identity.device_id).await?,
             &identity.thumbprint,
+            "pending"
+        ),
+        "pending-signed renewal promoted the certificate"
+    );
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    ensure!(
+        has_certificate(
+            &device(&ctx.target, &identity.device_id).await?,
+            &identity.thumbprint,
             "current"
         ),
-        "signed renewal with the pending certificate did not promote it"
+        "confirm did not promote the pending certificate"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "confirm-idempotent").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let original = device(&ctx.target, &identity.device_id).await?;
+    let original_events = if ctx.mock() {
+        Some(ctx.target.events(&identity.device_id).await?)
+    } else {
+        None
+    };
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await?["certificates"] == original["certificates"],
+        "confirm with an already current certificate changed its status"
+    );
+    if let Some(events) = &original_events {
+        ensure!(
+            ctx.target.events(&identity.device_id).await? == *events,
+            "confirm with an already current certificate emitted a lifecycle event"
+        );
+    }
+
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let promoted = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&promoted, &old_thumb, "retired")
+            && has_certificate(&promoted, &identity.thumbprint, "current"),
+        "confirm did not promote pending and retire the previous current certificate"
+    );
+    let events = if ctx.mock() {
+        Some(ctx.target.events(&identity.device_id).await?)
+    } else {
+        None
+    };
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let replayed = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        replayed["certificates"] == promoted["certificates"],
+        "idempotent confirm retry changed certificate statuses"
+    );
+    if let Some(events) = events {
+        ensure!(
+            ctx.target.events(&identity.device_id).await? == events,
+            "idempotent confirm retry emitted another promotion"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "retired-confirm").await?;
+    let first_key = KeyPair::generate()?;
+    let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
+    expect_status(&first, 200)?;
+    let first_thumb = thumbprint(
+        first.body["certificate_chain"][0]
+            .as_str()
+            .context("first pending leaf")?,
+    )?;
+    let second = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
+    expect_status(&second, 200)?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&before, &first_thumb, "retired"),
+        "replacement did not retire the first pending certificate"
+    );
+    let signed = first_key.sign_now(&first_thumb, "confirm", None);
+    expect_error(&ctx.target.signed_confirm(&signed, None).await?, 401, "device_unknown")?;
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &before).await?;
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context) -> anyhow::Result<()> {
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
+    let (_, mut identity) = issued(&ctx, "expired-confirm").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    ctx.target.advance(21).await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    expect_error(&ctx.target.confirm(&identity).await?, 401, "certificate_expired")?;
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        after["certificates"] == before["certificates"]
+            && has_certificate(&after, &old_thumb, "current")
+            && has_certificate(&after, &identity.thumbprint, "pending"),
+        "expired pending confirm changed certificate statuses"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_nonempty_body_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "confirm-body").await?;
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let signed = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+    expect_error(
+        &ctx.target.signed_confirm(&signed, Some(b"{}")).await?,
+        400,
+        "invalid_request",
+    )?;
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &before).await?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "confirm-faults").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+            .await?,
+        200,
+    )?;
+    ctx.target
+        .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
+        .await?;
+    expect_status(&ctx.target.confirm(&identity).await?, 503)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 503)?;
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &before).await?;
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+            .await?,
+        200,
+    )?;
+
+    ctx.target.faults(&json!({ "drop_next_response": "confirm" })).await?;
+    ensure!(
+        ctx.target.confirm(&identity).await.is_err(),
+        "dropped confirm returned a response"
+    );
+    let promoted = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&promoted, &old_thumb, "retired")
+            && has_certificate(&promoted, &identity.thumbprint, "current"),
+        "dropped confirm did not commit the promotion"
+    );
+    let events = ctx.target.events(&identity.device_id).await?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let requests = ctx.target.requests(None).await?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await?["certificates"] == promoted["certificates"]
+            && ctx.target.events(&identity.device_id).await? == events
+            && count(&requests, "confirm")? == 4
+            && count(&requests, "confirm_retry_503")? == 1
+            && requests["request_sequence"].as_array().is_some_and(|sequence| sequence
+                .iter()
+                .filter(|entry| *entry == "confirm_204")
+                .count()
+                == 2),
+        "idempotent confirm retry duplicated the promotion"
     );
     Ok(())
 }
@@ -1699,7 +2328,7 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
         )
         .await?;
     let welcome = stream.next().await?;
-    let Some(agent_identity_channel_proto::server_message::Payload::Welcome(payload)) = welcome.payload else {
+    let Some(agent_channel_proto::server_message::Payload::Welcome(payload)) = welcome.payload else {
         anyhow::bail!("channel did not send Welcome");
     };
     ensure!(
@@ -1776,7 +2405,7 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
     ensure!(
         matches!(
             welcome.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::Welcome(_))
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
         ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
         "released Hello did not receive its Welcome"
     );
@@ -1793,7 +2422,7 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
     let (_, other) = issued(&ctx, "other-device").await?;
     let mut first = channel::open(&ctx.target, &identity).await?;
     let first_challenge = first.challenge().await?;
-    let Some(agent_identity_channel_proto::server_message::Payload::Challenge(first_challenge_bytes)) =
+    let Some(agent_channel_proto::server_message::Payload::Challenge(first_challenge_bytes)) =
         first_challenge.payload.as_ref()
     else {
         anyhow::bail!("first stream missing challenge");
@@ -1821,9 +2450,7 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
     ] {
         let mut stream = channel::open(&ctx.target, &identity).await?;
         let challenge = stream.challenge().await?;
-        let Some(agent_identity_channel_proto::server_message::Payload::Challenge(payload)) =
-            challenge.payload.as_ref()
-        else {
+        let Some(agent_channel_proto::server_message::Payload::Challenge(payload)) = challenge.payload.as_ref() else {
             anyhow::bail!("stream missing challenge");
         };
         ensure!(
@@ -1844,11 +2471,11 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
         if variant == "wrong_correlation" {
             stream
                 .sender
-                .send(agent_identity_channel_proto::AgentMessage {
+                .send(agent_channel_proto::AgentMessage {
                     id: uuid::Uuid::new_v4().to_string(),
                     correlation_id: Some(uuid::Uuid::new_v4().to_string()),
-                    payload: Some(agent_identity_channel_proto::agent_message::Payload::Hello(
-                        agent_identity_channel_proto::Hello {
+                    payload: Some(agent_channel_proto::agent_message::Payload::Hello(
+                        agent_channel_proto::Hello {
                             metadata: [("hostname".to_owned(), "untrusted".to_owned())].into(),
                             capabilities: Vec::new(),
                             applied_state_versions: Default::default(),
@@ -1955,13 +2582,13 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
         .await?;
     expect_status(&reply, 200)?;
     ensure!(
-        reply.body.get("channel_url").is_none(),
-        "enroll included channel_url for unavailable channel"
+        reply.body.get("channel_url").is_none() && reply.body["config"].get("agent_channel_url").is_none(),
+        "enroll included config.agent_channel_url for unavailable channel"
     );
     let identity = Identity::from_enrollment(key, &reply)?;
     ensure!(
-        identity.channel_url.is_none(),
-        "enroll returned channel_url for unavailable channel"
+        identity.agent_channel_url.is_none(),
+        "enroll returned config.agent_channel_url for unavailable channel"
     );
     let failure = channel::probe_unavailable(&ctx.target, &identity)
         .await
@@ -1972,6 +2599,240 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
             .downcast_ref::<tonic::Status>()
             .is_some_and(|status| status.code() == Code::Unavailable),
         "unavailable channel did not return gRPC UNAVAILABLE"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "config-revisions").await?;
+    let (_, other) = issued(&ctx, "second-config-revisions").await?;
+    let initial = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        initial == identity.config && count(&initial, "revision")? == 1,
+        "enrollment did not start at config revision 1"
+    );
+    ctx.target.faults(&json!({ "channel_broken": true })).await?;
+    let failure = channel::open(&ctx.target, &identity)
+        .await
+        .err()
+        .context("broken channel accepted a stream")?;
+    ensure!(
+        failure
+            .downcast_ref::<tonic::Status>()
+            .is_some_and(|status| status.code() == Code::Unavailable),
+        "channel_broken did not return UNAVAILABLE"
+    );
+    ensure!(
+        check_in_config(&ctx.target, &identity).await? == initial,
+        "transport failure changed the effective config revision"
+    );
+
+    ctx.target.faults(&json!({ "channel_available": false })).await?;
+    let disabled = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        count(&disabled, "revision")? == 2
+            && disabled.get("agent_channel_url").is_none()
+            && count(&check_in_config(&ctx.target, &other).await?, "revision")? == 2,
+        "disabling the channel did not raise every device's config revision"
+    );
+    ctx.target.faults(&json!({ "channel_available": false })).await?;
+    ensure!(
+        check_in_config(&ctx.target, &identity).await? == disabled,
+        "no-op channel toggle raised the config revision"
+    );
+    ctx.target.faults(&json!({ "channel_available": true })).await?;
+    let enabled = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        count(&enabled, "revision")? == 3 && enabled["agent_channel_url"] == ctx.target.base_url,
+        "re-enabling the channel did not restore its URL at a higher revision"
+    );
+    ctx.target.faults(&json!({ "channel_broken": false })).await?;
+    ensure!(
+        check_in_config(&ctx.target, &identity).await? == enabled,
+        "fixing the transport raised an unchanged config revision"
+    );
+
+    let changed = ctx
+        .target
+        .control("config", &json!({ "fields": { "conformance_flag": true } }))
+        .await?;
+    expect_status(&changed, 200)?;
+    ensure!(
+        changed.body["updatedDevices"] == 2,
+        "config change did not update both devices"
+    );
+    let extended = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        count(&extended, "revision")? == 4 && extended["conformance_flag"] == true,
+        "extra config field did not raise the revision"
+    );
+    let unchanged = ctx
+        .target
+        .control("config", &json!({ "fields": { "conformance_flag": true } }))
+        .await?;
+    expect_status(&unchanged, 200)?;
+    ensure!(
+        unchanged.body["updatedDevices"] == 0 && check_in_config(&ctx.target, &identity).await? == extended,
+        "identical config fields raised the revision"
+    );
+    expect_status(
+        &ctx.target
+            .control("config", &json!({ "fields": { "revision": 999 } }))
+            .await?,
+        400,
+    )?;
+    ensure!(
+        check_in_config(&ctx.target, &identity).await? == extended,
+        "reserved config field modified the device"
+    );
+    expect_status(
+        &ctx.target
+            .control("config", &json!({ "fields": { "conformance_flag": false } }))
+            .await?,
+        200,
+    )?;
+    let final_config = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        count(&final_config, "revision")? == 5
+            && final_config["conformance_flag"] == false
+            && count(&check_in_config(&ctx.target, &other).await?, "revision")? == 5,
+        "replacing a field did not advance both device revisions"
+    );
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    expect_status(
+        &ctx.target
+            .control("reconnect", &json!({ "device_id": identity.device_id }))
+            .await?,
+        202,
+    )?;
+    ensure!(
+        check_in_config(&ctx.target, &identity).await? == final_config,
+        "renew, confirm or reconnect changed an unaffected config revision"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "stale-config").await?;
+    let current_revision = count(&identity.config, "revision")?;
+    let announced_revision = current_revision.saturating_sub(1);
+    let mut stale = channel::open(&ctx.target, &identity).await?;
+    let challenge = stale.challenge().await?;
+    let hello_id = stale
+        .send_hello_with_revision(&identity, &challenge, &[], None, announced_revision)
+        .await?;
+    let welcome = stale.next().await?;
+    ensure!(
+        matches!(
+            welcome.payload,
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
+        ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
+        "stale Hello did not receive Welcome first"
+    );
+    if current_revision == 0 {
+        ensure!(
+            tokio::time::timeout(Duration::from_millis(200), stale.stream.message())
+                .await
+                .is_err(),
+            "revision zero received a ConfigUpdate despite having no lower unsigned revision"
+        );
+    } else {
+        let (update, config) = next_config_update(&mut stale).await?;
+        ensure!(
+            config == identity.config,
+            "stale Hello did not receive the current config immediately after Welcome"
+        );
+        stale.ack(&update).await?;
+    }
+
+    let mut current = channel::open(&ctx.target, &identity).await?;
+    current.hello(&identity, &[]).await?;
+    ensure!(
+        tokio::time::timeout(Duration::from_millis(200), current.stream.message())
+            .await
+            .is_err(),
+        "up-to-date Hello received an unnecessary ConfigUpdate"
+    );
+    if ctx.mock() {
+        let events = ctx.target.events(&identity.device_id).await?;
+        let applied = events
+            .iter()
+            .filter(|event| event["type"] == "stream_authenticated")
+            .map(|event| event["applied_config_revision"].as_u64())
+            .collect::<Vec<_>>();
+        ensure!(
+            applied == [Some(announced_revision), Some(current_revision)]
+                && events
+                    .iter()
+                    .filter(|event| event["type"] == "config_update_sent")
+                    .count()
+                    == usize::from(current_revision > 0),
+            "mock did not distinguish stale from current Hello revisions"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_config_update_pushes_higher_revision(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "config-push").await?;
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    stream.hello(&identity, &[]).await?;
+    let first = ctx
+        .target
+        .control("config", &json!({ "fields": { "conformance_note": "updated" } }))
+        .await?;
+    expect_status(&first, 200)?;
+    let (message, config) = next_config_update(&mut stream).await?;
+    ensure!(
+        count(&config, "revision")? == count(&identity.config, "revision")? + 1
+            && config["conformance_note"] == "updated"
+            && config == check_in_config(&ctx.target, &identity).await?,
+        "config edit did not push the next effective revision"
+    );
+    stream.ack(&message).await?;
+    let stale = ctx
+        .target
+        .control(
+            "config/stale",
+            &json!({ "device_id": identity.device_id, "revision": 1 }),
+        )
+        .await?;
+    expect_status(&stale, 200)?;
+    ensure!(stale.body["sent"] == 1, "stale ConfigUpdate was not delivered");
+    let (stale_message, stale_config) = next_config_update(&mut stream).await?;
+    ensure!(
+        count(&stale_config, "revision")? == 1
+            && stale_config["mock_stale_marker"] == "ignore-me"
+            && check_in_config(&ctx.target, &identity).await? == config,
+        "stale ConfigUpdate modified the server's effective revision"
+    );
+    stream.ack(&stale_message).await?;
+    ctx.target.faults(&json!({ "channel_available": false })).await?;
+    let (disabled, config) = next_config_update(&mut stream).await?;
+    ensure!(
+        count(&config, "revision")? == count(&identity.config, "revision")? + 2
+            && config.get("agent_channel_url").is_none(),
+        "channel toggle did not push a higher revision without agent_channel_url"
+    );
+    stream.ack(&disabled).await?;
+    let events = ctx.target.events(&identity.device_id).await?;
+    let changed = events
+        .iter()
+        .filter(|event| event["type"] == "config_changed")
+        .map(|event| count(event, "revision"))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let pushed = events
+        .iter()
+        .filter(|event| event["type"] == "config_update_sent")
+        .map(|event| count(event, "revision"))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    ensure!(
+        changed == [2, 3] && pushed == changed,
+        "config change and push events did not advance in order"
     );
     Ok(())
 }
@@ -1994,7 +2855,7 @@ pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> 
     ensure!(
         matches!(
             pushed.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::RenewRequested(ref reason))
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(ref reason))
                 if reason.reason == "admin"
         ),
         "connected stream did not get admin renewal request"
@@ -2019,7 +2880,7 @@ pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> 
     ensure!(
         matches!(
             repeated.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::RenewRequested(ref reason))
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(ref reason))
                 if reason.reason == "admin"
         ),
         "renewal request was not repeated on connect"
@@ -2047,7 +2908,7 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
     ensure!(
         matches!(
             pushed.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::Reconnect(ref message))
+            Some(agent_channel_proto::server_message::Payload::Reconnect(ref message))
                 if message.reason == "mock"
         ),
         "mock did not push Reconnect"
@@ -2063,7 +2924,7 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
     ensure!(
         matches!(
             welcome.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::Welcome(_))
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
         ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
         "replacement did not receive correlated Welcome"
     );
@@ -2112,7 +2973,7 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
-pub(crate) async fn p_request_renewal_flag_cleared_on_signed_renew(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "offline-flag").await?;
     expect_status(
         &ctx.target
@@ -2136,14 +2997,20 @@ pub(crate) async fn p_request_renewal_flag_cleared_on_signed_renew(ctx: Context)
         device(&ctx.target, &identity.device_id).await?["renewalRequested"] == true,
         "flag cleared when pending certificate was merely issued"
     );
-    expect_status(
-        &ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?,
-        200,
-    )?;
+    let replay_key = KeyPair {
+        key: identity.key.key.clone(),
+        csr: identity.key.csr.clone(),
+    };
+    expect_status(&ctx.target.renew(&identity, &replay_key, &json!({})).await?, 200)?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await?["renewalRequested"] == true,
+        "pending-signed renew cleared the request flag"
+    );
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let current = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         current["renewalRequested"] == false && has_certificate(&current, &identity.thumbprint, "current"),
-        "signed renewal with the pending certificate did not clear the request flag"
+        "confirm did not clear the request flag"
     );
     Ok(())
 }
@@ -2171,7 +3038,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     let pending = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         pending["renewalRequested"] == true && has_certificate(&pending, &identity.thumbprint, "pending"),
-        "renewal request cleared before new certificate authentication"
+        "renewal request cleared before confirmation"
     );
     let mut new_stream = channel::open(&ctx.target, &identity).await?;
     let challenge = new_stream.challenge().await?;
@@ -2184,13 +3051,28 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     ensure!(
         matches!(
             welcome.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::Welcome(_))
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
         ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
         "new certificate did not receive its correlated Welcome"
     );
     ensure!(
+        device(&ctx.target, &identity.device_id).await?["renewalRequested"] == true,
+        "pending certificate's Hello cleared the renewal request"
+    );
+    let still_requested = new_stream.next().await?;
+    ensure!(
+        matches!(
+            still_requested.payload,
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(ref reason))
+                if reason.reason == "admin"
+        ),
+        "pending-certificate channel did not receive the outstanding renewal request"
+    );
+    new_stream.ack(&still_requested).await?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    ensure!(
         device(&ctx.target, &identity.device_id).await?["renewalRequested"] == false,
-        "request flag not cleared on new certificate authentication"
+        "confirm did not clear the renewal request"
     );
     let mut additional = channel::open(&ctx.target, &identity).await?;
     additional.hello(&identity, &[]).await?;
@@ -2360,7 +3242,7 @@ pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyh
     Ok(())
 }
 
-pub(crate) async fn p_pending_cert_auth_retires_old_and_closes_streams(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "make-before-break").await?;
     let old_thumb = identity.thumbprint.clone();
     let mut old = channel::open(&ctx.target, &identity).await?;
@@ -2369,12 +3251,39 @@ pub(crate) async fn p_pending_cert_auth_retires_old_and_closes_streams(ctx: Cont
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let events_before_replay = if ctx.mock() {
+        Some(ctx.target.events(&identity.device_id).await?)
+    } else {
+        None
+    };
+    let replay_key = KeyPair {
+        key: identity.key.key.clone(),
+        csr: identity.key.csr.clone(),
+    };
+    expect_status(&ctx.target.renew(&identity, &replay_key, &json!({})).await?, 200)?;
+    if let Some(events) = events_before_replay {
+        let after = ctx.target.events(&identity.device_id).await?;
+        ensure!(
+            after
+                .iter()
+                .filter(|event| event["type"] == "cert_status_changed")
+                .collect::<Vec<_>>()
+                == events
+                    .iter()
+                    .filter(|event| event["type"] == "cert_status_changed")
+                    .collect::<Vec<_>>()
+                && after.iter().any(|event| {
+                    event["type"] == "renew_received" && event["cert_thumbprint"] == identity.thumbprint
+                }),
+            "pending-signed renewal changed certificate statuses before confirm"
+        );
+    }
     let before = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         has_certificate(&before, &old_thumb, "current")
             && has_certificate(&before, &identity.thumbprint, "pending")
             && before["connected"] == true,
-        "renewal promoted the pending certificate before authentication"
+        "renewal promoted the pending certificate before confirmation"
     );
     let mut unauthenticated = channel::open(&ctx.target, &identity).await?;
     let challenge = unauthenticated.challenge().await?;
@@ -2416,45 +3325,143 @@ pub(crate) async fn p_pending_cert_auth_retires_old_and_closes_streams(ctx: Cont
             .is_err(),
         "bad proof closed the old authenticated stream"
     );
-    let mut current = channel::open(&ctx.target, &identity).await?;
-    current.hello(&identity, &[]).await?;
+    let mut pending_stream = channel::open(&ctx.target, &identity).await?;
+    pending_stream.hello(&identity, &[]).await?;
+    let after_hello = device(&ctx.target, &identity.device_id).await?;
     ensure!(
-        tokio::time::timeout(Duration::from_secs(3), old.stream.message())
+        has_certificate(&after_hello, &old_thumb, "current")
+            && has_certificate(&after_hello, &identity.thumbprint, "pending")
+            && after_hello["connected"] == true,
+        "authenticated pending certificate promoted before confirm"
+    );
+    ensure!(
+        tokio::time::timeout(Duration::from_millis(200), old.stream.message())
             .await
-            .context("old stream not closed")??
-            .is_none(),
-        "old stream did not close with OK"
-    );
-    let record = device(&ctx.target, &identity.device_id).await?;
-    ensure!(
-        record["connected"] == true,
-        "new certificate did not keep device connected"
-    );
-    ensure!(
-        has_certificate(&record, &old_thumb, "retired"),
-        "old certificate not retired"
-    );
-    ensure!(
-        has_certificate(&record, &identity.thumbprint, "current"),
-        "new certificate not current"
+            .is_err(),
+        "pending-certificate Hello closed the old authenticated stream"
     );
     if ctx.mock() {
         let events = ctx.target.events(&identity.device_id).await?;
-        let new_auth = events
-            .iter()
-            .find(|event| event["type"] == "stream_authenticated" && event["cert_thumbprint"] == identity.thumbprint)
-            .context("new certificate has no authenticated stream event")?;
-        let old_close = events
-            .iter()
-            .find(|event| {
-                event["type"] == "stream_closed" && event["cert_thumbprint"] == old_thumb && event["status"] == "OK"
-            })
-            .context("old certificate has no clean stream-closed event")?;
         ensure!(
-            count(new_auth, "seq")? < count(old_close, "seq")?,
-            "old stream closed before the new certificate authenticated"
+            events.iter().any(|event| {
+                event["type"] == "stream_authenticated" && event["cert_thumbprint"] == identity.thumbprint
+            }) && events.iter().all(|event| {
+                event["type"] != "cert_status_changed"
+                    || event["cert_thumbprint"] != identity.thumbprint
+                    || event["to"] != "current"
+            }),
+            "pending-certificate Hello promoted the certificate in the event log"
         );
     }
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let confirmed = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&confirmed, &old_thumb, "retired")
+            && has_certificate(&confirmed, &identity.thumbprint, "current"),
+        "confirm did not promote pending and retire old current"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "retired-stream-grace").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let mut old = channel::open(&ctx.target, &identity).await?;
+    old.hello(&identity, &[]).await?;
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let mut replacement = channel::open(&ctx.target, &identity).await?;
+    replacement.hello(&identity, &[]).await?;
+    let now = chain_evaluation_time(&ctx).await?;
+    expect_status(&ctx.target.control("time/freeze", &json!({ "now": now })).await?, 200)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+
+    let pushed = old.next().await?;
+    ensure!(
+        matches!(
+            pushed.payload,
+            Some(agent_channel_proto::server_message::Payload::Reconnect(ref message))
+                if message.reason == "certificate_rotated"
+        ),
+        "retired stream did not receive Reconnect(certificate_rotated)"
+    );
+    let record = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&record, &old_thumb, "retired")
+            && has_certificate(&record, &identity.thumbprint, "current")
+            && record["connected"] == true,
+        "confirm did not promote while keeping the replacement stream connected"
+    );
+    let events = ctx.target.events(&identity.device_id).await?;
+    let promoted = events
+        .iter()
+        .find(|event| {
+            event["type"] == "cert_status_changed"
+                && event["cert_thumbprint"] == identity.thumbprint
+                && event["to"] == "current"
+        })
+        .context("confirm promotion event missing")?;
+    let reconnect = events
+        .iter()
+        .find(|event| {
+            event["type"] == "reconnect_sent"
+                && event["cert_thumbprint"] == old_thumb
+                && event["reason"] == "certificate_rotated"
+        })
+        .context("retired stream reconnect event missing")?;
+    ensure!(
+        count(promoted, "seq")? < count(reconnect, "seq")?,
+        "reconnect push was sent before confirmation promoted the certificate"
+    );
+
+    expect_status(
+        &ctx.target.control("time/freeze", &json!({ "now": now + 59 })).await?,
+        200,
+    )?;
+    ensure!(
+        ctx.target
+            .events(&identity.device_id)
+            .await?
+            .iter()
+            .all(|event| { event["type"] != "stream_closed" || event["cert_thumbprint"] != old_thumb }),
+        "retired stream closed before its 60-second reconnect grace elapsed"
+    );
+    ensure!(
+        tokio::time::timeout(Duration::from_millis(150), old.stream.message())
+            .await
+            .is_err(),
+        "retired stream closed before the 60-second boundary"
+    );
+    expect_status(
+        &ctx.target.control("time/freeze", &json!({ "now": now + 60 })).await?,
+        200,
+    )?;
+    ensure!(
+        tokio::time::timeout(Duration::from_secs(3), old.stream.message())
+            .await
+            .context("retired stream did not close at 60 seconds")??
+            .is_none(),
+        "retired stream did not close cleanly at 60 seconds"
+    );
+    let events = ctx.target.events(&identity.device_id).await?;
+    let closed = events
+        .iter()
+        .find(|event| {
+            event["type"] == "stream_closed" && event["cert_thumbprint"] == old_thumb && event["status"] == "OK"
+        })
+        .context("retired stream has no clean close event")?;
+    let new_auth = events
+        .iter()
+        .find(|event| event["type"] == "stream_authenticated" && event["cert_thumbprint"] == identity.thumbprint)
+        .context("replacement stream was not authenticated")?;
+    ensure!(
+        count(closed, "seq")? > count(reconnect, "seq")?
+            && count(closed, "seq")? > count(new_auth, "seq")?
+            && device(&ctx.target, &identity.device_id).await?["connected"] == true,
+        "retired stream closed before reconnect or replacement authentication"
+    );
     Ok(())
 }
 
@@ -2495,7 +3502,7 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
     let (_, mut a) = issued(&ctx, "old-a").await?;
     let (_, b) = issued(&ctx, "old-b").await?;
     let old_root = field(&device(&ctx.target, &a.device_id).await?["certificate"], "issuer")?.to_owned();
-    let expected = active_old_root_ids(&ctx.target, &old_root).await?;
+    let expected = active_old_root_ids(&ctx, &old_root).await?;
     ensure!(
         expected.contains(&a.device_id) && expected.contains(&b.device_id),
         "new devices are missing from the full old-root listing"
@@ -2516,22 +3523,20 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
     let renewed = ctx.target.renew(&a, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     a.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
-    expect_status(&ctx.target.renew(&a, &KeyPair::generate()?, &json!({})).await?, 200)?;
+    expect_status(&ctx.target.confirm(&a).await?, 204)?;
     ensure!(
         device(&ctx.target, &a.device_id).await?["renewalRequested"] == false,
-        "pending certificate did not clear the rotation flag on HTTP authentication"
+        "confirm did not clear the rotation flag"
     );
     let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     ensure!(
-        count(&status.body, "activeDevicesOnOldRoot")?
-            == active_old_root_ids(&ctx.target, &old_root).await?.len() as u64,
+        count(&status.body, "activeDevicesOnOldRoot")? == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
         "migration old-root count disagrees with all listing pages"
     );
     ctx.target.revoke(&b.device_id).await?;
     let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     ensure!(
-        count(&status.body, "activeDevicesOnOldRoot")?
-            == active_old_root_ids(&ctx.target, &old_root).await?.len() as u64,
+        count(&status.body, "activeDevicesOnOldRoot")? == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
         "revoked device remained in the old-root count"
     );
     finish_rotation(&ctx).await?;
@@ -2546,25 +3551,169 @@ pub(crate) async fn p_rotation_conflict_409(ctx: Context) -> anyhow::Result<()> 
     Ok(())
 }
 
+pub(crate) async fn p_rotation_completes_early_when_last_device_migrates(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut first) = issued(&ctx, "first-old-root").await?;
+    let (_, mut last) = issued(&ctx, "last-old-root").await?;
+    let old_root = thumbprint(first.certificate_chain.last().context("missing old root")?)?;
+    ensure!(
+        thumbprint(last.certificate_chain.last().context("missing old root")?)? == old_root,
+        "devices were not enrolled under the same old root"
+    );
+
+    let started = ctx.target.rotate(None).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "rotating" && count(&started.body, "activeDevicesOnOldRoot")? == 2,
+        "rotation did not start with both old-root devices"
+    );
+    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
+    ensure!(
+        deadline - chain_evaluation_time(&ctx).await? > 60,
+        "rotation deadline is not far enough away to test early completion"
+    );
+    let new_root = field(&started.body["newRoot"], "thumbprint")?.to_owned();
+    ensure!(new_root != old_root, "rotation did not create a new root");
+
+    for (remaining, identity) in [(1, &mut first), (0, &mut last)] {
+        let new_key = KeyPair::generate()?;
+        let renewed = ctx.target.renew(identity, &new_key, &json!({})).await?;
+        expect_status(&renewed, 200)?;
+        identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
+        let pending = device(&ctx.target, &identity.device_id).await?;
+        ensure!(
+            has_certificate(&pending, &identity.thumbprint, "pending") && pending["certificate"]["issuer"] == old_root,
+            "renewal migrated the device before confirmation"
+        );
+        let before_auth = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+        ensure!(
+            before_auth.body["phase"] == "rotating"
+                && count(&before_auth.body, "activeDevicesOnOldRoot")? == remaining + 1,
+            "rotation completed before the old-root certificate was replaced"
+        );
+
+        expect_status(&ctx.target.confirm(identity).await?, 204)?;
+        let migrated = device(&ctx.target, &identity.device_id).await?;
+        ensure!(
+            has_certificate(&migrated, &identity.thumbprint, "current")
+                && migrated["certificate"]["issuer"] == new_root,
+            "confirm did not migrate the device to the new root"
+        );
+        let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+        let roots = ctx.target.trust_anchor().await?;
+        let published = roots["roots"].as_array().context("published roots")?;
+        ensure!(
+            count(&status.body, "activeDevicesOnOldRoot")? == remaining,
+            "migration did not update the old-root device count"
+        );
+        if remaining == 1 {
+            ensure!(
+                status.body["phase"] == "rotating"
+                    && published.len() == 2
+                    && published.iter().any(|root| root["thumbprint"] == old_root),
+                "rotation stopped while an old-root device was still active"
+            );
+        } else {
+            ensure!(
+                status.body["phase"] == "idle"
+                    && published.len() == 1
+                    && published[0]["thumbprint"] == new_root
+                    && chain_evaluation_time(&ctx).await? < deadline - 30,
+                "rotation did not finish early with only the new root published"
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_completes_immediately_without_old_root_devices(ctx: Context) -> anyhow::Result<()> {
+    let original = ctx.target.trust_anchor().await?;
+    let original_roots = original["roots"].as_array().context("original roots")?;
+    ensure!(original_roots.len() == 1, "expected one root before rotation");
+    let old_root = field(&original_roots[0], "thumbprint")?;
+
+    let started = ctx.target.rotate(None).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "idle"
+            && count(&started.body, "activeDevicesOnOldRoot")? == 0
+            && started.body.get("deadline").is_none()
+            && started.body.get("oldRoot").is_none()
+            && started.body.get("newRoot").is_none(),
+        "rotation without old-root devices did not complete in the POST response"
+    );
+    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    expect_status(&status, 200)?;
+    ensure!(status.body == started.body, "completed rotation did not remain idle");
+    let roots = ctx.target.trust_anchor().await?;
+    let published = roots["roots"].as_array().context("published roots")?;
+    ensure!(
+        published.len() == 1 && published[0]["thumbprint"] != old_root,
+        "rotation without old-root devices did not replace the published root"
+    );
+    assert_root(&published[0])?;
+    Ok(())
+}
+
 pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()> {
-    ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, expired) = issued(&ctx, "expired-old-root").await?;
-    ctx.target.advance(121).await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
     let (_, active) = issued(&ctx, "active-old-root").await?;
     let (_, revoked) = issued(&ctx, "revoked-old-root").await?;
     ctx.target.revoke(&revoked.device_id).await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
+    let (_, pending_only) = issued(&ctx, "expired-current-pending-old-root").await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 240 })).await?;
+    expect_status(
+        &ctx.target
+            .renew(&pending_only, &KeyPair::generate()?, &json!({}))
+            .await?,
+        200,
+    )?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
+    let (_, both) = issued(&ctx, "current-and-pending-old-root").await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 180 })).await?;
+    expect_status(&ctx.target.renew(&both, &KeyPair::generate()?, &json!({})).await?, 200)?;
+    ctx.target.advance(61).await?;
+
     let expired_record = device(&ctx.target, &expired.device_id).await?;
     ensure!(
         expired_record["status"] == "expired",
         "fixture certificate did not expire"
     );
-    let maximum = time::OffsetDateTime::parse(
-        field(
-            &device(&ctx.target, &active.device_id).await?["certificate"],
-            "notAfter",
-        )?,
-        &Rfc3339,
-    )?;
+    let pending_record = device(&ctx.target, &pending_only.device_id).await?;
+    ensure!(
+        pending_record["status"] == "expired"
+            && pending_record["certificates"]
+                .as_array()
+                .is_some_and(|certs| certs.iter().any(|cert| cert["status"] == "pending")),
+        "fixture lacks a live pending old-root certificate with an expired current certificate"
+    );
+    let both_record = device(&ctx.target, &both.device_id).await?;
+    ensure!(
+        both_record["status"] == "active"
+            && both_record["certificates"]
+                .as_array()
+                .is_some_and(|certs| certs.iter().any(|cert| cert["status"] == "pending")),
+        "fixture lacks both current and pending old-root certificates"
+    );
+    let pending_cert = pending_record["certificates"]
+        .as_array()
+        .context("pending device certificates")?
+        .iter()
+        .find(|cert| cert["status"] == "pending")
+        .context("pending old-root certificate")?;
+    let maximum = time::OffsetDateTime::parse(field(pending_cert, "notAfter")?, &Rfc3339)?;
+    ensure!(
+        time::OffsetDateTime::parse(
+            field(
+                &device(&ctx.target, &active.device_id).await?["certificate"],
+                "notAfter"
+            )?,
+            &Rfc3339
+        )? < maximum,
+        "pending certificate does not determine the rotation maximum"
+    );
     let too_late = (maximum + time::Duration::seconds(1)).format(&Rfc3339)?;
     expect_status(&ctx.target.rotate(Some(&too_late)).await?, 400)?;
     ensure!(
@@ -2577,8 +3726,134 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
     let started = ctx.target.rotate(None).await?;
     expect_status(&started, 202)?;
     ensure!(
-        started.body["deadline"] == maximum.format(&Rfc3339)? && count(&started.body, "activeDevicesOnOldRoot")? == 1,
-        "rotation maximum included an expired or revoked old-root device"
+        started.body["deadline"] == maximum.format(&Rfc3339)?
+            && count(&started.body, "activeDevicesOnOldRoot")? == 3
+            && active_old_root_ids(&ctx, field(&started.body["oldRoot"], "thumbprint")?)
+                .await?
+                .len()
+                == 3,
+        "rotation maximum or device count excluded a pending certificate or counted one device twice"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context) -> anyhow::Result<()> {
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
+    let (_, expired) = issued(&ctx, "grace-old-root").await?;
+    let old_root = thumbprint(expired.certificate_chain.last().context("missing old root")?)?;
+    let expiry = time::OffsetDateTime::parse(
+        field(
+            &device(&ctx.target, &expired.device_id).await?["certificate"],
+            "notAfter",
+        )?,
+        &Rfc3339,
+    )?
+    .unix_timestamp();
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 600 })).await?;
+    let (_, revoked) = issued(&ctx, "long-lived-old-root").await?;
+
+    let started = ctx.target.rotate(None).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "rotating" && count(&started.body, "activeDevicesOnOldRoot")? == 2,
+        "rotation did not count both old-root devices"
+    );
+    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
+    let new_root = field(&started.body["newRoot"], "thumbprint")?;
+    ctx.target.revoke(&revoked.device_id).await?;
+    let remaining = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    ensure!(
+        remaining.body["phase"] == "rotating"
+            && count(&remaining.body, "activeDevicesOnOldRoot")? == 1
+            && ctx.target.trust_anchor().await?["roots"]
+                .as_array()
+                .is_some_and(|roots| roots.len() == 2),
+        "rotation finished while the short-lived old-root certificate was unexpired"
+    );
+
+    let until_expiry = expiry - chain_evaluation_time(&ctx).await?;
+    ensure!(
+        until_expiry > 0,
+        "old-root certificate expired before the boundary test"
+    );
+    ctx.target.advance(until_expiry).await?;
+    let now = chain_evaluation_time(&ctx).await?;
+    ensure!(
+        now >= expiry && now < expiry + 60 && now < deadline - 60,
+        "certificate is not expired within grace and before the rotation deadline"
+    );
+    let completed = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    let roots = ctx.target.trust_anchor().await?;
+    ensure!(
+        completed.body["phase"] == "idle"
+            && count(&completed.body, "activeDevicesOnOldRoot")? == 0
+            && roots["roots"]
+                .as_array()
+                .is_some_and(|entries| entries.len() == 1 && entries[0]["thumbprint"] == new_root),
+        "expiry of the last active old-root certificate did not finish the rotation early"
+    );
+    ensure!(
+        device(&ctx.target, &expired.device_id).await?["status"] == "expired",
+        "old-root certificate was not expired before grace renewal"
+    );
+
+    let new_key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&expired, &new_key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    let chain = renewed.body["certificate_chain"]
+        .as_array()
+        .context("grace renewal chain")?
+        .iter()
+        .map(|cert| cert.as_str().context("chain element").map(str::to_owned))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    verify_chain(&chain, &roots, chain_evaluation_time(&ctx).await?)?;
+    ensure!(
+        thumbprint(chain.last().context("new root")?)? == new_root
+            && new_root != old_root
+            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["phase"] == "idle",
+        "expired old-root certificate did not renew onto the new root after early completion"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(ctx: Context) -> anyhow::Result<()> {
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
+    let (_, short) = issued(&ctx, "freeze-short-old-root").await?;
+    let expiry = time::OffsetDateTime::parse(
+        field(&device(&ctx.target, &short.device_id).await?["certificate"], "notAfter")?,
+        &Rfc3339,
+    )?
+    .unix_timestamp();
+    let old_root = thumbprint(short.certificate_chain.last().context("missing old root")?)?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 180 })).await?;
+    let (_, long) = issued(&ctx, "freeze-long-old-root").await?;
+    let started = ctx.target.rotate(None).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "rotating" && count(&started.body, "activeDevicesOnOldRoot")? == 2,
+        "rotation did not start with two active old-root certificates"
+    );
+    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
+    ctx.target.revoke(&long.device_id).await?;
+
+    let before = ctx.target.control("time/freeze", &json!({ "now": expiry - 1 })).await?;
+    expect_status(&before, 200)?;
+    ensure!(
+        before.body["published_roots"]
+            .as_array()
+            .is_some_and(|roots| roots.len() == 2)
+            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["activeDevicesOnOldRoot"] == 1,
+        "old root was removed before the last certificate expired"
+    );
+    let at_expiry = ctx.target.control("time/freeze", &json!({ "now": expiry })).await?;
+    expect_status(&at_expiry, 200)?;
+    ensure!(
+        expiry < deadline
+            && at_expiry.body["published_roots"]
+                .as_array()
+                .is_some_and(|roots| roots.len() == 1 && roots[0] != old_root)
+            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["phase"] == "idle",
+        "freezing the clock at certificate expiry did not complete the rotation immediately"
     );
     Ok(())
 }
@@ -2597,7 +3872,7 @@ pub(crate) async fn p_rotation_push_rate_survives_deadline(ctx: Context) -> anyh
             ensure!(
                 matches!(
                     push.payload,
-                    Some(agent_identity_channel_proto::server_message::Payload::RenewRequested(ref renewal))
+                    Some(agent_channel_proto::server_message::Payload::RenewRequested(ref renewal))
                         if renewal.reason == "rotation"
                 ),
                 "queued rotation push has the wrong payload"
@@ -2796,13 +4071,73 @@ pub(crate) async fn p_rotation_request_renewal_pushed(ctx: Context) -> anyhow::R
     ensure!(
         matches!(
             push.payload,
-            Some(agent_identity_channel_proto::server_message::Payload::RenewRequested(ref reason))
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(ref reason))
                 if reason.reason == "rotation"
         ),
         "rotation did not push RenewRequested(rotation)"
     );
     stream.ack(&push).await?;
     finish_rotation(&ctx).await?;
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context) -> anyhow::Result<()> {
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
+    let (_, mut identity) = issued(&ctx, "pending-only-old-root").await?;
+    let old_root = thumbprint(identity.certificate_chain.last().context("missing old root")?)?;
+    let current_expiry = time::OffsetDateTime::parse(
+        field(
+            &device(&ctx.target, &identity.device_id).await?["certificate"],
+            "notAfter",
+        )?,
+        &Rfc3339,
+    )?
+    .unix_timestamp();
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    ensure!(
+        thumbprint(identity.certificate_chain.last().context("missing pending root")?)? == old_root,
+        "pending certificate was not issued under the old root"
+    );
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    stream.hello(&identity, &[]).await?;
+    let until_expiry = current_expiry - chain_evaluation_time(&ctx).await?;
+    ensure!(until_expiry > 0, "current certificate expired before the boundary test");
+    ctx.target.advance(until_expiry).await?;
+    let record = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        record["status"] == "expired"
+            && record["connected"] == true
+            && has_certificate(&record, &identity.thumbprint, "pending"),
+        "pending-only old-root stream was not connected after current expiry"
+    );
+    let started = ctx.target.rotate(None).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "rotating"
+            && count(&started.body, "activeDevicesOnOldRoot")? == 1
+            && ctx.target.trust_anchor().await?["roots"]
+                .as_array()
+                .is_some_and(|roots| roots.len() == 2),
+        "rotation omitted the pending-only old-root device"
+    );
+    let push = stream.next().await?;
+    ensure!(
+        matches!(
+            push.payload,
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(ref reason))
+                if reason.reason == "rotation"
+        ),
+        "pending-only old-root stream did not receive RenewRequested(rotation)"
+    );
+    stream.ack(&push).await?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await?["renewalRequested"] == true,
+        "rotation did not persist the request-renewal flag for the pending-only device"
+    );
     Ok(())
 }
 
@@ -3402,7 +4737,7 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
         )?;
     }
     if ctx.mock() {
-        let oversized = vec![b' '; 1024 * 1024 + 1];
+        let oversized = vec![b' '; 64 * 1024 + 1];
         expect_error(
             &ctx.target
                 .send(
@@ -3413,6 +4748,12 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
                     None,
                 )
                 .await?,
+            413,
+            "invalid_request",
+        )?;
+        let signed = issued.key.sign_now(&issued.thumbprint, "renew", Some(&oversized));
+        expect_error(
+            &ctx.target.signed_renew(&oversized, &signed, None).await?,
             413,
             "invalid_request",
         )?;

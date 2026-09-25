@@ -157,7 +157,7 @@ impl Target {
                 .await?,
             204,
         )?;
-        Ok(identity.channel_url.is_some())
+        Ok(identity.agent_channel_url.is_some())
     }
 
     pub(crate) async fn requests(&self, token: Option<&Token>) -> anyhow::Result<Value> {
@@ -270,6 +270,39 @@ impl Target {
         .await
     }
 
+    pub(crate) async fn confirm(&self, identity: &Identity) -> anyhow::Result<Reply> {
+        let headers = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+        self.signed_confirm(&headers, None).await
+    }
+
+    pub(crate) async fn signed_confirm(&self, headers: &SignedHeaders, body: Option<&[u8]>) -> anyhow::Result<Reply> {
+        self.send(
+            Method::POST,
+            "/api/agent-identity/v1/confirm",
+            body,
+            None,
+            Some(headers),
+        )
+        .await
+    }
+
+    pub(crate) async fn check_in(&self, identity: &Identity, metadata: &Value) -> anyhow::Result<Reply> {
+        let body = serde_json::to_vec(&json!({ "metadata": metadata }))?;
+        let headers = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
+        self.signed_check_in(&body, &headers).await
+    }
+
+    pub(crate) async fn signed_check_in(&self, body: &[u8], headers: &SignedHeaders) -> anyhow::Result<Reply> {
+        self.send(
+            Method::POST,
+            "/api/agent-identity/v1/check-in",
+            Some(body),
+            None,
+            Some(headers),
+        )
+        .await
+    }
+
     pub(crate) async fn device(&self, id: &str) -> anyhow::Result<Reply> {
         self.admin(Method::GET, &format!("/devices/{id}"), None).await
     }
@@ -326,10 +359,10 @@ pub(crate) struct Token {
 pub(crate) struct Identity {
     pub(crate) device_id: String,
     pub(crate) authority_id: String,
-    pub(crate) friendly_name: String,
     pub(crate) thumbprint: String,
     pub(crate) certificate_chain: Vec<String>,
-    pub(crate) channel_url: Option<String>,
+    pub(crate) agent_channel_url: Option<String>,
+    pub(crate) config: Value,
     pub(crate) key: KeyPair,
 }
 
@@ -343,18 +376,31 @@ impl Identity {
             .map(|entry| entry.as_str().context("invalid chain entry").map(str::to_owned))
             .collect::<anyhow::Result<Vec<_>>>()?;
         ensure!(!chain.is_empty(), "empty certificate chain");
-        let channel_url = match reply.body.get("channel_url") {
+        ensure!(
+            reply.body.get("channel_url").is_none(),
+            "enrollment used obsolete top-level channel_url"
+        );
+        let config = reply.body["config"].as_object().context("missing enrollment config")?;
+        ensure!(
+            config.get("version") == Some(&json!(1)),
+            "enrollment config.version is not 1"
+        );
+        ensure!(
+            config.get("revision").and_then(Value::as_u64).is_some(),
+            "enrollment config.revision is not an unsigned integer"
+        );
+        let agent_channel_url = match config.get("agent_channel_url") {
             None => None,
             Some(Value::String(url)) => Some(url.clone()),
-            Some(_) => anyhow::bail!("enrollment channel_url must be a string when present"),
+            Some(_) => anyhow::bail!("enrollment config.agent_channel_url must be a string when present"),
         };
         Ok(Self {
             device_id: field(&reply.body, "device_id")?.to_owned(),
             authority_id: field(&reply.body, "authority_id")?.to_owned(),
-            friendly_name: field(&reply.body, "friendly_name")?.to_owned(),
             thumbprint: crate::signer::thumbprint(&chain[0])?,
             certificate_chain: chain,
-            channel_url,
+            agent_channel_url,
+            config: reply.body["config"].clone(),
             key,
         })
     }
@@ -445,20 +491,26 @@ mod tests {
             body: json!({
                 "authority_id": uuid::Uuid::new_v4(),
                 "device_id": uuid::Uuid::new_v4(),
-                "friendly_name": "test",
                 "certificate_chain": [certificate],
+                "config": { "version": 1, "revision": 1 },
             }),
         };
         ensure!(
             Identity::from_enrollment(KeyPair::generate()?, &reply)?
-                .channel_url
+                .agent_channel_url
                 .is_none(),
-            "omitted channel_url was not accepted"
+            "omitted config.agent_channel_url was not accepted"
         );
+        reply.body["config"]["agent_channel_url"] = Value::Null;
+        ensure!(
+            Identity::from_enrollment(KeyPair::generate()?, &reply).is_err(),
+            "explicit null config.agent_channel_url was accepted"
+        );
+        reply.body["config"]["agent_channel_url"] = json!("https://host/mock");
         reply.body["channel_url"] = Value::Null;
         ensure!(
             Identity::from_enrollment(KeyPair::generate()?, &reply).is_err(),
-            "explicit null channel_url was accepted"
+            "obsolete top-level channel_url was accepted"
         );
         Ok(())
     }

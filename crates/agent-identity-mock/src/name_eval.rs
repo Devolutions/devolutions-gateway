@@ -16,7 +16,7 @@ pub(crate) const KNOWN_KEYS: [&str; 8] = [
 
 pub(crate) const MAX_METADATA_KEYS: usize = 32;
 pub(crate) const MAX_METADATA_VALUE_BYTES: usize = 1024;
-pub(crate) const MAX_METADATA_TOTAL_BYTES: usize = 8 * 1024;
+pub(crate) const MAX_METADATA_TOTAL_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_FRIENDLY_NAME_CHARS: usize = 255;
 pub(crate) const DEFAULT_FRIENDLY_NAME_FORMAT: &str = "{hostname}";
 

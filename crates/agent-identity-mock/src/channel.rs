@@ -6,9 +6,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_identity_channel_proto::agent_channel_server::AgentChannel;
-use agent_identity_channel_proto::{
-    AgentMessage, Challenge, Reconnect, RenewRequested, ServerMessage, Welcome, agent_message, server_message,
+use agent_channel_proto::agent_channel_server::AgentChannel;
+use agent_channel_proto::{
+    AgentMessage, Challenge, ConfigUpdate, Reconnect, RenewRequested, ServerMessage, Welcome, agent_message,
+    server_message,
 };
 use futures::StreamExt as _;
 use rand::RngExt as _;
@@ -72,6 +73,8 @@ impl AgentChannel for ChannelService {
     ) -> Result<Response<Self::ConnectStream>, Status> {
         let app = Arc::clone(&self.app);
         let metadata = request.metadata();
+        let duplicate_signature = metadata.get_all("signature-input").iter().count() != 1
+            || metadata.get_all("signature").iter().count() != 1;
         let header_bytes = |name: &str| metadata.get(name).map(|v| v.as_bytes().to_vec());
         let signature_input = header_bytes("signature-input");
         let signature = header_bytes("signature");
@@ -79,16 +82,19 @@ impl AgentChannel for ChannelService {
         let now = app.now();
         let stream_id = Uuid::new_v4();
         let (out_tx, out_rx) = mpsc::channel(32);
-        let (push_tx, push_rx) = mpsc::channel(32);
+        let (push_tx, push_rx) = mpsc::unbounded_channel();
         let auth = {
             let mut state = app.state.lock().await;
             state.tick(now);
             state.requests.connect += 1;
-            if !state.faults.channel_available {
+            state.requests.request_sequence.push("connect");
+            if !state.faults.channel_available || state.faults.channel_broken {
                 // §7.5: the channel is not hosted.
                 return Err(Status::unavailable("channel not available"));
             }
-            let result = {
+            let result = if duplicate_signature {
+                Err(Rejection::SignatureInvalid)
+            } else {
                 let crate::state::State {
                     devices,
                     cert_index,
@@ -115,6 +121,7 @@ impl AgentChannel for ChannelService {
                         device_id: auth.device_id(),
                         cert_thumbprint: auth.cert_thumbprint().to_owned(),
                         tx: push_tx.clone(),
+                        retire_at: None,
                     },
                 );
                 state.record_event(
@@ -212,8 +219,8 @@ async fn run_stream(
     stream_id: Uuid,
     auth: crate::oracle::AuthenticatedDevice,
     mut client: Streaming<AgentMessage>,
-    push_tx: mpsc::Sender<StreamPush>,
-    mut push_rx: mpsc::Receiver<StreamPush>,
+    push_tx: mpsc::UnboundedSender<StreamPush>,
+    mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
 ) {
     let device_id = auth.device_id();
@@ -282,6 +289,7 @@ async fn run_stream(
     let Some(agent_message::Payload::Hello(hello_payload)) = hello.payload else {
         return;
     };
+    let applied_config_revision = hello_payload.applied_state_versions.get("config").copied().unwrap_or(0);
 
     let metadata: Map<String, Value> = hello_payload
         .metadata
@@ -331,7 +339,7 @@ async fn run_stream(
     }
 
     // Step 4: only now does anything happen server-side.
-    let renewal_reason = {
+    let authentication = {
         let now = app.now();
         let mut state = app.state.lock().await;
         state.tick(now);
@@ -362,28 +370,40 @@ async fn run_stream(
                 serde_json::json!({
                     "stream_id": stream_id,
                     "cert_thumbprint": cert_thumbprint,
+                    "applied_config_revision": applied_config_revision,
                 }),
             );
-            state.note_cert_authenticated(device_id, &cert_thumbprint);
-            let reason = state.devices.get_mut(&device_id).and_then(|device| {
-                device.metadata = metadata;
-                device.last_seen_at = Some(now);
-                device.renewal_requested.as_ref().map(|f| f.reason.as_str())
-            });
+            let (reason, config_update) = state
+                .devices
+                .get_mut(&device_id)
+                .map(|device| {
+                    device.metadata = metadata;
+                    device.last_seen_at = Some(now);
+                    let revision = device.config_revision();
+                    let update = (applied_config_revision < revision).then(|| {
+                        (
+                            serde_json::to_string(&device.config).expect("device config is serializable"),
+                            revision,
+                        )
+                    });
+                    (device.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
+                })
+                .expect("authenticated device exists");
             state.streams.insert(
                 stream_id,
                 StreamHandle {
                     device_id,
                     cert_thumbprint: cert_thumbprint.clone(),
                     tx: push_tx,
+                    retire_at: None,
                 },
             );
             state.requests.authenticated_connects += 1;
-            Ok(reason)
+            Ok((reason, config_update))
         }
     };
-    let renewal_reason = match renewal_reason {
-        Ok(reason) => reason,
+    let (renewal_reason, config_update) = match authentication {
+        Ok(result) => result,
         Err(rejection) => {
             close_with(&out, rejection_status(rejection)).await;
             finish_stream(
@@ -416,8 +436,25 @@ async fn run_stream(
         return;
     }
 
-    // §7.3 step 5: the request-renewal flag is pushed on every connect until renewed.
+    // §7.3: reconcile config and the renewal flag after Welcome.
     let mut awaiting_ack = HashSet::new();
+    if let Some((config_json, revision)) = config_update {
+        let message = server_message(
+            Uuid::new_v4().to_string(),
+            None,
+            server_message::Payload::ConfigUpdate(ConfigUpdate { config_json }),
+        );
+        awaiting_ack.insert(message.id.clone());
+        if !send(&out, message).await {
+            finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+            return;
+        }
+        app.state.lock().await.record_event(
+            device_id,
+            "config_update_sent",
+            serde_json::json!({ "stream_id": stream_id, "revision": revision }),
+        );
+    }
     if let Some(reason) = renewal_reason {
         let message = server_message(
             Uuid::new_v4().to_string(),
@@ -454,6 +491,17 @@ async fn run_stream(
             }
             push = push_rx.recv() => {
                 match push {
+                    Some(StreamPush::ConfigUpdate(config_json)) => {
+                        let message = server_message(
+                            Uuid::new_v4().to_string(),
+                            None,
+                            server_message::Payload::ConfigUpdate(ConfigUpdate { config_json }),
+                        );
+                        awaiting_ack.insert(message.id.clone());
+                        if !send(&out, message).await {
+                            break;
+                        }
+                    }
                     Some(StreamPush::RenewRequested(reason)) => {
                         let message = server_message(
                             Uuid::new_v4().to_string(),

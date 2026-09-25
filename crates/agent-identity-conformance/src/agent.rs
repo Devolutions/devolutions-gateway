@@ -25,6 +25,7 @@ use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{Target, Token, count, decoded_certificate, expect_status, field};
+use crate::protocol::has_certificate;
 use crate::{Context, KeyBackend};
 
 type CaseFuture<'a> = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
@@ -41,6 +42,13 @@ const KNOWN_METADATA_KEYS: [&str; 8] = [
     "machine_id",
 ];
 const REQUIRED_METADATA_KEYS: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
+
+fn token_file_id(token: &str) -> String {
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 fn validate_key_name(prefix: &str, name: &str) -> anyhow::Result<()> {
     let key_uuid = name
@@ -75,7 +83,7 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
         );
         total_bytes += key.len() + value.len();
     }
-    ensure!(total_bytes <= 8 * 1024, "agent metadata exceeds 8 KiB");
+    ensure!(total_bytes <= 16 * 1024, "agent metadata exceeds 16 KiB");
     for key in REQUIRED_METADATA_KEYS {
         ensure!(
             values
@@ -135,6 +143,8 @@ impl AgentCase {
             "disable_jitter": true,
             "backoff_max_secs": 2,
             "pending_poll_interval_ms": 200,
+            "check_in_interval_secs": 5,
+            "channel_failure_check_in_after_secs": 3,
             "key_name_prefix": &ctx.key_name_prefix,
             "metadata_override_path": metadata_override_path
         });
@@ -192,12 +202,19 @@ impl AgentCase {
         self.dir.path()
     }
 
-    fn pending_path(&self) -> PathBuf {
+    fn pending_path_for(&self, token: &str) -> PathBuf {
         #[cfg(windows)]
-        let name = "pending-enrollment.dat";
+        let extension = "dat";
         #[cfg(not(windows))]
-        let name = "pending-enrollment.json";
-        self.path().join("identity").join(name)
+        let extension = "json";
+        self.path()
+            .join("identity")
+            .join("pending")
+            .join(format!("{}.{extension}", token_file_id(token)))
+    }
+
+    fn pending_path(&self) -> PathBuf {
+        self.pending_path_for(self.tokens.last().expect("pending token is tracked"))
     }
 
     fn identity_path(&self, authority_id: &str) -> PathBuf {
@@ -208,8 +225,15 @@ impl AgentCase {
             .join("identity.json")
     }
 
+    fn in_progress_path_for(&self, token: &str) -> PathBuf {
+        self.path()
+            .join("identity")
+            .join("pending")
+            .join(format!("{}.in-progress.json", token_file_id(token)))
+    }
+
     fn in_progress_path(&self) -> PathBuf {
-        self.path().join("identity").join("enrollment-in-progress.json")
+        self.in_progress_path_for(self.tokens.last().expect("pending token is tracked"))
     }
 
     fn metadata_override_path(&self) -> PathBuf {
@@ -229,14 +253,20 @@ impl AgentCase {
     }
 
     fn in_progress(&self) -> anyhow::Result<Option<Value>> {
-        let path = self.in_progress_path();
+        self.in_progress_for(self.tokens.last().expect("pending token is tracked"))
+    }
+
+    fn in_progress_for(&self, token: &str) -> anyhow::Result<Option<Value>> {
+        let path = self.in_progress_path_for(token);
         if !path.exists() {
             return Ok(None);
         }
-        let record: Value =
-            serde_json::from_slice(&std::fs::read(path)?).context("read enrollment-in-progress.json")?;
+        let record: Value = serde_json::from_slice(&std::fs::read(path)?).context("read pending in-progress record")?;
         ensure!(record["version"] == 1, "in-progress enrollment has wrong version");
-        field(&record, "token_sha256")?;
+        ensure!(
+            record["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes())),
+            "in-progress record does not belong to its pending token"
+        );
         validate_key_name(&self.ctx.key_name_prefix, field(&record, "key_name")?)?;
         Ok(Some(record))
     }
@@ -293,7 +323,8 @@ impl AgentCase {
             use std::os::unix::fs::OpenOptionsExt as _;
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
-                .create_new(true)
+                .create(true)
+                .truncate(true)
                 .mode(0o600)
                 .open(&path)?;
             file.write_all(&contents)?;
@@ -389,7 +420,7 @@ impl AgentCase {
                         let json_path = authority.path().join("identity.json");
                         if json_path.exists() {
                             let state: Value = serde_json::from_slice(&std::fs::read(json_path)?)?;
-                            if state["device_id"] == id && !self.pending_path().exists() {
+                            if state["device_id"] == id && !self.pending_path_for(&token.text).exists() {
                                 ensure!(
                                     key_exists(self, key_name(&state, "current")?)?,
                                     "settled enrollment has no current identity key"
@@ -455,8 +486,8 @@ impl AgentCase {
             let machine_keys_gone = crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?.is_empty();
             #[cfg(not(windows))]
             let machine_keys_gone = true;
-            if !self.pending_path().exists()
-                && !self.in_progress_path().exists()
+            if !self.pending_path_for(&token.text).exists()
+                && !self.in_progress_path_for(&token.text).exists()
                 && !self.has_stored_identity()?
                 && self.file_keys_with_prefix()?.is_empty()
                 && machine_keys_gone
@@ -553,8 +584,20 @@ impl AgentCase {
             let name = entry.file_name();
             let name = name.to_str().context("identity entry name is not UTF-8")?;
             let file_type = entry.file_type()?;
-            if path == self.pending_path() || path == self.in_progress_path() {
-                ensure!(file_type.is_file(), "{} is not a regular file", path.display());
+            if name == "pending" {
+                ensure!(file_type.is_dir(), "identity/pending is not a directory");
+                for pending in std::fs::read_dir(path)? {
+                    let pending = pending?;
+                    ensure!(
+                        pending.file_type()?.is_file()
+                            && self.tokens.iter().any(|token| {
+                                pending.path() == self.pending_path_for(token)
+                                    || pending.path() == self.in_progress_path_for(token)
+                            }),
+                        "unexpected pending enrollment file {}",
+                        pending.path().display()
+                    );
+                }
             } else if name == "keys" {
                 ensure!(file_type.is_dir(), "identity/keys is not a directory");
                 if self.ctx.key_backend != KeyBackend::File {
@@ -642,8 +685,10 @@ impl AgentCase {
                 }
             }
         }
-        if let Some(progress) = self.in_progress()? {
-            recorded.insert(field(&progress, "key_name")?.to_owned());
+        for token in &self.tokens {
+            if let Some(progress) = self.in_progress_for(token)? {
+                recorded.insert(field(&progress, "key_name")?.to_owned());
+            }
         }
         let mut existing = self.file_keys_with_prefix()?;
         #[cfg(windows)]
@@ -812,7 +857,7 @@ impl AgentCase {
                     stack.push(path);
                     continue;
                 }
-                if path == self.pending_path() && path.exists() {
+                if self.tokens.iter().any(|token| path == self.pending_path_for(token)) {
                     continue;
                 }
                 let contents = std::fs::read(&path)?;
@@ -1033,23 +1078,45 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
         "stored identity has wrong base URL"
     );
     ensure!(
-        state["friendly_name"] == device["friendlyName"],
-        "stored identity has the wrong friendly name"
+        state.get("channel_url").is_none(),
+        "identity stored obsolete top-level channel_url"
+    );
+    let config = state["config"].as_object().context("stored identity config missing")?;
+    ensure!(
+        config.get("version") == Some(&json!(1)),
+        "stored identity has wrong config version"
+    );
+    ensure!(
+        config.get("revision").and_then(Value::as_u64).is_some(),
+        "stored identity lacks config.revision"
     );
     if case.ctx.channel_available {
-        let channel_url = field(state, "channel_url")?;
+        let channel_url = field(&state["config"], "agent_channel_url")?;
         ensure!(
             reqwest::Url::parse(channel_url)?.scheme() == "https",
-            "stored identity has an invalid channel URL"
+            "stored identity has an invalid config.agent_channel_url"
         );
         if case.ctx.mock() {
             ensure!(
                 channel_url == case.ctx.target.base_url,
-                "stored mock channel URL does not match enrollment"
+                "stored mock config.agent_channel_url does not match enrollment"
             );
         }
     } else {
-        ensure!(state.get("channel_url").is_none(), "unavailable channel URL was stored");
+        ensure!(
+            config.get("agent_channel_url").is_none(),
+            "unavailable config.agent_channel_url was stored"
+        );
+    }
+    if case.ctx.mock() {
+        let mut expected = json!({ "version": 1, "revision": 1 });
+        if case.ctx.channel_available {
+            expected["agent_channel_url"] = json!(case.ctx.target.base_url);
+        }
+        ensure!(
+            state["config"] == expected,
+            "agent did not store the initial mock config and revision exactly"
+        );
     }
     ensure!(state.get("rejected").is_none(), "new identity is already rejected");
     ensure!(
@@ -1085,10 +1152,6 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
             }
         }
     }
-    ensure!(
-        state["config"]["version"] == 1,
-        "stored identity has wrong config version"
-    );
     Ok(())
 }
 
@@ -1100,6 +1163,27 @@ fn current_thumbprint(record: &Value) -> anyhow::Result<&str> {
         .find(|cert| cert["status"] == "current")
         .and_then(|cert| cert["thumbprint"].as_str())
         .context("no current certificate")
+}
+
+fn assert_check_in_triggers_renewal(requests: &Value, start: usize) -> anyhow::Result<()> {
+    let sequence = requests["request_sequence"]
+        .as_array()
+        .context("mock request sequence missing")?;
+    let steps = sequence
+        .iter()
+        .skip(start)
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let position = |name: &str| steps.iter().position(|step| *step == name);
+    let (Some(check_in), Some(renew), Some(confirm)) = (position("check-in"), position("renew"), position("confirm"))
+    else {
+        anyhow::bail!("channelless request sequence omitted check-in, renew or confirm");
+    };
+    ensure!(
+        check_in < renew && renew < confirm,
+        "channelless renewal did not follow check-in → renew → confirm"
+    );
+    Ok(())
 }
 
 fn key_name<'a>(state: &'a Value, slot: &str) -> anyhow::Result<&'a str> {
@@ -1137,22 +1221,27 @@ async fn assert_new_auth_precedes_old_close(
     let started = Instant::now();
     loop {
         let events = target.events(device_id).await?;
+        let confirmed = events.iter().find(|event| {
+            event["type"] == "cert_status_changed" && event["cert_thumbprint"] == new_thumb && event["to"] == "current"
+        });
         let new_auth = events
             .iter()
             .find(|event| event["type"] == "stream_authenticated" && event["cert_thumbprint"] == new_thumb);
         let old_close = events
             .iter()
             .find(|event| event["type"] == "stream_closed" && event["cert_thumbprint"] == old_thumb);
-        if let (Some(new_auth), Some(old_close)) = (new_auth, old_close) {
+        if let (Some(confirmed), Some(new_auth), Some(old_close)) = (confirmed, new_auth, old_close) {
             ensure!(
-                old_close["status"] == "OK" && count(new_auth, "seq")? < count(old_close, "seq")?,
-                "old stream closed before the new channel proof authenticated"
+                old_close["status"] == "OK"
+                    && count(confirmed, "seq")? < count(new_auth, "seq")?
+                    && count(new_auth, "seq")? < count(old_close, "seq")?,
+                "confirm, new channel authentication and old stream close occurred out of order"
             );
             return Ok(());
         }
         ensure!(
             started.elapsed() < WAIT,
-            "new authentication or old stream-closed event missing"
+            "confirm, new authentication or old stream-closed event missing"
         );
         tokio::time::sleep(POLL).await;
     }
@@ -1234,72 +1323,147 @@ pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) 
     .await
 }
 
-pub(crate) async fn a_enroll_new_token_replaces_in_progress_key(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             let original_token = new_token(case, 1).await?;
-            let (original_id, original_key) = dropped_enrollment(case, &original_token).await?;
             let replacement = new_token(case, 1).await?;
-            std::fs::remove_file(case.pending_path())?;
-            case.write_pending(&replacement.text)?;
-            let replacement_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(replacement.text.as_bytes()));
+            target
+                .faults(&json!({
+                    "fail_next_response": {
+                        "endpoint": "enroll",
+                        "status": 503,
+                        "retry_after_secs": 15
+                    }
+                }))
+                .await?;
+            case.write_pending(&original_token.text)?;
             let started = Instant::now();
-            let replacement_key = loop {
-                if let Some(progress) = case.in_progress()?
-                    && progress["token_sha256"] == replacement_hash
+            let original_key = loop {
+                if count(&target.requests(Some(&original_token)).await?, "enroll")? >= 1
+                    && target.control("faults", &json!({})).await?.body["fail_next_response"].is_null()
+                    && let Some(progress) = case.in_progress_for(&original_token.text)?
                 {
                     let name = field(&progress, "key_name")?;
-                    ensure!(name != original_key, "new pending token reused the original key name");
-                    if !key_exists(case, &original_key)? && key_exists(case, name)? {
+                    if key_exists(case, name)? {
                         break name.to_owned();
                     }
                 }
                 case.check_running()?;
                 ensure!(
                     started.elapsed() < WAIT,
-                    "agent did not replace the in-progress token and key within 20 seconds"
+                    "agent did not persist its first pending enrollment during transient backoff"
                 );
                 tokio::time::sleep(POLL).await;
             };
             ensure!(
-                count(&target.devices_for(&replacement, "").await?.body, "totalCount")? == 0
-                    && count(&target.token_record(&replacement.id).await?.body, "usedCount")? == 0,
-                "retry barrier did not hold the replacement enrollment"
+                case.pending_path_for(&original_token.text).exists(),
+                "first pending file vanished during transient backoff"
             );
-            expect_status(
-                &target
-                    .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
-                    .await?,
-                200,
-            )?;
-            let (new_id, state) = case.enrolled(&target, &replacement).await?;
+            case.write_pending(&replacement.text)?;
+            let (replacement_id, replacement_state) = case.enrolled(&target, &replacement).await?;
+            let replacement_key = key_name(&replacement_state, "current")?.to_owned();
             ensure!(
-                new_id != original_id,
-                "a different pending token reused the first device"
+                replacement_key != original_key
+                    && replacement_state["token_sha256"]
+                        == URL_SAFE_NO_PAD.encode(Sha256::digest(replacement.text.as_bytes()))
+                    && case.pending_path_for(&original_token.text).exists()
+                    && case.in_progress_for(&original_token.text)?.is_some()
+                    && key_exists(case, &original_key)?,
+                "second token displaced the first pending file or in-progress key"
             );
+            let (original_id, state) = case.enrolled(&target, &original_token).await?;
             ensure!(
-                key_name(&state, "current")? == replacement_key,
-                "a different pending token did not retain its new enrollment key"
+                original_id != replacement_id
+                    && state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(original_token.text.as_bytes()))
+                    && key_name(&state, "current")? == original_key,
+                "last completing token did not become the stored identity for its authority"
             );
-            ensure!(
-                state["token_sha256"] == replacement_hash,
-                "replacement enrollment kept the original token hash"
-            );
-            wait_key_deleted(case, &original_key).await?;
-            ensure!(
-                !case.in_progress_path().exists() && !case.pending_path().exists(),
-                "replacement enrollment retained the old in-progress record"
-            );
+            wait_key_deleted(case, &replacement_key).await?;
             ensure!(
                 count(&target.devices_for(&original_token, "").await?.body, "totalCount")? == 1
+                    && count(&target.devices_for(&replacement, "").await?.body, "totalCount")? == 1
                     && count(&target.token_record(&original_token.id).await?.body, "usedCount")? == 1
-                    && count(&target.token_record(&replacement.id).await?.body, "usedCount")? == 1,
-                "pending-token replacement changed enrollment use counts"
+                    && count(&target.token_record(&replacement.id).await?.body, "usedCount")? == 1
+                    && !case.pending_path_for(&original_token.text).exists()
+                    && !case.pending_path_for(&replacement.text).exists()
+                    && !case.in_progress_path_for(&original_token.text).exists()
+                    && !case.in_progress_path_for(&replacement.text).exists(),
+                "independent pending tokens were not both consumed and cleaned up"
             );
-            let admin = case.device(&target, &new_id).await?;
+            let admin = case.device(&target, &original_id).await?;
             expect_status(&admin, 200)?;
-            assert_stored_identity(case, &replacement, &state, &admin.body)?;
+            assert_stored_identity(case, &original_token, &state, &admin.body)?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independently(
+    ctx: Context,
+) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let first = case.ctx.target.clone();
+            let second = case.ctx.second.clone().context("second authority required")?;
+            let first_token = first.create_token(1, Duration::from_secs(3600), None).await?;
+            let second_token = second.create_token(1, Duration::from_secs(3600), None).await?;
+            first
+                .faults(&json!({
+                    "fail_next_response": {
+                        "endpoint": "enroll",
+                        "status": 503,
+                        "retry_after_secs": 15
+                    }
+                }))
+                .await?;
+            case.write_pending(&first_token.text)?;
+            let started = Instant::now();
+            let first_key = loop {
+                if count(&first.requests(Some(&first_token)).await?, "enroll")? >= 1
+                    && first.control("faults", &json!({})).await?.body["fail_next_response"].is_null()
+                    && let Some(progress) = case.in_progress_for(&first_token.text)?
+                {
+                    let name = field(&progress, "key_name")?;
+                    if key_exists(case, name)? {
+                        break name.to_owned();
+                    }
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "first authority did not persist a pending key during transient backoff"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            case.write_pending(&second_token.text)?;
+            let (second_id, second_state) = case.enrolled(&second, &second_token).await?;
+            ensure!(
+                case.pending_path_for(&first_token.text).exists()
+                    && case.in_progress_for(&first_token.text)?.is_some()
+                    && key_exists(case, &first_key)?
+                    && key_name(&second_state, "current")? != first_key,
+                "first authority backoff blocked or displaced the second pending token"
+            );
+            let (first_id, first_state) = case.enrolled(&first, &first_token).await?;
+            let first_authority = field(&first_state, "authority_id")?;
+            let second_authority = field(&second_state, "authority_id")?;
+            ensure!(
+                first_authority != second_authority
+                    && first_state["device_id"] == first_id
+                    && second_state["device_id"] == second_id
+                    && case.state(first_authority)?["device_id"] == first_id
+                    && case.state(second_authority)?["device_id"] == second_id
+                    && !case.pending_path_for(&first_token.text).exists()
+                    && !case.pending_path_for(&second_token.text).exists()
+                    && !case.in_progress_path_for(&first_token.text).exists()
+                    && !case.in_progress_path_for(&second_token.text).exists()
+                    && count(&first.token_record(&first_token.id).await?.body, "usedCount")? == 1
+                    && count(&second.token_record(&second_token.id).await?.body, "usedCount")? == 1,
+                "independent authorities did not both enroll and retain their keys"
+            );
             Ok(())
         })
     })
@@ -1475,6 +1639,8 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
                 for (index, response) in [
                     json!({ "endpoint": "enroll", "status": 503 }),
                     json!({ "endpoint": "enroll", "status": 400, "error": "invalid_request" }),
+                    json!({ "endpoint": "enroll", "status": 429, "retry_after_secs": 3 }),
+                    json!({ "endpoint": "enroll", "status": 302 }),
                     json!({ "endpoint": "enroll", "status": 503 }),
                 ]
                 .into_iter()
@@ -1512,6 +1678,20 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
                             && count(&target.token_record(&token.id).await?.body, "usedCount")? == 0,
                         "transient HTTP error created a device or consumed a token use"
                     );
+                    if response["retry_after_secs"] == 3 {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        ensure!(
+                            count(&target.requests(Some(&token)).await?, "enroll")? == initial + index as u64 + 1,
+                            "agent ignored the Retry-After delay"
+                        );
+                    }
+                    if response["status"] == 302 {
+                        tokio::time::sleep(POLL).await;
+                        ensure!(
+                            count(&target.requests(None).await?, "redirect_hits")? == 0,
+                            "agent followed the injected redirect"
+                        );
+                    }
                     case.check_running()?;
                 }
                 let _ = case.enrolled(&target, &token).await?;
@@ -1520,8 +1700,8 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
                     "retry consumed an additional token use"
                 );
                 ensure!(
-                    count(&target.requests(Some(&token)).await?, "enroll")? >= initial + 4,
-                    "agent did not survive three transient failures and retry successfully"
+                    count(&target.requests(Some(&token)).await?, "enroll")? >= initial + 6,
+                    "agent did not survive five transient failures and retry successfully"
                 );
                 Ok(())
             })
@@ -1865,14 +2045,18 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                 if let Ok(state) = case.state(&authority) {
                     case.check_key_protection_inner(&authority, &state, false)?;
                 }
-                ensure!(
-                    key_exists(case, &old_key)?,
-                    "old key was deleted before a replacement certificate authenticated"
-                );
+                if !key_exists(case, &old_key)? {
+                    let confirmed = current_thumbprint(&case.device(&target, &id).await?.body)
+                        .is_ok_and(|thumb| thumb != old_thumb);
+                    ensure!(
+                        confirmed,
+                        "old key was deleted before the server confirmed its replacement"
+                    );
+                }
                 case.check_running()?;
                 ensure!(
                     start.elapsed() < WAIT,
-                    "agent did not authenticate a new current certificate"
+                    "agent did not confirm a new current certificate"
                 );
                 tokio::time::sleep(POLL).await;
             };
@@ -1902,7 +2086,7 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
             );
             ensure!(
                 final_state["keys"].get("pending").is_none() && final_state["keys"].get("previous").is_none(),
-                "renewal left pending or previous key slots after new-key authentication"
+                "renewal left pending or previous key slots after confirm"
             );
             let current_chain = final_state["keys"]["current"]["certificate_chain"]
                 .as_array()
@@ -1916,6 +2100,17 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
             case.check_key_protection(&authority, &final_state)?;
             wait_key_deleted(case, &old_key).await?;
             let new_thumb = current_thumbprint(&renewed)?.to_owned();
+            if case.ctx.mock() {
+                ensure!(
+                    target.events(&id).await?.iter().any(|event| {
+                        event["type"] == "cert_status_changed"
+                            && event["cert_thumbprint"] == new_thumb
+                            && event["to"] == "current"
+                    }),
+                    "old key was deleted without a server-side confirm event"
+                );
+                assert_new_auth_precedes_old_close(&target, &id, &old_thumb, &new_thumb).await?;
+            }
             case.stop().await?;
             case.until_device(&target, &id, "offline channel after restart", |device| {
                 device["connected"] == false
@@ -1951,7 +2146,9 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 device["connected"] == true
             })
             .await?;
-            let attempts = count(&target.requests(None).await?, "renew")?;
+            let counters = target.requests(None).await?;
+            let attempts = count(&counters, "renew")?;
+            let confirmed_before = count(&counters, "confirm")?;
             expect_status(
                 &target
                     .control("retry-barrier", &json!({ "endpoint": "renew", "pause": true }))
@@ -2030,12 +2227,497 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 count(&target.requests(None).await?, "renew")? > before_restart,
                 "lost renewal response was not retried after restart"
             );
+            ensure!(
+                count(&target.requests(None).await?, "confirm")? > confirmed_before,
+                "retried renewal was not confirmed with the new key"
+            );
             let state = case.state(&authority)?;
             ensure!(
                 key_name(&state, "current")? == pending_key,
                 "agent did not reuse its persisted CSR key after restart"
             );
             case.check_key_protection(&authority, &state)?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_renewal_lost_confirm_response_retried(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
+            let old = case
+                .until_device(&target, &id, "old-key channel", |record| record["connected"] == true)
+                .await?;
+            let old_thumb = current_thumbprint(&old)?.to_owned();
+            let before = target.requests(None).await?;
+            let renew_before = count(&before, "renew")?;
+            let connect_before = count(&before, "connect")?;
+            let confirm_before = count(&before, "confirm")?;
+            let sequence_before = before["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?
+                .len();
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
+            target.faults(&json!({ "drop_next_response": "confirm" })).await?;
+            expect_status(
+                &target
+                    .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
+                    .await?,
+                202,
+            )?;
+            let started = Instant::now();
+            let (new_thumb, pending_key) = loop {
+                let record = case.device(&target, &id).await?;
+                let stored = case.state(&authority)?;
+                let requests = target.requests(None).await?;
+                if count(&requests, "confirm")? > confirm_before
+                    && count(&requests, "confirm_retry_503")? >= 2
+                    && let Ok(thumb) = current_thumbprint(&record.body)
+                    && thumb != old_thumb
+                    && let Ok(pending_key) = key_name(&stored, "pending")
+                {
+                    ensure!(
+                        key_name(&stored, "current")? == old_key && key_exists(case, &old_key)?,
+                        "agent discarded the old key before receiving confirm 204"
+                    );
+                    break (thumb.to_owned(), pending_key.to_owned());
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "agent did not retry the dropped confirm");
+                tokio::time::sleep(POLL).await;
+            };
+            ensure!(
+                target.control("faults", &json!({})).await?.body["drop_next_response"].is_null(),
+                "drop-next-confirm fault was not consumed"
+            );
+            let blocked = target.requests(None).await?;
+            ensure!(
+                count(&blocked, "renew")? == renew_before + 1 && count(&blocked, "connect")? == connect_before,
+                "agent renewed again or opened a stream while confirm outcome was unknown"
+            );
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            let settled = case
+                .until_state(
+                    &target,
+                    &authority,
+                    &id,
+                    "confirmed new key after dropped response",
+                    |state| {
+                        key_name(state, "current").is_ok_and(|name| name == pending_key)
+                            && state["keys"].get("pending").is_none()
+                            && state["keys"].get("previous").is_none()
+                    },
+                )
+                .await?;
+            ensure!(
+                key_name(&settled, "current")? == pending_key,
+                "agent used a different key for its confirm retry"
+            );
+            wait_key_deleted(case, &old_key).await?;
+            case.until_device(&target, &id, "new channel after confirm retry", |record| {
+                record["connected"] == true && current_thumbprint(record).is_ok_and(|thumb| thumb == new_thumb)
+            })
+            .await?;
+            let requests = target.requests(None).await?;
+            let sequence = requests["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?;
+            let completed = sequence
+                .iter()
+                .enumerate()
+                .skip(sequence_before)
+                .filter_map(|(idx, value)| (value == "confirm_204").then_some(idx))
+                .take(2)
+                .collect::<Vec<_>>();
+            ensure!(
+                completed.len() == 2,
+                "dropped confirm or successful retry was not processed"
+            );
+            ensure!(
+                completed[1] > completed[0] + 1
+                    && sequence[completed[0] + 1..completed[1]]
+                        .iter()
+                        .all(|entry| entry == "confirm")
+                    && count(&requests, "renew")? == renew_before + 1,
+                "agent sent renew or connect between the dropped confirm and its successful retry"
+            );
+            let events = target.events(&id).await?;
+            ensure!(
+                events
+                    .iter()
+                    .filter(|event| {
+                        event["type"] == "cert_status_changed"
+                            && event["cert_thumbprint"] == new_thumb
+                            && event["to"] == "current"
+                    })
+                    .count()
+                    == 1,
+                "lost confirm response promoted the pending certificate more than once"
+            );
+            assert_new_auth_precedes_old_close(&target, &id, &old_thumb, &new_thumb).await?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx.clone(), Some(3), true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target
+                .faults(&json!({ "channel_available": false, "leaf_lifetime_secs": 30 }))
+                .await?;
+            let token = new_token(case, 1).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
+            target.faults(&json!({ "drop_next_response": "confirm" })).await?;
+            let before = target.requests(None).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
+            let old_thumb = crate::signer::thumbprint(
+                state["keys"]["current"]["certificate_chain"][0]
+                    .as_str()
+                    .context("original enrolled leaf missing")?,
+            )?;
+            let started = Instant::now();
+            let (first_thumb, first_key) = loop {
+                let record = case.device(&target, &id).await?;
+                let stored = case.state(&authority)?;
+                let requests = target.requests(None).await?;
+                if count(&requests, "confirm")? > count(&before, "confirm")?
+                    && count(&requests, "confirm_retry_503")? >= 1
+                    && let Ok(thumb) = current_thumbprint(&record.body)
+                    && thumb != old_thumb
+                    && let Ok(pending_key) = key_name(&stored, "pending")
+                {
+                    ensure!(
+                        key_exists(case, &old_key)? && key_name(&stored, "current")? == old_key,
+                        "lost confirm response already discarded the old local current key"
+                    );
+                    break (thumb.to_owned(), pending_key.to_owned());
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not retain its key after a dropped confirm"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            case.stop().await?;
+            ensure!(
+                target.control("faults", &json!({})).await?.body["drop_next_response"].is_null()
+                    && has_certificate(&case.device(&target, &id).await?.body, &first_thumb, "current"),
+                "dropped confirm did not promote the pending certificate server-side"
+            );
+            let expiry = time::OffsetDateTime::parse(
+                field(&case.device(&target, &id).await?.body["certificate"], "notAfter")?,
+                &Rfc3339,
+            )?
+            .unix_timestamp();
+            let now = target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
+                .as_i64()
+                .context("mock time missing")?;
+            let secs = expiry - now + 1;
+            ensure!(
+                secs > 0 && secs < 60,
+                "pending key did not approach expiry before retry"
+            );
+            target.advance(secs).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            case.start().await?;
+            let confirmed_device = case
+                .until_device(&target, &id, "fresh-key renewal after rejected confirm", |record| {
+                    current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb && thumb != first_thumb)
+                        && has_certificate(record, &first_thumb, "retired")
+                        && record["renewalRequested"] == false
+                })
+                .await?;
+            let new_thumb = current_thumbprint(&confirmed_device)?.to_owned();
+            let settled = case
+                .until_state(&target, &authority, &id, "settled fresh confirmed key", |state| {
+                    key_name(state, "current").is_ok_and(|name| name != old_key && name != first_key)
+                        && state["keys"].get("pending").is_none()
+                        && state["keys"].get("previous").is_none()
+                })
+                .await?;
+            ensure!(
+                key_name(&settled, "current")? != first_key,
+                "agent reused the expired pending key after confirm rejected it"
+            );
+            wait_key_deleted(case, &first_key).await?;
+            wait_key_deleted(case, &old_key).await?;
+            let requests = target.requests(None).await?;
+            ensure!(
+                count(&requests, "renew")? >= count(&before, "renew")? + 2
+                    && count(&requests, "confirm")? >= count(&before, "confirm")? + 4,
+                "agent did not renew with the expired pending key and confirm a fresh CSR"
+            );
+            let events = target.events(&id).await?;
+            ensure!(
+                events
+                    .iter()
+                    .any(|event| { event["type"] == "renew_received" && event["cert_thumbprint"] == first_thumb })
+                    && events.iter().any(|event| {
+                        event["type"] == "cert_status_changed"
+                            && event["cert_thumbprint"] == first_thumb
+                            && event["from"] == "current"
+                            && event["to"] == "retired"
+                    })
+                    && events.iter().any(|event| {
+                        event["type"] == "cert_status_changed"
+                            && event["cert_thumbprint"] == new_thumb
+                            && event["to"] == "current"
+                    }),
+                "the failed pending certificate was not retired before confirming the new key"
+            );
+            Ok(())
+        })
+    })
+    .await?;
+
+    with_agent(ctx, Some(3), true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target
+                .faults(&json!({ "channel_available": false, "leaf_lifetime_secs": 30 }))
+                .await?;
+            let token = new_token(case, 1).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
+            target
+                .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
+                .await?;
+            let before = target.requests(None).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
+            let old_thumb = crate::signer::thumbprint(
+                state["keys"]["current"]["certificate_chain"][0]
+                    .as_str()
+                    .context("original enrolled leaf missing")?,
+            )?;
+            let started = Instant::now();
+            let (first_thumb, first_key) = loop {
+                let record = case.device(&target, &id).await?;
+                let stored = case.state(&authority)?;
+                let requests = target.requests(None).await?;
+                if count(&requests, "confirm_retry_503")? >= 1
+                    && let Some(pending) = record.body["certificates"]
+                        .as_array()
+                        .and_then(|certs| certs.iter().find(|cert| cert["status"] == "pending"))
+                    && let Ok(key) = key_name(&stored, "pending")
+                {
+                    ensure!(
+                        current_thumbprint(&record.body)? == old_thumb,
+                        "injected confirm failure promoted the pending certificate"
+                    );
+                    break (field(pending, "thumbprint")?.to_owned(), key.to_owned());
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not persist a pending key after confirm 503"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            case.stop().await?;
+            let pending = case.device(&target, &id).await?;
+            let certificate = pending.body["certificates"]
+                .as_array()
+                .context("device certificates missing")?
+                .iter()
+                .find(|cert| cert["thumbprint"] == first_thumb)
+                .context("pending certificate missing")?;
+            let expiry = time::OffsetDateTime::parse(field(certificate, "notAfter")?, &Rfc3339)?.unix_timestamp();
+            let now = target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
+                .as_i64()
+                .context("mock time missing")?;
+            let secs = expiry - now + 1;
+            ensure!(
+                secs > 0 && secs < 60,
+                "pending key did not approach expiry before retry"
+            );
+            target.advance(secs).await?;
+            let renew_before_restart = count(&target.requests(None).await?, "renew")?;
+            target
+                .faults(&json!({
+                    "fail_next_response": {
+                        "endpoint": "renew",
+                        "status": 401,
+                        "error": "device_unknown"
+                    }
+                }))
+                .await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            case.start().await?;
+            let renewed = case
+                .until_device(
+                    &target,
+                    &id,
+                    "fallback renewal after pending-key device_unknown",
+                    |record| {
+                        current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb && thumb != first_thumb)
+                            && has_certificate(record, &first_thumb, "retired")
+                    },
+                )
+                .await?;
+            let settled = case
+                .until_state(&target, &authority, &id, "confirmed fallback key", |state| {
+                    key_name(state, "current").is_ok_and(|name| name != old_key && name != first_key)
+                        && state["keys"].get("pending").is_none()
+                        && state.get("rejected").is_none()
+                })
+                .await?;
+            ensure!(
+                crate::signer::thumbprint(
+                    settled["keys"]["current"]["certificate_chain"][0]
+                        .as_str()
+                        .context("fallback certificate missing")?
+                )? == current_thumbprint(&renewed)?,
+                "agent did not persist the fallback-renewed certificate"
+            );
+            wait_key_deleted(case, &first_key).await?;
+            wait_key_deleted(case, &old_key).await?;
+            let requests = target.requests(None).await?;
+            let keyids = requests["renew_attempt_keyids"]
+                .as_array()
+                .context("mock renew signing-key trace missing")?;
+            let index = usize::try_from(renew_before_restart)?;
+            ensure!(
+                keyids.get(index) == Some(&json!(first_thumb))
+                    && keyids.get(index + 1) == Some(&json!(old_thumb))
+                    && count(&requests, "renew")? >= count(&before, "renew")? + 3
+                    && count(&requests, "confirm")? >= count(&before, "confirm")? + 4
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "renew_received" && event["cert_thumbprint"] == old_thumb }),
+                "device_unknown on pending-key renew did not fall back to the old current key"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx.clone(), None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let original = case
+                .until_device(&target, &id, "old certificate channel", |record| {
+                    record["connected"] == true
+                })
+                .await?;
+            let old_thumb = current_thumbprint(&original)?.to_owned();
+            let expiry =
+                time::OffsetDateTime::parse(field(&original["certificate"], "notAfter")?, &Rfc3339)?.unix_timestamp();
+            let before = target.requests(None).await?;
+            case.stop().await?;
+            case.until_device(&target, &id, "offline expired channel", |record| {
+                record["connected"] == false
+            })
+            .await?;
+            let now = target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
+                .as_i64()
+                .context("mock time missing")?;
+            let secs = expiry - now + 1;
+            ensure!(secs > 0 && secs < 60, "old certificate is not approaching expiry");
+            target.advance(secs).await?;
+            case.start().await?;
+            let renewed = case
+                .until_device(&target, &id, "within-grace renewal and reconnect", |record| {
+                    current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb) && record["connected"] == true
+                })
+                .await?;
+            ensure!(
+                renewed["certificate"]["issuer"] == original["certificate"]["issuer"]
+                    && count(&target.requests(None).await?, "renew")? > count(&before, "renew")?
+                    && count(&target.requests(None).await?, "confirm")? > count(&before, "confirm")?
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "renew_received" && event["cert_thumbprint"] == old_thumb })
+                    && case.state(&authority)?["rejected"].is_null(),
+                "expired-within-grace certificate did not sign renew and confirm before reconnecting"
+            );
+            Ok(())
+        })
+    })
+    .await?;
+
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            case.until_device(&target, &id, "old certificate channel", |record| {
+                record["connected"] == true
+            })
+            .await?;
+            let before = count(&target.requests(None).await?, "renew")?;
+            case.stop().await?;
+            target.advance(61).await?;
+            let since = time::OffsetDateTime::now_utc();
+            case.start().await?;
+            let rejected = case
+                .until_rejected(&target, &authority, &id, "certificate_expired")
+                .await?;
+            ensure!(
+                rejected["rejected"]["code"] == "certificate_expired"
+                    && count(&target.requests(None).await?, "renew")? > before,
+                "agent did not mark an expired-beyond-grace identity rejected"
+            );
+            assert_terminal_stops(case, &target, &authority, Some(&id), "certificate_expired", since).await?;
             Ok(())
         })
     })
@@ -2172,13 +2854,14 @@ pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Resu
     .await
 }
 
-pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyhow::Result<()> {
-    with_agent(ctx, None, true, |case| {
+pub(crate) async fn a_old_key_deleted_after_confirm_without_channel(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, Some(8), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
             let old_key = key_name(&state, "current")?.to_owned();
             let first = case
                 .until_device(&target, &id, "old-root channel", |record| record["connected"] == true)
@@ -2188,118 +2871,90 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
                 "initial Hello ignored the metadata override"
             );
             let old_thumb = current_thumbprint(&first)?.to_owned();
-            target.faults(&json!({ "channel_available": false })).await?;
             let renewed_hostname = "conformance-renew";
             case.set_metadata_hostname(renewed_hostname)?;
+            target.faults(&json!({ "channel_available": false })).await?;
+            case.until_state(&target, &authority, &id, "removed channel URL", |state| {
+                state["config"]["revision"]
+                    .as_u64()
+                    .is_some_and(|revision| revision > 1)
+                    && state["config"].get("agent_channel_url").is_none()
+            })
+            .await?;
+            case.until_device(&target, &id, "closed old channel before offline renewal", |record| {
+                record["connected"] == false
+            })
+            .await?;
             expect_status(
                 &target
                     .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
                     .await?,
                 202,
             )?;
-            let pending = case
-                .until_device(&target, &id, "pending renewal without channel", |record| {
-                    record["metadata"]["hostname"] == renewed_hostname
-                        && record["certificates"].as_array().is_some_and(|certs| {
-                            certs
-                                .iter()
-                                .any(|cert| cert["status"] == "pending" && cert["thumbprint"] != old_thumb)
-                        })
-                })
-                .await?;
-            let new_thumb = pending["certificates"]
-                .as_array()
-                .context("pending certificates missing")?
-                .iter()
-                .find(|cert| cert["status"] == "pending")
-                .and_then(|cert| cert["thumbprint"].as_str())
-                .context("pending certificate lacks a thumbprint")?
-                .to_owned();
-            for _ in 0..3 {
-                ensure!(
-                    key_exists(case, &old_key)?
-                        && current_thumbprint(&case.device(&target, &id).await?.body)? == old_thumb,
-                    "old key was deleted before the pending key authenticated"
-                );
-                case.check_running()?;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-            ensure!(
-                target
-                    .events(&id)
-                    .await?
-                    .iter()
-                    .all(|event| { event["type"] != "stream_authenticated" || event["cert_thumbprint"] != new_thumb }),
-                "new channel authenticated while the channel was unavailable"
-            );
-            expect_status(&target.control("handshake", &json!({ "pause": true })).await?, 200)?;
-            let hello_hostname = "conformance-hello";
-            case.set_metadata_hostname(hello_hostname)?;
-            target.faults(&json!({ "channel_available": true })).await?;
             let start = Instant::now();
-            let held_new_stream = loop {
-                let events = target.events(&id).await?;
-                let paused = target.paused_stream_ids().await?;
-                if let Some(stream) = events.iter().find(|event| {
-                    event["type"] == "stream_opened"
-                        && event["cert_thumbprint"] == new_thumb
-                        && event["stream_id"]
-                            .as_str()
-                            .is_some_and(|id| paused.iter().any(|held| held == id))
-                }) {
-                    break field(stream, "stream_id")?.to_owned();
+            let confirmed = loop {
+                let record = case.device(&target, &id).await?;
+                expect_status(&record, 200)?;
+                if current_thumbprint(&record.body).is_ok_and(|thumb| thumb != old_thumb) {
+                    break record.body;
                 }
-                ensure!(
-                    key_exists(case, &old_key)?,
-                    "old key was deleted while the new channel was still opening"
-                );
+                if !key_exists(case, &old_key)? {
+                    let refreshed = case.device(&target, &id).await?;
+                    ensure!(
+                        current_thumbprint(&refreshed.body).is_ok_and(|thumb| thumb != old_thumb),
+                        "old key was deleted before confirm while the channel was unavailable"
+                    );
+                }
                 case.check_running()?;
                 ensure!(
                     start.elapsed() < WAIT,
-                    "agent did not reach the new-key handshake barrier"
+                    "agent did not confirm renewal without the channel"
                 );
                 tokio::time::sleep(POLL).await;
             };
-            for _ in 0..5 {
-                ensure!(
-                    key_exists(case, &old_key)?
-                        && target.paused_stream_ids().await?.contains(&held_new_stream)
-                        && case.device(&target, &id).await?.body["metadata"]["hostname"] == renewed_hostname
-                        && target.events(&id).await?.iter().all(|event| {
-                            event["type"] != "stream_authenticated" || event["cert_thumbprint"] != new_thumb
-                        }),
-                    "agent deleted the previous key before the new Hello authenticated"
-                );
-                case.check_running()?;
-                tokio::time::sleep(POLL).await;
-            }
-            expect_status(&target.control("handshake", &json!({ "pause": false })).await?, 200)?;
-            let start = Instant::now();
-            loop {
-                let exists = key_exists(case, &old_key)?;
-                let authenticated = target
-                    .events(&id)
-                    .await?
+            let new_thumb = current_thumbprint(&confirmed)?.to_owned();
+            ensure!(
+                confirmed["metadata"]["hostname"] == renewed_hostname
+                    && confirmed["renewalRequested"] == false
+                    && confirmed["certificates"].as_array().is_some_and(|certs| {
+                        certs
+                            .iter()
+                            .any(|cert| cert["thumbprint"] == old_thumb && cert["status"] == "retired")
+                    }),
+                "HTTP renewal did not finish through confirm while the channel was unavailable"
+            );
+            let events = target.events(&id).await?;
+            ensure!(
+                events.iter().any(|event| {
+                    event["type"] == "cert_status_changed"
+                        && event["cert_thumbprint"] == new_thumb
+                        && event["to"] == "current"
+                }) && events
                     .iter()
-                    .any(|event| event["type"] == "stream_authenticated" && event["cert_thumbprint"] == new_thumb);
-                ensure!(
-                    exists || authenticated,
-                    "previous key was deleted before stream_authenticated"
-                );
-                if !exists && authenticated {
-                    break;
-                }
-                case.check_running()?;
-                ensure!(start.elapsed() < WAIT, "old key survived new channel authentication");
-                tokio::time::sleep(POLL).await;
-            }
-            case.until_device(&target, &id, "new authenticated channel", |record| {
-                current_thumbprint(record).is_ok_and(|thumb| thumb == new_thumb)
-                    && record["connected"] == true
-                    && record["metadata"]["hostname"] == hello_hostname
-            })
-            .await?;
-            assert_new_auth_precedes_old_close(&target, &id, &old_thumb, &new_thumb).await?;
+                    .all(|event| { event["type"] != "stream_authenticated" || event["cert_thumbprint"] != new_thumb }),
+                "new key was promoted by the channel instead of confirm"
+            );
+            let requests = target.requests(None).await?;
+            ensure!(
+                count(&requests, "renew")? >= 1 && count(&requests, "confirm")? >= 1,
+                "agent did not send both renew and confirm while the channel was unavailable"
+            );
+            wait_key_deleted(case, &old_key).await?;
+            let stored = case
+                .until_state(&target, &authority, &id, "settled confirmed key", |state| {
+                    key_name(state, "current").is_ok_and(|name| name != old_key)
+                        && state["keys"].get("pending").is_none()
+                        && state["keys"].get("previous").is_none()
+                })
+                .await?;
+            ensure!(
+                crate::signer::thumbprint(
+                    stored["keys"]["current"]["certificate_chain"][0]
+                        .as_str()
+                        .context("confirmed leaf missing")?
+                )? == new_thumb,
+                "agent stored a different key after confirm"
+            );
             Ok(())
         })
     })
@@ -2355,7 +3010,7 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Result<()> {
-    with_agent(ctx, None, true, |case| {
+    with_agent(ctx.clone(), None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
@@ -2390,6 +3045,56 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
                 renewed["connected"] == true,
                 "agent did not reconnect after offline request"
             );
+            Ok(())
+        })
+    })
+    .await?;
+    if !ctx.mock() {
+        return Ok(());
+    }
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, _) = case.enrolled(&target, &token).await?;
+            let original = current_thumbprint(&case.device(&target, &id).await?.body)?.to_owned();
+            let before = target.requests(None).await?;
+            let sequence_start = before["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?
+                .len();
+            expect_status(
+                &target
+                    .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
+                    .await?,
+                202,
+            )?;
+            ensure!(
+                case.device(&target, &id).await?.body["renewalRequested"] == true,
+                "channelless renewal flag was not persisted"
+            );
+            case.until_device(&target, &id, "check-in-triggered channelless renewal", |record| {
+                current_thumbprint(record).is_ok_and(|thumb| thumb != original)
+                    && record["renewalRequested"] == false
+                    && record["connected"] == false
+            })
+            .await?;
+            let requests = target.requests(None).await?;
+            ensure!(
+                count(&requests, "check_in")? > count(&before, "check_in")?
+                    && count(&requests, "renew")? >= 1
+                    && count(&requests, "confirm")? >= 1
+                    && count(&requests, "connect")? == 0
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "check_in_received" && event["renewal_requested"] == true }),
+                "channelless renewal did not start at check-in and finish with confirm"
+            );
+            assert_check_in_triggers_renewal(&requests, sequence_start)?;
             Ok(())
         })
     })
@@ -2503,7 +3208,63 @@ pub(crate) async fn a_device_unknown_recorded(ctx: Context) -> anyhow::Result<()
     .await
 }
 
+pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx.clone(), Some(5), true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            ensure!(
+                case.device(&target, &id).await?.body["connected"] == false,
+                "signed-request rejection fixture unexpectedly opened a channel"
+            );
+            let before = target.requests(None).await?;
+            let since = time::OffsetDateTime::now_utc();
+            target.revoke(&id).await?;
+            case.until_rejected(&target, &authority, &id, "device_revoked").await?;
+            let after = target.requests(None).await?;
+            ensure!(
+                count(&after, "renew")? > count(&before, "renew")?
+                    || count(&after, "check_in")? > count(&before, "check_in")?,
+                "agent did not record device_revoked from a signed request"
+            );
+            assert_terminal_stops(case, &target, &authority, Some(&id), "device_revoked", since).await?;
+            Ok(())
+        })
+    })
+    .await?;
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_broken": true })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            ensure!(
+                case.device(&target, &id).await?.body["connected"] == false,
+                "channel-open rejection fixture authenticated prematurely"
+            );
+            let since = time::OffsetDateTime::now_utc();
+            target.reset().await?;
+            let rejected = case.until_rejected(&target, &authority, &id, "device_unknown").await?;
+            ensure!(
+                rejected["rejected"]["code"] == "device_unknown"
+                    && count(&target.requests(None).await?, "connect")? > 0,
+                "agent did not record device_unknown from a channel-open rejection"
+            );
+            assert_terminal_stops(case, &target, &authority, None, "device_unknown", since).await?;
+            Ok(())
+        })
+    })
+    .await
+}
+
 pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()> {
+    let invalid_url_case = ctx.clone();
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2512,8 +3273,8 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             ensure!(
-                state.get("channel_url").is_none(),
-                "agent stored channel_url despite the field being absent from enrollment"
+                state.get("channel_url").is_none() && state["config"].get("agent_channel_url").is_none(),
+                "agent stored config.agent_channel_url despite its absence from enrollment"
             );
             for _ in 0..3 {
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -2524,9 +3285,355 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
                 );
                 ensure!(
                     count(&target.requests(None).await?, "connect")? == 0,
-                    "agent attempted Connect despite absent channel_url"
+                    "agent attempted Connect despite absent config.agent_channel_url"
                 );
             }
+            Ok(())
+        })
+    })
+    .await?;
+    with_agent(invalid_url_case, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target
+                .faults(&json!({ "channel_available": true, "malformed_channel_url": true }))
+                .await?;
+            let before = count(&target.requests(None).await?, "connect")?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            ensure!(
+                state["config"]["agent_channel_url"]
+                    .as_str()
+                    .is_some_and(|url| url.starts_with("http://")),
+                "mock did not inject a non-HTTPS channel URL"
+            );
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                case.check_running()?;
+                ensure!(
+                    count(&target.requests(None).await?, "connect")? == before
+                        && case.device(&target, &id).await?.body["connected"] == false,
+                    "agent tried to connect using a non-HTTPS channel URL"
+                );
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_config_update_disables_channel(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            case.until_device(&target, &id, "initial channel", |record| record["connected"] == true)
+                .await?;
+            let before = target.requests(None).await?;
+            ensure!(
+                count(&before, "check_in")? == 0,
+                "agent checked in over HTTP while its channel was working"
+            );
+            let initial_revision = count(&state["config"], "revision")?;
+            target.faults(&json!({ "channel_available": false })).await?;
+            let stored = case
+                .until_state(&target, &authority, &id, "disabled channel config", |state| {
+                    state["config"]["revision"]
+                        .as_u64()
+                        .is_some_and(|revision| revision > initial_revision)
+                        && state["config"].get("agent_channel_url").is_none()
+                })
+                .await?;
+            let disabled_revision = count(&stored["config"], "revision")?;
+            case.until_device(&target, &id, "closed channel after config update", |record| {
+                record["connected"] == false
+            })
+            .await?;
+            let events = target.events(&id).await?;
+            ensure!(
+                events
+                    .iter()
+                    .any(|event| { event["type"] == "config_update_sent" && event["revision"] == disabled_revision })
+                    && events
+                        .iter()
+                        .any(|event| event["type"] == "stream_closed" && event["status"] == "OK"),
+                "channel was not cleanly closed after the higher config revision"
+            );
+            let connects = count(&target.requests(None).await?, "connect")?;
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                case.check_running()?;
+                ensure!(
+                    count(&target.requests(None).await?, "connect")? == connects
+                        && case.device(&target, &id).await?.body["connected"] == false
+                        && count(&case.state(&authority)?["config"], "revision")? == disabled_revision,
+                    "agent retried the channel after its URL was removed"
+                );
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_check_in_enables_channel(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            ensure!(
+                state["config"].get("agent_channel_url").is_none()
+                    && case.device(&target, &id).await?.body["connected"] == false,
+                "agent was enrolled with a channel URL despite disabled availability"
+            );
+            let start = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "check_in")? >= 1 {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(start.elapsed() < WAIT, "agent did not check in without a channel URL");
+                tokio::time::sleep(POLL).await;
+            }
+            let before = count(&target.requests(None).await?, "check_in")?;
+            target.faults(&json!({ "channel_available": true })).await?;
+            let stored = case
+                .until_state(
+                    &target,
+                    &authority,
+                    &id,
+                    "enabled channel config from check-in",
+                    |state| {
+                        state["config"]["revision"]
+                            .as_u64()
+                            .is_some_and(|revision| revision > 1)
+                            && state["config"]["agent_channel_url"] == target.base_url
+                    },
+                )
+                .await?;
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? > before,
+                "agent did not learn the enabled URL through check-in"
+            );
+            case.until_device(&target, &id, "channel opened from check-in config", |record| {
+                record["connected"] == true
+            })
+            .await?;
+            ensure!(
+                stored["config"]["agent_channel_url"] == target.base_url
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| event["type"] == "check_in_received"),
+                "agent did not persist the check-in revision before opening a channel"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_check_in_recovers_broken_channel(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_broken": true })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            ensure!(
+                state["config"]["agent_channel_url"] == target.base_url && count(&state["config"], "revision")? == 1,
+                "broken transport incorrectly changed the effective config"
+            );
+            let start = Instant::now();
+            loop {
+                let requests = target.requests(None).await?;
+                if count(&requests, "connect")? >= 1 && count(&requests, "check_in")? >= 1 {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    start.elapsed() < WAIT,
+                    "agent did not check in after its channel remained broken"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            ensure!(
+                case.device(&target, &id).await?.body["connected"] == false
+                    && count(&case.state(&authority)?["config"], "revision")? == 1,
+                "broken channel was treated as an effective config change"
+            );
+            let before = count(&target.requests(None).await?, "check_in")?;
+            target.faults(&json!({ "channel_available": false })).await?;
+            let stored = case
+                .until_state(
+                    &target,
+                    &authority,
+                    &id,
+                    "disabled config after broken-channel check-in",
+                    |state| {
+                        state["config"]["revision"]
+                            .as_u64()
+                            .is_some_and(|revision| revision > 1)
+                            && state["config"].get("agent_channel_url").is_none()
+                    },
+                )
+                .await?;
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? > before
+                    && stored["config"].get("agent_channel_url").is_none(),
+                "agent did not learn the disabled URL through check-in"
+            );
+            let connects = count(&target.requests(None).await?, "connect")?;
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                case.check_running()?;
+                ensure!(
+                    count(&target.requests(None).await?, "connect")? == connects
+                        && case.device(&target, &id).await?.body["connected"] == false,
+                    "agent kept reconnecting after check-in removed its channel URL"
+                );
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_config_unknown_fields_and_hello_revision(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            case.until_device(&target, &id, "initial channel", |record| record["connected"] == true)
+                .await?;
+            let initial_revision = count(&state["config"], "revision")?;
+            let before = target.events(&id).await?;
+            let authenticated_before = before
+                .iter()
+                .filter(|event| event["type"] == "stream_authenticated")
+                .collect::<Vec<_>>();
+            ensure!(
+                authenticated_before
+                    .iter()
+                    .any(|event| { event["applied_config_revision"] == initial_revision })
+                    && count(&target.requests(None).await?, "check_in")? == 0,
+                "working channel did not report its stored revision or checked in over HTTP"
+            );
+            let acks_before = count(&target.requests(None).await?, "correlated_acks")?;
+            expect_status(
+                &target
+                    .control(
+                        "config",
+                        &json!({ "fields": { "product_hint": { "mode": "preserved" } } }),
+                    )
+                    .await?,
+                200,
+            )?;
+            let stored = case
+                .until_state(&target, &authority, &id, "unknown pushed config field", |state| {
+                    state["config"]["revision"]
+                        .as_u64()
+                        .is_some_and(|revision| revision > initial_revision)
+                        && state["config"]["product_hint"] == json!({ "mode": "preserved" })
+                })
+                .await?;
+            let revision = count(&stored["config"], "revision")?;
+            let started = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "correlated_acks")? > acks_before {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "agent did not acknowledge ConfigUpdate");
+                tokio::time::sleep(POLL).await;
+            }
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? == 0
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "config_update_sent" && event["revision"] == revision }),
+                "agent polled HTTP despite a working channel config update"
+            );
+            let acks_before_stale = count(&target.requests(None).await?, "correlated_acks")?;
+            let injected_reply = target
+                .control(
+                    "config/stale",
+                    &json!({ "device_id": id, "revision": initial_revision }),
+                )
+                .await?;
+            expect_status(&injected_reply, 200)?;
+            ensure!(injected_reply.body["sent"] == 1, "stale ConfigUpdate was not delivered");
+            let started = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "correlated_acks")? > acks_before_stale {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not acknowledge the stale ConfigUpdate"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            let after_stale = case.state(&authority)?;
+            ensure!(
+                after_stale["config"] == stored["config"]
+                    && after_stale["config"].get("mock_stale_marker").is_none()
+                    && target.events(&id).await?.iter().any(|event| {
+                        event["type"] == "stale_config_update_sent" && event["revision"] == initial_revision
+                    }),
+                "agent applied a decreasing config revision"
+            );
+            expect_status(&target.control("reconnect", &json!({ "device_id": id })).await?, 202)?;
+            let started = Instant::now();
+            loop {
+                let events = target.events(&id).await?;
+                let authenticated = events
+                    .iter()
+                    .filter(|event| event["type"] == "stream_authenticated")
+                    .collect::<Vec<_>>();
+                if authenticated.len() > authenticated_before.len() {
+                    ensure!(
+                        authenticated
+                            .last()
+                            .is_some_and(|event| event["applied_config_revision"] == revision),
+                        "reconnected Hello did not report the stored config revision"
+                    );
+                    break;
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "agent did not reconnect after mock push");
+                tokio::time::sleep(POLL).await;
+            }
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? == 0
+                    && case.state(&authority)?["config"]["product_hint"] == json!({ "mode": "preserved" }),
+                "agent lost the unknown config field or checked in with a working channel"
+            );
+            // Hold the healthy channel beyond two five-second check-in intervals.
+            tokio::time::sleep(Duration::from_secs(12)).await;
+            case.check_running()?;
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? == 0
+                    && case.device(&target, &id).await?.body["connected"] == true,
+                "agent checked in periodically despite a working channel"
+            );
             Ok(())
         })
     })
@@ -2761,7 +3868,7 @@ pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Result<()> {
-    with_agent(ctx, Some(2), true, |case| {
+    with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             target.faults(&json!({ "channel_available": false })).await?;
@@ -2775,9 +3882,19 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                 "channel unavailable but agent connected"
             );
             let old_root = field(&before.body["certificate"], "issuer")?.to_owned();
+            let before_requests = target.requests(None).await?;
+            let confirms_before = count(&before_requests, "confirm")?;
+            let check_ins_before = count(&before_requests, "check_in")?;
+            let rotation_sequence_start = before_requests["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?
+                .len();
+            target
+                .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
+                .await?;
             expect_status(&target.rotate(None).await?, 202)?;
             let new = case
-                .until_device(&target, &id, "scheduled new-root renewal", |record| {
+                .until_device(&target, &id, "check-in-triggered new-root renewal", |record| {
                     record["certificates"].as_array().is_some_and(|certs| {
                         certs
                             .iter()
@@ -2785,6 +3902,15 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                     })
                 })
                 .await?;
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? > check_ins_before
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "check_in_received" && event["renewal_requested"] == true }),
+                "channelless rotation did not request renewal through check-in"
+            );
             ensure!(
                 new["connected"] == false,
                 "scheduled renewal unexpectedly required a channel"
@@ -2808,22 +3934,48 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                 })
                 .await?;
             let pending_key = key_name(&stored, "pending")?.to_owned();
+            let started = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "confirm")? > confirms_before
+                    && target.control("faults", &json!({})).await?.body["fail_next_response"].is_null()
+                {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not retry confirm after new-root renewal"
+                );
+                tokio::time::sleep(POLL).await;
+            }
             case.stop().await?;
             ensure!(
-                key_name(&case.state(&authority)?, "pending")? == pending_key,
+                key_name(&case.state(&authority)?, "pending")? == pending_key
+                    && has_certificate(&case.device(&target, &id).await?.body, &pending_thumb, "pending"),
                 "new-root pending key was not persisted across restart"
             );
-            let attempts = count(&target.requests(None).await?, "renew")?;
+            let before_restart = target.requests(None).await?;
+            let restart_sequence_start = before_restart["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?
+                .len();
+            let confirms = count(&before_restart, "confirm")?;
             case.start().await?;
-            case.until_device(&target, &id, "authenticated new-root key after restart", |record| {
+            case.until_device(&target, &id, "confirmed new-root key after restart", |record| {
                 record["certificate"]["issuer"] == new_root
                     && current_thumbprint(record).is_ok_and(|thumb| thumb == pending_thumb)
             })
             .await?;
+            let requests = target.requests(None).await?;
             ensure!(
-                count(&target.requests(None).await?, "renew")? > attempts,
-                "agent did not authenticate the stored new-root key through renew"
+                count(&requests, "confirm")? > confirms
+                    && requests["request_sequence"]
+                        .as_array()
+                        .and_then(|sequence| sequence.get(restart_sequence_start))
+                        .is_some_and(|entry| entry == "confirm"),
+                "agent did not retry confirm first with its persisted pending key"
             );
+            assert_check_in_triggers_renewal(&requests, rotation_sequence_start)?;
             let final_state = case.state(&authority)?;
             ensure!(
                 key_name(&final_state, "current")? == pending_key
@@ -2832,7 +3984,7 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                         .and_then(|chain| chain.last())
                         .and_then(Value::as_str)
                         .is_some_and(|root| crate::signer::thumbprint(root).is_ok_and(|issuer| issuer == new_root)),
-                "restarted agent did not keep the authenticated new-root chain"
+                "restarted agent did not keep the confirmed new-root chain"
             );
             Ok(())
         })
@@ -2895,6 +4047,19 @@ mod tests {
             false,
         )
         .await?;
+        let fixture_token = "dvaet1.fixturebag.fixturesecret";
+        let fixture_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(fixture_token.as_bytes()));
+        case.add_token(fixture_token);
+        let pending_name = case
+            .pending_path()
+            .file_name()
+            .context("pending filename")?
+            .to_string_lossy()
+            .to_string();
+        ensure!(
+            pending_name.starts_with(&token_file_id(fixture_token)) && token_file_id(fixture_token).len() == 64,
+            "pending filename is not keyed by the full token SHA-256"
+        );
         let config: Value = serde_json::from_slice(&std::fs::read(case.path().join("agent.json"))?)?;
         ensure!(
             config["__debug__"]["identity"]["key_name_prefix"] == prefix,
@@ -2940,9 +4105,10 @@ mod tests {
             case.audit_orphan_keys().is_err(),
             "an unrecorded file-backed key was accepted"
         );
+        std::fs::create_dir_all(case.in_progress_path().parent().context("pending directory")?)?;
         std::fs::write(
             case.in_progress_path(),
-            serde_json::to_vec(&json!({ "version": 1, "token_sha256": "test-hash", "key_name": name }))?,
+            serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
         )?;
         case.audit_orphan_keys()?;
         std::fs::remove_file(case.in_progress_path())?;
@@ -2974,7 +4140,7 @@ mod tests {
         std::fs::remove_file(identity)?;
         std::fs::write(
             case.in_progress_path(),
-            serde_json::to_vec(&json!({ "version": 1, "token_sha256": "test-hash", "key_name": name }))?,
+            serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
         )?;
         let leftover = case.path().join("identity").join("authorities").join("leftover.tmp");
         std::fs::write(&leftover, b"temp")?;
