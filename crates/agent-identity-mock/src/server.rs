@@ -23,9 +23,9 @@ use crate::api_agent::{DROP_HEADER, INJECTED_HEADER};
 use crate::app::App;
 use crate::channel::ChannelService;
 
-pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
-pub type OutBody = http_body_util::combinators::UnsyncBoxBody<Bytes, BoxError>;
-pub type OutResponse = http::Response<OutBody>;
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type OutBody = http_body_util::combinators::UnsyncBoxBody<Bytes, BoxError>;
+type OutResponse = http::Response<OutBody>;
 
 /// Service error used to abort a connection without a response
 /// (`faults.drop_next_response`, §11).

@@ -20,17 +20,16 @@ use tonic::{Code, Request, Response, Status, Streaming};
 use uuid::Uuid;
 
 use crate::app::App;
-use crate::httpsig::{CertStatus, Endpoint, Rejection, verify_request};
 use crate::name_eval;
-use crate::proof::verify_channel_proof;
+use crate::oracle::{CertStatus, Endpoint, Rejection, verify_channel_proof, verify_request};
 use crate::state::{StreamHandle, StreamPush};
 
 /// §7.3: the agent must answer the challenge within 10 s (real time).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
-pub struct ChannelService {
-    pub app: Arc<App>,
+pub(crate) struct ChannelService {
+    pub(crate) app: Arc<App>,
 }
 
 fn error_status(code: Code, error_code: &str) -> Status {
@@ -211,7 +210,7 @@ async fn close_opening_push(
 async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
-    auth: crate::httpsig::AuthenticatedDevice,
+    auth: crate::oracle::AuthenticatedDevice,
     mut client: Streaming<AgentMessage>,
     push_tx: mpsc::Sender<StreamPush>,
     mut push_rx: mpsc::Receiver<StreamPush>,

@@ -2914,7 +2914,23 @@ mod tests {
         let name = format!("{prefix}{}", uuid::Uuid::new_v4());
         let foreign = format!("DevolutionsAgent-Identity-{}", uuid::Uuid::new_v4());
         std::fs::create_dir_all(case.key_file_path(&name).parent().context("key directory")?)?;
-        std::fs::write(case.key_file_path(&name), b"run-owned-key")?;
+        let write_run_key = |path: &Path| -> anyhow::Result<()> {
+            #[cfg(unix)]
+            {
+                use std::io::Write as _;
+                use std::os::unix::fs::OpenOptionsExt as _;
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)?;
+                file.write_all(b"run-owned-key")?;
+            }
+            #[cfg(not(unix))]
+            std::fs::write(path, b"run-owned-key")?;
+            Ok(())
+        };
+        write_run_key(&case.key_file_path(&name))?;
         std::fs::write(case.key_file_path(&foreign), b"foreign-key")?;
         ensure!(
             case.audit_identity_tree().is_err(),
@@ -2953,7 +2969,7 @@ mod tests {
             case.check_key_protection(authority, &stored).is_err(),
             "settled identity accepted a missing current key"
         );
-        std::fs::write(case.key_file_path(&name), b"run-owned-key")?;
+        write_run_key(&case.key_file_path(&name))?;
         case.audit_orphan_keys()?;
         std::fs::remove_file(identity)?;
         std::fs::write(

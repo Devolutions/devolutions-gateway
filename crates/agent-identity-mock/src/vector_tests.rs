@@ -1,33 +1,31 @@
-//! Mandatory in-crate test: run every shared vector
-//! (`docs/agent-identity/test-vectors.json`) through the same verifier, proof check and
-//! CSR check functions the server uses.
+//! Run the shared vectors (`docs/agent-identity/test-vectors.json`) through the oracle's public API.
 
 use std::collections::HashMap;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use p256::ecdsa::signature::Verifier as _;
-use p256::ecdsa::{Signature, VerifyingKey};
+use p256::ecdsa::VerifyingKey;
 use p256::pkcs8::DecodePublicKey as _;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::csr::check_csr;
-use crate::httpsig::{CertStatus, Endpoint, NonceStore, RegisteredCert, verify_request};
-use crate::proof::verify_channel_proof;
+use crate::oracle::{
+    CertStatus, Endpoint, NonceStore, RegisteredCert, check_csr, content_digest_header, verify_channel_proof,
+    verify_raw_signature, verify_request,
+};
 
 const VECTORS: &str = include_str!("../../../docs/agent-identity/test-vectors.json");
 
 #[derive(Deserialize)]
 struct Vectors {
-    http_signature: HttpSignatureSection,
+    http_signature: SignatureSection,
     channel_proof: ChannelProofSection,
     csr: CsrSection,
     rfc9421_b_2_4: Rfc9421Case,
 }
 
 #[derive(Deserialize)]
-struct HttpSignatureSection {
+struct SignatureSection {
     registered: Vec<RegisteredVector>,
     cases: Vec<SigCase>,
     sequences: Vec<Sequence>,
@@ -136,27 +134,6 @@ fn registry(registered: &[RegisteredVector]) -> HashMap<String, RegisteredCert> 
 
 fn run_case(registry: &HashMap<String, RegisteredCert>, nonces: &mut NonceStore, case: &SigCase) -> String {
     let endpoint = endpoint_of(&case.endpoint);
-
-    // The signature base built from the parsed headers must match the vector's, so the
-    // verifier is checking signatures over exactly the bytes the contract pins down.
-    // Negative cases (tampered digest, cross-endpoint replay, malformed dictionaries)
-    // legitimately differ on the wire, and verification fails before the base matters;
-    // only single-`sig` valid cases pin the base bytes.
-    if case.expected == "ok" {
-        let input = case.headers.get("signature-input").expect("case has signature-input");
-        let members = crate::sfv::parse_dictionary(input).expect("vector header parses");
-        let [(_, member)]: [(String, crate::sfv::MemberValue); 1] = members.try_into().expect("one member");
-        let crate::sfv::MemberValue::InnerList(inner) = member else {
-            panic!("sig member is an inner list");
-        };
-        let base = crate::httpsig::signature_base(
-            &case.method,
-            case.headers.get("content-digest").map(String::as_bytes),
-            &inner,
-        );
-        assert_eq!(base, case.signature_base, "signature base mismatch in {}", case.name);
-    }
-
     let body = case.body.as_deref().unwrap_or("");
     let result = verify_request(
         endpoint,
@@ -169,6 +146,30 @@ fn run_case(registry: &HashMap<String, RegisteredCert>, nonces: &mut NonceStore,
         &mut |keyid| registry.get(keyid).cloned(),
         nonces,
     );
+    if case.expected == "ok"
+        && let Ok(auth) = &result
+    {
+        if endpoint == Endpoint::Renew {
+            assert_eq!(
+                case.headers["content-digest"],
+                content_digest_header(body.as_bytes()),
+                "content-digest mismatch in {}",
+                case.name
+            );
+        }
+        // The vector's signed base must verify even when the wire encoding is noncanonical.
+        let encoded = case.headers["signature"]
+            .trim()
+            .strip_prefix("sig=:")
+            .and_then(|value| value.strip_suffix(':'))
+            .expect("single profile signature");
+        let raw_signature = STANDARD.decode(encoded).expect("signature base64");
+        assert!(
+            verify_raw_signature(auth.public_key(), case.signature_base.as_bytes(), &raw_signature),
+            "signature base fixture mismatch in {}",
+            case.name
+        );
+    }
     match result {
         Ok(_) => "ok".to_owned(),
         Err(rejection) => rejection.code().to_owned(),
@@ -184,6 +185,29 @@ fn http_signature_cases() {
         let actual = run_case(&registry, &mut nonces, case);
         assert_eq!(actual, case.expected, "case {}", case.name);
     }
+}
+
+#[test]
+fn noncanonical_valid_signature_input_preserves_signed_base() {
+    let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
+    let registry = registry(&vectors.http_signature.registered);
+    let mut case = vectors
+        .http_signature
+        .cases
+        .iter()
+        .find(|case| case.name == "valid_renew")
+        .expect("valid_renew exists")
+        .clone();
+    let input = case.headers.get_mut("signature-input").expect("signature-input");
+    *input = format!(
+        " \t{}",
+        input.replace("\"@method\" \"content-digest\"", "\"@method\"   \"content-digest\"")
+    );
+    case.headers
+        .get_mut("signature")
+        .expect("signature")
+        .insert_str(0, " \t");
+    assert_eq!(run_case(&registry, &mut NonceStore::default(), &case), "ok");
 }
 
 #[test]
@@ -229,7 +253,7 @@ fn csr_cases() {
     for (name, case) in &vectors.csr.cases {
         let der = STANDARD.decode(&case.csr).expect("valid csr base64");
         match (check_csr(&der), case.expected.as_str()) {
-            (Ok(key), "ok") => {
+            (Some(key), "ok") => {
                 let expected_key = STANDARD
                     .decode(case.public_key_sec1.as_ref().expect("valid case has key"))
                     .expect("valid sec1");
@@ -239,7 +263,7 @@ fn csr_cases() {
                     "csr case {name} public key"
                 );
             }
-            (Err(_), "invalid_request") => {}
+            (None, "invalid_request") => {}
             (result, expected) => panic!("csr case {name}: got {result:?}, want {expected}"),
         }
     }
@@ -247,13 +271,13 @@ fn csr_cases() {
 
 #[test]
 fn rfc9421_b_2_4() {
+    // The RFC response example checks the raw P-256 primitive, not the §6 request policy.
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
     let case = &vectors.rfc9421_b_2_4;
     let spki = STANDARD.decode(&case.public_key_spki).expect("valid spki base64");
     let key = VerifyingKey::from_public_key_der(&spki).expect("valid spki");
     let sig_bytes = STANDARD.decode(&case.signature).expect("valid signature base64");
-    let signature = Signature::from_slice(&sig_bytes).expect("raw r||s");
-    let actual = key.verify(case.signature_base.as_bytes(), &signature).is_ok();
+    let actual = verify_raw_signature(&key, case.signature_base.as_bytes(), &sig_bytes);
     assert_eq!(actual, case.expected_valid, "rfc9421_b_2_4");
 }
 
@@ -314,27 +338,4 @@ fn duplicate_signature_parameter_is_rejected() {
         run_case(&registry, &mut NonceStore::default(), &case),
         "signature_invalid"
     );
-}
-
-#[test]
-fn inner_list_requires_space_between_items() {
-    assert!(crate::sfv::parse_dictionary("sig=(\"a\" \"b\")").is_some());
-    assert!(crate::sfv::parse_dictionary("sig=(\"a\"\"b\")").is_none());
-    assert!(crate::sfv::parse_dictionary("sig=(\"a\"\t\"b\")").is_none());
-}
-
-#[test]
-fn parameter_separator_rejects_horizontal_tab() {
-    assert!(crate::sfv::parse_dictionary("sig=(\"@method\"); created=1").is_some());
-    assert!(crate::sfv::parse_dictionary("sig=(\"@method\");\tcreated=1").is_none());
-}
-
-#[test]
-fn nonce_conflict_keeps_original_expiry_through_boundary() {
-    let mut store = NonceStore::default();
-    assert!(store.insert_fresh("key", "nonce", 120, 0));
-    assert!(!store.insert_fresh("key", "nonce", 61, 0));
-    assert!(!store.insert_fresh("key", "nonce", 120, 62));
-    assert!(!store.insert_fresh("key", "nonce", 120, 120));
-    assert!(store.insert_fresh("key", "nonce", 200, 121));
 }

@@ -37,7 +37,7 @@ impl MockClock {
     }
 
     /// `__mock__/time/advance`.
-    pub fn advance_by(&self, secs: i64) {
+    pub(crate) fn advance_by(&self, secs: i64) {
         if self.fixed_secs.load(Ordering::Relaxed) == UNFROZEN {
             self.advance_secs.fetch_add(secs, Ordering::Relaxed);
         } else {
@@ -46,18 +46,18 @@ impl MockClock {
     }
 
     /// Pins time for an atomic mock-only boundary observation.
-    pub fn freeze_at(&self, now: i64) {
+    pub(crate) fn freeze_at(&self, now: i64) {
         let skew = self.skew_secs.load(Ordering::Relaxed);
         self.fixed_secs.store(now.saturating_sub(skew), Ordering::Relaxed);
     }
 
     /// `faults.clock_skew_secs`; `None` clears the skew.
-    pub fn set_skew(&self, secs: Option<i64>) {
+    pub(crate) fn set_skew(&self, secs: Option<i64>) {
         self.skew_secs.store(secs.unwrap_or(0), Ordering::Relaxed);
     }
 
     /// `__mock__/reset`.
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         self.advance_secs.store(0, Ordering::Relaxed);
         self.skew_secs.store(0, Ordering::Relaxed);
         self.fixed_secs.store(UNFROZEN, Ordering::Relaxed);

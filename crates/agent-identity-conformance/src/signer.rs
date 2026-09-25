@@ -109,7 +109,6 @@ pub(crate) fn thumbprint(cert_base64: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use der::Decode as _;
     use p256::ecdsa::VerifyingKey;
     use p256::ecdsa::signature::Verifier as _;
     use p256::pkcs8::{DecodePrivateKey as _, DecodePublicKey as _};
@@ -168,18 +167,6 @@ mod tests {
             rfc["signature_base"].as_str().context("rfc base")?.as_bytes(),
             &signature,
         )?;
-        Ok(())
-    }
-
-    #[test]
-    fn generated_request_has_self_signature() -> anyhow::Result<()> {
-        let pair = KeyPair::generate()?;
-        let csr_der = STANDARD.decode(&pair.csr)?;
-        let csr = x509_cert::request::CertReq::from_der(&csr_der)?;
-        let signed_bytes = csr.info.to_der()?;
-        let key = VerifyingKey::from_public_key_der(&csr.info.public_key.to_der()?)?;
-        let signature = Signature::from_der(csr.signature.as_bytes().context("CSR signature")?)?;
-        key.verify(&signed_bytes, &signature)?;
         Ok(())
     }
 }

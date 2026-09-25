@@ -20,14 +20,14 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, parse_rfc3339, rfc3339};
-use crate::httpsig::CertStatus;
+use crate::oracle::CertStatus;
 use crate::state::{ApiError, Device, State, Token};
 
 const MAX_PAGE_SIZE: u64 = 100;
 const DEFAULT_PAGE_SIZE: u64 = 25;
 const MAX_TOKEN_LIFETIME_SECS: i64 = 365 * 24 * 3600;
 
-pub fn router(app: Arc<App>) -> Router {
+pub(crate) fn router(app: Arc<App>) -> Router {
     let authed = Router::new()
         .route("/enrollment-tokens", post(create_token).get(list_tokens))
         .route("/enrollment-tokens/{id}", get(get_token).delete(delete_token))

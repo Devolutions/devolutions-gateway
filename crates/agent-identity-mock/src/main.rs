@@ -5,10 +5,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use agent_identity_mock::app::App;
-use agent_identity_mock::clock::MockClock;
-use agent_identity_mock::server::{self, Dispatcher};
-use agent_identity_mock::state::State;
+use agent_identity_mock::{App, Dispatcher, MockClock, State, serve};
 use anyhow::Context as _;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -154,5 +151,5 @@ async fn main() -> anyhow::Result<()> {
 
     eprintln!("agent-identity-mock listening on {base_url}");
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
-    server::serve(listener, acceptor, Dispatcher::new(app)).await
+    serve(listener, acceptor, Dispatcher::new(app)).await
 }

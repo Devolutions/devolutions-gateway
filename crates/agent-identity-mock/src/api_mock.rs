@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::app::{App, rfc3339};
 use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, PushKind};
 
-pub fn router(app: Arc<App>) -> Router {
+pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/__mock__/faults", post(faults))
         .route("/__mock__/reset", post(reset))
