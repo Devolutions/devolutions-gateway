@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C16, orchestrator, 2026-09-25, pending Benoit's review).
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C9 and C14 (12:48); the rest are pending his review.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -312,8 +312,10 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 ### 9.2 Devices
 
 - `GET /devices` query: `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25) **[DVLS convention replaces cursor]**, `view=summary|full`, `metadata=k1,k2`, `status=active|revoked|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (friendly-name substring, case-insensitive).
-  Ordered by creation (C9): each device gets a strictly increasing creation key inside its creating transaction (e.g. an identity column), and listings sort by it; `created_at` is non-decreasing in that order.
-  A device created after a page was fetched never appears on that page or an earlier one.
+  Ordered by creation (C9): each device gets a strictly increasing creation key when it's inserted (e.g. an identity column), and listings sort by it; `created_at` is non-decreasing in that order.
+  A page walk returns every device that existed when the walk started at least once, and exactly once when no enrollment overlaps the walk; only a deletion during the walk can make it miss one.
+  A device whose enrollment overlaps the walk may be missing from it, or make the next page repeat one entry; clients deduplicate by `id`.
+  Device IDs stay UUIDs; a server may mint UUIDv7 (RFC 9562) for index locality, but the sort key stays separate (SQL Server doesn't order `uniqueidentifier` bytewise).
 - Page shape (DVLS convention): `{ data: [...], currentPage, pageSize, totalCount, totalPages }`.
 - Summary: `{ id, friendlyName, status, connected, lastSeenAt, certificate: { notAfter, issuer } }` plus `metadata` subset when requested.
 - Full adds `metadata`, `certificates: [{ thumbprint, serialNumber, notBefore, notAfter, issuer, status }]`, `enrollmentToken: { id, name }`, `createdAt`, `revokedAt`, `renewalRequested`.
