@@ -1,0 +1,8 @@
+semicolon-outside-block-ignore-multiline = true
+accept-comment-above-statement = true
+accept-comment-above-attributes = true
+
+# Device keys can fail (for example in the Windows key store); sign would panic, so identity code calls try_sign.
+disallowed-methods = [
+    { path = "signature::Signer::sign", reason = "use try_sign: device key signing is fallible" },
+]
