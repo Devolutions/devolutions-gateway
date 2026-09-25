@@ -55,7 +55,7 @@ Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CO
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
 - Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6, raised by C31 so any §10.5 object always fits, including future known keys).
-- `metadata` is required in enroll and renew bodies (an object, possibly empty); absent or not an object → `invalid_request` (C7).
+- `metadata` is required in enroll, renew and check-in bodies (an object, possibly empty); absent or not an object → `invalid_request` (C7).
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
 - Unknown keys within limits are stored as-is (informational only).
 - Friendly name: evaluated once at enrollment from the token's format.
@@ -497,7 +497,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 {
   "version": 1,
   "authority_id": "...", "device_id": "...",
-  "base_url": "https://host/dvls", "config": { "version": 1, "agent_channel_url": "https://host/dvls" },
+  "base_url": "https://host/dvls", "config": { "version": 1, "revision": 1, "agent_channel_url": "https://host/dvls" },
   "token_sha256": "<base64url SHA-256 of the full token string>",
   "rejected": { "code": "device_revoked", "at": "2026-09-24T12:00:00Z" },
   "keys": {
@@ -508,7 +508,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 }
 ```
 
-- `rejected` is absent until the server answers a `renew` or channel `connect` with `device_revoked` or `device_unknown` (or closes a live stream with one of them); `code` is that error code.
+- `rejected` is absent until the server rejects the identity for good: `device_revoked` or `device_unknown` on any signed request or channel open (or on a live stream), or `certificate_expired` on a renew beyond grace (C22, C23); `code` is that error code.
   The agent can't observe revocation otherwise.
   Once `rejected` is set, the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key (crash safety).
