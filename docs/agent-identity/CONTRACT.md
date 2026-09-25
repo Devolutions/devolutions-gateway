@@ -1,6 +1,6 @@
-# Agent Identity — Contract (draft v0.5)
+# Agent Identity — Contract (draft v0.6)
 
-Status: v0.5; E1–E9 decisions applied; clarifications C1–C21 (orchestrator, 2026-09-25), all approved by Benoit: C21 no `friendly_name` in the enroll response, C17 `confirm` (replaces C3's promote-on-first-use), C18 `config.agent_channel_url`, C19 config revisions with `ConfigUpdate` and the `GET config` fallback, C20 channel renames.
+Status: v0.6; E1–E9 decisions applied; clarifications C1–C31 (orchestrator, 2026-09-25), approved by Benoit. v0.6 adds C22–C31 from the contract critique: expiry handling within grace (C22), confirm-expiry recovery with the pending key (C23), server concurrency guarantees (C24), exact covered components (C25), side-effect-free replay (C26), deleted-token tombstones with same-token replay (C27), per-token pending files (C28), transport hardening and debug-build-only knobs (C29), size caps and transient errors (C30), 16 KiB metadata ceiling (C31). Open: the check-in / config polling proposal.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -33,20 +33,28 @@ Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CO
   The agent rejects a malformed token locally (`token_malformed`, local only, permanent).
 - The server stores only `SHA-256(secret)`.
 - Acceptance, consumption and idempotence follow the V1 plan (row exists, `used_count < max_uses`, `now < expires_at`; use consumed in the device-creating transaction; same CSR public key returns the existing device without consuming a use).
-- Evaluation order (C1): (1) authenticate the token (row exists and `SHA-256(secret)` matches) → else `token_invalid`; (2) validate the body, CSR and metadata → else `invalid_request`; (3) idempotence lookup on the CSR public key; (4) `token_expired`; (5) `token_exhausted`; (6) create the device.
-  Idempotence is checked before expiry and exhaustion so a lost response on a `max_uses = 1` token can be retried.
+- Deleted tokens (C27): deleting a token keeps its row as a tombstone (secret hash, `deleted_at`).
+  A deleted token authenticates only for step (3) below: an idempotent replay of a device that this token created. Everything else → `token_invalid`.
+- Evaluation order (C1): (1) authenticate the token (row exists and `SHA-256(secret)` matches) → else `token_invalid`; (2) validate the body, CSR and metadata → else `invalid_request`; (3) idempotence lookup on the CSR public key; (4) `token_invalid` if the token is deleted, then `token_expired`; (5) `token_exhausted`; (6) create the device.
+  Idempotence is checked before deletion, expiry and exhaustion so a lost response can always be retried with the same token.
 - Idempotence match (C1), against every certificate the server has issued:
-  - Key of the current certificate of a non-revoked device → `200` with that device and its current chain; no use consumed; metadata and `last_seen_at` updated.
+  - Key of the current certificate of a non-revoked device that was enrolled with this same token → `200` with that device and its current chain; no use consumed; **no side effects** (C26): metadata and `last_seen_at` aren't touched, since a CSR proves past, not present, possession of the key.
+  - Same key, device enrolled with a different token → `invalid_request`.
   - Any certificate key of a revoked device → `device_revoked`.
   - Key of a pending or retired certificate of a non-revoked device → `invalid_request` (a public key belongs to exactly one certificate lineage; it's never reused).
   - Key of a certificate of a deleted device → `device_revoked` (C15): issued public keys stay reserved after deletion; the server keeps each one's SPKI SHA-256 and the time it was first issued, and purging old entries is out of scope for V1.
 - Idempotence applies only when the matching device is not revoked; for a revoked device, enroll returns `device_revoked`.
+- Concurrency (C24), required of every server:
+  - Uniqueness: every issued public key is unique, enforced by a unique index on its SPKI SHA-256 (the C15 reserved-key table serves).
+  - Token uses: consumed with a conditional update (`used_count < max_uses`) in the device-creating transaction.
+  - Concurrent same-key requests: of two concurrent enrolls with the same CSR key, exactly one creates the device; the other gets the §2 replay result for it. The same holds for concurrent renews with the same CSR key (§5.3).
+  - Rotation: the issuing root is read inside the issuing transaction and serialized with rotation start, so no certificate from the old root is issued after the rotation starts.
 
 ## 3. Metadata
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 8 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6).
+- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6, raised by C31 so any §10.5 object always fits, including future known keys).
 - `metadata` is required in enroll and renew bodies (an object, possibly empty); absent or not an object → `invalid_request` (C7).
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
 - Unknown keys within limits are stored as-is (informational only).
@@ -116,7 +124,9 @@ Request:
   The agent replaces its stored config only with a higher revision.
   Delivery of later revisions is covered in §7.3 (agent channel) and §5.6 (HTTP fallback).
 - `config.agent_channel_url` (C18) is the base URL of the agent channel (§7). It's absent when the server doesn't offer the agent channel to this device, whatever the reason (the topology can't host it, it's disabled, or a product authenticates agents over its own channel); the agent then opens no agent channel for that authority.
+  It must be an absolute `https` URL without query or fragment (C29); an agent receiving anything else treats it as absent and logs a warning.
   Products may add their own fields later (e.g. a PSU channel URL); both can coexist.
+- Transport (C29): the agent's identity HTTP client never follows redirects (a `3xx` is a transient error), and it validates the server certificate and host name against the OS trust store (invariant 10).
 
 ### 5.3 `POST renew`
 
@@ -147,13 +157,19 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 | `token_expired` | 401 | `now ≥ expires_at` | permanent |
 | `device_revoked` | 403 | Device revoked | terminal |
 | `device_unknown` | 401 | Certificate not registered, or device deleted | terminal |
-| `certificate_expired` | 401 | Expired (for `connect`, `confirm`, `config`) or beyond grace (for `renew`) | re-enroll required, except on `confirm` (renew again with a fresh key, §8) |
+| `certificate_expired` | 401 | Expired (for `connect`, `confirm`, `config`) or beyond grace (for `renew`) | see below (C22) |
 | `signature_invalid` | 401 | Bad signature, wrong `tag`, bad digest, replayed nonce, malformed params | transient |
 | `clock_skew` | 401 | `created`/`expires` outside tolerance | transient, adjust clock |
 | `invalid_request` | 400 | Malformed body, CSR or metadata | transient (agent bug; keep retrying with backoff) |
 
 `token_*` codes on a pending enrollment are permanent (the pending file is deleted).
 `device_revoked` and `device_unknown` record `rejected` on the stored identity (§10.3); the agent stops renewing and reconnecting for that authority.
+`certificate_expired` (C22):
+- On `connect` or `config`: the agent renews immediately (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
+- On `renew`: the certificate is beyond grace. The agent records `rejected { code: "certificate_expired" }` and stops; only a new enrollment with a different token recovers.
+- On `confirm`: see §8.
+Other failures (C30): any other `4xx` without a parseable §5.4 body, `429`, any `5xx`, a `3xx`, and network or TLS errors are transient: retry with jittered exponential backoff, honoring `Retry-After` when present.
+Request size (C30): servers accept request bodies up to 64 KiB on these endpoints; larger → `413 invalid_request`.
 
 ### 5.5 `POST confirm` (C17)
 
@@ -186,7 +202,9 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
 - Server checks, in this order:
-  1. Parse; exactly one signature labelled `sig`; all parameters present; `alg` matches → else `signature_invalid`.
+  1. Parse; exactly one signature labelled `sig`; all parameters present; `alg` matches; the covered components are **exactly** the tag's list above, in that order, each once (C25) → else `signature_invalid`.
+     A verifier never relies on the client-declared list alone: an under-covered `renew` (e.g. only `@method`) must fail here.
+     For `renew`, exactly one `Content-Digest` member, `sha-256`, is required.
   2. `tag` matches the endpoint → else `signature_invalid`.
   3. `0 < expires − created ≤ 300`; `created ≤ now + 60`; `expires ≥ now − 60` → else `clock_skew` (C4 adds the lower bound).
   4. Resolve `keyid` to a registered certificate with status `current` or `pending` → else `device_unknown`; device not revoked → else `device_revoked`; validity per endpoint → else `certificate_expired`.
@@ -335,7 +353,12 @@ Agent renewal (C17):
 7. Reconnect the agent channel, if any, with the new certificate: open the new stream, then close the old one.
 Failure handling:
 - Transient errors on `renew` or `confirm`: retry with backoff; the old certificate and stream keep working.
-- `certificate_expired` on `confirm`, or a pending key that's unusable locally: delete the pending key and slot, then renew again with a fresh key, signed with the current certificate while it's valid or within its grace (C2 retires the old pending certificate server-side).
+- `certificate_expired` on `confirm` (C23): the pending certificate expired before it was confirmed.
+  The agent doesn't know whether an earlier `confirm` succeeded (lost response), so it renews **signed with the pending key**: renew accepts a pending or current certificate within its grace, whichever state the server holds.
+  - Success: continue at step 4 with the new pending certificate; the previous pending key is deleted after the next `confirm` succeeds.
+  - `certificate_expired` (beyond grace): record `rejected { code: "certificate_expired" }`.
+  - `device_unknown`: the server holds neither certificate, so retry the same renew signed with the old current key while it's within grace.
+- A pending key that's unusable locally: delete it and its slot, then renew again with a fresh key, signed with the current certificate while it's valid or within its grace (C2 retires the old pending certificate server-side).
 - `device_revoked` or `device_unknown`: terminal (§5.4).
 Server side:
 - A `pending` certificate becomes `current` only through `confirm` (§5.5, C17 replaces the earlier C3 "first authentication" rule).
@@ -424,27 +447,34 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - `__debug__.identity.acl_grant_current_user` (Windows only, test use): the key-store key DACL and the pending-file reader also grant the agent process's user, so CI can run the agent as a normal process.
   The pending file is still written with a protected DACL; the tester adds the same user when it stands in for the MSI.
   Like the other `__debug__` knobs, it's never set by the MSI.
+- Debug builds only (C29): the whole `__debug__.identity` section is honored only when the agent is built with `debug_assertions` (the dev profile the testsuite and CI use). Other builds ignore it and log a warning at start-up.
 
 - `KeyBackend`: `KeyStore` (Windows default; Microsoft Software KSP, machine key, non-exportable) or `File` (default elsewhere; PKCS#8 `0600`).
 - `Identity.Enabled` default `true`: the task is idle without a pending file or stored identity.
 
-### 10.2 Pending-enrollment file
+### 10.2 Pending-enrollment files (C28)
 
-- Linux/macOS: `<data-dir>/identity/pending-enrollment.json`, mode `0600`, owned by the account the agent service runs as (root in production; the CI user in tests), content `{ "version": 1, "token": "<token>" }` (C12).
-  The agent doesn't enforce the owner.
-- Windows: `<data-dir>\identity\pending-enrollment.dat`, protected DACL granting SYSTEM full control only, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)`.
-- The service reads it at start-up and polls for it (default every 5 s).
+- One file per token, named by the token's SHA-256 in lowercase hex (`<hex>`, case-safe on every file system):
+  - Linux/macOS: `<data-dir>/identity/pending/<hex>.json`, mode `0600`, owned by the account the agent service runs as (root in production; the CI user in tests), content `{ "version": 1, "token": "<token>" }` (C12).
+    The agent doesn't enforce the owner.
+  - Windows: `<data-dir>\identity\pending\<hex>.dat`, protected DACL granting SYSTEM full control only, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON.
+    `.dat` because the content is an opaque DPAPI blob, not JSON.
+  - Writing the same token twice (e.g. an Intune re-run) overwrites the same file.
+- The service reads the directory at start-up and polls it (default every 5 s).
+- Each pending file is independent: its own enrollment key, in-progress record and retry backoff.
+  Requests are sent one at a time, and a pending file in transient backoff doesn't block the others.
 - It enrolls with retry; deletes on success or `token_*` / `token_malformed`; keeps it on anything else.
 - Enrollment key (C15):
-  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "...", "key_name": "..." }` in `<data-dir>/identity/enrollment-in-progress.json` (written like `identity.json`; no secret).
+  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "...", "key_name": "..." }` in `<data-dir>/identity/pending/<hex>.in-progress.json` (written like `identity.json`; no secret).
   - Every retry of that pending file, including after a restart, uses that key, so a lost response is recovered through enroll idempotence (§2).
-  - A pending file with a different token hash discards the in-progress record and its key, and starts over with a new key.
+  - Nothing is discarded before enrollment completes; the authority is only known from the enroll response.
   - On success, the key becomes the new identity's `current` key; the in-progress record is deleted with the pending file.
   - `device_revoked` on enroll is also permanent: the device this enrollment created was revoked before the agent got the response, and coming back needs a different token.
     The agent stores no identity.
-  - Every permanent outcome deletes the pending file, the in-progress record and the enrollment key.
-- Same token hash as any stored identity, rejected or not → deleted without any request (the authority is only known after enrollment).
-- A different token enrolls; on success its identity replaces the stored identity for the returned `authority_id` (old keys deleted).
+  - Every permanent outcome deletes the pending file, its in-progress record and its enrollment key.
+- Same token hash as any stored identity, rejected or not → deleted without any request.
+- A different token enrolls; on success, its identity replaces the stored identity for the returned `authority_id`, if any (the old identity's keys are deleted).
+  If two pending tokens enroll with the same authority, the last one to complete wins; the other device record stays on the server for the admin to revoke or delete.
 - The token is never logged, not even partially; the tester greps agent logs for it.
 
 ### 10.3 Stored identities
@@ -474,7 +504,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - Key names (C15): `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
   The authority isn't known when the enrollment key is created, and key-store keys can't be renamed.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
-- Key records (C15): the agent writes a key's name to its record (`identity.json` or `enrollment-in-progress.json`) before creating the key, and deletes a key before removing its name from the record.
+- Key records (C15): the agent writes a key's name to its record (`identity.json` or a `pending/<hex>.in-progress.json`) before creating the key, and deletes a key before removing its name from the record.
   So a crash never leaves an unrecorded key, and every existing key with the agent's prefix is recorded.
   A recorded key that doesn't exist yet (or anymore) is regenerated or dropped at start-up.
 - Writes are atomic (write temp + rename).
@@ -510,6 +540,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
     `channel_broken: true` (C19) makes channel opens fail with `UNAVAILABLE` without changing the config, like a proxy that breaks gRPC.
   - `POST config` `{ "fields": { ... } }` (C19): merges extra fields (not `version`, `revision` or `agent_channel_url`) into every device's effective config, bumps the revisions and pushes `ConfigUpdate` on live streams; used to check propagation and the preservation of unknown fields.
   - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew"|"confirm"|"config", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
+    An empty error body is deliberately nonconforming; it exercises the agent's transient handling (§5.4, C30).
   - `POST reset`.
   - `POST time/advance` `{ secs }` (for grace and deadline tests); stream expiry and rotation deadlines are re-evaluated immediately on advance.
   - `GET events?device_id=<uuid>` (C13): ordered channel and certificate events for that device (`stream_opened`, `stream_authenticated`, `stream_closed` with status, `cert_status_changed`), each with a monotonic sequence number, so make-before-break is asserted from ordering rather than polling.

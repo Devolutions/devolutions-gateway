@@ -836,6 +836,21 @@
         "expected": "signature_invalid"
       },
       {
+        "name": "renew_two_digest_members",
+        "description": "Content-Digest with sha-256 and sha-512 members, correctly signed (step 1, C25)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:, sha-512=:p6mCeqpvVoXx3f39VLgrpM/L3O9N9oyX0Mibv0fx3ZUa4UGJbq0ddFnXV/p92P690hdlz5ZeihUcdTIAp5Ph1w==:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"kJGSk5SVlpeYmZqbnJ2enw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:bCldqhz5KaVr/FeQdKYz+TUPFQXCMAaIJ7w+7x84mpMzD8DuqNewT2eagqdU/0Lvxtk0CBQnaKhQCW/uaL0LUw==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:, sha-512=:p6mCeqpvVoXx3f39VLgrpM/L3O9N9oyX0Mibv0fx3ZUa4UGJbq0ddFnXV/p92P690hdlz5ZeihUcdTIAp5Ph1w==:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"kJGSk5SVlpeYmZqbnJ2enw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
         "name": "wrong_key",
         "description": "keyid of device A, signed by device B's key (step 5)",
         "endpoint": "renew",
