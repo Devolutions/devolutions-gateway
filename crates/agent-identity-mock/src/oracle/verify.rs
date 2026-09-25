@@ -1,23 +1,18 @@
-//! CONTRACT.md §6 RFC 9421 profile verifier, built by hand (no RFC 9421 library).
-//!
-//! The single entry point is [`verify_request`]; the HTTP server, the gRPC channel and
-//! the in-crate vector test all go through it.
+//! CONTRACT.md §6 ordered signature checks and nonce commits.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use p256::ecdsa::signature::Verifier as _;
-use p256::ecdsa::{Signature, VerifyingKey};
-use sha2::Digest as _;
+use p256::ecdsa::VerifyingKey;
 use uuid::Uuid;
 
-use crate::sfv;
+use super::{content_digest_header, sfv, verify_p256_signature};
 
 /// Endpoint a signature is verified for (the `tag` must match).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Endpoint {
+pub(crate) enum Endpoint {
     Renew,
     Connect,
 }
@@ -40,7 +35,7 @@ impl Endpoint {
 
 /// §5.4 rejection codes produced by signature verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Rejection {
+pub(crate) enum Rejection {
     SignatureInvalid,
     ClockSkew,
     DeviceUnknown,
@@ -49,7 +44,7 @@ pub enum Rejection {
 }
 
 impl Rejection {
-    pub fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Rejection::SignatureInvalid => "signature_invalid",
             Rejection::ClockSkew => "clock_skew",
@@ -59,7 +54,7 @@ impl Rejection {
         }
     }
 
-    pub fn http_status(self) -> u16 {
+    pub(crate) fn http_status(self) -> u16 {
         match self {
             Rejection::DeviceRevoked => 403,
             _ => 401,
@@ -69,14 +64,14 @@ impl Rejection {
 
 /// Status of a registered certificate (§8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CertStatus {
+pub(crate) enum CertStatus {
     Current,
     Pending,
     Retired,
 }
 
 impl CertStatus {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Current => "current",
             Self::Pending => "pending",
@@ -87,27 +82,27 @@ impl CertStatus {
 
 /// What the verifier needs to know about the certificate behind a `keyid`.
 #[derive(Debug, Clone)]
-pub struct RegisteredCert {
-    pub device_id: Uuid,
-    pub revoked: bool,
-    pub status: CertStatus,
+pub(crate) struct RegisteredCert {
+    pub(crate) device_id: Uuid,
+    pub(crate) revoked: bool,
+    pub(crate) status: CertStatus,
     /// Unix seconds.
-    pub not_before: i64,
+    pub(crate) not_before: i64,
     /// Unix seconds.
-    pub not_after: i64,
-    pub public_key: VerifyingKey,
+    pub(crate) not_after: i64,
+    pub(crate) public_key: VerifyingKey,
 }
 
 /// Replay store for `(keyid, nonce)` pairs (§6 step 6).
 #[derive(Debug, Default)]
-pub struct NonceStore {
+pub(crate) struct NonceStore {
     /// `(keyid, nonce)` → keep until (Unix seconds).
     entries: HashMap<(String, String), i64>,
 }
 
 impl NonceStore {
     /// Atomically inserts `(keyid, nonce)`. Returns `false` on conflict.
-    pub fn insert_fresh(&mut self, keyid: &str, nonce: &str, keep_until: i64, now: i64) -> bool {
+    fn insert_fresh(&mut self, keyid: &str, nonce: &str, keep_until: i64, now: i64) -> bool {
         self.entries.retain(|_, until| *until >= now);
         match self.entries.entry((keyid.to_owned(), nonce.to_owned())) {
             Entry::Vacant(entry) => {
@@ -121,7 +116,7 @@ impl NonceStore {
 
 /// A successfully authenticated request. Constructible only by [`verify_request`], so
 /// handlers downstream of authentication can trust the identity fields.
-pub struct AuthenticatedDevice {
+pub(crate) struct AuthenticatedDevice {
     device_id: Uuid,
     cert_thumbprint: String,
     /// The `nonce` parameter of the signature, UTF-8 as received (§7.3 binds it).
@@ -130,19 +125,19 @@ pub struct AuthenticatedDevice {
 }
 
 impl AuthenticatedDevice {
-    pub fn device_id(&self) -> Uuid {
+    pub(crate) fn device_id(&self) -> Uuid {
         self.device_id
     }
 
-    pub fn cert_thumbprint(&self) -> &str {
+    pub(crate) fn cert_thumbprint(&self) -> &str {
         &self.cert_thumbprint
     }
 
-    pub fn nonce(&self) -> &str {
+    pub(crate) fn nonce(&self) -> &str {
         &self.nonce
     }
 
-    pub fn public_key(&self) -> &VerifyingKey {
+    pub(crate) fn public_key(&self) -> &VerifyingKey {
         &self.public_key
     }
 }
@@ -164,7 +159,7 @@ const PROFILE_ALG: &str = "ecdsa-p256-sha256";
     clippy::too_many_arguments,
     reason = "one argument per contract input; bundling them would just move the noise"
 )]
-pub fn verify_request(
+pub(crate) fn verify_request(
     endpoint: Endpoint,
     method: &str,
     signature_input: Option<&[u8]>,
@@ -272,10 +267,9 @@ pub fn verify_request(
         }
     }
     let base = signature_base(method, content_digest, inner);
-    let sig = Signature::from_slice(sig_bytes).map_err(|_| Rejection::SignatureInvalid)?;
-    cert.public_key
-        .verify(base.as_bytes(), &sig)
-        .map_err(|_| Rejection::SignatureInvalid)?;
+    if !verify_p256_signature(&cert.public_key, base.as_bytes(), sig_bytes) {
+        return Err(Rejection::SignatureInvalid);
+    }
 
     // Step 6: commit the nonce only after the signature verified.
     if !nonces.insert_fresh(keyid, nonce, expires + NONCE_KEEP_SECS, now) {
@@ -325,21 +319,13 @@ fn valid_base64url_bytes(value: &str, expected_len: usize) -> bool {
         .is_ok_and(|decoded| decoded.len() == expected_len && URL_SAFE_NO_PAD.encode(decoded) == value)
 }
 
-/// `Content-Digest: sha-256=:<base64>:  ` (RFC 9530), computed over the exact body bytes.
-pub fn content_digest_header(body: &[u8]) -> String {
-    use base64::Engine as _;
-    let digest = sha2::Sha256::digest(body);
-    format!("sha-256=:{}:", base64::engine::general_purpose::STANDARD.encode(digest))
-}
-
 /// RFC 9421 §2.5 signature base: one line per covered component as listed in the
 /// parsed `Signature-Input` member, then the `@signature-params` line with the inner
 /// list re-serialized canonically (parameters in received order).
 ///
 /// In [`verify_request`] this is only reached after the covered-components check, so
-/// the components are exactly the §6 profile's; the standalone construction is also
-/// exercised by the vector test against `signature_base` fields.
-pub(crate) fn signature_base(method: &str, content_digest: Option<&[u8]>, inner: &sfv::InnerList) -> String {
+/// the components are exactly the §6 profile's.
+fn signature_base(method: &str, content_digest: Option<&[u8]>, inner: &sfv::InnerList) -> String {
     let mut lines = Vec::with_capacity(inner.items.len() + 1);
     for item in &inner.items {
         let sfv::ItemValue::Str(component) = &item.value else {
@@ -359,4 +345,19 @@ pub(crate) fn signature_base(method: &str, content_digest: Option<&[u8]>, inner:
     }
     lines.push(format!("\"@signature-params\": {}", sfv::serialize_inner_list(inner)));
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NonceStore;
+
+    #[test]
+    fn nonce_conflict_keeps_original_expiry_through_boundary() {
+        let mut store = NonceStore::default();
+        assert!(store.insert_fresh("key", "nonce", 120, 0));
+        assert!(!store.insert_fresh("key", "nonce", 61, 0));
+        assert!(!store.insert_fresh("key", "nonce", 120, 62));
+        assert!(!store.insert_fresh("key", "nonce", 120, 120));
+        assert!(store.insert_fresh("key", "nonce", 200, 121));
+    }
 }

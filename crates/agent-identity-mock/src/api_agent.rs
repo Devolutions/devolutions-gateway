@@ -13,15 +13,15 @@ use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
 use crate::app::{App, rfc3339};
-use crate::httpsig::{Endpoint, Rejection, verify_request};
+use crate::oracle::{Endpoint, Rejection, verify_request};
 use crate::state::{ApiError, DropTarget, FailNextResponse};
 
 /// Header set on a success response when `faults.drop_next_response` fires; the
 /// dispatcher turns it into a connection abort without a response (§11).
-pub const DROP_HEADER: &str = "x-mock-drop";
-pub const INJECTED_HEADER: &str = "x-mock-injected";
+pub(crate) const DROP_HEADER: &str = "x-mock-drop";
+pub(crate) const INJECTED_HEADER: &str = "x-mock-injected";
 
-pub fn router(app: Arc<App>) -> Router {
+pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/agent-identity/v1/trust-anchor", get(trust_anchor))
         .route("/api/agent-identity/v1/enroll", post(enroll))
@@ -32,7 +32,7 @@ pub fn router(app: Arc<App>) -> Router {
 
 /// §5.4 error body: `{ "error", "message", "server_time" }` on every non-2xx
 /// agent-facing response.
-pub fn agent_error(app: &App, status: u16, code: &str, message: &str) -> Response {
+pub(crate) fn agent_error(app: &App, status: u16, code: &str, message: &str) -> Response {
     (
         StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         Json(json!({
@@ -44,11 +44,11 @@ pub fn agent_error(app: &App, status: u16, code: &str, message: &str) -> Respons
         .into_response()
 }
 
-pub fn api_error_response(app: &App, err: &ApiError) -> Response {
+pub(crate) fn api_error_response(app: &App, err: &ApiError) -> Response {
     agent_error(app, err.status, err.code, &err.message)
 }
 
-pub fn rejection_response(app: &App, rejection: Rejection) -> Response {
+pub(crate) fn rejection_response(app: &App, rejection: Rejection) -> Response {
     agent_error(app, rejection.http_status(), rejection.code(), rejection.code())
 }
 

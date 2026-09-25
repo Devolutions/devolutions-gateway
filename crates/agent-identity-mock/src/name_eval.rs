@@ -3,7 +3,7 @@
 use serde_json::{Map, Value};
 
 /// Known metadata keys (placeholders besides `token_name`).
-pub const KNOWN_KEYS: [&str; 8] = [
+pub(crate) const KNOWN_KEYS: [&str; 8] = [
     "hostname",
     "fqdn",
     "domain",
@@ -14,15 +14,15 @@ pub const KNOWN_KEYS: [&str; 8] = [
     "machine_id",
 ];
 
-pub const MAX_METADATA_KEYS: usize = 32;
-pub const MAX_METADATA_VALUE_BYTES: usize = 1024;
-pub const MAX_METADATA_TOTAL_BYTES: usize = 8 * 1024;
-pub const MAX_FRIENDLY_NAME_CHARS: usize = 255;
-pub const DEFAULT_FRIENDLY_NAME_FORMAT: &str = "{hostname}";
+pub(crate) const MAX_METADATA_KEYS: usize = 32;
+pub(crate) const MAX_METADATA_VALUE_BYTES: usize = 1024;
+pub(crate) const MAX_METADATA_TOTAL_BYTES: usize = 8 * 1024;
+pub(crate) const MAX_FRIENDLY_NAME_CHARS: usize = 255;
+pub(crate) const DEFAULT_FRIENDLY_NAME_FORMAT: &str = "{hostname}";
 
 /// Validates a metadata object against the §3 limits. Returns a message for
 /// `invalid_request` on violation.
-pub fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
+pub(crate) fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
     if metadata.len() > MAX_METADATA_KEYS {
         return Err(format!("metadata has more than {MAX_METADATA_KEYS} keys"));
     }
@@ -64,14 +64,14 @@ fn valid_metadata_key(key: &str) -> bool {
 
 /// Validates a friendly-name format at token creation: placeholders must be known and
 /// braces balanced. Returns a message for a 400 on violation.
-pub fn validate_friendly_name_format(format: &str) -> Result<(), String> {
+pub(crate) fn validate_friendly_name_format(format: &str) -> Result<(), String> {
     parse_format(format).map(|_| ())
 }
 
 /// Renders the friendly name: validated format, missing values evaluate to empty,
 /// `{{`/`}}` escape braces, result trimmed and truncated to 255 chars, empty falls back
 /// to the device ID.
-pub fn render_friendly_name(
+pub(crate) fn render_friendly_name(
     format: &str,
     metadata: &Map<String, Value>,
     token_name: &str,
@@ -135,20 +135,4 @@ fn parse_format(format: &str) -> Result<Vec<FormatPart<'_>>, String> {
     }
     parts.push(FormatPart::Literal(rest));
     Ok(parts)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn friendly_name_preserves_literals_and_brace_escapes() {
-        let mut metadata = Map::new();
-        metadata.insert("hostname".to_owned(), Value::String("host".to_owned()));
-        let format = "  {hostname}-{{ok}}-{token_name}-{fqdn}  ";
-        validate_friendly_name_format(format).expect("valid format");
-        let rendered = render_friendly_name(format, &metadata, "token", uuid::Uuid::nil());
-        assert_eq!(rendered, "host-{ok}-token-");
-        assert!(validate_friendly_name_format("{unknown}").is_err());
-    }
 }

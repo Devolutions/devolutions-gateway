@@ -7,7 +7,7 @@
 
 /// A bare item value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ItemValue {
+pub(super) enum ItemValue {
     Str(String),
     Int(i64),
     Bytes(Vec<u8>),
@@ -15,35 +15,35 @@ pub enum ItemValue {
 
 /// A `;key[=value]` parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Param {
-    pub key: String,
+pub(super) struct Param {
+    pub(super) key: String,
     /// `None` is a bare parameter (boolean true in RFC 8941).
-    pub value: Option<ItemValue>,
+    pub(super) value: Option<ItemValue>,
 }
 
 /// An item with its parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListItem {
-    pub value: ItemValue,
-    pub params: Vec<Param>,
+pub(super) struct ListItem {
+    pub(super) value: ItemValue,
+    pub(super) params: Vec<Param>,
 }
 
 /// An `( item item ... );params` inner list.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InnerList {
-    pub items: Vec<ListItem>,
-    pub params: Vec<Param>,
+pub(super) struct InnerList {
+    pub(super) items: Vec<ListItem>,
+    pub(super) params: Vec<Param>,
 }
 
 /// A dictionary member value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MemberValue {
+pub(super) enum MemberValue {
     Item(ListItem),
     InnerList(InnerList),
 }
 
 /// Parses an RFC 8941 dictionary, strictly. Returns `None` on any syntax error.
-pub fn parse_dictionary(input: &str) -> Option<Vec<(String, MemberValue)>> {
+pub(super) fn parse_dictionary(input: &str) -> Option<Vec<(String, MemberValue)>> {
     let mut p = Parser {
         bytes: input.as_bytes(),
         pos: 0,
@@ -73,7 +73,7 @@ pub fn parse_dictionary(input: &str) -> Option<Vec<(String, MemberValue)>> {
 
 /// Serializes an inner list in canonical form: `("a" "b");k=v` with parameters in
 /// received order.
-pub fn serialize_inner_list(list: &InnerList) -> String {
+pub(super) fn serialize_inner_list(list: &InnerList) -> String {
     let mut out = String::from("(");
     for (i, item) in list.items.iter().enumerate() {
         if i > 0 {
@@ -281,5 +281,23 @@ impl Parser<'_> {
             return None;
         }
         core::str::from_utf8(&self.bytes[start..self.pos]).ok()?.parse().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dictionary;
+
+    #[test]
+    fn inner_list_requires_space_between_items() {
+        assert!(parse_dictionary("sig=(\"a\" \"b\")").is_some());
+        assert!(parse_dictionary("sig=(\"a\"\"b\")").is_none());
+        assert!(parse_dictionary("sig=(\"a\"\t\"b\")").is_none());
+    }
+
+    #[test]
+    fn parameter_separator_rejects_horizontal_tab() {
+        assert!(parse_dictionary("sig=(\"@method\"); created=1").is_some());
+        assert!(parse_dictionary("sig=(\"@method\");\tcreated=1").is_none());
     }
 }

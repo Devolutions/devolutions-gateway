@@ -25,15 +25,15 @@ use x509_cert::time::{Time, Validity};
 const ID_KP_CLIENT_AUTH: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
 
 const ROOT_LIFETIME_SECS: i64 = 10 * 365 * 24 * 3600;
-pub const DEFAULT_LEAF_LIFETIME_SECS: i64 = 90 * 24 * 3600;
+pub(crate) const DEFAULT_LEAF_LIFETIME_SECS: i64 = 90 * 24 * 3600;
 
 /// `base64url(SHA-256(certificate DER))` (§1).
-pub fn thumbprint(der: &[u8]) -> String {
+pub(crate) fn thumbprint(der: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(der))
 }
 
 /// Base64 (standard, padded) of a DER blob, for JSON bodies (§1).
-pub fn base64_der(der: &[u8]) -> String {
+pub(crate) fn base64_der(der: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(der)
 }
 
@@ -88,23 +88,23 @@ fn new_builder(
 }
 
 /// A root CA (§4, §8).
-pub struct RootCa {
-    pub name: Name,
+pub(crate) struct RootCa {
+    pub(crate) name: Name,
     /// Dropped as soon as the root stops issuing during a rotation.
-    pub key: Option<SigningKey>,
-    pub cert_der: Vec<u8>,
-    pub thumbprint: String,
+    pub(crate) key: Option<SigningKey>,
+    pub(crate) cert_der: Vec<u8>,
+    pub(crate) thumbprint: String,
     /// Unix seconds.
-    pub not_before: i64,
+    pub(crate) not_before: i64,
     /// Unix seconds.
-    pub not_after: i64,
+    pub(crate) not_after: i64,
     /// Whether the root is currently listed by `trust-anchor`.
-    pub published: bool,
+    pub(crate) published: bool,
 }
 
 impl RootCa {
     /// Creates a self-signed P-256 root, `CN=Mock Agent Identity Root <n>`, 10 years.
-    pub fn generate(n: u32, now: i64) -> anyhow::Result<Self> {
+    pub(crate) fn generate(n: u32, now: i64) -> anyhow::Result<Self> {
         let mut rng = rand::rng();
         let key = SigningKey::generate_from_rng(&mut rng);
         let name = Name::from_str(&format!("CN=Mock Agent Identity Root {n}")).context("root name")?;
@@ -137,18 +137,18 @@ impl RootCa {
 }
 
 /// A freshly issued leaf certificate.
-pub struct Leaf {
-    pub der: Vec<u8>,
-    pub thumbprint: String,
-    pub serial: String,
+pub(crate) struct Leaf {
+    pub(crate) der: Vec<u8>,
+    pub(crate) thumbprint: String,
+    pub(crate) serial: String,
     /// Unix seconds.
-    pub not_before: i64,
+    pub(crate) not_before: i64,
     /// Unix seconds.
-    pub not_after: i64,
+    pub(crate) not_after: i64,
 }
 
 /// Issues a leaf per §4; the lifetime is capped at the issuing root's `notAfter`.
-pub fn issue_leaf(
+pub(crate) fn issue_leaf(
     root: &RootCa,
     device_id: uuid::Uuid,
     public_key: &VerifyingKey,
@@ -194,7 +194,7 @@ pub fn issue_leaf(
 }
 
 /// Canonical public-key encoding used to compare keys across requests (SPKI DER).
-pub fn public_key_der(key: &VerifyingKey) -> Vec<u8> {
+pub(crate) fn public_key_der(key: &VerifyingKey) -> Vec<u8> {
     key.to_public_key_der()
         .map(|d| d.as_bytes().to_vec())
         .unwrap_or_else(|_| key.to_sec1_bytes().to_vec())

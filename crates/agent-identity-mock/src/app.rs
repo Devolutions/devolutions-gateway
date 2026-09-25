@@ -36,7 +36,7 @@ impl App {
 }
 
 /// RFC 3339 UTC with a `Z` designator, as in the contract's examples (§1).
-pub fn rfc3339(unix_secs: i64) -> String {
+pub(crate) fn rfc3339(unix_secs: i64) -> String {
     use time::format_description::well_known::Rfc3339;
     match time::OffsetDateTime::from_unix_timestamp(unix_secs) {
         Ok(t) => t.format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
@@ -45,7 +45,7 @@ pub fn rfc3339(unix_secs: i64) -> String {
 }
 
 /// Parses an RFC 3339 timestamp to Unix seconds.
-pub fn parse_rfc3339(value: &str) -> Option<i64> {
+pub(crate) fn parse_rfc3339(value: &str) -> Option<i64> {
     use time::format_description::well_known::Rfc3339;
     time::OffsetDateTime::parse(value, &Rfc3339)
         .ok()

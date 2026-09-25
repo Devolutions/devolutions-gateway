@@ -11,20 +11,20 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::ca::{self, DEFAULT_LEAF_LIFETIME_SECS, RootCa};
-use crate::httpsig::{CertStatus, NonceStore, RegisteredCert};
 use crate::name_eval;
+use crate::oracle::{AuthenticatedDevice, CertStatus, NonceStore, RegisteredCert, check_csr};
 
 /// Error with an HTTP status and a machine-readable code, mapped to the right body
 /// shape by the handlers.
 #[derive(Debug)]
-pub struct ApiError {
-    pub status: u16,
-    pub code: &'static str,
-    pub message: String,
+pub(crate) struct ApiError {
+    pub(crate) status: u16,
+    pub(crate) code: &'static str,
+    pub(crate) message: String,
 }
 
 impl ApiError {
-    pub fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
             code,
@@ -32,62 +32,62 @@ impl ApiError {
         }
     }
 
-    pub fn invalid_request(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid_request(message: impl Into<String>) -> Self {
         Self::new(400, "invalid_request", message)
     }
 
-    pub fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self::new(404, "not_found", message)
     }
 
-    pub fn conflict(message: impl Into<String>) -> Self {
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self::new(409, "conflict", message)
     }
 
-    pub fn token_invalid() -> Self {
+    pub(crate) fn token_invalid() -> Self {
         Self::new(401, "token_invalid", "unknown or deleted token")
     }
 
-    pub fn token_exhausted() -> Self {
+    pub(crate) fn token_exhausted() -> Self {
         Self::new(403, "token_exhausted", "token has no remaining uses")
     }
 
-    pub fn token_expired() -> Self {
+    pub(crate) fn token_expired() -> Self {
         Self::new(401, "token_expired", "token is expired")
     }
 
-    pub fn device_revoked() -> Self {
+    pub(crate) fn device_revoked() -> Self {
         Self::new(403, "device_revoked", "device is revoked")
     }
 
-    pub fn internal(message: impl Into<String>) -> Self {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::new(500, "internal_error", message)
     }
 }
 
 /// §11 `faults.drop_next_response` target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DropTarget {
+pub(crate) enum DropTarget {
     Enroll,
     Renew,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct FailNextResponse {
-    pub endpoint: DropTarget,
-    pub status: u16,
-    pub error: Option<&'static str>,
+pub(crate) struct FailNextResponse {
+    pub(crate) endpoint: DropTarget,
+    pub(crate) status: u16,
+    pub(crate) error: Option<&'static str>,
 }
 
 /// §11 fault knobs. Merged field-by-field by `POST __mock__/faults`.
 #[derive(Debug, Clone)]
-pub struct Faults {
-    pub drop_next_response: Option<DropTarget>,
-    pub fail_next_response: Option<FailNextResponse>,
-    pub clock_skew_secs: Option<i64>,
-    pub leaf_lifetime_secs: Option<i64>,
-    pub channel_available: bool,
-    pub rotation_rate_limit_per_sec: Option<u32>,
+pub(crate) struct Faults {
+    pub(crate) drop_next_response: Option<DropTarget>,
+    pub(crate) fail_next_response: Option<FailNextResponse>,
+    pub(crate) clock_skew_secs: Option<i64>,
+    pub(crate) leaf_lifetime_secs: Option<i64>,
+    pub(crate) channel_available: bool,
+    pub(crate) rotation_rate_limit_per_sec: Option<u32>,
 }
 
 impl Default for Faults {
@@ -105,13 +105,13 @@ impl Default for Faults {
 
 /// Why a renewal was requested (§7.3 `RenewRequested.reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenewReason {
+pub(crate) enum RenewReason {
     Admin,
     Rotation,
 }
 
 impl RenewReason {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             RenewReason::Admin => "admin",
             RenewReason::Rotation => "rotation",
@@ -120,23 +120,23 @@ impl RenewReason {
 }
 
 /// Enrollment token record (§9.1). Only the SHA-256 of the secret is stored (§2).
-pub struct Token {
-    pub id: Uuid,
-    pub name: String,
-    pub max_uses: u64,
-    pub used_count: u64,
+pub(crate) struct Token {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) max_uses: u64,
+    pub(crate) used_count: u64,
     /// Unix seconds.
-    pub expires_at: i64,
-    pub friendly_name_format: Option<String>,
-    pub config: Option<Value>,
+    pub(crate) expires_at: i64,
+    pub(crate) friendly_name_format: Option<String>,
+    pub(crate) config: Option<Value>,
     /// Unix seconds.
-    pub created_at: i64,
-    pub created_by: String,
+    pub(crate) created_at: i64,
+    pub(crate) created_by: String,
 }
 
 impl Token {
     /// §9.1 `state` field. `expired` wins over `exhausted` when both hold.
-    pub fn state(&self, now: i64) -> &'static str {
+    pub(crate) fn state(&self, now: i64) -> &'static str {
         if now >= self.expires_at {
             "expired"
         } else if self.used_count >= self.max_uses {
@@ -148,58 +148,58 @@ impl Token {
 }
 
 /// A device certificate with its lifecycle status (§8).
-pub struct Cert {
-    pub thumbprint: String,
-    pub der: Vec<u8>,
-    pub public_key: VerifyingKey,
-    pub serial: String,
+pub(crate) struct Cert {
+    pub(crate) thumbprint: String,
+    pub(crate) der: Vec<u8>,
+    pub(crate) public_key: VerifyingKey,
+    pub(crate) serial: String,
     /// Unix seconds.
-    pub not_before: i64,
+    pub(crate) not_before: i64,
     /// Unix seconds.
-    pub not_after: i64,
+    pub(crate) not_after: i64,
     /// Thumbprint of the issuing root.
-    pub issuer: String,
-    pub status: CertStatus,
+    pub(crate) issuer: String,
+    pub(crate) status: CertStatus,
     /// Monotonic issuance order, including certificates issued in the same second.
-    pub issued_seq: u64,
+    pub(crate) issued_seq: u64,
 }
 
 /// A registered device (§9.2).
-pub struct Device {
-    pub id: Uuid,
-    pub friendly_name: String,
-    pub metadata: Map<String, Value>,
+pub(crate) struct Device {
+    pub(crate) id: Uuid,
+    pub(crate) friendly_name: String,
+    pub(crate) metadata: Map<String, Value>,
     /// Strictly increasing creation order, even for enrollments in the same second.
-    pub created_seq: u64,
+    pub(crate) created_seq: u64,
     /// Unix seconds.
-    pub created_at: i64,
+    pub(crate) created_at: i64,
     /// Unix seconds.
-    pub last_seen_at: Option<i64>,
+    pub(crate) last_seen_at: Option<i64>,
     /// Unix seconds.
-    pub revoked_at: Option<i64>,
-    pub renewal_requested: Option<RenewalFlag>,
-    pub token_id: Uuid,
-    pub token_name: String,
-    pub certs: Vec<Cert>,
+    pub(crate) revoked_at: Option<i64>,
+    pub(crate) renewal_requested: Option<RenewalFlag>,
+    pub(crate) token_id: Uuid,
+    pub(crate) token_name: String,
+    pub(crate) certs: Vec<Cert>,
 }
 
-pub struct RenewalFlag {
-    pub reason: RenewReason,
+pub(crate) struct RenewalFlag {
+    pub(crate) reason: RenewReason,
     /// First issuance order eligible to clear this flag.
-    pub min_issued_seq: u64,
+    pub(crate) min_issued_seq: u64,
 }
 
 impl Device {
-    pub fn current_cert(&self) -> Option<&Cert> {
+    pub(crate) fn current_cert(&self) -> Option<&Cert> {
         self.certs.iter().find(|c| c.status == CertStatus::Current)
     }
 
-    pub fn revoked(&self) -> bool {
+    pub(crate) fn revoked(&self) -> bool {
         self.revoked_at.is_some()
     }
 
     /// §9.2 `status` filter value.
-    pub fn status(&self, now: i64) -> &'static str {
+    pub(crate) fn status(&self, now: i64) -> &'static str {
         if self.revoked() {
             "revoked"
         } else if self.current_cert().is_some_and(|c| now < c.not_after) {
@@ -211,7 +211,7 @@ impl Device {
 }
 
 /// Pushed into a live channel stream's task.
-pub enum StreamPush {
+pub(crate) enum StreamPush {
     RenewRequested(&'static str),
     Reconnect(&'static str),
     /// Pending cert authenticated elsewhere: close with OK (§7.4).
@@ -224,76 +224,76 @@ pub enum StreamPush {
     CloseExpired,
 }
 
-pub struct StreamHandle {
-    pub device_id: Uuid,
-    pub cert_thumbprint: String,
-    pub tx: mpsc::Sender<StreamPush>,
+pub(crate) struct StreamHandle {
+    pub(crate) device_id: Uuid,
+    pub(crate) cert_thumbprint: String,
+    pub(crate) tx: mpsc::Sender<StreamPush>,
 }
 
 /// An in-progress CA rotation (§9.3).
-pub struct Rotation {
+pub(crate) struct Rotation {
     /// Thumbprints of the old and new roots.
-    pub old_root: String,
-    pub new_root: String,
+    pub(crate) old_root: String,
+    pub(crate) new_root: String,
     /// Unix seconds.
-    pub deadline: i64,
+    pub(crate) deadline: i64,
 }
 
 #[derive(Default)]
-pub struct RequestCounts {
-    pub enroll_by_token: HashMap<Uuid, u64>,
-    pub enroll_revoked_by_token: HashMap<Uuid, u64>,
-    pub enroll_total: u64,
-    pub enroll_retry_503: u64,
-    pub renew: u64,
-    pub renew_retry_503: u64,
-    pub connect: u64,
-    pub authenticated_connects: u64,
-    pub correlated_acks: u64,
-    pub overlap_open: u64,
+pub(crate) struct RequestCounts {
+    pub(crate) enroll_by_token: HashMap<Uuid, u64>,
+    pub(crate) enroll_revoked_by_token: HashMap<Uuid, u64>,
+    pub(crate) enroll_total: u64,
+    pub(crate) enroll_retry_503: u64,
+    pub(crate) renew: u64,
+    pub(crate) renew_retry_503: u64,
+    pub(crate) connect: u64,
+    pub(crate) authenticated_connects: u64,
+    pub(crate) correlated_acks: u64,
+    pub(crate) overlap_open: u64,
 }
 
-pub struct Event {
-    pub device_id: Uuid,
-    pub body: Value,
+pub(crate) struct Event {
+    pub(crate) device_id: Uuid,
+    pub(crate) body: Value,
 }
 
 pub struct State {
-    pub tokens: HashMap<Uuid, Token>,
+    pub(crate) tokens: HashMap<Uuid, Token>,
     /// SHA-256(secret) → token ID (§2).
-    pub token_hashes: HashMap<[u8; 32], Uuid>,
-    pub devices: HashMap<Uuid, Device>,
+    pub(crate) token_hashes: HashMap<[u8; 32], Uuid>,
+    pub(crate) devices: HashMap<Uuid, Device>,
     /// Certificate thumbprint → device.
-    pub cert_index: HashMap<String, Uuid>,
+    pub(crate) cert_index: HashMap<String, Uuid>,
     /// Issued keys remain reserved after a revoked device is deleted.
     deleted_revoked_keys: HashSet<Vec<u8>>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
-    pub roots: Vec<RootCa>,
-    pub rotation: Option<Rotation>,
-    pub nonces: NonceStore,
-    pub faults: Faults,
-    pub requests: RequestCounts,
+    pub(crate) roots: Vec<RootCa>,
+    pub(crate) rotation: Option<Rotation>,
+    pub(crate) nonces: NonceStore,
+    pub(crate) faults: Faults,
+    pub(crate) requests: RequestCounts,
     /// Mock-only barrier: retry requests receive 503 after the first response is dropped.
-    pub retry_barrier: Option<DropTarget>,
-    pub dropped_response: Option<DropTarget>,
+    pub(crate) retry_barrier: Option<DropTarget>,
+    pub(crate) dropped_response: Option<DropTarget>,
     /// Authenticated live channel streams, by stream ID.
-    pub streams: HashMap<Uuid, StreamHandle>,
+    pub(crate) streams: HashMap<Uuid, StreamHandle>,
     /// Signed openings that have received a Challenge but not passed Hello proof.
-    pub challenged_streams: HashMap<Uuid, StreamHandle>,
+    pub(crate) challenged_streams: HashMap<Uuid, StreamHandle>,
     /// Valid Hello proofs held before authentication by the mock-only handshake barrier.
-    pub paused_hellos: HashSet<Uuid>,
+    pub(crate) paused_hellos: HashSet<Uuid>,
     closed_streams: HashSet<Uuid>,
-    pub events: Vec<Event>,
-    pub next_event_seq: u64,
+    pub(crate) events: Vec<Event>,
+    pub(crate) next_event_seq: u64,
     /// Pending pushes survive the deadline that ends the public rotation phase.
-    pub rotation_push_queue: VecDeque<(Uuid, String)>,
+    pub(crate) rotation_push_queue: VecDeque<(Uuid, String)>,
     /// Sliding one-second rate window, shared across requests and rotation phases.
-    pub rotation_push_times: VecDeque<Instant>,
-    pub root_seq: u32,
-    pub serial_seq: u64,
-    pub next_device_seq: u64,
-    pub last_created_at: i64,
+    pub(crate) rotation_push_times: VecDeque<Instant>,
+    pub(crate) root_seq: u32,
+    pub(crate) serial_seq: u64,
+    pub(crate) next_device_seq: u64,
+    pub(crate) last_created_at: i64,
 }
 
 impl State {
@@ -327,7 +327,7 @@ impl State {
         })
     }
 
-    pub fn record_event(&mut self, device_id: Uuid, event_type: &str, fields: Value) {
+    pub(crate) fn record_event(&mut self, device_id: Uuid, event_type: &str, fields: Value) {
         let mut body = fields.as_object().cloned().expect("event fields are an object");
         body.insert("seq".to_owned(), json!(self.next_event_seq));
         body.insert("type".to_owned(), json!(event_type));
@@ -350,7 +350,7 @@ impl State {
         self.record_event(device_id, "cert_status_changed", fields);
     }
 
-    pub fn close_stream(
+    pub(crate) fn close_stream(
         &mut self,
         stream_id: Uuid,
         device_id: Uuid,
@@ -376,11 +376,11 @@ impl State {
     }
 
     /// The root new leaves are issued from (the newest one, §9.3).
-    pub fn issuing_root(&self) -> &RootCa {
+    pub(crate) fn issuing_root(&self) -> &RootCa {
         self.roots.last().expect("at least one root")
     }
 
-    pub fn observe_enroll(&mut self, secret: &[u8; 32]) {
+    pub(crate) fn observe_enroll(&mut self, secret: &[u8; 32]) {
         use sha2::Digest as _;
         let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
         if let Some(id) = self.token_hashes.get(&hash) {
@@ -388,13 +388,13 @@ impl State {
         }
     }
 
-    pub fn token_id(&self, secret: &[u8; 32]) -> Option<Uuid> {
+    pub(crate) fn token_id(&self, secret: &[u8; 32]) -> Option<Uuid> {
         use sha2::Digest as _;
         let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
         self.token_hashes.get(&hash).copied()
     }
 
-    pub fn fail_next_response(&mut self, endpoint: DropTarget) -> Option<FailNextResponse> {
+    pub(crate) fn fail_next_response(&mut self, endpoint: DropTarget) -> Option<FailNextResponse> {
         if self
             .faults
             .fail_next_response
@@ -407,17 +407,17 @@ impl State {
     }
 
     /// Resolves a certificate thumbprint for the §6 verifier.
-    pub fn lookup_cert(&self, thumbprint: &str) -> Option<RegisteredCert> {
+    pub(crate) fn lookup_cert(&self, thumbprint: &str) -> Option<RegisteredCert> {
         lookup_cert(&self.devices, &self.cert_index, thumbprint)
     }
 
     /// Whether the device has at least one authenticated live stream (§7).
-    pub fn is_connected(&self, device_id: Uuid) -> bool {
+    pub(crate) fn is_connected(&self, device_id: Uuid) -> bool {
         self.streams.values().any(|s| s.device_id == device_id)
     }
 
     /// Pushes an event to every live stream of a device; broken channels are dropped.
-    pub fn push_to_device(&mut self, device_id: Uuid, push: &PushKind) {
+    pub(crate) fn push_to_device(&mut self, device_id: Uuid, push: &PushKind) {
         let dead: Vec<Uuid> = self
             .streams
             .iter()
@@ -433,7 +433,7 @@ impl State {
     }
 
     /// Pushes an event to every live stream authenticated with a certificate.
-    pub fn push_to_cert_streams(&mut self, cert_thumbprint: &str, push: &PushKind) {
+    pub(crate) fn push_to_cert_streams(&mut self, cert_thumbprint: &str, push: &PushKind) {
         let dead: Vec<Uuid> = self
             .streams
             .iter()
@@ -452,7 +452,7 @@ impl State {
     /// previous `current` is retired and its streams close with OK, the pending becomes
     /// `current`. Also clears the renewal-requested flag when the authenticating
     /// certificate was issued after the flag was set.
-    pub fn note_cert_authenticated(&mut self, device_id: Uuid, cert_thumbprint: &str) {
+    pub(crate) fn note_cert_authenticated(&mut self, device_id: Uuid, cert_thumbprint: &str) {
         let Some(device) = self.devices.get_mut(&device_id) else {
             return;
         };
@@ -494,7 +494,7 @@ impl State {
     }
 
     /// §5.2 enroll. `secret` is the 32-byte token secret; only its SHA-256 is matched.
-    pub fn enroll(
+    pub(crate) fn enroll(
         &mut self,
         secret: &[u8; 32],
         csr_der: &[u8],
@@ -503,8 +503,8 @@ impl State {
     ) -> Result<EnrollOutcome, ApiError> {
         let token_id = self.token_id(secret).ok_or_else(ApiError::token_invalid)?;
 
-        let csr_key = crate::csr::check_csr(csr_der)
-            .map_err(|_| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+        let csr_key = check_csr(csr_der)
+            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         // Idempotence on the CSR public key (§2): an existing device with the same key
@@ -632,9 +632,9 @@ impl State {
     /// §5.3 renew, after the signature has been verified by the caller. Handles the
     /// pending promotion (§8), CSR and metadata checks, idempotence on the new public
     /// key and the one-pending rule.
-    pub fn renew(
+    pub(crate) fn renew(
         &mut self,
-        auth: &crate::httpsig::AuthenticatedDevice,
+        auth: &AuthenticatedDevice,
         csr_der: &[u8],
         metadata: Map<String, Value>,
         now: i64,
@@ -642,8 +642,8 @@ impl State {
         let device_id = auth.device_id();
         self.note_cert_authenticated(device_id, auth.cert_thumbprint());
 
-        let csr_key = crate::csr::check_csr(csr_der)
-            .map_err(|_| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+        let csr_key = check_csr(csr_der)
+            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_der = ca::public_key_der(&csr_key);
@@ -714,7 +714,7 @@ impl State {
     }
 
     /// §9.2 revoke: idempotent, closes live streams PERMISSION_DENIED + device_revoked.
-    pub fn revoke(&mut self, device_id: Uuid, now: i64) -> Result<(), ApiError> {
+    pub(crate) fn revoke(&mut self, device_id: Uuid, now: i64) -> Result<(), ApiError> {
         let device = self
             .devices
             .get_mut(&device_id)
@@ -727,7 +727,7 @@ impl State {
     }
 
     /// §9.2 delete: only when revoked.
-    pub fn delete_device(&mut self, device_id: Uuid) -> Result<(), ApiError> {
+    pub(crate) fn delete_device(&mut self, device_id: Uuid) -> Result<(), ApiError> {
         let device = self
             .devices
             .get(&device_id)
@@ -762,7 +762,7 @@ impl State {
     }
 
     /// §9.2 request-renewal: sets the flag (reason `admin`) and pushes to live streams.
-    pub fn request_renewal(&mut self, device_id: Uuid) -> Result<(), ApiError> {
+    pub(crate) fn request_renewal(&mut self, device_id: Uuid) -> Result<(), ApiError> {
         let min_issued_seq = self.serial_seq;
         let device = self
             .devices
@@ -779,7 +779,7 @@ impl State {
     /// §9.3 rotation start. `deadline` is RFC 3339 or the literal `"now"`; absent means
     /// the latest `notAfter` among active devices on the old root (`now` when there are
     /// none).
-    pub fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
+    pub(crate) fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
         if self.rotation.is_some() {
             return Err(ApiError::conflict("a rotation is already in progress"));
         }
@@ -866,7 +866,7 @@ impl State {
 
     /// Non-revoked devices whose current certificate was issued by the old root (§9.3
     /// `activeDevicesOnOldRoot`).
-    pub fn active_devices_on_old_root(&self, now: i64) -> u64 {
+    pub(crate) fn active_devices_on_old_root(&self, now: i64) -> u64 {
         let Some(rotation) = &self.rotation else {
             return 0;
         };
@@ -882,7 +882,7 @@ impl State {
 
     /// Lazy rotation deadline handling: called on every request and by a 1 s ticker.
     /// When the mock clock reaches the deadline the old root leaves `trust-anchor`.
-    pub fn tick(&mut self, now: i64) {
+    pub(crate) fn tick(&mut self, now: i64) {
         let expired_challenges = self
             .challenged_streams
             .iter()
@@ -939,7 +939,7 @@ impl State {
 
     /// §11 reset: clears tokens, devices, nonces, faults, rotation and the clock
     /// offset; creates a fresh root. Live streams are closed with `device_unknown`.
-    pub fn reset(&mut self, now: i64) -> anyhow::Result<()> {
+    pub(crate) fn reset(&mut self, now: i64) -> anyhow::Result<()> {
         let stream_ids: Vec<Uuid> = self.streams.keys().copied().collect();
         for id in &stream_ids {
             if let Some(handle) = self.streams.get(id) {
@@ -977,7 +977,7 @@ impl State {
 
     /// Creates a token record (validation done by the caller); returns the ID and the
     /// 32-byte secret (only its SHA-256 is stored, §2).
-    pub fn create_token(
+    pub(crate) fn create_token(
         &mut self,
         name: String,
         max_uses: u64,
@@ -1009,16 +1009,16 @@ impl State {
 }
 
 /// Enroll outcome data.
-pub struct EnrollOutcome {
-    pub device_id: Uuid,
-    pub friendly_name: String,
+pub(crate) struct EnrollOutcome {
+    pub(crate) device_id: Uuid,
+    pub(crate) friendly_name: String,
     /// Leaf-first (§4).
-    pub certificate_chain: Vec<Vec<u8>>,
+    pub(crate) certificate_chain: Vec<Vec<u8>>,
 }
 
 /// Free-function form of [`State::lookup_cert`] so callers can split borrows (the
 /// §6 verifier needs `&devices`/`&cert_index` and `&mut nonces` at once).
-pub fn lookup_cert(
+pub(crate) fn lookup_cert(
     devices: &HashMap<Uuid, Device>,
     cert_index: &HashMap<String, Uuid>,
     thumbprint: &str,
@@ -1037,7 +1037,7 @@ pub fn lookup_cert(
 }
 
 /// Cloneable push description (sending borrows the channel).
-pub enum PushKind {
+pub(crate) enum PushKind {
     RenewRequested(&'static str),
     Reconnect(&'static str),
     CloseOk,
