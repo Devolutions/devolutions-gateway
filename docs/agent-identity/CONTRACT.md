@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C14, orchestrator, 2026-09-25, pending Benoit's review).
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C15, orchestrator, 2026-09-25, pending Benoit's review).
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -40,6 +40,7 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
   - Key of the current certificate of a non-revoked device → `200` with that device, its friendly name and its current chain; no use consumed; metadata and `last_seen_at` updated.
   - Any certificate key of a revoked device → `device_revoked`.
   - Key of a pending or retired certificate of a non-revoked device → `invalid_request` (a public key belongs to exactly one certificate lineage; it's never reused).
+  - Key of a certificate of a deleted device → `device_revoked` (C15): issued public keys stay reserved after deletion (the server keeps their SPKI SHA-256).
 - Idempotence applies only when the matching device is not revoked; for a revoked device, enroll returns `device_revoked`.
 
 ## 3. Metadata
@@ -343,11 +344,14 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
       "extra_trusted_root": "C:\\path\\mock-cas.pem",
       "backoff_max_secs": 2,
       "pending_poll_interval_ms": 200,
-      "acl_grant_current_user": true
+      "acl_grant_current_user": true,
+      "key_name_prefix": "DevolutionsAgentTest-3f2a9c1e-"
     }
   }
 }
 ```
+
+- `__debug__.identity.key_name_prefix` (test use, C15): replaces the default key-name prefix `DevolutionsAgent-Identity-` (§10.3); the tester sets a unique prefix per run and deletes only keys with it.
 
 - `__debug__.identity.extra_trusted_root`: path to a PEM file with one or more certificates; each one is added to the TLS trust store in addition to the OS store (test use; multi-authority runs put both mock CAs in one bundle).
 - `__debug__.identity.acl_grant_current_user` (Windows only, test use): the key-store key DACL and the pending-file reader also grant the agent process's user, so CI can run the agent as a normal process.
@@ -364,6 +368,14 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - Windows: `<data-dir>\identity\pending-enrollment.dat`, protected DACL granting SYSTEM full control only, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)`.
 - The service reads it at start-up and polls for it (default every 5 s).
 - It enrolls with retry; deletes on success or `token_*` / `token_malformed`; keeps it on anything else.
+- Enrollment key (C15):
+  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "...", "key_name": "..." }` in `<data-dir>/identity/enrollment-in-progress.json` (written like `identity.json`; no secret).
+  - Every retry of that pending file, including after a restart, uses that key, so a lost response is recovered through enroll idempotence (§2).
+  - A pending file with a different token hash discards the in-progress record and its key, and starts over with a new key.
+  - On success, the key becomes the new identity's `current` key; the in-progress record is deleted with the pending file.
+  - `device_revoked` on enroll is also permanent: the device this enrollment created was revoked before the agent got the response, and coming back needs a different token.
+    The agent stores no identity.
+  - Every permanent outcome deletes the pending file, the in-progress record and the enrollment key.
 - Same token hash as any stored identity, rejected or not → deleted without any request (the authority is only known after enrollment).
 - A different token enrolls; on success its identity replaces the stored identity for the returned `authority_id` (old keys deleted).
 - The token is never logged, not even partially; the tester greps agent logs for it.
@@ -391,7 +403,12 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
   The agent can't observe revocation otherwise.
   Once `rejected` is set, the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds.
-- Key names: `DevolutionsAgent-Identity-<authority_id>-<generation>`; file backend stores `<authority dir>/keys/<key_name>.p8`.
+- Key names (C15): `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
+  The authority isn't known when the enrollment key is created, and key-store keys can't be renamed.
+  The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
+- Key records (C15): the agent writes a key's name to its record (`identity.json` or `enrollment-in-progress.json`) before creating the key, and deletes a key before removing its name from the record.
+  So a crash never leaves an unrecorded key, and every existing key with the agent's prefix is recorded.
+  A recorded key that doesn't exist yet (or anymore) is regenerated or dropped at start-up.
 - Writes are atomic (write temp + rename).
 
 ### 10.4 CLI
@@ -425,3 +442,4 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
   - `POST time/advance` `{ secs }` (for grace and deadline tests); stream expiry and rotation deadlines are re-evaluated immediately on advance.
   - `GET events?device_id=<uuid>` (C13): ordered channel and certificate events for that device (`stream_opened`, `stream_authenticated`, `stream_closed` with status, `cert_status_changed`), each with a monotonic sequence number, so make-before-break is asserted from ordering rather than polling.
 - Mock-only tests are skipped against DVLS.
+- The mock may expose more test-only instrumentation (e.g. `__mock__/handshake`), documented in its README and used only by mock-only tests; it's not part of this contract.
