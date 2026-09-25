@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C9, C12–C14, C16 and the former Phase 0 proposals (13:36); C3, C10 and C15 are pending his review.
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C10, C12–C16 and the former Phase 0 proposals; C3 is being redesigned (a dedicated confirm endpoint, pending his go).
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -39,7 +39,7 @@ Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CO
   - Key of the current certificate of a non-revoked device → `200` with that device, its friendly name and its current chain; no use consumed; metadata and `last_seen_at` updated.
   - Any certificate key of a revoked device → `device_revoked`.
   - Key of a pending or retired certificate of a non-revoked device → `invalid_request` (a public key belongs to exactly one certificate lineage; it's never reused).
-  - Key of a certificate of a deleted device → `device_revoked` (C15): issued public keys stay reserved after deletion (the server keeps their SPKI SHA-256).
+  - Key of a certificate of a deleted device → `device_revoked` (C15): issued public keys stay reserved after deletion; the server keeps each one's SPKI SHA-256 and the time it was first issued, and purging old entries is out of scope for V1.
 - Idempotence applies only when the matching device is not revoked; for a revoked device, enroll returns `device_revoked`.
 
 ## 3. Metadata
@@ -287,7 +287,10 @@ Additions:
 - Renewal trigger: `notBefore + 2/3 × lifetime + jitter`, jitter uniform in `[0, 1/12 × lifetime]`.
 - The request-renewal flag is cleared when a certificate issued after the flag was set first authenticates.
 - Rotation `deadline`: RFC 3339 or the literal `"now"`; a value ≤ now is an emergency; absent → the maximum.
-- Rotation maximum (C10): the latest `notAfter` among the unexpired current certificates of non-revoked devices issued by the old root (now when there are none); an explicit later deadline → `400`.
+- Rotation maximum (C10): the latest `notAfter` among the unexpired current or pending certificates of non-revoked devices issued by the old root (now when there are none); an explicit later deadline → `400`.
+- Early completion (C10): when `activeDevicesOnOldRoot` is 0, at rotation start or later, the rotation completes at once, exactly as if its deadline had passed.
+  The count can't grow back, because new certificates come only from the new root and revocation is final.
+  Devices whose old-root certificate has expired but is still within the renew grace keep renewing onto the new root after completion, because authentication is pin-based.
 - Rotation pushes (C10): `RenewRequested{reason:"rotation"}` goes to connected old-root devices at a bounded rate (server setting; the mock defaults to 10/s) and keeps draining after the deadline, until every device connected on the old root has been notified; the persistent flag covers the rest.
 - At rotation start, the old root's private key is destroyed; the server keeps only what's needed to recognize pinned old-root certificates.
 
@@ -329,7 +332,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 
 - `POST /ca/rotation` `{ deadline? }` → `202 Rotation`; `409` if one is in progress.
 - `GET /ca/rotation` → `Rotation`: `{ phase: "idle"|"rotating", oldRoot?: { thumbprint, notAfter }, newRoot?: { thumbprint, notAfter }, deadline?, activeDevicesOnOldRoot }`.
-- `activeDevicesOnOldRoot` counts non-revoked devices whose current certificate is unexpired and issued by the old root (C10).
+- `activeDevicesOnOldRoot` counts non-revoked devices with an unexpired current or pending certificate issued by the old root (C10).
 
 ## 10. Agent local contract (observable by the conformance tester)
 
