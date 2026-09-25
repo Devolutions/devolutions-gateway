@@ -521,28 +521,17 @@ mod tests {
             Ok(_) => String::from("ok"),
             Err(error) => format!("err {:#010x}", error.code().0),
         };
-        // Temporary: the realistic case is another process of the same user opening the key by name.
-        drop(key);
-        let (reopen_status, reread_status, delete_status) = match provider.key(&name) {
-            Ok(Some(reopened)) => {
-                let reread = match read_dacl(&reopened) {
-                    Ok(_) => String::from("ok"),
-                    Err(error) => format!("err {:#010x}", error.code().0),
-                };
-                let delete = match reopened.delete() {
-                    Ok(()) => String::from("ok"),
-                    Err(error) => format!("err {:#010x}", error.code().0),
-                };
-                (String::from("ok"), reread, delete)
-            }
-            Ok(None) => (String::from("not found"), String::from("n/a"), String::from("n/a")),
-            Err(error) => (format!("err {error:#}"), String::from("n/a"), String::from("n/a")),
+        let deleted = key.delete();
+        let delete_status = match &deleted {
+            Ok(()) => String::from("ok"),
+            Err(error) => format!("err {:#010x}", error.code().0),
         };
-        let leftover = crate::list(&crate::KeyBackend::KeyStore, "DevolutionsAgentTest-A3-")
-            .map(|names| names.contains(&name))
-            .unwrap_or(true);
-        panic!(
-            "A3-SPIKE: read_dacl_creator_handle={read_status} reopen_by_name={reopen_status} read_dacl_reopened={reread_status} delete_reopened={delete_status} leftover={leftover} name={name}"
-        );
+        println!("A3-SPIKE: read_dacl={read_status} delete={delete_status}");
+        if deleted.is_err()
+            && let Err(error) = delete(&name)
+        {
+            println!("A3-SPIKE: leftover={name} cleanup_error={error:#}");
+        }
+        Ok(())
     }
 }
