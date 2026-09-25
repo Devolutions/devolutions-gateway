@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, ensure};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use der::{Decode as _, Encode as _};
+use der::{Decode as _, Encode as _, Reader as _};
 use http::Method;
 #[cfg(any(unix, windows))]
 use p256::ecdsa::SigningKey;
@@ -60,6 +60,95 @@ fn validate_key_name(prefix: &str, name: &str) -> anyhow::Result<()> {
         "key name does not end with a lowercase hyphenated UUID"
     );
     Ok(())
+}
+
+fn canonical_authority_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| uuid::Uuid::parse_str(name).ok().map(|id| id.to_string() == name))
+        == Some(true)
+}
+
+fn contains_pkcs8_material(contents: &[u8]) -> bool {
+    const PEM_MARKERS: [&[u8]; 2] = [b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN ENCRYPTED PRIVATE KEY-----"];
+    PEM_MARKERS
+        .iter()
+        .any(|marker| contents.windows(marker.len()).any(|window| window == *marker))
+        || p256::pkcs8::PrivateKeyInfoRef::try_from(contents).is_ok()
+        || encrypted_pkcs8_der(contents).unwrap_or(false)
+}
+
+fn encrypted_pkcs8_der(contents: &[u8]) -> der::Result<bool> {
+    let outer = <&der::asn1::SequenceRef>::from_der(contents)?;
+    let mut fields = der::SliceReader::new(outer.as_bytes())?;
+    let algorithm: &der::asn1::SequenceRef = fields.decode()?;
+    let encrypted: &der::asn1::OctetStringRef = fields.decode()?;
+    fields.finish()?;
+    let mut algorithm_fields = der::SliceReader::new(algorithm.as_bytes())?;
+    let oid: der::asn1::ObjectIdentifier = algorithm_fields.decode()?;
+    let oid = oid.to_string();
+    Ok(!encrypted.as_bytes().is_empty()
+        && (oid.starts_with("1.2.840.113549.1.5.") || oid.starts_with("1.2.840.113549.1.12.1.")))
+}
+
+fn temporary_name(name: &str, expected: &str) -> bool {
+    let name = name.strip_prefix('.').unwrap_or(name);
+    let Some(suffix) = name
+        .strip_prefix(expected)
+        .and_then(|tail| tail.strip_prefix('.').or_else(|| tail.strip_prefix('-')))
+    else {
+        return false;
+    };
+    suffix.starts_with("tmp")
+        || ["temp", "part", "new"].iter().any(|marker| {
+            suffix.strip_prefix(marker).is_some_and(|rest| {
+                rest.is_empty()
+                    || rest.starts_with('.')
+                    || rest.starts_with('-')
+                    || rest.starts_with('_')
+                    || rest.as_bytes().first().is_some_and(|byte| byte.is_ascii_digit())
+            })
+        })
+        || [".tmp", ".temp", ".part", ".new"]
+            .iter()
+            .any(|extension| suffix.ends_with(extension))
+}
+
+fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, key_prefix: &str) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if documented.iter().any(|file| {
+        path.parent() == file.parent()
+            && file
+                .file_name()
+                .and_then(|expected| expected.to_str())
+                .is_some_and(|expected| temporary_name(name, expected))
+    }) {
+        return true;
+    }
+    let candidate = name.strip_prefix('.').unwrap_or(name);
+    match path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|parent| parent.to_str())
+    {
+        Some("keys") => candidate
+            .split_once(".p8.")
+            .or_else(|| candidate.split_once(".p8-"))
+            .is_some_and(|(key, _)| {
+                validate_key_name(key_prefix, key).is_ok() && temporary_name(name, &format!("{key}.p8"))
+            }),
+        Some("pending") if candidate.len() >= 64 => {
+            let (hash, _) = candidate.split_at(64);
+            hash.bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                && [".json", ".dat", ".in-progress.json"]
+                    .iter()
+                    .any(|suffix| temporary_name(name, &format!("{hash}{suffix}")))
+        }
+        _ => false,
+    }
 }
 
 fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> anyhow::Result<()> {
@@ -120,6 +209,8 @@ struct AgentCase {
     child: Option<Child>,
     #[cfg(windows)]
     job: Option<crate::windows::AgentJob>,
+    #[cfg(windows)]
+    acl_grant_current_user: bool,
     #[cfg(unix)]
     process_group: Option<i32>,
     tokens: Vec<String>,
@@ -172,6 +263,8 @@ impl AgentCase {
         {
             identity_debug["acl_grant_current_user"] = json!(true);
         }
+        #[cfg(windows)]
+        let acl_grant_current_user = identity_debug["acl_grant_current_user"].as_bool().unwrap_or(false);
         let config = json!({
             "Identity": { "Enabled": true, "KeyBackend": ctx.key_backend.name() },
             "__debug__": {
@@ -186,6 +279,8 @@ impl AgentCase {
             child: None,
             #[cfg(windows)]
             job: None,
+            #[cfg(windows)]
+            acl_grant_current_user,
             #[cfg(unix)]
             process_group: None,
             tokens: Vec::new(),
@@ -245,6 +340,20 @@ impl AgentCase {
         std::fs::write(&replacement, serde_json::to_vec(&json!({ "hostname": hostname }))?)?;
         std::fs::rename(&replacement, self.metadata_override_path())?;
         self.metadata_hostname = hostname.to_owned();
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn set_acl_grant_current_user(&mut self, allowed: bool) -> anyhow::Result<()> {
+        ensure!(
+            self.child.is_none(),
+            "key ACL setting must be set before starting the agent"
+        );
+        let path = self.path().join("agent.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        config["__debug__"]["identity"]["acl_grant_current_user"] = json!(allowed);
+        std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
+        self.acl_grant_current_user = allowed;
         Ok(())
     }
 
@@ -468,28 +577,29 @@ impl AgentCase {
     async fn until_pending_deleted(
         &mut self,
         target: &Target,
-        token: &Token,
+        pending: &str,
+        attempted: &Token,
         expected_devices: u64,
         expected_uses: u64,
     ) -> anyhow::Result<()> {
         let start = Instant::now();
         loop {
-            let listing = target.devices_for(token, "").await?;
+            let listing = target.devices_for(attempted, "").await?;
             expect_status(&listing, 200)?;
             ensure!(
                 count(&listing.body, "totalCount")? == expected_devices,
                 "permanently invalid pending token changed its device count"
             );
             ensure!(
-                count(&target.token_record(&token.id).await?.body, "usedCount")? == expected_uses,
+                count(&target.token_record(&attempted.id).await?.body, "usedCount")? == expected_uses,
                 "permanently invalid pending token consumed a use"
             );
             #[cfg(windows)]
             let machine_keys_gone = crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?.is_empty();
             #[cfg(not(windows))]
             let machine_keys_gone = true;
-            if !self.pending_path_for(&token.text).exists()
-                && !self.in_progress_path_for(&token.text).exists()
+            if !self.pending_path_for(pending).exists()
+                && !self.in_progress_path_for(pending).exists()
                 && !self.has_stored_identity()?
                 && self.file_keys_with_prefix()?.is_empty()
                 && machine_keys_gone
@@ -580,67 +690,85 @@ impl AgentCase {
             metadata.file_type().is_dir(),
             "identity directory is not a real directory"
         );
-        for entry in std::fs::read_dir(identity)? {
-            let entry = entry?;
-            let path = entry.path();
-            let name = entry.file_name();
-            let name = name.to_str().context("identity entry name is not UTF-8")?;
-            let file_type = entry.file_type()?;
-            if name == "pending" {
-                ensure!(file_type.is_dir(), "identity/pending is not a directory");
-                for pending in std::fs::read_dir(path)? {
-                    let pending = pending?;
-                    ensure!(
-                        pending.file_type()?.is_file()
-                            && self.tokens.iter().any(|token| {
-                                pending.path() == self.pending_path_for(token)
-                                    || pending.path() == self.in_progress_path_for(token)
-                            }),
-                        "unexpected pending enrollment file {}",
-                        pending.path().display()
-                    );
+        let authorities = identity.join("authorities");
+        let keys = identity.join("keys");
+        let pending = identity.join("pending");
+        let recorded_keys = self.recorded_key_names()?;
+        let recorded_files = if self.ctx.key_backend == KeyBackend::File {
+            recorded_keys
+                .iter()
+                .map(|name| self.key_file_path(name))
+                .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
+        let mut documented = recorded_files.clone();
+        for token in &self.tokens {
+            documented.insert(self.pending_path_for(token));
+            documented.insert(self.in_progress_path_for(token));
+        }
+        if authorities.exists() {
+            for entry in std::fs::read_dir(&authorities)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() && canonical_authority_dir(&entry.path()) {
+                    documented.insert(entry.path().join("identity.json"));
                 }
-            } else if name == "keys" {
-                ensure!(file_type.is_dir(), "identity/keys is not a directory");
-                if self.ctx.key_backend != KeyBackend::File {
-                    ensure!(
-                        std::fs::read_dir(&path)?.next().is_none(),
-                        "key-store backend left file-backed keys"
-                    );
-                }
-                for key in std::fs::read_dir(path)? {
-                    let key = key?;
-                    let file_name = key.file_name();
-                    let name = file_name
-                        .to_str()
-                        .and_then(|name| name.strip_suffix(".p8"))
-                        .with_context(|| format!("unexpected key file {}", key.path().display()))?;
-                    validate_key_name(&self.ctx.key_name_prefix, name)?;
-                    ensure!(key.file_type()?.is_file(), "{} is not a key file", key.path().display());
-                }
-            } else if name == "authorities" {
-                ensure!(file_type.is_dir(), "identity/authorities is not a directory");
-                for authority in std::fs::read_dir(path)? {
-                    let authority = authority?;
-                    let name = authority.file_name();
-                    let name = name.to_str().context("authority directory name is not UTF-8")?;
-                    let parsed = uuid::Uuid::parse_str(name).context("authority directory is not a UUID")?;
-                    ensure!(
-                        parsed.to_string() == name,
-                        "authority directory is not a lowercase UUID"
-                    );
-                    ensure!(authority.file_type()?.is_dir(), "authority entry is not a directory");
-                    for child in std::fs::read_dir(authority.path())? {
-                        let child = child?;
-                        ensure!(
-                            child.file_name() == "identity.json" && child.file_type()?.is_file(),
-                            "unexpected identity file {}",
-                            child.path().display()
-                        );
+            }
+        }
+
+        let mut directories = vec![identity];
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(directory)? {
+                let entry = entry?;
+                let path = entry.path();
+                let file_type = entry.file_type()?;
+                let known_directory = path == pending
+                    || path == keys
+                    || path == authorities
+                    || path.parent() == Some(authorities.as_path()) && canonical_authority_dir(&path);
+                if file_type.is_dir() {
+                    if !known_directory {
+                        eprintln!("WARN unknown identity directory {}", path.display());
                     }
+                    directories.push(path);
+                    continue;
                 }
-            } else {
-                anyhow::bail!("unexpected identity file {}", path.display());
+                ensure!(
+                    !known_directory,
+                    "documented identity directory {} is not a directory",
+                    path.display()
+                );
+                let recorded = recorded_files.contains(&path);
+                ensure!(
+                    !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("p8"))
+                        || recorded,
+                    "unrecorded private key file {}",
+                    path.display()
+                );
+                ensure!(
+                    !is_temporary_sibling(&path, &documented, &self.ctx.key_name_prefix),
+                    "leftover identity temporary file {}",
+                    path.display()
+                );
+                if file_type.is_file() && !recorded {
+                    ensure!(
+                        !contains_pkcs8_material(&std::fs::read(&path)?),
+                        "unrecorded PKCS#8 private key in {}",
+                        path.display()
+                    );
+                }
+                if documented.contains(&path) {
+                    ensure!(
+                        file_type.is_file(),
+                        "documented identity file {} is not a file",
+                        path.display()
+                    );
+                } else {
+                    eprintln!("WARN unknown identity file {}", path.display());
+                }
             }
         }
         Ok(())
@@ -669,12 +797,16 @@ impl AgentCase {
         Ok(keys)
     }
 
-    fn audit_orphan_keys(&self) -> anyhow::Result<()> {
+    fn recorded_key_names(&self) -> anyhow::Result<HashSet<String>> {
         let mut recorded = HashSet::new();
         let authorities = self.path().join("identity").join("authorities");
         if authorities.exists() {
             for authority in std::fs::read_dir(authorities)? {
-                let path = authority?.path().join("identity.json");
+                let authority = authority?;
+                if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
+                    continue;
+                }
+                let path = authority.path().join("identity.json");
                 if path.exists() {
                     let state: Value = serde_json::from_slice(&std::fs::read(&path)?)
                         .with_context(|| format!("read {}", path.display()))?;
@@ -692,6 +824,11 @@ impl AgentCase {
                 recorded.insert(field(&progress, "key_name")?.to_owned());
             }
         }
+        Ok(recorded)
+    }
+
+    fn audit_orphan_keys(&self) -> anyhow::Result<()> {
+        let recorded = self.recorded_key_names()?;
         let existing = self.file_keys_with_prefix()?;
         #[cfg(windows)]
         let existing = {
@@ -729,6 +866,9 @@ impl AgentCase {
         }
         for authority in std::fs::read_dir(authorities)? {
             let authority = authority?;
+            if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
+                continue;
+            }
             let path = authority.path().join("identity.json");
             if path.exists() {
                 let state: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
@@ -745,7 +885,7 @@ impl AgentCase {
 
     fn check_key_protection_inner(
         &self,
-        authority_id: &str,
+        _authority_id: &str,
         state: &Value,
         require_current: bool,
     ) -> anyhow::Result<()> {
@@ -753,17 +893,6 @@ impl AgentCase {
             ensure!(
                 state["keys"]["current"]["key_name"].is_string(),
                 "settled identity has no current key name"
-            );
-        }
-        #[cfg(windows)]
-        let _ = authority_id;
-        #[cfg(unix)]
-        if self.ctx.key_backend == KeyBackend::File {
-            use std::os::unix::fs::PermissionsExt as _;
-            let path = self.identity_path(authority_id);
-            ensure!(
-                std::fs::metadata(path)?.permissions().mode() & 0o777 == 0o600,
-                "identity.json is not mode 0600"
             );
         }
         for slot in ["current", "pending", "previous"] {
@@ -792,7 +921,7 @@ impl AgentCase {
                 );
                 if exists {
                     crate::windows::assert_non_exportable(name)?;
-                    crate::windows::assert_machine_key_acl(name)?;
+                    crate::windows::assert_machine_key_acl(name, self.acl_grant_current_user)?;
                     if let Some(expected) = &expected_spki {
                         let key = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
                         ensure!(
@@ -829,26 +958,6 @@ impl AgentCase {
             }
             #[cfg(not(any(unix, windows)))]
             let _ = expected_spki;
-        }
-        if self.ctx.key_backend == KeyBackend::File {
-            let keys_dir = self.path().join("identity").join("keys");
-            if keys_dir.exists() {
-                for entry in std::fs::read_dir(keys_dir)? {
-                    let entry = entry?;
-                    if entry
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(&self.ctx.key_name_prefix)
-                    {
-                        let path = entry.path();
-                        ensure!(
-                            path.is_file() && path.extension().is_some_and(|ext| ext == "p8"),
-                            "leftover file-backend temp file {}",
-                            path.display()
-                        );
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -1042,8 +1151,11 @@ async fn assert_terminal_stops(
             if let Some(before) = &counters {
                 let after = target.requests(None).await?;
                 ensure!(
-                    after["renew"] == before["renew"] && after["connect"] == before["connect"],
-                    "rejected identity sent a renew or Connect during backoff cycles"
+                    after["renew"] == before["renew"]
+                        && after["confirm"] == before["confirm"]
+                        && after["check_in"] == before["check_in"]
+                        && after["connect"] == before["connect"],
+                    "rejected identity sent another signed request during backoff cycles"
                 );
             }
             if let Some(id) = device_id {
@@ -1583,7 +1695,8 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                     None
                 };
                 case.write_pending(&pending)?;
-                case.until_pending_deleted(&target, &attempted, devices, used).await?;
+                case.until_pending_deleted(&target, &pending, &attempted, devices, used)
+                    .await?;
                 if let Some(before) = ingress {
                     ensure!(
                         count(&target.requests(None).await?, "enroll_total")? == before,
@@ -1711,6 +1824,206 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
         .await?;
     }
     Ok(())
+}
+
+async fn wait_for_injected_attempt(
+    case: &mut AgentCase,
+    target: &Target,
+    counter: &str,
+    before: u64,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    loop {
+        let attempts = count(&target.requests(None).await?, counter)?;
+        ensure!(
+            attempts <= before + 1,
+            "{counter} retried before the injected error was observed"
+        );
+        if attempts == before + 1 && target.control("faults", &json!({})).await?.body["fail_next_response"].is_null() {
+            return Ok(());
+        }
+        case.check_running()?;
+        ensure!(started.elapsed() < WAIT, "{counter} did not receive the injected error");
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, initial) = case.enrolled(&target, &token).await?;
+            let authority = field(&initial, "authority_id")?.to_owned();
+            case.until_device(&target, &id, "working channel for renewal faults", |device| {
+                device["connected"] == true
+            })
+            .await?;
+            for status in [302, 429, 503] {
+                let before = target.requests(None).await?;
+                let device_before = case.device(&target, &id).await?.body;
+                let stored_before = case.state(&authority)?;
+                let old_thumb = current_thumbprint(&device_before)?.to_owned();
+                let old_key = key_name(&stored_before, "current")?.to_owned();
+                let attempts = count(&before, "renew")?;
+                let mut fault = json!({ "endpoint": "renew", "status": status });
+                if status == 429 {
+                    fault["retry_after_secs"] = json!(3);
+                }
+                target.faults(&json!({ "fail_next_response": fault })).await?;
+                expect_status(
+                    &target
+                        .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
+                        .await?,
+                    202,
+                )?;
+                wait_for_injected_attempt(case, &target, "renew", attempts).await?;
+                let failed = case.device(&target, &id).await?.body;
+                let stored = case.state(&authority)?;
+                ensure!(
+                    failed["certificates"] == device_before["certificates"]
+                        && failed["metadata"] == device_before["metadata"]
+                        && failed["lastSeenAt"] == device_before["lastSeenAt"]
+                        && stored["config"] == stored_before["config"]
+                        && key_name(&stored, "current")? == old_key
+                        && stored["keys"]["pending"]["certificate_chain"].is_null()
+                        && stored.get("rejected").is_none(),
+                    "injected renew {status} changed server or committed identity state"
+                );
+                if status == 429 {
+                    tokio::time::sleep(Duration::from_millis(2600)).await;
+                    ensure!(
+                        count(&target.requests(None).await?, "renew")? == attempts + 1,
+                        "renew retry ignored Retry-After: 3 seconds"
+                    );
+                }
+                let renewed = case
+                    .until_device(&target, &id, "renew retry confirmed", |device| {
+                        current_thumbprint(device).is_ok_and(|thumb| thumb != old_thumb) && device["connected"] == true
+                    })
+                    .await?;
+                case.until_state(&target, &authority, &id, "renew retry persisted", |state| {
+                    key_name(state, "current").is_ok_and(|name| name != old_key)
+                        && state["keys"].get("pending").is_none()
+                        && state.get("rejected").is_none()
+                })
+                .await?;
+                ensure!(
+                    count(&target.requests(None).await?, "renew")? >= attempts + 2
+                        && count(&target.requests(None).await?, "redirect_hits")? == count(&before, "redirect_hits")?
+                        && renewed["renewalRequested"] == false,
+                    "renew {status} was followed as a redirect or not retried to completion"
+                );
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_check_in_transient_failures_retry_without_state_change(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, false, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let config_path = case.path().join("agent.json");
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
+            config["__debug__"]["identity"]["check_in_interval_secs"] = json!(60);
+            std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
+            case.start().await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, initial) = case.enrolled(&target, &token).await?;
+            let authority = field(&initial, "authority_id")?.to_owned();
+            let started = Instant::now();
+            loop {
+                if target
+                    .events(&id)
+                    .await?
+                    .iter()
+                    .any(|event| event["type"] == "check_in_received")
+                {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "initial check-in never completed");
+                tokio::time::sleep(POLL).await;
+            }
+            for status in [302, 429, 503] {
+                case.stop().await?;
+                let before = target.requests(None).await?;
+                let device_before = case.device(&target, &id).await?.body;
+                let stored_before = case.state(&authority)?;
+                let completed_before = target
+                    .events(&id)
+                    .await?
+                    .iter()
+                    .filter(|event| event["type"] == "check_in_received")
+                    .count();
+                let hostname = format!("check-in-after-{status}");
+                case.set_metadata_hostname(&hostname)?;
+                let attempts = count(&before, "check_in")?;
+                let mut fault = json!({ "endpoint": "check-in", "status": status });
+                if status == 429 {
+                    fault["retry_after_secs"] = json!(3);
+                }
+                target.faults(&json!({ "fail_next_response": fault })).await?;
+                case.start().await?;
+                wait_for_injected_attempt(case, &target, "check_in", attempts).await?;
+                let failed = case.device(&target, &id).await?.body;
+                let stored = case.state(&authority)?;
+                ensure!(
+                    failed["certificates"] == device_before["certificates"]
+                        && failed["metadata"] == device_before["metadata"]
+                        && failed["lastSeenAt"] == device_before["lastSeenAt"]
+                        && stored["config"] == stored_before["config"]
+                        && stored["keys"] == stored_before["keys"]
+                        && stored.get("rejected").is_none(),
+                    "injected check-in {status} changed server or committed identity state"
+                );
+                if status == 429 {
+                    tokio::time::sleep(Duration::from_millis(2600)).await;
+                    ensure!(
+                        count(&target.requests(None).await?, "check_in")? == attempts + 1,
+                        "check-in retry ignored Retry-After: 3 seconds"
+                    );
+                }
+                let retry_started = Instant::now();
+                loop {
+                    let current = count(&target.requests(None).await?, "check_in")?;
+                    ensure!(
+                        current <= attempts + 2,
+                        "check-in sent extra requests before the retry was observed"
+                    );
+                    if current == attempts + 2
+                        && case.device(&target, &id).await?.body["metadata"]["hostname"] == hostname
+                    {
+                        break;
+                    }
+                    case.check_running()?;
+                    ensure!(
+                        retry_started.elapsed() < Duration::from_secs(10),
+                        "check-in {status} was not retried before the next 60-second periodic send"
+                    );
+                    tokio::time::sleep(POLL).await;
+                }
+                ensure!(
+                    target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .filter(|event| event["type"] == "check_in_received")
+                        .count()
+                        == completed_before + 1
+                        && count(&target.requests(None).await?, "redirect_hits")? == count(&before, "redirect_hits")?,
+                    "check-in {status} was followed as a redirect or not retried to completion"
+                );
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub(crate) async fn a_token_never_logged(ctx: Context) -> anyhow::Result<()> {
@@ -2017,7 +2330,10 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
                     .open(case.path().join("cli-stderr.log"))?
                     .write_all(&result.stderr)?;
                 ensure!(!result.status.success(), "identity enroll CLI accepted {reason}");
-                ensure!(!case.pending_path().exists(), "{reason} wrote a pending file");
+                ensure!(
+                    !case.pending_path_for(&candidate).exists() && !case.in_progress_path_for(&candidate).exists(),
+                    "{reason} wrote pending enrollment state"
+                );
             }
             Ok(())
         })
@@ -2380,6 +2696,99 @@ pub(crate) async fn a_renewal_lost_confirm_response_retried(ctx: Context) -> any
     .await
 }
 
+pub(crate) async fn a_confirm_barrier_blocks_channelless_traffic(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, initial) = case.enrolled(&target, &token).await?;
+            let authority = field(&initial, "authority_id")?.to_owned();
+            let original = case.device(&target, &id).await?.body;
+            let old_thumb = current_thumbprint(&original)?.to_owned();
+            let started = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "check_in")? > 0 {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "initial channelless check-in did not run");
+                tokio::time::sleep(POLL).await;
+            }
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
+            target
+                .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
+                .await?;
+            expect_status(
+                &target
+                    .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
+                    .await?,
+                202,
+            )?;
+            let started = Instant::now();
+            let blocked = loop {
+                let requests = target.requests(None).await?;
+                let state = case.state(&authority)?;
+                if count(&requests, "confirm_retry_503")? > 0 && state["keys"]["pending"]["key_name"].is_string() {
+                    break requests;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "confirm retry never reached the channelless barrier"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            let sequence_start = blocked["request_sequence"]
+                .as_array()
+                .context("mock request sequence missing")?
+                .iter()
+                .position(|entry| entry == "confirm")
+                .context("confirm barrier observed no confirm attempt")?;
+            let blocked_certificates = case.device(&target, &id).await?.body["certificates"].clone();
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            case.check_running()?;
+            let after = target.requests(None).await?;
+            ensure!(
+                count(&after, "confirm")? > count(&blocked, "confirm")?
+                    && count(&after, "renew")? == count(&blocked, "renew")?
+                    && count(&after, "check_in")? == count(&blocked, "check_in")?
+                    && count(&after, "connect")? == count(&blocked, "connect")?
+                    && after["request_sequence"]
+                        .as_array()
+                        .context("mock request sequence missing")?
+                        .iter()
+                        .skip(sequence_start)
+                        .all(|entry| entry == "confirm")
+                    && case.device(&target, &id).await?.body["certificates"] == blocked_certificates,
+                "unknown confirm outcome permitted check-in, renew, connect or certificate promotion"
+            );
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            case.until_device(&target, &id, "channelless confirm resolved", |record| {
+                current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb) && record["renewalRequested"] == false
+            })
+            .await?;
+            case.until_state(&target, &authority, &id, "confirmed key stored", |state| {
+                state["keys"].get("pending").is_none() && state.get("rejected").is_none()
+            })
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+}
+
 pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx.clone(), Some(3), true, |case| {
         Box::pin(async move {
@@ -2637,6 +3046,87 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                 "device_unknown on pending-key renew did not fall back to the old current key"
             );
             Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_confirm_expired_pending_beyond_grace_rejects(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, Some(3), true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target
+                .faults(&json!({ "channel_available": false, "leaf_lifetime_secs": 30 }))
+                .await?;
+            let token = new_token(case, 1).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
+            target
+                .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
+                .await?;
+            case.write_pending(&token.text)?;
+            let (id, initial) = case.enrolled(&target, &token).await?;
+            let authority = field(&initial, "authority_id")?.to_owned();
+            let old_key = key_name(&initial, "current")?.to_owned();
+            let started = Instant::now();
+            let (pending_thumb, pending_certificate) = loop {
+                let record = case.device(&target, &id).await?.body;
+                let stored = case.state(&authority)?;
+                if count(&target.requests(None).await?, "confirm_retry_503")? > 0
+                    && let Some(pending) = record["certificates"]
+                        .as_array()
+                        .and_then(|certs| certs.iter().find(|cert| cert["status"] == "pending"))
+                    && stored["keys"]["pending"]["key_name"].is_string()
+                {
+                    break (field(pending, "thumbprint")?.to_owned(), pending.clone());
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "pending certificate was not held at confirm");
+                tokio::time::sleep(POLL).await;
+            };
+            case.stop().await?;
+            let before = target.requests(None).await?;
+            let certificates = case.device(&target, &id).await?.body["certificates"].clone();
+            let not_before =
+                time::OffsetDateTime::parse(field(&pending_certificate, "notBefore")?, &Rfc3339)?.unix_timestamp();
+            let not_after =
+                time::OffsetDateTime::parse(field(&pending_certificate, "notAfter")?, &Rfc3339)?.unix_timestamp();
+            let now = target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
+                .as_i64()
+                .context("mock time missing")?;
+            let secs = not_after + (not_after - not_before) + 1 - now;
+            ensure!(
+                secs > 0 && secs < 120,
+                "pending certificate did not approach its grace limit"
+            );
+            target.advance(secs).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            let since = time::OffsetDateTime::now_utc();
+            case.start().await?;
+            let rejected = case
+                .until_rejected(&target, &authority, &id, "certificate_expired")
+                .await?;
+            let after = target.requests(None).await?;
+            let renew_index = usize::try_from(count(&before, "renew")?)?;
+            ensure!(
+                rejected["rejected"]["code"] == "certificate_expired"
+                    && key_name(&rejected, "current")? == old_key
+                    && after["renew_attempt_keyids"][renew_index] == pending_thumb
+                    && count(&after, "renew")? == count(&before, "renew")? + 1
+                    && count(&after, "confirm")? > count(&before, "confirm")?
+                    && case.device(&target, &id).await?.body["certificates"] == certificates,
+                "beyond-grace pending-key renew did not reject without issuing or promoting a certificate"
+            );
+            assert_terminal_stops(case, &target, &authority, Some(&id), "certificate_expired", since).await
         })
     })
     .await
@@ -3126,6 +3616,11 @@ pub(crate) async fn a_reconnect_make_before_break(ctx: Context) -> anyhow::Resul
             let (id, _) = case.enrolled(&target, &token).await?;
             case.until_device(&target, &id, "first channel", |record| record["connected"] == true)
                 .await?;
+            ensure!(
+                case.device(&target, &id).await?.body["metadata"]["hostname"] == case.metadata_hostname,
+                "first Hello did not send the current metadata override"
+            );
+            case.set_metadata_hostname("reconnected-host")?;
             let before = target.requests(None).await?;
             expect_status(&target.control("reconnect", &json!({ "device_id": id })).await?, 202)?;
             let started = Instant::now();
@@ -3155,6 +3650,10 @@ pub(crate) async fn a_reconnect_make_before_break(ctx: Context) -> anyhow::Resul
             ensure!(
                 authenticated.len() >= 2,
                 "Reconnect never authenticated a replacement stream"
+            );
+            ensure!(
+                case.device(&target, &id).await?.body["metadata"]["hostname"] == "reconnected-host",
+                "replacement Hello reused the previous metadata override"
             );
             let old_stream = field(authenticated[0], "stream_id")?;
             let new_seq = count(authenticated[1], "seq")?;
@@ -3296,6 +3795,61 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
                 state["config"].get("agent_channel_url").is_none(),
                 "agent stored config.agent_channel_url despite its absence from enrollment"
             );
+            let started = Instant::now();
+            let first_check_in = loop {
+                let requests = target.requests(None).await?;
+                if count(&requests, "check_in")? > 0
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| event["type"] == "check_in_received")
+                {
+                    break count(&requests, "check_in")?;
+                }
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "first channelless check-in did not complete");
+                tokio::time::sleep(POLL).await;
+            };
+            ensure!(
+                case.device(&target, &id).await?.body["metadata"]["hostname"] == case.metadata_hostname,
+                "first check-in did not send the current metadata override"
+            );
+            let first_completed = target
+                .events(&id)
+                .await?
+                .iter()
+                .filter(|event| event["type"] == "check_in_received")
+                .count();
+            case.set_metadata_hostname("second-check-in-host")?;
+            let started = Instant::now();
+            loop {
+                let attempts = count(&target.requests(None).await?, "check_in")?;
+                let completed = target
+                    .events(&id)
+                    .await?
+                    .iter()
+                    .filter(|event| event["type"] == "check_in_received")
+                    .count();
+                ensure!(
+                    attempts <= first_check_in + 1 && completed <= first_completed + 1,
+                    "multiple check-ins occurred before the first post-change send was observed"
+                );
+                if completed == first_completed + 1 {
+                    ensure!(
+                        attempts == first_check_in + 1
+                            && case.device(&target, &id).await?.body["metadata"]["hostname"] == "second-check-in-host",
+                        "the first post-change check-in used stale metadata"
+                    );
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not complete a check-in after the metadata override changed"
+                );
+                tokio::time::sleep(POLL).await;
+            }
             for _ in 0..3 {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 case.check_running()?;
@@ -3777,15 +4331,60 @@ pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
             ctx.key_backend == KeyBackend::KeyStore,
             "Windows non-exportability requires key-store backend"
         );
-        return with_agent(ctx, None, true, |case| {
+        with_agent(ctx.clone(), None, true, |case| {
             Box::pin(async move {
                 let target = case.ctx.target.clone();
                 let token = new_token(case, 1).await?;
                 case.write_pending(&token.text)?;
-                let (_, state) = case.enrolled(&target, &token).await?;
+                let (id, state) = case.enrolled(&target, &token).await?;
                 crate::windows::assert_non_exportable(key_name(&state, "current")?)?;
-                crate::windows::assert_machine_key_acl(key_name(&state, "current")?)?;
+                crate::windows::assert_machine_key_acl(key_name(&state, "current")?, case.acl_grant_current_user)?;
                 case.check_key_protection(field(&state, "authority_id")?, &state)?;
+                if case.ctx.channel_available {
+                    case.until_device(&target, &id, "signed channel Hello", |device| {
+                        device["connected"] == true
+                    })
+                    .await?;
+                } else {
+                    case.set_metadata_hostname("acl-signing-probe")?;
+                    case.until_device(&target, &id, "signed check-in", |device| {
+                        device["metadata"]["hostname"] == "acl-signing-probe"
+                    })
+                    .await?;
+                }
+                Ok(())
+            })
+        })
+        .await?;
+        if !crate::windows::running_as_system()? {
+            return Err(
+                crate::Incomplete("SYSTEM agent fixture required to test key ACL without current-user grant").into(),
+            );
+        }
+        return with_agent(ctx, None, false, |case| {
+            Box::pin(async move {
+                case.set_acl_grant_current_user(false)?;
+                case.start().await?;
+                let target = case.ctx.target.clone();
+                let token = new_token(case, 1).await?;
+                case.write_pending(&token.text)?;
+                let (id, state) = case.enrolled(&target, &token).await?;
+                let key = key_name(&state, "current")?;
+                crate::windows::assert_non_exportable(key)?;
+                crate::windows::assert_machine_key_acl(key, false)?;
+                case.check_key_protection(field(&state, "authority_id")?, &state)?;
+                if case.ctx.channel_available {
+                    case.until_device(&target, &id, "SYSTEM-only key signed channel Hello", |device| {
+                        device["connected"] == true
+                    })
+                    .await?;
+                } else {
+                    case.set_metadata_hostname("system-acl-signing-probe")?;
+                    case.until_device(&target, &id, "SYSTEM-only key signed check-in", |device| {
+                        device["metadata"]["hostname"] == "system-acl-signing-probe"
+                    })
+                    .await?;
+                }
                 Ok(())
             })
         })
@@ -3812,13 +4411,10 @@ pub(crate) async fn a_file_backend_permissions(ctx: Context) -> anyhow::Result<(
                 let token = new_token(case, 1).await?;
                 case.write_pending(&token.text)?;
                 let (_, state) = case.enrolled(&target, &token).await?;
-                let authority = field(&state, "authority_id")?;
                 let name = key_name(&state, "current")?;
                 let key_file = case.key_file_path(name);
-                for path in [key_file, case.identity_path(authority)] {
-                    let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
-                    ensure!(mode == 0o600, "{} has mode {mode:o}, expected 0600", path.display());
-                }
+                let mode = std::fs::metadata(&key_file)?.permissions().mode() & 0o777;
+                ensure!(mode == 0o600, "{} has mode {mode:o}, expected 0600", key_file.display());
                 Ok(())
             })
         })
@@ -4156,6 +4752,9 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
 
 #[cfg(test)]
 mod tests {
+    use p256::elliptic_curve::Generate as _;
+    use p256::pkcs8::EncodePrivateKey as _;
+
     use super::*;
 
     #[test]
@@ -4273,6 +4872,15 @@ mod tests {
             serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
         )?;
         case.audit_orphan_keys()?;
+        std::fs::remove_file(case.key_file_path(&foreign))?;
+        case.audit_identity_tree()?;
+        case.ctx.key_backend = KeyBackend::KeyStore;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "key-store backend accepted a file-backed key"
+        );
+        case.ctx.key_backend = KeyBackend::File;
+        write_run_key(&case.key_file_path(&foreign))?;
         std::fs::remove_file(case.in_progress_path())?;
         let identity = case.identity_path(&uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(identity.parent().context("authority directory")?)?;
@@ -4299,18 +4907,11 @@ mod tests {
         );
         write_run_key(&case.key_file_path(&name))?;
         case.audit_orphan_keys()?;
-        std::fs::remove_file(identity)?;
+        std::fs::remove_file(&identity)?;
         std::fs::write(
             case.in_progress_path(),
             serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
         )?;
-        let leftover = case.path().join("identity").join("authorities").join("leftover.tmp");
-        std::fs::write(&leftover, b"temp")?;
-        ensure!(
-            case.audit_identity_tree().is_err(),
-            "leftover authority temp file was accepted"
-        );
-        std::fs::remove_file(leftover)?;
         case.cleanup_run_keys()?;
         ensure!(!case.key_file_path(&name).exists(), "run-owned key survived cleanup");
         ensure!(
@@ -4319,6 +4920,101 @@ mod tests {
         );
         std::fs::remove_file(case.key_file_path(&foreign))?;
         case.audit_identity_tree()?;
+        let unknown = case.path().join("identity").join("notes").join("unknown.bin");
+        std::fs::create_dir_all(unknown.parent().context("unknown entry parent")?)?;
+        std::fs::write(&unknown, b"non-key data")?;
+        case.audit_identity_tree()?;
+        let unexpected_key = unknown.with_file_name("other.p8");
+        std::fs::write(&unexpected_key, b"not even a PKCS#8 key")?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "nested unrecorded .p8 file was accepted"
+        );
+        std::fs::remove_file(unexpected_key)?;
+        let pkcs8 = p256::SecretKey::generate_from_rng(&mut rand::rng()).to_pkcs8_der()?;
+        std::fs::write(&unknown, pkcs8.as_bytes())?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "unrecorded PKCS#8 DER was accepted"
+        );
+        std::fs::write(
+            &unknown,
+            format!(
+                "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+                base64::engine::general_purpose::STANDARD.encode(pkcs8.as_bytes())
+            ),
+        )?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "unrecorded PKCS#8 PEM was accepted"
+        );
+        let encrypted_pkcs8 = base64::engine::general_purpose::STANDARD.decode(
+            "MIH0MF8GCSqGSIb3DQEFDTBSMDEGCSqGSIb3DQEFDDAkBBBDtKK//RHOS2x0YBSFGGtPAgIIADAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQKvLa4jZ8A4WkKva7UtVXYQSBkEduwKFQc7aMPm4ZYJQGbaBB72cZ+GZ3lsNoaJaVZcwLNBLXwUgfQEnx6o5L7LAa8/L2G+6X6uJxnxyQzH4yhvW7RqambZYzGluT8kf3uxdu/TBlAfjKRZQht0Q5niBAmut2MbKgfAk4JryXi/mKvQ0QAMDN6grm1Nlq2xa5ZgCILNnfErEQbRexpKQiSLSW9w==",
+        )?;
+        std::fs::write(&unknown, encrypted_pkcs8)?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "unrecorded encrypted PKCS#8 DER was accepted"
+        );
+        std::fs::remove_file(unknown)?;
+        let unrelated = identity.with_file_name(".identity.json.notes");
+        std::fs::write(&unrelated, b"not a temporary file")?;
+        case.audit_identity_tree()?;
+        std::fs::remove_file(unrelated)?;
+        let template = identity.with_file_name(".identity.json.template");
+        std::fs::write(&template, b"also not a temporary file")?;
+        case.audit_identity_tree()?;
+        std::fs::remove_file(template)?;
+        let leftover = identity.with_file_name("identity.json.tmp");
+        std::fs::write(&leftover, b"temp")?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "leftover identity.json sibling was accepted"
+        );
+        std::fs::remove_file(leftover)?;
+        for leftover in [
+            case.pending_path()
+                .with_extension(if cfg!(windows) { "dat.tmp" } else { "json.tmp" }),
+            case.key_file_path(&name).with_extension("p8.tmp"),
+        ] {
+            std::fs::write(&leftover, b"temp")?;
+            ensure!(
+                case.audit_identity_tree().is_err(),
+                "leftover pending or key-file sibling was accepted"
+            );
+            std::fs::remove_file(leftover)?;
+        }
+        std::fs::remove_file(case.in_progress_path())?;
+        ensure!(
+            case.recorded_key_names()?.is_empty(),
+            "the removed key is still recorded"
+        );
+        for leftover in [
+            case.key_file_path(&name).with_extension("p8.tmp"),
+            case.path()
+                .join("identity")
+                .join("pending")
+                .join(format!("{}.json.tmp", token_file_id("untracked-token"))),
+        ] {
+            std::fs::write(&leftover, b"partial temporary file")?;
+            ensure!(
+                case.audit_identity_tree().is_err(),
+                "temporary sibling survived after its record was removed"
+            );
+            std::fs::remove_file(leftover)?;
+        }
+        case.audit_identity_tree()?;
+        let unknown_authority = case
+            .path()
+            .join("identity")
+            .join("authorities")
+            .join("not-an-authority");
+        std::fs::create_dir_all(&unknown_authority)?;
+        std::fs::write(unknown_authority.join("identity.json"), b"not an identity")?;
+        case.audit_identity_tree()?;
+        case.audit_stored_keys()?;
+        case.audit_orphan_keys()?;
+        std::fs::remove_dir_all(unknown_authority)?;
         case.finish().await?;
         Ok(())
     }

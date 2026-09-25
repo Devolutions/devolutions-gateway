@@ -15,6 +15,7 @@ Start two mocks as described in the [mock README] for the complete multi-authori
 
 Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provide `--unprivileged-admin-token` to check permission denials.
+The disposable rotation checks require no other active devices on the published root; otherwise they report `SKIP` before rotating.
 `--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
 Agent cases check the five required §10.5 metadata fields and their values at each send.
@@ -30,7 +31,8 @@ The final summary reports counts, per-category durations and the reason for ever
 The runner reports a unique `KEY NAME PREFIX` for each run and writes it to `__debug__.identity.key_name_prefix` in every generated `agent.json`.
 Key names must be that prefix followed by a lowercase hyphenated UUID; file-backed keys live at `<data-dir>/identity/keys/<key_name>.p8`.
 After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `enrollment-in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
-It also rejects leftover temporary or unrecognized files anywhere under `<data-dir>/identity`.
+It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of identity files; other unknown files produce warnings.
+On Windows, checking the key ACL without a current-user grant requires running the suite and agent as SYSTEM; without this fixture, the key-store case reports `SKIP`.
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.
 The runner stops after 14 minutes 30 seconds; the testsuite allows 15 minutes and terminates the runner's process tree on timeout.
 
