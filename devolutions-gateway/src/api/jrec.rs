@@ -633,6 +633,8 @@ where
 #[serde(rename_all = "camelCase")]
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
+    #[serde(default)]
+    logs: Vec<RecordingZipManifestFile>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -695,8 +697,8 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut clip_names = Vec::with_capacity(manifest.files.len());
-    for file in manifest.files {
+    let mut clip_names = Vec::with_capacity(manifest.files.len() + manifest.logs.len());
+    for file in manifest.files.into_iter().chain(manifest.logs) {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
                 file_name = %file.file_name,
@@ -1089,6 +1091,39 @@ mod tests {
             plan.clip_names,
             vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()]
         );
+    }
+
+    #[tokio::test]
+    async fn snapshots_manifest_logs_for_zip() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+
+        let manifest = serde_json::json!({
+            "sessionId": "33333333-3333-3333-3333-333333333333",
+            "startTime": 1,
+            "duration": 5,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
+            ],
+            "logs": [
+                { "fileName": "log-0.slog" },
+                { "fileName": "log-1.slog" }
+            ]
+        });
+
+        tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
+            .await
+            .expect("write manifest");
+        for file_name in ["recording-0.webm", "log-0.slog", "log-1.slog"] {
+            tokio::fs::write(dir_path.join(file_name), b"content")
+                .await
+                .expect("write artifact");
+        }
+
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+        assert_eq!(plan.clip_names, ["recording-0.webm", "log-0.slog", "log-1.slog"]);
     }
 
     #[tokio::test]
