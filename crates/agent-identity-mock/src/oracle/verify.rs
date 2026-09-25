@@ -15,6 +15,8 @@ use super::{content_digest_header, sfv, verify_p256_signature};
 pub(crate) enum Endpoint {
     Renew,
     Connect,
+    Confirm,
+    CheckIn,
 }
 
 impl Endpoint {
@@ -22,13 +24,15 @@ impl Endpoint {
         match self {
             Endpoint::Renew => "renew",
             Endpoint::Connect => "connect",
+            Endpoint::Confirm => "confirm",
+            Endpoint::CheckIn => "check-in",
         }
     }
 
     fn components(self) -> &'static [&'static str] {
         match self {
-            Endpoint::Renew => &["@method", "content-digest"],
-            Endpoint::Connect => &["@method"],
+            Endpoint::Renew | Endpoint::CheckIn => &["@method", "content-digest"],
+            Endpoint::Connect | Endpoint::Confirm => &["@method"],
         }
     }
 }
@@ -154,7 +158,7 @@ const PROFILE_ALG: &str = "ecdsa-p256-sha256";
 /// `lookup` resolves a `keyid` (certificate thumbprint) to a registered certificate.
 ///
 /// `signature_input`, `signature` and `content_digest` are the raw header/metadata
-/// values (`content_digest` is only consulted for `renew`).
+/// values (`content_digest` is consulted for `renew` and `check-in`).
 #[expect(
     clippy::too_many_arguments,
     reason = "one argument per contract input; bundling them would just move the noise"
@@ -214,6 +218,23 @@ pub(crate) fn verify_request(
         }
     }
 
+    if matches!(endpoint, Endpoint::Renew | Endpoint::CheckIn) {
+        let digest = header_str(content_digest)?;
+        let members = sfv::parse_dictionary(digest).ok_or(Rejection::SignatureInvalid)?;
+        if !matches!(
+            members.as_slice(),
+            [(
+                name,
+                sfv::MemberValue::Item(sfv::ListItem {
+                    value: sfv::ItemValue::Bytes(bytes),
+                    params,
+                }),
+            )] if name == "sha-256" && params.is_empty() && bytes.len() == 32
+        ) {
+            return Err(Rejection::SignatureInvalid);
+        }
+    }
+
     let created = int_param(inner, "created")?;
     let expires = int_param(inner, "expires")?;
     let nonce = str_param(inner, "nonce")?;
@@ -251,15 +272,15 @@ pub(crate) fn verify_request(
         return Err(Rejection::DeviceRevoked);
     }
     let valid = match endpoint {
-        Endpoint::Connect => cert.not_before <= now && now < cert.not_after,
+        Endpoint::Connect | Endpoint::Confirm | Endpoint::CheckIn => cert.not_before <= now && now < cert.not_after,
         Endpoint::Renew => now < cert.not_after + (cert.not_after - cert.not_before),
     };
     if !valid {
         return Err(Rejection::CertificateExpired);
     }
 
-    // Step 5: content-digest (renew) and signature.
-    if endpoint == Endpoint::Renew {
+    // Step 5: content-digest (renew and check-in) and signature.
+    if matches!(endpoint, Endpoint::Renew | Endpoint::CheckIn) {
         let header = header_str(content_digest)?;
         let expected = content_digest_header(body);
         if header != expected {

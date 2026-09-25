@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
-agent-identity-channel-proto = { path = "../agent-identity-channel-proto" }
+agent-channel-proto = { path = "../agent-channel-proto" }
 anyhow = "1"
 base64 = "0.22"
 der = "0.8"

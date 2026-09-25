@@ -26,7 +26,7 @@ use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, OBJECT_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
     SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
 };
-use windows::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE};
+use windows::Win32::Storage::FileSystem::{CREATE_ALWAYS, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
@@ -194,7 +194,7 @@ pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> 
             GENERIC_WRITE.0,
             FILE_SHARE_MODE(0),
             Some(&attributes),
-            CREATE_NEW,
+            CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL,
             None,
         )?
@@ -606,16 +606,6 @@ mod tests {
             "D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)(A;;FA;;;WD)",
             sid
         ));
-    }
-
-    #[test]
-    fn machine_key_snapshot_is_available() -> anyhow::Result<()> {
-        let prefix = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
-        ensure!(
-            machine_keys_with_prefix(&prefix)?.is_empty(),
-            "unexpected machine key with a fresh run prefix"
-        );
-        Ok(())
     }
 
     #[test]

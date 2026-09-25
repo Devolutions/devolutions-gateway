@@ -202,7 +202,11 @@ async fn list_tokens(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Ha
     };
     let state = app.state.lock().await;
     let now = app.now();
-    let mut tokens: Vec<&Token> = state.tokens.values().collect();
+    let mut tokens: Vec<&Token> = state
+        .tokens
+        .values()
+        .filter(|token| token.deleted_at.is_none())
+        .collect();
     tokens.sort_by_key(|t| (t.created_at, t.id));
     let records: Vec<Value> = tokens.into_iter().map(|t| token_record(t, now)).collect();
     Json(paginate(records, page_number, page_size)).into_response()
@@ -211,7 +215,7 @@ async fn list_tokens(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Ha
 async fn get_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let state = app.state.lock().await;
-    match state.tokens.get(&id) {
+    match state.tokens.get(&id).filter(|token| token.deleted_at.is_none()) {
         Some(token) => Json(token_record(token, app.now())).into_response(),
         None => admin_error(&ApiError::not_found("unknown token")),
     }
@@ -220,11 +224,13 @@ async fn get_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) ->
 async fn delete_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let mut state = app.state.lock().await;
-    if state.tokens.remove(&id).is_none() {
-        return admin_error(&ApiError::not_found("unknown token"));
+    match state.tokens.get_mut(&id) {
+        Some(token) => {
+            token.deleted_at.get_or_insert_with(|| app.now());
+            StatusCode::NO_CONTENT.into_response()
+        }
+        None => admin_error(&ApiError::not_found("unknown token")),
     }
-    state.token_hashes.retain(|_, v| *v != id);
-    StatusCode::NO_CONTENT.into_response()
 }
 
 // ==== §9.2 devices ====
@@ -448,7 +454,7 @@ async fn revoke_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>
 async fn delete_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let mut state = app.state.lock().await;
-    match state.delete_device(id) {
+    match state.delete_device(id, app.now()) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => admin_error(&err),
     }

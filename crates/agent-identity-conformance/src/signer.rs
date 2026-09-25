@@ -43,15 +43,15 @@ impl KeyPair {
         nonce: &str,
     ) -> SignedHeaders {
         let (components, digest) = match tag {
-            "renew" => {
-                let body = body.expect("renew signatures require a body");
+            "renew" | "check-in" => {
+                let body = body.expect("renew and check-in signatures require a body");
                 (
                     "(\"@method\" \"content-digest\")",
                     Some(format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(body)))),
                 )
             }
-            "connect" => {
-                assert!(body.is_none(), "connect signatures do not cover a body");
+            "connect" | "confirm" => {
+                assert!(body.is_none(), "{tag} signatures require an empty body");
                 ("(\"@method\")", None)
             }
             _ => panic!("unsupported signature tag {tag}"),
@@ -119,18 +119,28 @@ mod tests {
     fn fixed_rfc6979_vectors_and_channel_proof() -> anyhow::Result<()> {
         let vectors: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let key_der = STANDARD.decode(vectors["keys"][0]["private_key_pkcs8"].as_str().context("vector key")?)?;
-        let key = SigningKey::from_pkcs8_der(&key_der)?;
-        let pair = KeyPair {
-            key,
-            csr: String::new(),
-        };
         let cases = vectors["http_signature"]["cases"].as_array().context("vector cases")?;
-        for name in ["valid_renew", "valid_connect"] {
+        for (name, key_name) in [
+            ("valid_renew", "device-a"),
+            ("valid_connect", "device-a"),
+            ("valid_confirm", "device-g"),
+            ("valid_check_in", "device-a"),
+        ] {
             let case = cases
                 .iter()
                 .find(|case| case["name"] == name)
                 .context("missing signature vector")?;
+            let vector_key = vectors["keys"]
+                .as_array()
+                .context("vector keys")?
+                .iter()
+                .find(|key| key["name"] == key_name)
+                .context("missing vector key")?;
+            let key_der = STANDARD.decode(vector_key["private_key_pkcs8"].as_str().context("vector private key")?)?;
+            let pair = KeyPair {
+                key: SigningKey::from_pkcs8_der(&key_der)?,
+                csr: String::new(),
+            };
             let input = case["headers"]["signature-input"].as_str().context("signature-input")?;
             let tag = case["endpoint"].as_str().context("endpoint")?;
             let nonce = input
@@ -138,7 +148,7 @@ mod tests {
                 .nth(1)
                 .and_then(|value| value.split('"').next())
                 .context("nonce")?;
-            let keyid = vectors["keys"][0]["thumbprint"].as_str().context("thumbprint")?;
+            let keyid = vector_key["thumbprint"].as_str().context("thumbprint")?;
             let body = case["body"].as_str().map(str::as_bytes);
             let signed = pair.sign(keyid, tag, body, 1_790_000_000, 1_790_000_060, nonce);
             assert_eq!(signed.input, input, "{name} input");
@@ -146,6 +156,11 @@ mod tests {
             assert_eq!(signed.signature, case["headers"]["signature"], "{name} signature");
             assert_eq!(signed.digest.as_deref(), case["headers"]["content-digest"].as_str());
         }
+        let key_der = STANDARD.decode(vectors["keys"][0]["private_key_pkcs8"].as_str().context("vector key")?)?;
+        let pair = KeyPair {
+            key: SigningKey::from_pkcs8_der(&key_der)?,
+            csr: String::new(),
+        };
         let proof = &vectors["channel_proof"];
         let challenge = STANDARD.decode(proof["challenge"].as_str().context("challenge")?)?;
         let nonce = proof["connect_nonce"].as_str().context("connect nonce")?;

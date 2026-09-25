@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use agent_identity_channel_proto::agent_channel_client::AgentChannelClient;
-use agent_identity_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message, server_message};
+use agent_channel_proto::agent_channel_client::AgentChannelClient;
+use agent_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message, server_message};
 use anyhow::{Context as _, ensure};
 use http::Request as HttpRequest;
 use tokio::sync::mpsc;
@@ -44,6 +44,21 @@ impl ChannelStream {
         metadata: &[(&str, &str)],
         proof_override: Option<Vec<u8>>,
     ) -> anyhow::Result<String> {
+        let revision = identity.config["revision"]
+            .as_u64()
+            .context("identity config has no revision")?;
+        self.send_hello_with_revision(identity, challenge, metadata, proof_override, revision)
+            .await
+    }
+
+    pub(crate) async fn send_hello_with_revision(
+        &mut self,
+        identity: &Identity,
+        challenge: &ServerMessage,
+        metadata: &[(&str, &str)],
+        proof_override: Option<Vec<u8>>,
+        revision: u64,
+    ) -> anyhow::Result<String> {
         let Some(server_message::Payload::Challenge(payload)) = challenge.payload.as_ref() else {
             anyhow::bail!("expected a channel challenge");
         };
@@ -60,7 +75,7 @@ impl ChannelStream {
                         .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                         .collect(),
                     capabilities: Vec::new(),
-                    applied_state_versions: Default::default(),
+                    applied_state_versions: [("config".to_owned(), revision)].into_iter().collect(),
                     proof,
                 })),
             })
@@ -145,18 +160,36 @@ pub(crate) async fn open_with_headers(
     headers: SignedHeaders,
 ) -> anyhow::Result<ChannelStream> {
     let channel_url = identity
-        .channel_url
+        .agent_channel_url
         .as_deref()
-        .context("enrollment omitted channel_url")?;
-    open_at_url(target, channel_url, headers).await
+        .context("enrollment omitted config.agent_channel_url")?;
+    open_at_url(target, channel_url, headers, None).await
+}
+
+pub(crate) async fn open_with_duplicate_header(
+    target: &Target,
+    identity: &Identity,
+    name: &'static str,
+) -> anyhow::Result<ChannelStream> {
+    let channel_url = identity
+        .agent_channel_url
+        .as_deref()
+        .context("enrollment omitted config.agent_channel_url")?;
+    let headers = identity.key.sign_now(&identity.thumbprint, "connect", None);
+    open_at_url(target, channel_url, headers, Some(name)).await
 }
 
 pub(crate) async fn probe_unavailable(target: &Target, identity: &Identity) -> anyhow::Result<ChannelStream> {
     let headers = identity.key.sign_now(&identity.thumbprint, "connect", None);
-    open_at_url(target, &target.base_url, headers).await
+    open_at_url(target, &target.base_url, headers, None).await
 }
 
-async fn open_at_url(target: &Target, channel_url: &str, headers: SignedHeaders) -> anyhow::Result<ChannelStream> {
+async fn open_at_url(
+    target: &Target,
+    channel_url: &str,
+    headers: SignedHeaders,
+    duplicate: Option<&'static str>,
+) -> anyhow::Result<ChannelStream> {
     let url = reqwest::Url::parse(channel_url)?;
     let origin = url.origin().ascii_serialization();
     let mut endpoint = Endpoint::from_shared(origin)?.connect_timeout(Duration::from_secs(5));
@@ -201,6 +234,16 @@ async fn open_at_url(target: &Target, channel_url: &str, headers: SignedHeaders)
         request
             .metadata_mut()
             .insert("content-digest", digest.parse().context("encode content digest")?);
+    }
+    if let Some(name) = duplicate {
+        let value = match name {
+            "signature-input" => &headers.input,
+            "signature" => &headers.signature,
+            _ => anyhow::bail!("unknown duplicate metadata {name}"),
+        };
+        request
+            .metadata_mut()
+            .append(name, value.parse().context("duplicate signature metadata")?);
     }
     let stream = client.connect(request).await?.into_inner();
     Ok(ChannelStream {

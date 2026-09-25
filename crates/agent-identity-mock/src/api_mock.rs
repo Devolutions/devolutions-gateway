@@ -18,6 +18,8 @@ use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, PushKind};
 pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/__mock__/faults", post(faults))
+        .route("/__mock__/config", post(update_config))
+        .route("/__mock__/config/stale", post(stale_config))
         .route("/__mock__/reset", post(reset))
         .route("/__mock__/time/advance", post(time_advance))
         .route("/__mock__/time/freeze", post(time_freeze))
@@ -25,6 +27,7 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/__mock__/handshake", post(handshake).get(handshake_state))
         .route("/__mock__/retry-barrier", post(retry_barrier))
         .route("/__mock__/requests", get(requests))
+        .route("/__mock__/redirect-target", get(redirect_target).post(redirect_target))
         .route("/__mock__/reconnect", post(reconnect))
         .with_state(app)
 }
@@ -50,14 +53,25 @@ async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Reque
         "enroll_total": state.requests.enroll_total,
         "enroll_retry_503": state.requests.enroll_retry_503,
         "renew": state.requests.renew,
+        "renew_attempt_keyids": state.requests.renew_attempt_keyids,
         "renew_retry_503": state.requests.renew_retry_503,
+        "confirm": state.requests.confirm,
+        "confirm_retry_503": state.requests.confirm_retry_503,
+        "check_in": state.requests.check_in,
         "connect": state.requests.connect,
+        "redirect_hits": state.requests.redirect_hits,
+        "request_sequence": state.requests.request_sequence,
         "authenticated_connects": state.requests.authenticated_connects,
         "correlated_acks": state.requests.correlated_acks,
         "overlap_open": state.requests.overlap_open,
         "active_streams": state.streams.len(),
         "paused_hellos": state.paused_hellos.len(),
     }))
+}
+
+async fn redirect_target(AxumState(app): AxumState<Arc<App>>) -> StatusCode {
+    app.state.lock().await.requests.redirect_hits += 1;
+    StatusCode::IM_A_TEAPOT
 }
 
 #[derive(Deserialize)]
@@ -116,12 +130,13 @@ async fn retry_barrier(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Resp
     let endpoint = match request.endpoint.as_str() {
         "enroll" => DropTarget::Enroll,
         "renew" => DropTarget::Renew,
-        _ => return control_error(&ApiError::invalid_request("endpoint must be enroll or renew")),
+        "confirm" => DropTarget::Confirm,
+        _ => return control_error(&ApiError::invalid_request("endpoint must be enroll, renew or confirm")),
     };
     let mut state = app.state.lock().await;
     if request.pause {
         state.retry_barrier = Some(endpoint);
-        state.dropped_response = None;
+        state.barrier_triggered = None;
     } else if state.retry_barrier == Some(endpoint) {
         state.retry_barrier = None;
     }
@@ -142,6 +157,43 @@ async fn reconnect(AxumState(app): AxumState<Arc<App>>, Json(request): Json<Reco
     StatusCode::ACCEPTED.into_response()
 }
 
+async fn update_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => return control_error(&ApiError::invalid_request("malformed JSON body")),
+    };
+    let Some(fields) = value.get("fields").and_then(Value::as_object) else {
+        return control_error(&ApiError::invalid_request("fields must be a JSON object"));
+    };
+    if fields
+        .keys()
+        .any(|name| matches!(name.as_str(), "version" | "revision" | "agent_channel_url"))
+    {
+        return control_error(&ApiError::invalid_request("config fields cannot replace reserved keys"));
+    }
+    let mut state = app.state.lock().await;
+    let updated = state.merge_config_fields(fields);
+    Json(json!({ "updatedDevices": updated })).into_response()
+}
+
+#[derive(Deserialize)]
+struct StaleConfigRequest {
+    device_id: Uuid,
+    revision: u64,
+}
+
+async fn stale_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let request: StaleConfigRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(_) => return control_error(&ApiError::invalid_request("body requires device_id and revision")),
+    };
+    let mut state = app.state.lock().await;
+    match state.replay_stale_config(request.device_id, request.revision) {
+        Ok(sent) => Json(json!({ "sent": sent })).into_response(),
+        Err(error) => control_error(&error),
+    }
+}
+
 fn control_error(err: &ApiError) -> Response {
     (
         StatusCode::from_u16(err.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
@@ -155,18 +207,25 @@ fn faults_view(faults: &Faults) -> Value {
         "drop_next_response": faults.drop_next_response.map(|t| match t {
             DropTarget::Enroll => "enroll",
             DropTarget::Renew => "renew",
+            DropTarget::Confirm => "confirm",
+            DropTarget::CheckIn => "check-in",
         }),
         "fail_next_response": faults.fail_next_response.map(|fault| json!({
             "endpoint": match fault.endpoint {
                 DropTarget::Enroll => "enroll",
                 DropTarget::Renew => "renew",
+                DropTarget::Confirm => "confirm",
+                DropTarget::CheckIn => "check-in",
             },
             "status": fault.status,
             "error": fault.error,
+            "retry_after_secs": fault.retry_after_secs,
         })),
         "clock_skew_secs": faults.clock_skew_secs,
         "leaf_lifetime_secs": faults.leaf_lifetime_secs,
         "channel_available": faults.channel_available,
+        "channel_broken": faults.channel_broken,
+        "malformed_channel_url": faults.malformed_channel_url,
         "rotation_rate_limit_per_sec": faults.rotation_rate_limit_per_sec,
     })
 }
@@ -193,15 +252,25 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                     let endpoint = match fields.get("endpoint").and_then(Value::as_str) {
                         Some("enroll") => DropTarget::Enroll,
                         Some("renew") => DropTarget::Renew,
-                        _ => return invalid("fail_next_response.endpoint must be enroll or renew"),
+                        Some("confirm") => DropTarget::Confirm,
+                        Some("check-in") => DropTarget::CheckIn,
+                        _ => return invalid("fail_next_response.endpoint must be enroll, renew, confirm or check-in"),
                     };
                     let Some(status) = fields
                         .get("status")
                         .and_then(Value::as_u64)
                         .and_then(|status| u16::try_from(status).ok())
-                        .filter(|status| (400..=599).contains(status))
+                        .filter(|status| (300..=599).contains(status))
                     else {
-                        return invalid("fail_next_response.status must be 400..599");
+                        return invalid("fail_next_response.status must be 300..599");
+                    };
+                    let retry_after_secs = match fields.get("retry_after_secs") {
+                        None => None,
+                        Some(Value::Number(value)) => match value.as_u64() {
+                            Some(secs) => Some(secs),
+                            None => return invalid("fail_next_response.retry_after_secs must be nonnegative"),
+                        },
+                        Some(_) => return invalid("fail_next_response.retry_after_secs must be nonnegative"),
                     };
                     let error = match fields.get("error") {
                         None => None,
@@ -223,6 +292,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                         endpoint,
                         status,
                         error,
+                        retry_after_secs,
                     });
                 }
                 _ => return invalid("fail_next_response must be an object or null"),
@@ -231,7 +301,9 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 Value::Null => state.faults.drop_next_response = None,
                 Value::String(s) if s == "enroll" => state.faults.drop_next_response = Some(DropTarget::Enroll),
                 Value::String(s) if s == "renew" => state.faults.drop_next_response = Some(DropTarget::Renew),
-                _ => return invalid("drop_next_response must be \"enroll\", \"renew\" or null"),
+                Value::String(s) if s == "confirm" => state.faults.drop_next_response = Some(DropTarget::Confirm),
+                Value::String(s) if s == "check-in" => state.faults.drop_next_response = Some(DropTarget::CheckIn),
+                _ => return invalid("drop_next_response must be enroll, renew, confirm, check-in or null"),
             },
             "clock_skew_secs" => match value {
                 Value::Null => state.faults.clock_skew_secs = None,
@@ -250,8 +322,16 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 _ => return invalid("leaf_lifetime_secs must be a positive integer or null"),
             },
             "channel_available" => match value {
-                Value::Bool(b) => state.faults.channel_available = *b,
+                Value::Bool(b) => state.update_channel_available(*b, &app.base_url),
                 _ => return invalid("channel_available must be a boolean"),
+            },
+            "channel_broken" => match value {
+                Value::Bool(b) => state.faults.channel_broken = *b,
+                _ => return invalid("channel_broken must be a boolean"),
+            },
+            "malformed_channel_url" => match value {
+                Value::Bool(b) => state.faults.malformed_channel_url = *b,
+                _ => return invalid("malformed_channel_url must be a boolean"),
             },
             "rotation_rate_limit_per_sec" => match value {
                 Value::Null => state.faults.rotation_rate_limit_per_sec = None,
@@ -265,6 +345,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
         }
     }
     app.clock.set_skew(state.faults.clock_skew_secs);
+    state.tick(app.now());
     Json(faults_view(&state.faults)).into_response()
 }
 
@@ -296,9 +377,10 @@ async fn time_advance(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Respo
         Ok(secs) => secs,
         Err(err) => return control_error(&err),
     };
+    let mut state = app.state.lock().await;
     app.clock.advance_by(secs);
-    app.tick().await;
     let now = app.now();
+    state.tick(now);
     Json(json!({ "now": now, "server_time": rfc3339(now) })).into_response()
 }
 

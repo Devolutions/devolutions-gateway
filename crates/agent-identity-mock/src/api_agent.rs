@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State as AxumState};
-use axum::http::header::AUTHORIZATION;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{AUTHORIZATION, LOCATION, RETRY_AFTER};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -13,8 +13,8 @@ use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
 use crate::app::{App, rfc3339};
-use crate::oracle::{Endpoint, Rejection, verify_request};
-use crate::state::{ApiError, DropTarget, FailNextResponse};
+use crate::oracle::{AuthenticatedDevice, Endpoint, Rejection, verify_request};
+use crate::state::{ApiError, DropTarget, FailNextResponse, State};
 
 /// Header set on a success response when `faults.drop_next_response` fires; the
 /// dispatcher turns it into a connection abort without a response (§11).
@@ -26,7 +26,9 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/api/agent-identity/v1/trust-anchor", get(trust_anchor))
         .route("/api/agent-identity/v1/enroll", post(enroll))
         .route("/api/agent-identity/v1/renew", post(renew))
-        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .route("/api/agent-identity/v1/confirm", post(confirm))
+        .route("/api/agent-identity/v1/check-in", post(check_in))
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(app)
 }
 
@@ -63,6 +65,19 @@ fn injected_response(app: &App, fault: FailNextResponse) -> Response {
     response
         .headers_mut()
         .insert(INJECTED_HEADER, "1".parse().expect("static value"));
+    if (300..400).contains(&fault.status) {
+        let target = format!("{}/__mock__/redirect-target", app.base_url);
+        response.headers_mut().insert(
+            LOCATION,
+            HeaderValue::from_str(&target).expect("mock base URL is a valid header"),
+        );
+    }
+    if let Some(secs) = fault.retry_after_secs {
+        response.headers_mut().insert(
+            RETRY_AFTER,
+            HeaderValue::from_str(&secs.to_string()).expect("Retry-After seconds are valid"),
+        );
+    }
     response
 }
 
@@ -129,7 +144,11 @@ fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError
 
 async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     app.tick().await;
-    app.state.lock().await.requests.enroll_total += 1;
+    {
+        let mut state = app.state.lock().await;
+        state.requests.enroll_total += 1;
+        state.requests.request_sequence.push("enroll");
+    }
     let secret = match parse_bearer(&headers) {
         Ok(secret) => secret,
         Err(err) => return api_error_response(&app, &err),
@@ -139,7 +158,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     let Some(token_id) = state.token_id(&secret) else {
         return api_error_response(&app, &ApiError::token_invalid());
     };
-    if state.retry_barrier == Some(DropTarget::Enroll) && state.dropped_response == Some(DropTarget::Enroll) {
+    if state.retry_barrier == Some(DropTarget::Enroll) && state.barrier_triggered == Some(DropTarget::Enroll) {
         state.requests.enroll_retry_503 += 1;
         return injected_response(
             &app,
@@ -147,6 +166,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
                 endpoint: DropTarget::Enroll,
                 status: 503,
                 error: None,
+                retry_after_secs: None,
             },
         );
     }
@@ -161,7 +181,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
 
     let mut state = app.state.lock().await;
     let now = app.now();
-    let outcome = match state.enroll(&secret, &csr_der, metadata, now) {
+    let outcome = match state.enroll(&secret, &csr_der, metadata, now, &app.base_url) {
         Ok(outcome) => outcome,
         Err(err) => {
             if err.code == "device_revoked" {
@@ -174,26 +194,26 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     if should_drop {
         // One-shot: process and commit, then abort without a response (§11).
         state.faults.drop_next_response = None;
-        state.dropped_response = Some(DropTarget::Enroll);
+        state.barrier_triggered = Some(DropTarget::Enroll);
     }
-    let channel_available = state.faults.channel_available;
+    let config = state
+        .devices
+        .get(&outcome.device_id)
+        .expect("enrolled device exists")
+        .config
+        .clone();
     drop(state);
 
-    let mut body = json!({
+    let body = json!({
         "authority_id": app.authority_id,
         "device_id": outcome.device_id,
-        "friendly_name": outcome.friendly_name,
         "certificate_chain": outcome
             .certificate_chain
             .iter()
             .map(|c| crate::ca::base64_der(c))
             .collect::<Vec<_>>(),
-        "config": { "version": 1 },
+        "config": config,
     });
-    if channel_available {
-        // §5.2: absent when the server cannot host the channel.
-        body["channel_url"] = json!(app.base_url);
-    }
     let mut response = Json(body).into_response();
     if should_drop {
         response
@@ -208,7 +228,15 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     let now = app.now();
     let mut state = app.state.lock().await;
     state.requests.renew += 1;
-    if state.retry_barrier == Some(DropTarget::Renew) && state.dropped_response == Some(DropTarget::Renew) {
+    state.requests.request_sequence.push("renew");
+    let keyid = headers
+        .get("signature-input")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|input| input.split_once(";keyid=\""))
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(keyid, _)| keyid.to_owned());
+    state.requests.renew_attempt_keyids.push(keyid);
+    if state.retry_barrier == Some(DropTarget::Renew) && state.barrier_triggered == Some(DropTarget::Renew) {
         state.requests.renew_retry_503 += 1;
         return injected_response(
             &app,
@@ -216,6 +244,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
                 endpoint: DropTarget::Renew,
                 status: 503,
                 error: None,
+                retry_after_secs: None,
             },
         );
     }
@@ -224,35 +253,16 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     }
 
     // §6 verification, checks in the contract's order.
-    let auth = {
-        let header_bytes = |name: &str| headers.get(name).map(|v| v.as_bytes().to_vec());
-        let signature_input = header_bytes("signature-input");
-        let signature = header_bytes("signature");
-        let content_digest = header_bytes("content-digest");
-        let state = &mut *state;
-        let crate::state::State {
-            devices,
-            cert_index,
-            nonces,
-            ..
-        } = state;
-        let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
-        verify_request(
-            Endpoint::Renew,
-            "POST",
-            signature_input.as_deref(),
-            signature.as_deref(),
-            content_digest.as_deref(),
-            &body,
-            now,
-            &mut lookup,
-            nonces,
-        )
-    };
+    let auth = authenticate(&mut state, Endpoint::Renew, &headers, &body, now);
     let auth = match auth {
         Ok(auth) => auth,
         Err(rejection) => return rejection_response(&app, rejection),
     };
+    state.record_event(
+        auth.device_id(),
+        "renew_received",
+        json!({ "cert_thumbprint": auth.cert_thumbprint() }),
+    );
 
     let (csr_der, metadata) = match parse_csr_body(&body) {
         Ok(parsed) => parsed,
@@ -265,7 +275,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     let should_drop = state.faults.drop_next_response == Some(DropTarget::Renew);
     if should_drop {
         state.faults.drop_next_response = None;
-        state.dropped_response = Some(DropTarget::Renew);
+        state.barrier_triggered = Some(DropTarget::Renew);
     }
     drop(state);
 
@@ -279,4 +289,144 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
             .insert(DROP_HEADER, "1".parse().expect("static value"));
     }
     response
+}
+
+async fn confirm(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
+    app.tick().await;
+    let mut state = app.state.lock().await;
+    let now = app.now();
+    state.requests.confirm += 1;
+    state.requests.request_sequence.push("confirm");
+    if state.retry_barrier == Some(DropTarget::Confirm) && state.barrier_triggered == Some(DropTarget::Confirm) {
+        state.requests.confirm_retry_503 += 1;
+        return injected_response(
+            &app,
+            FailNextResponse {
+                endpoint: DropTarget::Confirm,
+                status: 503,
+                error: None,
+                retry_after_secs: None,
+            },
+        );
+    }
+    if let Some(fault) = state.fail_next_response(DropTarget::Confirm) {
+        if state.retry_barrier == Some(DropTarget::Confirm) {
+            state.barrier_triggered = Some(DropTarget::Confirm);
+        }
+        return injected_response(&app, fault);
+    }
+    let auth = match authenticate(&mut state, Endpoint::Confirm, &headers, &body, now) {
+        Ok(auth) => auth,
+        Err(rejection) => return rejection_response(&app, rejection),
+    };
+    if !body.is_empty() {
+        return api_error_response(&app, &ApiError::invalid_request("confirm body must be empty"));
+    }
+    state.confirm(&auth, now);
+    state.requests.request_sequence.push("confirm_204");
+    let should_drop = state.faults.drop_next_response == Some(DropTarget::Confirm);
+    if should_drop {
+        state.faults.drop_next_response = None;
+        state.barrier_triggered = Some(DropTarget::Confirm);
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if should_drop {
+        response
+            .headers_mut()
+            .insert(DROP_HEADER, "1".parse().expect("static value"));
+    }
+    response
+}
+
+async fn check_in(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
+    app.tick().await;
+    let mut state = app.state.lock().await;
+    let now = app.now();
+    state.requests.check_in += 1;
+    state.requests.request_sequence.push("check-in");
+    if let Some(fault) = state.fail_next_response(DropTarget::CheckIn) {
+        return injected_response(&app, fault);
+    }
+    let auth = match authenticate(&mut state, Endpoint::CheckIn, &headers, &body, now) {
+        Ok(auth) => auth,
+        Err(rejection) => return rejection_response(&app, rejection),
+    };
+    let metadata = match parse_check_in_body(&body) {
+        Ok(metadata) => metadata,
+        Err(error) => return api_error_response(&app, &error),
+    };
+    let device = state
+        .devices
+        .get_mut(&auth.device_id())
+        .expect("authenticated device exists");
+    device.metadata = metadata;
+    device.last_seen_at = Some(now);
+    let renewal_requested = device.renewal_requested.is_some();
+    let config = device.config.clone();
+    let revision = device.config_revision();
+    state.record_event(
+        auth.device_id(),
+        "check_in_received",
+        json!({ "revision": revision, "renewal_requested": renewal_requested }),
+    );
+    let should_drop = state.faults.drop_next_response == Some(DropTarget::CheckIn);
+    if should_drop {
+        state.faults.drop_next_response = None;
+    }
+    let mut response = Json(json!({ "config": config, "renewal_requested": renewal_requested })).into_response();
+    if should_drop {
+        response
+            .headers_mut()
+            .insert(DROP_HEADER, "1".parse().expect("static value"));
+    }
+    response
+}
+
+fn parse_check_in_body(body: &[u8]) -> Result<Map<String, Value>, ApiError> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| ApiError::invalid_request("malformed JSON body"))?;
+    let metadata = value
+        .get("metadata")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| ApiError::invalid_request("`metadata` must be an object"))?;
+    crate::name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
+    Ok(metadata)
+}
+
+fn authenticate(
+    state: &mut State,
+    endpoint: Endpoint,
+    headers: &HeaderMap,
+    body: &[u8],
+    now: i64,
+) -> Result<AuthenticatedDevice, Rejection> {
+    if headers.get_all("signature-input").iter().count() != 1
+        || headers.get_all("signature").iter().count() != 1
+        || matches!(endpoint, Endpoint::Renew | Endpoint::CheckIn)
+            && headers.get_all("content-digest").iter().count() != 1
+    {
+        return Err(Rejection::SignatureInvalid);
+    }
+    let header_bytes = |name: &str| headers.get(name).map(|value| value.as_bytes().to_vec());
+    let signature_input = header_bytes("signature-input");
+    let signature = header_bytes("signature");
+    let content_digest = header_bytes("content-digest");
+    let State {
+        devices,
+        cert_index,
+        nonces,
+        ..
+    } = state;
+    let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
+    verify_request(
+        endpoint,
+        "POST",
+        signature_input.as_deref(),
+        signature.as_deref(),
+        content_digest.as_deref(),
+        body,
+        now,
+        &mut lookup,
+        nonces,
+    )
 }

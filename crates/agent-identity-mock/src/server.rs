@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use agent_identity_channel_proto::agent_channel_server::AgentChannelServer;
+use agent_channel_proto::agent_channel_server::AgentChannelServer;
 use axum::body::Bytes;
 use axum::response::IntoResponse as _;
 use axum::{Json, Router, http};
@@ -96,7 +96,7 @@ impl Dispatcher {
             .map_err(|_| ConnectionAborted)?;
         let request = http::Request::from_parts(parts, body);
 
-        let grpc_path = format!("/{}/Connect", agent_identity_channel_proto::SERVICE_NAME);
+        let grpc_path = format!("/{}/Connect", agent_channel_proto::SERVICE_NAME);
         if stripped == *grpc_path {
             let response = self
                 .grpc
