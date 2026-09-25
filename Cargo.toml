@@ -10,6 +10,13 @@ members = [
     "testsuite",
     "tools/generate-openapi",
 ]
+# Intent-only directories until their crates land (Phase 2).
+exclude = [
+    "crates/agent-channel-client",
+    "crates/agent-identity",
+    "crates/agent-identity-httpsig",
+    "crates/agent-identity-keys",
+]
 default-members = [
     "devolutions-agent",
     "devolutions-agent-updater",
