@@ -1,10 +1,9 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C9 and C14 (12:48); the rest are pending his review.
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C9, C12–C14, C16 and the former Phase 0 proposals (13:36); C3, C10 and C15 are pending his review.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
-Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
 
 ## 1. Conventions
 
@@ -47,7 +46,7 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits **[proposed]**: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 8 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6).
+- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes, no C0/C1 control characters; whole object ≤ 8 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values (C6).
 - `metadata` is required in enroll and renew bodies (an object, possibly empty); absent or not an object → `invalid_request` (C7).
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
 - Unknown keys within limits are stored as-is (informational only).
@@ -56,7 +55,7 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
   Unknown placeholders are rejected at token creation; missing values evaluate to empty.
   The result is trimmed and truncated to 255 characters; an empty result falls back to the device ID.
   "Characters" means Unicode scalar values, here and in `PATCH /devices/{id}`; truncation never splits one (C6).
-  Default format **[proposed]**: `{hostname}`.
+  Default format: `{hostname}`.
 
 ## 4. Certificates
 
@@ -70,7 +69,7 @@ Items marked **[proposed]** are Phase 0 choices not fixed by the V1 plan.
 ## 5. Agent-facing HTTP API (product-neutral)
 
 Base: the token's `u`.
-Paths **[proposed]** (identical for every product):
+Paths (identical for every product):
 
 | Method | Path | Auth |
 |---|---|---|
@@ -145,7 +144,7 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 | `certificate_expired` | 401 | Expired (for `connect`) or beyond grace (for `renew`) | re-enroll required |
 | `signature_invalid` | 401 | Bad signature, wrong `tag`, bad digest, replayed nonce, malformed params | transient |
 | `clock_skew` | 401 | `created`/`expires` outside tolerance | transient, adjust clock |
-| `invalid_request` **[proposed]** | 400 | Malformed body, CSR or metadata | transient (agent bug; keep retrying with backoff) |
+| `invalid_request` | 400 | Malformed body, CSR or metadata | transient (agent bug; keep retrying with backoff) |
 
 `token_*` codes on a pending enrollment are permanent (the pending file is deleted).
 `device_revoked` and `device_unknown` record `rejected` on the stored identity (§10.3); the agent stops renewing and reconnecting for that authority.
@@ -177,7 +176,7 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 
 ### 7.1 Service
 
-Package **[proposed]** `devolutions.agent.identity.channel.v1`.
+Package `devolutions.agent.identity.channel.v1`.
 The `.proto` is the single source for every language: Rust (`agent-identity-channel-proto` crate) and .NET (`Devolutions.AgentIdentity.Channel` NuGet package, built from the same file in devolutions-gateway).
 
 ```proto
@@ -277,7 +276,7 @@ message Reconnect {
 
 ### 7.5 Availability
 
-- DVLS emits `channel_url` only when it runs on Kestrel, or IIS in-process on Windows build ≥ 20348 (Server 2022) / ≥ 22000 (Windows 11), and an admin setting "Agent channel enabled" (default on) is not turned off **[proposed]**; the setting covers reverse proxies that break gRPC.
+- DVLS emits `channel_url` only when it runs on Kestrel, or IIS in-process on Windows build ≥ 20348 (Server 2022) / ≥ 22000 (Windows 11), and an admin setting "Agent channel enabled" (default on) is not turned off; the setting covers reverse proxies that break gRPC.
 - No fallback transport.
 
 ## 8. Renewal and rotation
@@ -296,7 +295,7 @@ Additions:
 
 This API follows DVLS conventions (camelCase keys, DVLS paging) rather than §1.
 
-Base **[proposed]**: `{u}/api/v3/agent-identity`.
+Base: `{u}/api/v3/agent-identity`.
 Auth: DVLS session token from application-identity (or user) login, `Authorization: Bearer`.
 Every endpoint requires a new administrative permission "Agent identity management" (E2), assignable to users and application identities through roles; built-in administrators have it implicitly.
 Missing permission → `403`.
@@ -334,7 +333,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 
 ## 10. Agent local contract (observable by the conformance tester)
 
-### 10.1 Configuration (`agent.json`) **[proposed]**
+### 10.1 Configuration (`agent.json`)
 
 ```json
 {
