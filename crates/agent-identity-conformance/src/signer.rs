@@ -15,6 +15,25 @@ pub(crate) struct KeyPair {
     pub(crate) csr: String,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum SignatureParameter {
+    Created,
+    Expires,
+    Nonce,
+    KeyId,
+    Algorithm,
+    Tag,
+}
+
+const DEFAULT_PARAMETER_ORDER: [SignatureParameter; 6] = [
+    SignatureParameter::Created,
+    SignatureParameter::Expires,
+    SignatureParameter::Nonce,
+    SignatureParameter::KeyId,
+    SignatureParameter::Algorithm,
+    SignatureParameter::Tag,
+];
+
 impl KeyPair {
     pub(crate) fn generate() -> anyhow::Result<Self> {
         let key = SigningKey::generate_from_rng(&mut rand::rng());
@@ -42,6 +61,19 @@ impl KeyPair {
         expires: i64,
         nonce: &str,
     ) -> SignedHeaders {
+        self.sign_with_order(keyid, tag, body, (created, expires), nonce, &DEFAULT_PARAMETER_ORDER)
+    }
+
+    pub(crate) fn sign_with_order(
+        &self,
+        keyid: &str,
+        tag: &str,
+        body: Option<&[u8]>,
+        time_bounds: (i64, i64),
+        nonce: &str,
+        order: &[SignatureParameter; 6],
+    ) -> SignedHeaders {
+        let (created, expires) = time_bounds;
         let (components, digest) = match tag {
             "renew" | "check-in" => {
                 let body = body.expect("renew and check-in signatures require a body");
@@ -56,9 +88,19 @@ impl KeyPair {
             }
             _ => panic!("unsupported signature tag {tag}"),
         };
-        let input = format!(
-            "sig={components};created={created};expires={expires};nonce=\"{nonce}\";keyid=\"{keyid}\";alg=\"ecdsa-p256-sha256\";tag=\"{tag}\""
-        );
+        let parameters = order
+            .iter()
+            .map(|parameter| match parameter {
+                SignatureParameter::Created => format!("created={created}"),
+                SignatureParameter::Expires => format!("expires={expires}"),
+                SignatureParameter::Nonce => format!("nonce=\"{nonce}\""),
+                SignatureParameter::KeyId => format!("keyid=\"{keyid}\""),
+                SignatureParameter::Algorithm => "alg=\"ecdsa-p256-sha256\"".to_owned(),
+                SignatureParameter::Tag => format!("tag=\"{tag}\""),
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        let input = format!("sig={components};{parameters}");
         let mut base = String::from("\"@method\": POST\n");
         if let Some(value) = &digest {
             base.push_str(&format!("\"content-digest\": {value}\n"));
@@ -77,10 +119,27 @@ impl KeyPair {
     }
 
     pub(crate) fn sign_now(&self, keyid: &str, tag: &str, body: Option<&[u8]>) -> SignedHeaders {
+        self.sign_now_with_order(keyid, tag, body, &DEFAULT_PARAMETER_ORDER)
+    }
+
+    pub(crate) fn sign_now_with_order(
+        &self,
+        keyid: &str,
+        tag: &str,
+        body: Option<&[u8]>,
+        order: &[SignatureParameter; 6],
+    ) -> SignedHeaders {
         let mut nonce_bytes = [0u8; 16];
         rand::rng().fill(&mut nonce_bytes[..]);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.sign(keyid, tag, body, now, now + 60, &URL_SAFE_NO_PAD.encode(nonce_bytes))
+        self.sign_with_order(
+            keyid,
+            tag,
+            body,
+            (now, now + 60),
+            &URL_SAFE_NO_PAD.encode(nonce_bytes),
+            order,
+        )
     }
 
     pub(crate) fn channel_proof(&self, challenge: &[u8], nonce: &str) -> Vec<u8> {
@@ -117,6 +176,14 @@ mod tests {
 
     #[test]
     fn fixed_rfc6979_vectors_and_channel_proof() -> anyhow::Result<()> {
+        const ALGORITHM_BEFORE_KEY_ID: [SignatureParameter; 6] = [
+            SignatureParameter::Created,
+            SignatureParameter::Expires,
+            SignatureParameter::Nonce,
+            SignatureParameter::Algorithm,
+            SignatureParameter::KeyId,
+            SignatureParameter::Tag,
+        ];
         let vectors: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let cases = vectors["http_signature"]["cases"].as_array().context("vector cases")?;
@@ -125,6 +192,10 @@ mod tests {
             ("valid_connect", "device-a"),
             ("valid_confirm", "device-g"),
             ("valid_check_in", "device-a"),
+            ("valid_renew_alg_before_keyid", "device-a"),
+            ("valid_connect_alg_before_keyid", "device-a"),
+            ("valid_confirm_alg_before_keyid", "device-g"),
+            ("valid_check_in_alg_before_keyid", "device-a"),
         ] {
             let case = cases
                 .iter()
@@ -150,7 +221,12 @@ mod tests {
                 .context("nonce")?;
             let keyid = vector_key["thumbprint"].as_str().context("thumbprint")?;
             let body = case["body"].as_str().map(str::as_bytes);
-            let signed = pair.sign(keyid, tag, body, 1_790_000_000, 1_790_000_060, nonce);
+            let order = if name.ends_with("_alg_before_keyid") {
+                &ALGORITHM_BEFORE_KEY_ID
+            } else {
+                &DEFAULT_PARAMETER_ORDER
+            };
+            let signed = pair.sign_with_order(keyid, tag, body, (1_790_000_000, 1_790_000_060), nonce, order);
             assert_eq!(signed.input, input, "{name} input");
             assert_eq!(signed.base, case["signature_base"], "{name} signature base");
             assert_eq!(signed.signature, case["headers"]["signature"], "{name} signature");

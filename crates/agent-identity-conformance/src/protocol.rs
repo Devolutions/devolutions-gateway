@@ -22,7 +22,7 @@ use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName};
 
 use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
-use crate::signer::{KeyPair, SignedHeaders, thumbprint};
+use crate::signer::{KeyPair, SignatureParameter, SignedHeaders, thumbprint};
 use crate::{Context, channel};
 
 const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
@@ -1263,6 +1263,48 @@ pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()>
             "{variant} tampering created a pending certificate"
         );
     }
+    Ok(())
+}
+
+pub(crate) async fn p_signature_parameter_order_accepted(ctx: Context) -> anyhow::Result<()> {
+    use SignatureParameter::{Algorithm, Created, Expires, KeyId, Nonce, Tag};
+
+    let (_, mut identity) = issued(&ctx, "parameter-order").await?;
+    let new_key = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({
+        "csr": new_key.csr,
+        "metadata": { "hostname": "renewed-in-alternate-order" },
+    }))?;
+    let renew_headers = identity.key.sign_now_with_order(
+        &identity.thumbprint,
+        "renew",
+        Some(&body),
+        &[Created, Expires, Nonce, Algorithm, KeyId, Tag],
+    );
+    let reply = ctx.target.signed_renew(&body, &renew_headers, None).await?;
+    expect_status(&reply, 200)?;
+    identity.adopt_certificate(&reply.body["certificate_chain"], new_key)?;
+    let renewed = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        has_certificate(&renewed, &identity.thumbprint, "pending")
+            && renewed["metadata"]["hostname"] == "renewed-in-alternate-order",
+        "alternate-order renew did not create a pending certificate and update metadata"
+    );
+
+    let connect_headers = identity.key.sign_now_with_order(
+        &identity.thumbprint,
+        "connect",
+        None,
+        &[Tag, Created, Expires, Nonce, KeyId, Algorithm],
+    );
+    ensure!(
+        renew_headers.nonce != connect_headers.nonce,
+        "tester reused the renew nonce"
+    );
+    let mut stream = channel::open_with_headers(&ctx.target, &identity, connect_headers).await?;
+    stream
+        .hello(&identity, &[("hostname", "connected-in-alternate-order")])
+        .await?;
     Ok(())
 }
 
