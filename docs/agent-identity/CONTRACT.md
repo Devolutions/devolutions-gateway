@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.4)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C15, orchestrator, 2026-09-25, pending Benoit's review).
+Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications (C1–C16, orchestrator, 2026-09-25, pending Benoit's review).
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -352,6 +352,10 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 ```
 
 - `__debug__.identity.key_name_prefix` (test use, C15): replaces the default key-name prefix `DevolutionsAgent-Identity-` (§10.3); the tester sets a unique prefix per run and deletes only keys with it.
+- `__debug__.identity.metadata_override_path` (test use, C16): path to a JSON object of string values, read at every send (enroll, renew, `Hello`).
+  Its known keys (§10.5) replace the collected values; unknown keys are ignored.
+  A missing or unreadable file means no override.
+  This lets the tester prove that metadata is collected at send time.
 
 - `__debug__.identity.extra_trusted_root`: path to a PEM file with one or more certificates; each one is added to the TLS trust store in addition to the OS store (test use; multi-authority runs put both mock CAs in one bundle).
 - `__debug__.identity.acl_grant_current_user` (Windows only, test use): the key-store key DACL and the pending-file reader also grant the agent process's user, so CI can run the agent as a normal process.
