@@ -377,7 +377,12 @@ pub(crate) fn machine_key_exists(name: &str) -> anyhow::Result<bool> {
     Ok(provider.key(name)?.is_some())
 }
 
-pub(crate) fn snapshot_machine_identity_keys() -> anyhow::Result<HashSet<String>> {
+fn belongs_to_run(name: &str, prefix: &str) -> bool {
+    name.starts_with(prefix)
+}
+
+pub(crate) fn machine_keys_with_prefix(prefix: &str) -> anyhow::Result<HashSet<String>> {
+    ensure!(!prefix.is_empty(), "machine key run prefix is empty");
     struct EnumState(*mut c_void);
     impl Drop for EnumState {
         fn drop(&mut self) {
@@ -419,7 +424,7 @@ pub(crate) fn snapshot_machine_identity_keys() -> anyhow::Result<HashSet<String>
                 let pointer = unsafe { (*key.0).pszName };
                 // SAFETY: The key-name pointer is NUL-terminated and lives until the buffer is freed.
                 let name = unsafe { pointer.to_string()? };
-                if name.starts_with("DevolutionsAgent-Identity-") {
+                if belongs_to_run(&name, prefix) {
                     names.insert(name);
                 }
             }
@@ -548,112 +553,21 @@ pub(crate) fn machine_public_key(name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(sec1)
 }
 
-pub(crate) fn cleanup_machine_keys(
-    dir: &Path,
-    known_keys: &[String],
-    preexisting: &HashSet<String>,
-    known_authorities: &HashSet<uuid::Uuid>,
-    should_delete: bool,
-) {
-    let after = match snapshot_machine_identity_keys() {
-        Ok(keys) => keys,
-        Err(error) => {
-            eprintln!("skipping machine key cleanup; could not enumerate keys: {error:#}");
-            return;
-        }
-    };
-    let names = teardown_candidates(dir, known_keys, preexisting, &after, known_authorities);
-    if !should_delete || known_authorities.is_empty() {
-        let candidates = if known_authorities.is_empty() {
-            after.difference(preexisting).cloned().collect::<HashSet<_>>()
-        } else {
-            names
-        };
-        let mut leftovers = candidates.into_iter().collect::<Vec<_>>();
-        leftovers.sort_unstable();
-        eprintln!(
-            "skipping machine key cleanup (DVLS needs --cleanup-machine-keys; deletion needs --authority-id); leftover candidates: {}",
-            if leftovers.is_empty() {
-                "none".to_owned()
-            } else {
-                leftovers.join(", ")
-            }
-        );
-        return;
-    }
+pub(crate) fn cleanup_machine_keys(prefix: &str) -> anyhow::Result<()> {
+    let names = machine_keys_with_prefix(prefix)?;
     if names.is_empty() {
-        return;
+        return Ok(());
     }
-    let Ok(provider) = Provider::open() else {
-        return;
-    };
+    let provider = Provider::open()?;
     for name in names {
-        let Ok(Some(key)) = provider.key(&name) else {
-            continue;
-        };
+        let key = provider
+            .key(&name)?
+            .with_context(|| format!("run-owned machine key {name} disappeared before cleanup"))?;
         // SAFETY: The machine key handle was opened for this provider; on success NCryptDeleteKey frees it.
-        if unsafe { NCryptDeleteKey(key.0, 0) }.is_ok() {
-            std::mem::forget(key);
-        }
+        unsafe { NCryptDeleteKey(key.0, 0) }.with_context(|| format!("delete run-owned machine key {name}"))?;
+        std::mem::forget(key);
     }
-}
-
-fn teardown_candidates(
-    dir: &Path,
-    known_keys: &[String],
-    preexisting: &HashSet<String>,
-    after: &HashSet<String>,
-    known_authorities: &HashSet<uuid::Uuid>,
-) -> HashSet<String> {
-    let mut names = cleanup_candidates(dir, known_keys, preexisting, known_authorities);
-    names.extend(
-        after
-            .difference(preexisting)
-            .filter(|name| matches_known_authority(name, known_authorities))
-            .cloned(),
-    );
-    names.retain(|name| after.contains(name));
-    names
-}
-
-fn matches_known_authority(name: &str, authorities: &HashSet<uuid::Uuid>) -> bool {
-    authorities.iter().any(|authority| {
-        name.strip_prefix(&format!("DevolutionsAgent-Identity-{authority}-"))
-            .is_some_and(|generation| {
-                !generation.is_empty()
-                    && generation.len() <= 64
-                    && generation
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
-            })
-    })
-}
-
-fn cleanup_candidates(
-    dir: &Path,
-    known_keys: &[String],
-    preexisting: &HashSet<String>,
-    known_authorities: &HashSet<uuid::Uuid>,
-) -> HashSet<String> {
-    let mut names = known_keys.iter().cloned().collect::<HashSet<_>>();
-    let authorities_dir = dir.join("identity").join("authorities");
-    if let Ok(entries) = std::fs::read_dir(authorities_dir) {
-        for entry in entries.flatten() {
-            let Ok(contents) = std::fs::read(entry.path().join("identity.json")) else {
-                continue;
-            };
-            let Ok(state) = serde_json::from_slice::<serde_json::Value>(&contents) else {
-                continue;
-            };
-            for slot in ["current", "pending", "previous"] {
-                if let Some(name) = state["keys"][slot]["key_name"].as_str() {
-                    names.insert(name.to_owned());
-                }
-            }
-        }
-    }
-    names.retain(|name| !preexisting.contains(name) && matches_known_authority(name, known_authorities));
-    names
+    Ok(())
 }
 
 #[cfg(test)]
@@ -696,7 +610,11 @@ mod tests {
 
     #[test]
     fn machine_key_snapshot_is_available() -> anyhow::Result<()> {
-        let _ = snapshot_machine_identity_keys()?;
+        let prefix = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
+        ensure!(
+            machine_keys_with_prefix(&prefix)?.is_empty(),
+            "unexpected machine key with a fresh run prefix"
+        );
         Ok(())
     }
 
@@ -712,63 +630,22 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_never_selects_preexisting_or_unrelated_machine_keys() -> anyhow::Result<()> {
-        let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join("agent-identity-windows-tests");
-        std::fs::create_dir_all(&scratch)?;
-        let dir = tempfile::Builder::new().prefix("keys-").tempdir_in(scratch)?;
-        let authority = uuid::Uuid::new_v4();
-        let current = format!("DevolutionsAgent-Identity-{authority}-current");
-        let previous = format!("DevolutionsAgent-Identity-{authority}-previous");
-        let unrelated = format!("DevolutionsAgent-Identity-{}-other", uuid::Uuid::new_v4());
-        let authorities = dir
-            .path()
-            .join("identity")
-            .join("authorities")
-            .join(authority.to_string());
-        std::fs::create_dir_all(&authorities)?;
-        std::fs::write(
-            authorities.join("identity.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "authority_id": authority,
-                "keys": {
-                    "current": { "key_name": current },
-                    "previous": { "key_name": previous }
-                }
-            }))?,
-        )?;
-        let selected = cleanup_candidates(
-            dir.path(),
-            &[current.clone(), previous.clone(), unrelated.clone()],
-            &HashSet::from([previous]),
-            &HashSet::from([authority]),
-        );
-        assert_eq!(selected, HashSet::from([current]));
-        assert!(cleanup_candidates(dir.path(), &[unrelated], &HashSet::new(), &HashSet::new()).is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn teardown_finds_orphans_without_an_identity_file() {
-        let authority = uuid::Uuid::new_v4();
-        let orphan = format!("DevolutionsAgent-Identity-{authority}-orphan");
-        let unrelated = format!("DevolutionsAgent-Identity-{}-other", uuid::Uuid::new_v4());
-        let preexisting = HashSet::from([format!("DevolutionsAgent-Identity-{authority}-preexisting")]);
-        let after = HashSet::from([
-            orphan.clone(),
-            unrelated,
-            preexisting.iter().next().expect("preexisting").clone(),
-        ]);
-        let selected = teardown_candidates(
-            Path::new("nonexistent-agent-identity-fixture"),
-            &[],
-            &preexisting,
-            &after,
-            &HashSet::from([authority]),
-        );
-        assert_eq!(selected, HashSet::from([orphan]));
+    fn machine_key_cleanup_matches_only_the_run_prefix() {
+        let prefix = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
+        let own = format!("{prefix}{}", uuid::Uuid::new_v4());
+        let other_run = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
+        assert!(belongs_to_run(&own, &prefix));
+        assert!(!belongs_to_run(
+            &format!("{other_run}{}", uuid::Uuid::new_v4()),
+            &prefix
+        ));
+        assert!(!belongs_to_run(
+            &format!("DevolutionsAgent-Identity-{}", uuid::Uuid::new_v4()),
+            &prefix
+        ));
+        assert!(!belongs_to_run(
+            &format!("{prefix}other"),
+            &format!("{prefix}{}", uuid::Uuid::new_v4())
+        ));
     }
 }

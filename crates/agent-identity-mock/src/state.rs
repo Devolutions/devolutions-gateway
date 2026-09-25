@@ -242,8 +242,11 @@ pub struct Rotation {
 #[derive(Default)]
 pub struct RequestCounts {
     pub enroll_by_token: HashMap<Uuid, u64>,
+    pub enroll_revoked_by_token: HashMap<Uuid, u64>,
     pub enroll_total: u64,
+    pub enroll_retry_503: u64,
     pub renew: u64,
+    pub renew_retry_503: u64,
     pub connect: u64,
     pub authenticated_connects: u64,
     pub correlated_acks: u64,
@@ -271,6 +274,9 @@ pub struct State {
     pub nonces: NonceStore,
     pub faults: Faults,
     pub requests: RequestCounts,
+    /// Mock-only barrier: retry requests receive 503 after the first response is dropped.
+    pub retry_barrier: Option<DropTarget>,
+    pub dropped_response: Option<DropTarget>,
     /// Authenticated live channel streams, by stream ID.
     pub streams: HashMap<Uuid, StreamHandle>,
     /// Signed openings that have received a Challenge but not passed Hello proof.
@@ -304,6 +310,8 @@ impl State {
             nonces: NonceStore::default(),
             faults: Faults::default(),
             requests: RequestCounts::default(),
+            retry_barrier: None,
+            dropped_response: None,
             streams: HashMap::new(),
             challenged_streams: HashMap::new(),
             paused_hellos: HashSet::new(),
@@ -953,6 +961,8 @@ impl State {
         self.nonces = NonceStore::default();
         self.faults = Faults::default();
         self.requests = RequestCounts::default();
+        self.retry_barrier = None;
+        self.dropped_response = None;
         self.rotation = None;
         self.rotation_push_queue.clear();
         self.rotation_push_times.clear();

@@ -42,11 +42,19 @@ impl KeyPair {
         expires: i64,
         nonce: &str,
     ) -> SignedHeaders {
-        let digest = body.map(|bytes| format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(bytes))));
-        let components = if digest.is_some() {
-            "(\"@method\" \"content-digest\")"
-        } else {
-            "(\"@method\")"
+        let (components, digest) = match tag {
+            "renew" => {
+                let body = body.expect("renew signatures require a body");
+                (
+                    "(\"@method\" \"content-digest\")",
+                    Some(format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(body)))),
+                )
+            }
+            "connect" => {
+                assert!(body.is_none(), "connect signatures do not cover a body");
+                ("(\"@method\")", None)
+            }
+            _ => panic!("unsupported signature tag {tag}"),
         };
         let input = format!(
             "sig={components};created={created};expires={expires};nonce=\"{nonce}\";keyid=\"{keyid}\";alg=\"ecdsa-p256-sha256\";tag=\"{tag}\""
