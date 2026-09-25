@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
@@ -42,9 +42,81 @@ struct JrecManifest {
     start_time: i64,
     duration: i64,
     files: Vec<JrecFile>,
+    /// Released players and streamers treat every entry of `files` as media, so a log recorded next to media goes here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    logs: Vec<JrecFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManifestList {
+    Files,
+    Logs,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManifestEntry {
+    list: ManifestList,
+    idx: usize,
+}
+
+impl JrecFile {
+    fn file_type(&self) -> Option<RecordingFileType> {
+        Utf8Path::new(&self.file_name)
+            .extension()
+            .and_then(RecordingFileType::from_extension)
+    }
 }
 
 impl JrecManifest {
+    fn has_media(&self) -> bool {
+        self.files.iter().any(|file| {
+            file.file_type()
+                .is_some_and(|file_type| file_type.category() == RecordingFileCategory::Media)
+        })
+    }
+
+    fn list_for(&self, file_type: RecordingFileType) -> ManifestList {
+        match file_type.category() {
+            RecordingFileCategory::Media => ManifestList::Files,
+            RecordingFileCategory::Log if self.has_media() => ManifestList::Logs,
+            RecordingFileCategory::Log => ManifestList::Files,
+        }
+    }
+
+    fn list_mut(&mut self, list: ManifestList) -> &mut Vec<JrecFile> {
+        match list {
+            ManifestList::Files => &mut self.files,
+            ManifestList::Logs => &mut self.logs,
+        }
+    }
+
+    fn entry_mut(&mut self, entry: ManifestEntry) -> Option<&mut JrecFile> {
+        self.list_mut(entry.list).get_mut(entry.idx)
+    }
+
+    fn push_file(&mut self, file_type: RecordingFileType, start_time: i64) -> (ManifestEntry, String) {
+        let list = self.list_for(file_type);
+        let file_name = format!(
+            "recording-{}.{}",
+            self.files.len() + self.logs.len(),
+            file_type.extension()
+        );
+
+        let entries = self.list_mut(list);
+        entries.push(JrecFile {
+            file_name: file_name.clone(),
+            start_time,
+            duration: 0,
+        });
+
+        let entry = ManifestEntry {
+            list,
+            idx: entries.len() - 1,
+        };
+
+        (entry, file_name)
+    }
+
     fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json = std::fs::read(path)?;
         let manifest = serde_json::from_slice(&json)?;
@@ -248,16 +320,16 @@ struct OnGoingRecording {
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
-    /// Manifest index of the file written by the connected media push.
-    media_file: Option<usize>,
-    /// Manifest index of the file written by the connected log push.
-    log_file: Option<usize>,
+    /// Manifest entry of the file written by the connected media push.
+    media_file: Option<ManifestEntry>,
+    /// Manifest entry of the file written by the connected log push.
+    log_file: Option<ManifestEntry>,
     /// Once a media push connected, only media pushes drive `state`, the TTL and the recording policy.
     has_media: bool,
 }
 
 impl OnGoingRecording {
-    fn connected_file_mut(&mut self, category: RecordingFileCategory) -> &mut Option<usize> {
+    fn connected_file_mut(&mut self, category: RecordingFileCategory) -> &mut Option<ManifestEntry> {
         match category {
             RecordingFileCategory::Media => &mut self.media_file,
             RecordingFileCategory::Log => &mut self.log_file,
@@ -556,29 +628,12 @@ impl RecordingManagerTask {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        let (manifest, recording_file) = if recording_path.exists() {
+        let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
+
+        let mut manifest = if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
 
-            let mut existing_manifest =
-                JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
-            let next_file_idx = existing_manifest.files.len();
-
-            let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
-
-            let file_name = format!("recording-{next_file_idx}.{}", file_type.extension());
-            let recording_file = recording_path.join(&file_name);
-
-            existing_manifest.files.push(JrecFile {
-                start_time,
-                duration: 0,
-                file_name,
-            });
-
-            existing_manifest
-                .save_to_file(&manifest_path)
-                .context("override existing manifest")?;
-
-            (existing_manifest, recording_file)
+            JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?
         } else {
             debug!(path = %recording_path, "Create recording directory");
 
@@ -586,31 +641,24 @@ impl RecordingManagerTask {
                 .await
                 .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
-            let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
-            let file_name = format!("recording-0.{}", file_type.extension());
-            let recording_file = recording_path.join(&file_name);
-
-            let first_file = JrecFile {
-                start_time,
-                duration: 0,
-                file_name,
-            };
-
-            let initial_manifest = JrecManifest {
+            JrecManifest {
                 session_id: id,
                 start_time,
                 duration: 0,
-                files: vec![first_file],
-            };
-
-            initial_manifest
-                .save_to_file(&manifest_path)
-                .context("write initial manifest to disk")?;
-
-            (initial_manifest, recording_file)
+                files: Vec::new(),
+                logs: Vec::new(),
+            }
         };
 
-        let file_idx = manifest.files.len() - 1;
+        let (manifest_entry, file_name) = manifest.push_file(file_type, start_time);
+        let recording_file = recording_path.join(&file_name);
+
+        manifest
+            .save_to_file(&manifest_path)
+            .context("write manifest to disk")?;
+
+        debug!(%id, %file_type, list = ?manifest_entry.list, %file_name, "Recording file added to manifest");
+
         let active_recording_count = self.rx.active_recordings.insert(id);
 
         // NOTE: the session associated to this recording is not always running through the Devolutions Gateway.
@@ -638,7 +686,7 @@ impl RecordingManagerTask {
         });
 
         ongoing.manifest = manifest;
-        *ongoing.connected_file_mut(category) = Some(file_idx);
+        *ongoing.connected_file_mut(category) = Some(manifest_entry);
 
         if category == RecordingFileCategory::Media {
             ongoing.has_media = true;
@@ -671,7 +719,7 @@ impl RecordingManagerTask {
 
         let category = file_type.category();
 
-        let Some(file_idx) = ongoing.connected_file_mut(category).take() else {
+        let Some(manifest_entry) = ongoing.connected_file_mut(category).take() else {
             anyhow::bail!("a {category} recording not connected can’t be disconnected (there is probably a bug)");
         };
 
@@ -683,18 +731,17 @@ impl RecordingManagerTask {
 
         let current_file = ongoing
             .manifest
-            .files
-            .get_mut(file_idx)
+            .entry_mut(manifest_entry)
             .context("no recording file (this is a bug)")?;
         current_file.duration = end_time - current_file.start_time;
-
-        ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
 
         let recording_file_path = ongoing
             .manifest_path
             .parent()
             .expect("a parent")
             .join(&current_file.file_name);
+
+        ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
 
         debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
 
@@ -1085,13 +1132,15 @@ mod tests {
             !self.manager.ongoing_recordings.contains_key(&id) && !self.manager.rx.active_recordings.contains(id)
         }
 
-        fn manifest_file_names(&mut self, id: Uuid) -> Vec<String> {
-            self.ongoing(id)
-                .manifest
-                .files
-                .iter()
-                .map(|file| file.file_name.clone())
-                .collect()
+        fn manifest_file_names(&mut self, id: Uuid) -> (Vec<String>, Vec<String>) {
+            let names = |files: &[JrecFile]| files.iter().map(|file| file.file_name.clone()).collect();
+            let manifest = &self.ongoing(id).manifest;
+            (names(&manifest.files), names(&manifest.logs))
+        }
+
+        fn manifest_json_on_disk(&self, id: Uuid) -> serde_json::Value {
+            let path = self.manager.recordings_path.join(id.to_string()).join("recording.json");
+            serde_json::from_slice(&std::fs::read(path).expect("manifest on disk")).expect("manifest JSON")
         }
 
         async fn expect_kill(&mut self, id: Uuid) {
@@ -1124,10 +1173,11 @@ mod tests {
         h.disconnect(id, RecordingFileType::WebM).await;
         h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
 
-        let manifest_path = h.ongoing(id).manifest_path.clone();
-        let manifest = JrecManifest::read_from_file(&manifest_path).expect("manifest on disk");
-        let file_names: Vec<_> = manifest.files.iter().map(|file| file.file_name.as_str()).collect();
-        assert_eq!(file_names, ["recording-0.webm", "recording-1.slog"]);
+        let manifest = h.manifest_json_on_disk(id);
+        assert_eq!(manifest["files"][0]["fileName"], "recording-0.webm");
+        assert_eq!(manifest["files"].as_array().map(Vec::len), Some(1));
+        assert_eq!(manifest["logs"][0]["fileName"], "recording-1.slog");
+        assert_eq!(manifest["logs"].as_array().map(Vec::len), Some(1));
     }
 
     #[tokio::test]
@@ -1151,7 +1201,10 @@ mod tests {
             );
         }
 
-        assert_eq!(h.manifest_file_names(id), ["recording-0.webm", "recording-1.slog"]);
+        assert_eq!(
+            h.manifest_file_names(id),
+            (vec!["recording-0.webm".to_owned()], vec!["recording-1.slog".to_owned()])
+        );
         assert!(h.is_connected(id));
     }
 
@@ -1160,14 +1213,17 @@ mod tests {
         let mut h = harness();
         let id = Uuid::new_v4();
 
+        h.connect(id, RecordingFileType::TRP).await.expect("media push");
         h.connect(id, RecordingFileType::SessionRecordingLog)
             .await
             .expect("first log push");
-        h.connect(id, RecordingFileType::TRP).await.expect("media push");
 
         assert!(h.connect(id, RecordingFileType::SessionRecordingLog).await.is_err());
 
-        assert_eq!(h.manifest_file_names(id), ["recording-0.slog", "recording-1.trp"]);
+        assert_eq!(
+            h.manifest_file_names(id),
+            (vec!["recording-0.trp".to_owned()], vec!["recording-1.slog".to_owned()])
+        );
         assert!(h.is_connected(id));
     }
 
@@ -1249,12 +1305,19 @@ mod tests {
 
         h.connect(id, RecordingFileType::WebM).await.expect("media reconnect");
         assert!(h.is_connected(id));
-        assert_eq!(h.manifest_file_names(id), ["recording-0.webm", "recording-1.webm"]);
+        assert_eq!(
+            h.manifest_file_names(id),
+            (
+                vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()],
+                vec![]
+            )
+        );
 
         h.disconnect(id, RecordingFileType::WebM).await;
         h.manager.handle_remove(id);
 
         assert!(h.is_terminated(id));
+        assert!(h.manifest_json_on_disk(id).get("logs").is_none());
     }
 
     #[tokio::test]
@@ -1276,5 +1339,52 @@ mod tests {
 
         assert!(h.is_terminated(id));
         h.expect_kill(id).await;
+
+        let manifest = h.manifest_json_on_disk(id);
+        assert_eq!(manifest["files"][0]["fileName"], "recording-0.slog");
+        assert!(manifest.get("logs").is_none());
+    }
+
+    #[tokio::test]
+    async fn file_names_are_unique_across_files_and_logs() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
+
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log push");
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.connect(id, RecordingFileType::WebM).await.expect("media reconnect");
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+        h.connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("log reconnect");
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+
+        assert_eq!(
+            h.manifest_file_names(id),
+            (
+                vec!["recording-0.webm".to_owned(), "recording-2.webm".to_owned()],
+                vec!["recording-1.slog".to_owned(), "recording-3.slog".to_owned()],
+            )
+        );
+    }
+
+    #[test]
+    fn manifest_without_logs_is_read_and_written_unchanged() {
+        let json = serde_json::json!({
+            "sessionId": "11111111-1111-1111-1111-111111111111",
+            "startTime": 1,
+            "duration": 5,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
+            ]
+        });
+
+        let manifest: JrecManifest = serde_json::from_value(json.clone()).expect("manifest without logs");
+        assert!(manifest.logs.is_empty());
+        assert_eq!(serde_json::to_value(&manifest).expect("serialize manifest"), json);
     }
 }

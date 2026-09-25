@@ -31,7 +31,7 @@ use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::{PushOutcome, RecordingMessageSender};
-use crate::token::{JrecTokenClaims, RecordingFileCategory, RecordingFileType, RecordingOperation};
+use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
@@ -633,6 +633,8 @@ where
 #[serde(rename_all = "camelCase")]
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
+    #[serde(default)]
+    logs: Vec<RecordingZipManifestFile>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -695,8 +697,8 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut clip_names = Vec::with_capacity(manifest.files.len());
-    for file in manifest.files {
+    let mut clip_names = Vec::with_capacity(manifest.files.len() + manifest.logs.len());
+    for file in manifest.files.into_iter().chain(manifest.logs) {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
                 file_name = %file.file_name,
@@ -997,8 +999,8 @@ async fn shadow_recording(
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
-    let Some(recording_path) = last_media_file(&recording_files) else {
-        warn!(%id, "Shadow recording rejected: no media recording file found");
+    let Some(recording_path) = recording_files.last() else {
+        warn!(%id, "Shadow recording rejected: no recording files found");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
@@ -1011,14 +1013,6 @@ async fn shadow_recording(
             let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
         }))
     }
-}
-
-fn last_media_file(recording_files: &[Utf8PathBuf]) -> Option<&Utf8PathBuf> {
-    recording_files.iter().rev().find(|path| {
-        path.extension()
-            .and_then(RecordingFileType::from_extension)
-            .is_some_and(|file_type| file_type.category() == RecordingFileCategory::Media)
-    })
 }
 
 #[cfg(test)]
@@ -1038,38 +1032,6 @@ mod tests {
         assert!(!is_safe_recording_file_name("../secret.webm"));
         assert!(!is_safe_recording_file_name("a/b.webm"));
         assert!(!is_safe_recording_file_name("a\\b.webm"));
-    }
-
-    #[test]
-    fn shadow_picks_last_media_file() {
-        let files = |names: &[&str]| names.iter().map(Utf8PathBuf::from).collect::<Vec<_>>();
-
-        let media_then_log = files(&["rec/recording-0.webm", "rec/recording-1.slog"]);
-        assert_eq!(
-            last_media_file(&media_then_log),
-            Some(&Utf8PathBuf::from("rec/recording-0.webm"))
-        );
-
-        let reconnected = files(&[
-            "rec/recording-0.slog",
-            "rec/recording-1.trp",
-            "rec/recording-2.slog",
-            "rec/recording-3.trp",
-        ]);
-        assert_eq!(
-            last_media_file(&reconnected),
-            Some(&Utf8PathBuf::from("rec/recording-3.trp"))
-        );
-
-        let media_only = files(&["rec/recording-0.cast"]);
-        assert_eq!(
-            last_media_file(&media_only),
-            Some(&Utf8PathBuf::from("rec/recording-0.cast"))
-        );
-
-        assert_eq!(last_media_file(&files(&["rec/recording-0.slog"])), None);
-        assert_eq!(last_media_file(&files(&["rec/recording-0"])), None);
-        assert_eq!(last_media_file(&[]), None);
     }
 
     #[test]
@@ -1128,6 +1090,42 @@ mod tests {
         assert_eq!(
             plan.clip_names,
             vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshots_manifest_logs_for_zip() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+
+        let manifest = serde_json::json!({
+            "sessionId": "33333333-3333-3333-3333-333333333333",
+            "startTime": 1,
+            "duration": 5,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
+            ],
+            "logs": [
+                { "fileName": "recording-1.slog", "startTime": 1, "duration": 5 }
+            ]
+        });
+
+        tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
+            .await
+            .expect("write manifest");
+        tokio::fs::write(dir_path.join("recording-0.webm"), b"clip-zero")
+            .await
+            .expect("write clip 0");
+        tokio::fs::write(dir_path.join("recording-1.slog"), b"log-one")
+            .await
+            .expect("write log 1");
+
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+        assert_eq!(
+            plan.clip_names,
+            vec!["recording-0.webm".to_owned(), "recording-1.slog".to_owned()]
         );
     }
 
