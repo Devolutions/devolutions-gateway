@@ -1,6 +1,6 @@
-# Agent Identity — Contract (draft v0.4)
+# Agent Identity — Contract (draft v0.5)
 
-Status: v0.4; E1–E9 decisions applied; v0.4 adds Phase 1 gate clarifications C1–C16 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C10, C12–C16 and the former Phase 0 proposals; C3 is being redesigned (a dedicated confirm endpoint, pending his go).
+Status: v0.5 draft; E1–E9 decisions applied; clarifications C1–C18 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C10, C12–C16, C17 (`confirm`, replacing C3's promote-on-first-use) and C18 (`config.agent_channel_url`), plus the former Phase 0 proposals.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -76,6 +76,7 @@ Paths (identical for every product):
 | GET | `{u}/api/agent-identity/v1/trust-anchor` | none |
 | POST | `{u}/api/agent-identity/v1/enroll` | `Authorization: Bearer <token>` |
 | POST | `{u}/api/agent-identity/v1/renew` | RFC 9421, `tag="renew"` |
+| POST | `{u}/api/agent-identity/v1/confirm` | RFC 9421, `tag="confirm"`, signed with the new key (§5.5) |
 
 ### 5.1 `GET trust-anchor`
 
@@ -104,14 +105,14 @@ Request:
   "device_id": "<uuid>",
   "friendly_name": "...",
   "certificate_chain": ["<base64 DER leaf>", "<base64 DER root>"],
-  "channel_url": "https://host/dvls",
-  "config": { "version": 1 }
+  "config": { "version": 1, "agent_channel_url": "https://host/dvls" }
 }
 ```
 
 - `authority_id` is stable for a server instance (DVLS: generated once, stored in settings).
-- `channel_url` is absent when the server cannot host the channel (see §7.5).
-- `config` is versioned; V1 has no other fields.
+- `config` is versioned (`version` is the schema version); the agent ignores unknown fields.
+- `config.agent_channel_url` (C18) is the base URL of the agent channel (§7). It's absent when the server doesn't offer the agent channel to this device, whatever the reason (the topology can't host it, it's disabled, or a product authenticates agents over its own channel); the agent then opens no agent channel for that authority.
+  Products may add their own fields later (e.g. a PSU channel URL); both can coexist.
 
 ### 5.3 `POST renew`
 
@@ -122,6 +123,7 @@ Request:
 - CSR key rules (C2): the key of the device's pending certificate → `200` replaying that pending chain (lost-response retry); the key of any other certificate the server has issued (this device's current or retired ones, or any certificate of another device) → `invalid_request`; otherwise a new pending certificate is issued.
 - At most one `pending` certificate per device: a renew with a different new key retires the previous pending certificate.
 - Accepted with a `current` or `pending` certificate that is unexpired, or expired by less than its own lifetime (`now < notAfter + (notAfter − notBefore)`).
+- Renew never promotes a certificate; only `confirm` does (§5.5).
 
 ### 5.4 Errors
 
@@ -149,11 +151,22 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 `token_*` codes on a pending enrollment are permanent (the pending file is deleted).
 `device_revoked` and `device_unknown` record `rejected` on the stored identity (§10.3); the agent stops renewing and reconnecting for that authority.
 
+### 5.5 `POST confirm` (C17)
+
+- Signed with the **pending** certificate's key (§6), `tag="confirm"`, components `("@method")`, empty body.
+- The signing certificate must be the device's `pending` or `current` certificate and unexpired (no grace), else §6 step 4 errors.
+- Pending → it becomes `current`, the previous `current` becomes `retired`, and the server:
+  - sends `Reconnect{reason:"certificate_rotated"}` on streams opened with the retired certificate;
+  - closes those still open 60 s later with `OK`.
+- Already current → no-op (idempotent retry after a lost response).
+- `204` in both cases.
+- `confirm` is the only operation that promotes a certificate; renew and channel connect never do.
+
 ## 6. RFC 9421 profile
 
 - Label `sig`.
-- `Signature-Input: sig=(<components>);created=<int>;expires=<int>;nonce="<base64url 16 random bytes>";keyid="<thumbprint>";alg="ecdsa-p256-sha256";tag="<renew|connect>"`.
-- Components: `renew` → `("@method" "content-digest")`; `connect` → `("@method")`.
+- `Signature-Input: sig=(<components>);created=<int>;expires=<int>;nonce="<base64url 16 random bytes>";keyid="<thumbprint>";alg="ecdsa-p256-sha256";tag="<renew|connect|confirm>"`.
+- Components: `renew` → `("@method" "content-digest")`; `connect` and `confirm` → `("@method")`.
 - `Content-Digest: sha-256=:<base64>:` (RFC 9530).
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
@@ -169,7 +182,7 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 - On `clock_skew`, the agent may retry once with `created` offset by `server_time − local_time`.
 - Libraries (approved, E4): Rust `httpsig` (signature base + custom `SigningKey`, `httpsig-hyper` for `content-digest` on `renew`); .NET NSign for signature base and ECDSA verification.
   Only the policy checks above (tag, window, key resolution, nonce commit) are our code; any other gap is escalated.
-- Shared test vectors (`docs/agent-identity/test-vectors.json`): fixed P-256 key, fixed requests for both tags, exact signature base strings, valid signatures, a channel proof (§7.3), and negative cases; plus RFC 9421 Appendix B.2.4 as a sanity check.
+- Shared test vectors (`docs/agent-identity/test-vectors.json`): fixed P-256 key, fixed requests for all three tags, exact signature base strings, valid signatures, a channel proof (§7.3), and negative cases (including cross-tag cases for `confirm`); plus RFC 9421 Appendix B.2.4 as a sanity check.
   In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request.
 
 ## 7. Channel (gRPC)
@@ -243,8 +256,8 @@ message Reconnect {
 
 ### 7.2 URL and path prefix
 
-- gRPC path: `<channel_url path>/devolutions.agent.identity.channel.v1.AgentChannel/Connect`.
-  With `channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.identity.channel.v1.AgentChannel/Connect`; the agent's tower layer adds the prefix.
+- gRPC path: `<agent_channel_url path>/devolutions.agent.identity.channel.v1.AgentChannel/Connect`.
+  With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.identity.channel.v1.AgentChannel/Connect`; the agent's tower layer adds the prefix.
 - The opening request carries `signature-input`, `signature` metadata with `tag="connect"`.
 
 ### 7.3 Sequence
@@ -256,8 +269,9 @@ message Reconnect {
 4. The server verifies `proof` with the public key of the certificate that authenticated the opening request.
    On success it replies `Welcome` (`correlation_id` = Hello `id`), updates metadata, `last_seen_at` and `connected`, and only then treats the stream as authenticated.
    On failure, or if no `Hello` arrives within 10 s, it closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`.
-5. If the request-renewal flag is set, the server sends `RenewRequested` after `Welcome` on every connect until the device renews; the agent replies `Ack` (`correlation_id` = message `id`).
+5. If the request-renewal flag is set, the server sends `RenewRequested` after `Welcome` on every connect until the device confirms a newer certificate; the agent replies `Ack` (`correlation_id` = message `id`).
 6. `Reconnect` asks the agent to open a new stream; the agent opens it, then closes the old one.
+   The agent uses the same routine after its own `confirm` succeeds.
 - No server push, metadata update or `connected` state happens before step 4 succeeds.
 - Rationale: the header signature isn't bound to the stream; the fresh challenge makes captured opening headers (TLS-terminating proxies, TLS inspection, header logs) useless for opening a stream.
 - An active intermediary in the path is out of scope (it can read the plaintext anyway); TLS channel binding is a possible later addition.
@@ -271,21 +285,34 @@ message Reconnect {
 - Auth failures at open: gRPC status `UNAUTHENTICATED` (or `PERMISSION_DENIED` for `device_revoked`) with trailer `error-code: <§5.4 code>`.
 - Revocation: the server closes live streams with `PERMISSION_DENIED` + `error-code: device_revoked`.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
-- When a `pending` certificate authenticates, the previous `current` certificate is retired and its streams are closed with `OK` (the agent has already switched: make-before-break).
+- When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
 - Agent: HTTP/2 keepalive every 30 s; reconnect with jittered exponential backoff (1 s → 5 min); stops on `device_revoked` / `device_unknown`.
 
 ### 7.5 Availability
 
-- DVLS emits `channel_url` only when it runs on Kestrel, or IIS in-process on Windows build ≥ 20348 (Server 2022) / ≥ 22000 (Windows 11), and an admin setting "Agent channel enabled" (default on) is not turned off; the setting covers reverse proxies that break gRPC.
+- DVLS emits `config.agent_channel_url` only when it runs on Kestrel, or IIS in-process on Windows build ≥ 20348 (Server 2022) / ≥ 22000 (Windows 11), and an admin setting "Agent channel enabled" (default on) is not turned off; the setting covers reverse proxies that break gRPC.
 - No fallback transport.
 
 ## 8. Renewal and rotation
 
-As in the V1 plan (agent steps 1–6, DVLS `pending`/`current`/`retired`, grace = one leaf lifetime; manual rotation with deadline, rate-limited `RenewRequested`, old root removed at deadline, pinned old-root certificates accepted until their expiry).
-Additions:
-- A certificate "authenticates" (C3) when a `renew` signed with it passes §6, or when a channel stream opened with it passes the §7.3 proof; the first such event for a `pending` certificate makes it `current` and retires the previous `current` certificate.
-- Renewal trigger: `notBefore + 2/3 × lifetime + jitter`, jitter uniform in `[0, 1/12 × lifetime]`.
-- The request-renewal flag is cleared when a certificate issued after the flag was set first authenticates.
+As in the V1 plan (DVLS `pending`/`current`/`retired`, grace = one leaf lifetime; manual rotation with deadline, rate-limited `RenewRequested`, old root removed at deadline, pinned old-root certificates accepted until their expiry), with the agent steps replaced as below.
+Agent renewal (C17):
+1. Trigger at `notBefore + 2/3 × lifetime + jitter` (jitter uniform in `[0, 1/12 × lifetime]`), or on `RenewRequested`.
+2. Generate the new key and record it as `pending` (§10.3 write-before-create).
+3. `POST renew` with its CSR, signed with the current key; retry with the same CSR on failure.
+4. Store the returned chain on the `pending` slot.
+5. `POST confirm` signed with the new key; retry with backoff.
+   While the outcome of a `confirm` is unknown, the agent sends no other signed request to that authority and opens no stream; it retries `confirm` first, since `confirm` is idempotent.
+6. On `204`: `pending` becomes `current`, the old key moves to `previous` and is deleted right away (§10.3 delete-before-remove).
+7. Reconnect the agent channel, if any, with the new certificate: open the new stream, then close the old one.
+Failure handling:
+- Transient errors on `renew` or `confirm`: retry with backoff; the old certificate and stream keep working.
+- `certificate_expired` on `confirm`, or a pending key that's unusable locally: delete the pending key and slot, then renew again with a fresh key, signed with the current certificate while it's valid or within its grace (C2 retires the old pending certificate server-side).
+- `device_revoked` or `device_unknown`: terminal (§5.4).
+Server side:
+- A `pending` certificate becomes `current` only through `confirm` (§5.5, C17 replaces the earlier C3 "first authentication" rule).
+- The request-renewal flag is cleared when a certificate issued after the flag was set is confirmed.
+Rotation:
 - Rotation `deadline`: RFC 3339 or the literal `"now"`; a value ≤ now is an emergency; absent → the maximum.
 - Rotation maximum (C10): the latest `notAfter` among the unexpired current or pending certificates of non-revoked devices issued by the old root (now when there are none); an explicit later deadline → `400`.
 - Early completion (C10): when `activeDevicesOnOldRoot` is 0, at rotation start or later, the rotation completes at once, exactly as if its deadline had passed.
@@ -396,7 +423,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 {
   "version": 1,
   "authority_id": "...", "device_id": "...", "friendly_name": "...",
-  "base_url": "https://host/dvls", "channel_url": "https://host/dvls", "config": { "version": 1 },
+  "base_url": "https://host/dvls", "config": { "version": 1, "agent_channel_url": "https://host/dvls" },
   "token_sha256": "<base64url SHA-256 of the full token string>",
   "rejected": { "code": "device_revoked", "at": "2026-09-24T12:00:00Z" },
   "keys": {
@@ -410,7 +437,8 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - `rejected` is absent until the server answers a `renew` or channel `connect` with `device_revoked` or `device_unknown` (or closes a live stream with one of them); `code` is that error code.
   The agent can't observe revocation otherwise.
   Once `rejected` is set, the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
-- `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds.
+- `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key (crash safety).
+- `config` is stored exactly as received (unknown fields included).
 - Key names (C15): `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
   The authority isn't known when the enrollment key is created, and key-store keys can't be renamed.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
@@ -444,8 +472,9 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - Implements §5, §7 and §9 per contract; shares only the `.proto` with the agent.
 - Serves under a configurable path prefix (the conformance run uses `/mock`), so the agent's path-prefix handling is exercised; the Docker DVLS target has no prefix.
 - Mock-only control API under `{u}/__mock__/`:
-  - `POST faults` `{ drop_next_response?: "enroll"|"renew", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, rotation_rate_limit_per_sec? }`.
-  - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
+  - `POST faults` `{ drop_next_response?: "enroll"|"renew"|"confirm", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, rotation_rate_limit_per_sec? }`.
+    `channel_available: false` makes new enroll responses omit `config.agent_channel_url` and makes channel opens fail with `UNAVAILABLE`.
+  - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew"|"confirm", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
   - `POST reset`.
   - `POST time/advance` `{ secs }` (for grace and deadline tests); stream expiry and rotation deadlines are re-evaluated immediately on advance.
   - `GET events?device_id=<uuid>` (C13): ordered channel and certificate events for that device (`stream_opened`, `stream_authenticated`, `stream_closed` with status, `cert_status_changed`), each with a monotonic sequence number, so make-before-break is asserted from ordering rather than polling.
