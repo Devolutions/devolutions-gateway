@@ -144,7 +144,7 @@ A signed request is authenticated as a device if and only if all of the followin
 - the signature verifies with that certificate's public key;
 - the certificate is unexpired, or, for `renew` only, expired within the grace window.
 
-The agent never sends its certificate to authenticate.
+The agent never sends its certificate to authenticate to the authority.
 Chain validation alone is not authentication.
 
 ## Channel

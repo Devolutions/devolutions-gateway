@@ -1,7 +1,9 @@
 # Device key custody
 
 This crate holds device private keys.
-It is not specific to Agent Identity; it is meant to be reusable, e.g. by Agent Tunnel.
+Keys belong to the device's Agent Identity.
+Features that authenticate as the device, such as Agent Tunnel after its migration, use these keys instead of their own.
+A key must therefore also be usable for TLS client authentication.
 
 ## Invariants
 
