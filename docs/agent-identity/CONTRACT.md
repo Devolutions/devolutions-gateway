@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.5)
 
-Status: v0.5; E1–E9 decisions applied; clarifications C1–C20 (orchestrator, 2026-09-25), all approved by Benoit: C17 `confirm` (replaces C3's promote-on-first-use), C18 `config.agent_channel_url`, C19 config revisions with `ConfigUpdate` and the `GET config` fallback, C20 channel renames.
+Status: v0.5; E1–E9 decisions applied; clarifications C1–C21 (orchestrator, 2026-09-25), all approved by Benoit: C21 no `friendly_name` in the enroll response, C17 `confirm` (replaces C3's promote-on-first-use), C18 `config.agent_channel_url`, C19 config revisions with `ConfigUpdate` and the `GET config` fallback, C20 channel renames.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -36,7 +36,7 @@ Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CO
 - Evaluation order (C1): (1) authenticate the token (row exists and `SHA-256(secret)` matches) → else `token_invalid`; (2) validate the body, CSR and metadata → else `invalid_request`; (3) idempotence lookup on the CSR public key; (4) `token_expired`; (5) `token_exhausted`; (6) create the device.
   Idempotence is checked before expiry and exhaustion so a lost response on a `max_uses = 1` token can be retried.
 - Idempotence match (C1), against every certificate the server has issued:
-  - Key of the current certificate of a non-revoked device → `200` with that device, its friendly name and its current chain; no use consumed; metadata and `last_seen_at` updated.
+  - Key of the current certificate of a non-revoked device → `200` with that device and its current chain; no use consumed; metadata and `last_seen_at` updated.
   - Any certificate key of a revoked device → `device_revoked`.
   - Key of a pending or retired certificate of a non-revoked device → `invalid_request` (a public key belongs to exactly one certificate lineage; it's never reused).
   - Key of a certificate of a deleted device → `device_revoked` (C15): issued public keys stay reserved after deletion; the server keeps each one's SPKI SHA-256 and the time it was first issued, and purging old entries is out of scope for V1.
@@ -104,13 +104,13 @@ Request:
 {
   "authority_id": "<uuid>",
   "device_id": "<uuid>",
-  "friendly_name": "...",
   "certificate_chain": ["<base64 DER leaf>", "<base64 DER root>"],
   "config": { "version": 1, "revision": 1, "agent_channel_url": "https://host/dvls" }
 }
 ```
 
 - `authority_id` is stable for a server instance (DVLS: generated once, stored in settings).
+- The friendly name is server-side only (C21): it's evaluated and stored at enrollment (§3) and shown through the admin API (§9), but not returned to the agent, which would only hold a copy that goes stale when an admin renames the device.
 - `config` is versioned (`version` is the schema version); the agent ignores unknown fields.
 - `config.revision` (C19): unsigned integer, assigned by the server, strictly increasing per device whenever the device's effective config changes.
   The agent replaces its stored config only with a higher revision.
@@ -454,7 +454,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 ```json
 {
   "version": 1,
-  "authority_id": "...", "device_id": "...", "friendly_name": "...",
+  "authority_id": "...", "device_id": "...",
   "base_url": "https://host/dvls", "config": { "version": 1, "agent_channel_url": "https://host/dvls" },
   "token_sha256": "<base64url SHA-256 of the full token string>",
   "rejected": { "code": "device_revoked", "at": "2026-09-24T12:00:00Z" },
