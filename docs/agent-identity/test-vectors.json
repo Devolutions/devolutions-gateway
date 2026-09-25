@@ -876,6 +876,148 @@
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
       {
+        "name": "renew_over_covered_components",
+        "description": "renew with the correct tag but over_covered covered components, correctly signed (step 1, C25)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:vB3wcnXwwyviZeza9ErP2AYe4n6drVNK/HJYe1zaoZIlM/FdPiZGACW8PKLNpZdhENpudPRFBD3kiHLby+suew==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "renew_reordered_components",
+        "description": "renew with the correct tag but reordered covered components, correctly signed (step 1, C25)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"wMHCw8TFxsfIycrLzM3Ozw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:rQCYEeI/c4tOVpvEGeSpyNXqodz1RLaYRn2m269mcr0flRqAqGvA4m84XC9vCCHyk46z9cOq89JT8myZKjtEBQ==:"
+        },
+        "signature_base": "\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@method\": POST\n\"@signature-params\": (\"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"wMHCw8TFxsfIycrLzM3Ozw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "renew_duplicated_components",
+        "description": "renew with the correct tag but duplicated covered components, correctly signed (step 1, C25)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"0NHS09TV1tfY2drb3N3e3w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:dAEUQAmipw4DzFyNSHFIY6KWi6yu/mkhgIvhdcZdZOeldfFvOelTMwC2m8T43HvjogLHChM3kS6iI3Cod6oSMw==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@method\": POST\n\"@signature-params\": (\"@method\" \"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"0NHS09TV1tfY2drb3N3e3w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "connect_over_covered_components",
+        "description": "connect with the correct tag but over_covered covered components, correctly signed (step 1, C25)",
+        "endpoint": "connect",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "signature-input": "sig=(\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+          "signature": "sig=:8tIuMrX2vDeMbTF9qXj8wqDDVLmMzWg0c6V8LoLrFqdhvKMSoLTrMKnwtg2JS/NJsDNxY6+iFS1qsskKF2ftvw==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+        "expected": "signature_invalid"
+      },
+      {
+        "name": "connect_duplicated_components",
+        "description": "connect with the correct tag but duplicated covered components, correctly signed (step 1, C25)",
+        "endpoint": "connect",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "signature-input": "sig=(\"@method\" \"@method\");created=1790000000;expires=1790000060;nonce=\"8PHy8_T19vf4-fr7_P3-_w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+          "signature": "sig=:+hnl7+pUe7FX0PFXJRXRLqjtaDLOmXjDZzEa3KFxz8+527x2E2NoGTZcGgrB89PEWTs7cgrnj+Ad0K2BMlPcJg==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@method\": POST\n\"@signature-params\": (\"@method\" \"@method\");created=1790000000;expires=1790000060;nonce=\"8PHy8_T19vf4-fr7_P3-_w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+        "expected": "signature_invalid"
+      },
+      {
+        "name": "confirm_over_covered_components",
+        "description": "confirm with the correct tag but over_covered covered components, correctly signed (step 1, C25)",
+        "endpoint": "confirm",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "signature-input": "sig=(\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+          "signature": "sig=:Zk7AUPh6OCW1cC4CtQRu4QF97m/0vwTVGdYr+aCWEe0LxGNVWHnQH2wjGxZqmFiePuRJtHcfh+USmYNXeCDmXg==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+        "expected": "signature_invalid"
+      },
+      {
+        "name": "confirm_duplicated_components",
+        "description": "confirm with the correct tag but duplicated covered components, correctly signed (step 1, C25)",
+        "endpoint": "confirm",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "signature-input": "sig=(\"@method\" \"@method\");created=1790000000;expires=1790000060;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+          "signature": "sig=:wcH2SXSeP0StTk8ZxCEew+DiQ6P71BeGZo3efRUNAvAgsoaj4eYzcYdtv9Xzqam119ov/a/Fh9Kiajx8CpZe2w==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@method\": POST\n\"@signature-params\": (\"@method\" \"@method\");created=1790000000;expires=1790000060;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+        "expected": "signature_invalid"
+      },
+      {
+        "name": "check_in_over_covered_components",
+        "description": "check-in with the correct tag but over_covered covered components, correctly signed (step 1, C25)",
+        "endpoint": "check-in",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "signature": "sig=:fKaB+fNuqoJB0Zls/aghYbDuyNLMslGOMFhQZ7jpYQeVSYpLX8GZwg/8KgAjbZlP5lUJ6NkqVWpzwNppigCj4A==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+        "expected": "signature_invalid",
+        "body": "{\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "check_in_reordered_components",
+        "description": "check-in with the correct tag but reordered covered components, correctly signed (step 1, C25)",
+        "endpoint": "check-in",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:",
+          "signature-input": "sig=(\"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"MDEyMzQ1Njc4OTo7PD0-Pw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "signature": "sig=:CdK07lSbO0QU9dQcgSYHzgVHZ/PvJMh8BQSVaKjwPzU7OtQrte8EcysHQAUSGi1dAdEL4SDk6GAOD/41AhYTdA==:"
+        },
+        "signature_base": "\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@method\": POST\n\"@signature-params\": (\"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"MDEyMzQ1Njc4OTo7PD0-Pw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+        "expected": "signature_invalid",
+        "body": "{\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "check_in_duplicated_components",
+        "description": "check-in with the correct tag but duplicated covered components, correctly signed (step 1, C25)",
+        "endpoint": "check-in",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"QEFCQ0RFRkdISUpLTE1OTw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "signature": "sig=:XSC5dCyZ3k5rKXk5EQELOkrP0wMhq5obPBgTGrhAX8vHOYSpIKkWxFpA5AK7vXLXBIMJrA5WXNGEHr+vqVdd+Q==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@method\": POST\n\"@signature-params\": (\"@method\" \"content-digest\" \"@method\");created=1790000000;expires=1790000060;nonce=\"QEFCQ0RFRkdISUpLTE1OTw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+        "expected": "signature_invalid",
+        "body": "{\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
         "name": "wrong_key",
         "description": "keyid of device A, signed by device B's key (step 5)",
         "endpoint": "renew",
