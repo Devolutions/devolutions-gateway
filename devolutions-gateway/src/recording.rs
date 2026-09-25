@@ -674,15 +674,18 @@ impl RecordingManagerTask {
             .map(|info| info.recording_policy)
             .unwrap_or(false);
 
+        let has_media = manifest.has_media();
+
+        // A log pushed after the media ended must not make the finished recording look live or enforce its policy.
         let ongoing = self.ongoing_recordings.entry(id).or_insert_with(|| OnGoingRecording {
-            state: OnGoingRecordingState::Connected,
+            state: OnGoingRecordingState::LastSeen { timestamp: start_time },
             manifest: manifest.clone(),
             manifest_path,
-            session_must_be_recorded,
+            session_must_be_recorded: false,
             disconnected_ttl,
             media_file: None,
             log_file: None,
-            has_media: false,
+            has_media,
         });
 
         ongoing.manifest = manifest;
@@ -696,6 +699,8 @@ impl RecordingManagerTask {
             ongoing.state = OnGoingRecordingState::Connected;
             ongoing.session_must_be_recorded = session_must_be_recorded;
             ongoing.disconnected_ttl = disconnected_ttl;
+        } else {
+            debug!(%id, %file_type, "Push does not drive the recording state");
         }
 
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -1372,19 +1377,67 @@ mod tests {
         );
     }
 
-    #[test]
-    fn manifest_without_logs_is_read_and_written_unchanged() {
-        let json = serde_json::json!({
-            "sessionId": "11111111-1111-1111-1111-111111111111",
-            "startTime": 1,
-            "duration": 5,
-            "files": [
-                { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
-            ]
-        });
+    #[tokio::test]
+    async fn late_log_push_to_finished_media_recording() {
+        let mut h = harness();
+        let id = Uuid::new_v4();
 
-        let manifest: JrecManifest = serde_json::from_value(json.clone()).expect("manifest without logs");
-        assert!(manifest.logs.is_empty());
-        assert_eq!(serde_json::to_value(&manifest).expect("serialize manifest"), json);
+        h.connect(id, RecordingFileType::WebM).await.expect("media push");
+        h.ongoing(id).session_must_be_recorded = true;
+        h.disconnect(id, RecordingFileType::WebM).await;
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+        h.expect_kill(id).await;
+
+        let log_file = h
+            .connect(id, RecordingFileType::SessionRecordingLog)
+            .await
+            .expect("late log push");
+
+        assert_eq!(log_file.file_name(), Some("recording-1.slog"));
+        assert!(h.ongoing(id).has_media);
+        assert!(!h.is_connected(id));
+        assert!(!h.ongoing(id).session_must_be_recorded);
+        assert_eq!(
+            h.manifest_file_names(id),
+            (vec!["recording-0.webm".to_owned()], vec!["recording-1.slog".to_owned()])
+        );
+
+        h.disconnect(id, RecordingFileType::SessionRecordingLog).await;
+        assert!(!h.is_connected(id));
+        h.manager.handle_remove(id);
+
+        assert!(h.is_terminated(id));
+        h.expect_no_kill();
+
+        let manifest = h.manifest_json_on_disk(id);
+        assert_eq!(manifest["files"].as_array().map(Vec::len), Some(1));
+        assert_eq!(manifest["files"][0]["fileName"], "recording-0.webm");
+        assert_eq!(manifest["logs"].as_array().map(Vec::len), Some(1));
+        assert_eq!(manifest["logs"][0]["fileName"], "recording-1.slog");
+    }
+
+    #[test]
+    fn manifest_shapes_round_trip_unchanged() {
+        const MEDIA_ONLY: &str = r#"{"sessionId":"11111111-1111-1111-1111-111111111111","startTime":1,"duration":5,"files":[{"fileName":"recording-0.webm","startTime":1,"duration":5}]}"#;
+        const LOG_ONLY: &str = r#"{"sessionId":"11111111-1111-1111-1111-111111111111","startTime":1,"duration":5,"files":[{"fileName":"recording-0.slog","startTime":1,"duration":5}]}"#;
+        const MEDIA_WITH_LOG: &str = r#"{"sessionId":"11111111-1111-1111-1111-111111111111","startTime":1,"duration":5,"files":[{"fileName":"recording-0.webm","startTime":1,"duration":5}],"logs":[{"fileName":"recording-1.slog","startTime":2,"duration":3}]}"#;
+        const GATEWAY_2026_3_0: &str = r#"{"sessionId":"5b0c3a2e-8f1d-4c6a-9e7b-2d4f6a8c0e1f","startTime":1787255035,"duration":59,"files":[{"fileName":"recording-0.slog","startTime":1787255035,"duration":59}]}"#;
+
+        let names = |files: &[JrecFile]| files.iter().map(|file| file.file_name.clone()).collect::<Vec<_>>();
+
+        for (json, files, logs) in [
+            (MEDIA_ONLY, vec!["recording-0.webm"], vec![]),
+            (LOG_ONLY, vec!["recording-0.slog"], vec![]),
+            (MEDIA_WITH_LOG, vec!["recording-0.webm"], vec!["recording-1.slog"]),
+            (GATEWAY_2026_3_0, vec!["recording-0.slog"], vec![]),
+        ] {
+            let manifest: JrecManifest = serde_json::from_str(json).expect("manifest");
+
+            assert_eq!(names(&manifest.files), files, "{json}");
+            assert_eq!(names(&manifest.logs), logs, "{json}");
+            assert_eq!(serde_json::to_string(&manifest).expect("serialize manifest"), json);
+        }
     }
 }
