@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -9,11 +10,11 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use der::{Decode as _, Encode as _};
 use http::Method;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use p256::ecdsa::SigningKey;
 #[cfg(windows)]
 use p256::ecdsa::VerifyingKey;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use p256::pkcs8::DecodePrivateKey as _;
 use p256::pkcs8::EncodePublicKey as _;
 use rand::RngExt as _;
@@ -40,6 +41,18 @@ const KNOWN_METADATA_KEYS: [&str; 8] = [
     "machine_id",
 ];
 const REQUIRED_METADATA_KEYS: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
+
+fn validate_key_name(prefix: &str, name: &str) -> anyhow::Result<()> {
+    let key_uuid = name
+        .strip_prefix(prefix)
+        .with_context(|| format!("key name {name} does not start with run prefix {prefix}"))?;
+    let parsed = uuid::Uuid::parse_str(key_uuid).context("key name does not end with a UUID")?;
+    ensure!(
+        parsed.to_string() == key_uuid,
+        "key name does not end with a lowercase hyphenated UUID"
+    );
+    Ok(())
+}
 
 fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> anyhow::Result<()> {
     let values = metadata.as_object().context("agent metadata is not an object")?;
@@ -102,37 +115,28 @@ struct AgentCase {
     #[cfg(unix)]
     process_group: Option<i32>,
     tokens: Vec<String>,
-    metadata_baseline: Option<Value>,
+    metadata_hostname: String,
     cleaned: bool,
-    #[cfg(windows)]
-    machine_keys: Vec<String>,
-    #[cfg(windows)]
-    preexisting_keys: std::collections::HashSet<String>,
-    #[cfg(windows)]
-    known_authorities: std::collections::HashSet<uuid::Uuid>,
 }
 
 impl AgentCase {
     async fn new(ctx: Context, renewal_after_secs: Option<u64>, run: bool) -> anyhow::Result<Self> {
-        #[cfg(windows)]
-        let preexisting_keys =
-            crate::windows::snapshot_machine_identity_keys().context("snapshot existing machine identity keys")?;
-        #[cfg(windows)]
-        let known_authorities = [
-            ctx.target.authority_id,
-            ctx.second.as_ref().and_then(|target| target.authority_id),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
         let dir = tempfile::Builder::new()
             .prefix("identity-agent-")
             .tempdir_in(&ctx.work_dir)
             .context("create agent data dir")?;
+        let metadata_hostname = "conformance-initial".to_owned();
+        let metadata_override_path = dir.path().join("identity-metadata-override.json");
+        std::fs::write(
+            &metadata_override_path,
+            serde_json::to_vec(&json!({ "hostname": metadata_hostname }))?,
+        )?;
         let mut identity_debug = json!({
             "disable_jitter": true,
             "backoff_max_secs": 2,
-            "pending_poll_interval_ms": 200
+            "pending_poll_interval_ms": 200,
+            "key_name_prefix": &ctx.key_name_prefix,
+            "metadata_override_path": metadata_override_path
         });
         if let Some(seconds) = renewal_after_secs {
             identity_debug["renewal_after_secs"] = json!(seconds);
@@ -175,14 +179,8 @@ impl AgentCase {
             #[cfg(unix)]
             process_group: None,
             tokens: Vec::new(),
-            metadata_baseline: None,
+            metadata_hostname,
             cleaned: false,
-            #[cfg(windows)]
-            machine_keys: Vec::new(),
-            #[cfg(windows)]
-            preexisting_keys,
-            #[cfg(windows)]
-            known_authorities,
         };
         if run {
             case.start().await?;
@@ -210,28 +208,65 @@ impl AgentCase {
             .join("identity.json")
     }
 
+    fn in_progress_path(&self) -> PathBuf {
+        self.path().join("identity").join("enrollment-in-progress.json")
+    }
+
+    fn metadata_override_path(&self) -> PathBuf {
+        self.path().join("identity-metadata-override.json")
+    }
+
+    fn set_metadata_hostname(&mut self, hostname: &str) -> anyhow::Result<()> {
+        let replacement = self.path().join("identity-metadata-override-next.json");
+        std::fs::write(&replacement, serde_json::to_vec(&json!({ "hostname": hostname }))?)?;
+        std::fs::rename(&replacement, self.metadata_override_path())?;
+        self.metadata_hostname = hostname.to_owned();
+        Ok(())
+    }
+
+    fn key_file_path(&self, name: &str) -> PathBuf {
+        self.path().join("identity").join("keys").join(format!("{name}.p8"))
+    }
+
+    fn in_progress(&self) -> anyhow::Result<Option<Value>> {
+        let path = self.in_progress_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let record: Value =
+            serde_json::from_slice(&std::fs::read(path)?).context("read enrollment-in-progress.json")?;
+        ensure!(record["version"] == 1, "in-progress enrollment has wrong version");
+        field(&record, "token_sha256")?;
+        validate_key_name(&self.ctx.key_name_prefix, field(&record, "key_name")?)?;
+        Ok(Some(record))
+    }
+
     fn state(&self, authority_id: &str) -> anyhow::Result<Value> {
         serde_json::from_slice(&std::fs::read(self.identity_path(authority_id))?).context("read stored identity")
+    }
+
+    fn has_stored_identity(&self) -> anyhow::Result<bool> {
+        let authorities = self.path().join("identity").join("authorities");
+        if !authorities.exists() {
+            return Ok(false);
+        }
+        for entry in std::fs::read_dir(authorities)? {
+            if entry?.path().join("identity.json").exists() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn add_token(&mut self, token: &str) {
         self.tokens.push(token.to_owned());
     }
 
-    fn observe_agent_metadata(&mut self, device: &Value) -> anyhow::Result<()> {
+    fn observe_agent_metadata(&self, device: &Value) -> anyhow::Result<()> {
         let metadata = device
             .get("metadata")
             .context("admin full view omitted agent metadata")?;
-        validate_agent_metadata(metadata, self.ctx.agent_version.as_deref())?;
-        if let Some(baseline) = &self.metadata_baseline {
-            ensure!(
-                metadata == baseline,
-                "agent metadata changed between enroll, renew or Hello"
-            );
-        } else {
-            self.metadata_baseline = Some(metadata.clone());
-        }
-        Ok(())
+        validate_agent_metadata(metadata, self.ctx.agent_version.as_deref())
     }
 
     async fn device(&mut self, target: &Target, device_id: &str) -> anyhow::Result<crate::client::Reply> {
@@ -355,18 +390,16 @@ impl AgentCase {
                         if json_path.exists() {
                             let state: Value = serde_json::from_slice(&std::fs::read(json_path)?)?;
                             if state["device_id"] == id && !self.pending_path().exists() {
+                                ensure!(
+                                    key_exists(self, key_name(&state, "current")?)?,
+                                    "settled enrollment has no current identity key"
+                                );
                                 self.observe_agent_metadata(device)?;
                                 if let Some(known) = target.authority_id {
                                     ensure!(
                                         state["authority_id"] == known.to_string(),
                                         "agent stored an unexpected authority ID"
                                     );
-                                }
-                                #[cfg(windows)]
-                                for slot in ["current", "pending", "previous"] {
-                                    if let Some(name) = state["keys"][slot]["key_name"].as_str() {
-                                        self.machine_keys.push(name.to_owned());
-                                    }
                                 }
                                 return Ok((id, state));
                             }
@@ -418,11 +451,23 @@ impl AgentCase {
                 count(&target.token_record(&token.id).await?.body, "usedCount")? == expected_uses,
                 "permanently invalid pending token consumed a use"
             );
-            if !self.pending_path().exists() {
+            #[cfg(windows)]
+            let machine_keys_gone = crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?.is_empty();
+            #[cfg(not(windows))]
+            let machine_keys_gone = true;
+            if !self.pending_path().exists()
+                && !self.in_progress_path().exists()
+                && !self.has_stored_identity()?
+                && self.file_keys_with_prefix()?.is_empty()
+                && machine_keys_gone
+            {
                 return Ok(());
             }
             self.check_running()?;
-            ensure!(start.elapsed() < WAIT, "agent kept a permanently invalid pending token");
+            ensure!(
+                start.elapsed() < WAIT,
+                "agent kept a permanently invalid pending token, in-progress record, key or identity"
+            );
             tokio::time::sleep(POLL).await;
         }
     }
@@ -477,20 +522,153 @@ impl AgentCase {
 
     async fn finish(&mut self) -> anyhow::Result<()> {
         let stopped = self.stop().await;
+        let layout = self.audit_identity_tree();
         let protected = self.audit_stored_keys();
-        #[cfg(windows)]
-        crate::windows::cleanup_machine_keys(
-            self.path(),
-            &self.machine_keys,
-            &self.preexisting_keys,
-            &self.known_authorities,
-            self.ctx.mock() || self.ctx.cleanup_machine_keys,
-        );
-        let audited = self.audit_tokens();
-        self.cleaned = true;
+        let orphaned = self.audit_orphan_keys();
+        let tokens = self.audit_tokens();
+        let cleaned = self.cleanup_run_keys();
+        self.cleaned = cleaned.is_ok();
         stopped?;
+        layout?;
         protected?;
-        audited
+        orphaned?;
+        tokens?;
+        cleaned
+    }
+
+    fn audit_identity_tree(&self) -> anyhow::Result<()> {
+        let identity = self.path().join("identity");
+        let metadata = match std::fs::symlink_metadata(&identity) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        ensure!(
+            metadata.file_type().is_dir(),
+            "identity directory is not a real directory"
+        );
+        for entry in std::fs::read_dir(identity)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_str().context("identity entry name is not UTF-8")?;
+            let file_type = entry.file_type()?;
+            if path == self.pending_path() || path == self.in_progress_path() {
+                ensure!(file_type.is_file(), "{} is not a regular file", path.display());
+            } else if name == "keys" {
+                ensure!(file_type.is_dir(), "identity/keys is not a directory");
+                if self.ctx.key_backend != KeyBackend::File {
+                    ensure!(
+                        std::fs::read_dir(&path)?.next().is_none(),
+                        "key-store backend left file-backed keys"
+                    );
+                }
+                for key in std::fs::read_dir(path)? {
+                    let key = key?;
+                    let file_name = key.file_name();
+                    let name = file_name
+                        .to_str()
+                        .and_then(|name| name.strip_suffix(".p8"))
+                        .with_context(|| format!("unexpected key file {}", key.path().display()))?;
+                    validate_key_name(&self.ctx.key_name_prefix, name)?;
+                    ensure!(key.file_type()?.is_file(), "{} is not a key file", key.path().display());
+                }
+            } else if name == "authorities" {
+                ensure!(file_type.is_dir(), "identity/authorities is not a directory");
+                for authority in std::fs::read_dir(path)? {
+                    let authority = authority?;
+                    let name = authority.file_name();
+                    let name = name.to_str().context("authority directory name is not UTF-8")?;
+                    let parsed = uuid::Uuid::parse_str(name).context("authority directory is not a UUID")?;
+                    ensure!(
+                        parsed.to_string() == name,
+                        "authority directory is not a lowercase UUID"
+                    );
+                    ensure!(authority.file_type()?.is_dir(), "authority entry is not a directory");
+                    for child in std::fs::read_dir(authority.path())? {
+                        let child = child?;
+                        ensure!(
+                            child.file_name() == "identity.json" && child.file_type()?.is_file(),
+                            "unexpected identity file {}",
+                            child.path().display()
+                        );
+                    }
+                }
+            } else {
+                anyhow::bail!("unexpected identity file {}", path.display());
+            }
+        }
+        Ok(())
+    }
+
+    fn file_keys_with_prefix(&self) -> anyhow::Result<HashSet<String>> {
+        let dir = self.path().join("identity").join("keys");
+        let mut keys = HashSet::new();
+        if dir.exists() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let file_name = entry.file_name();
+                let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(".p8")) else {
+                    continue;
+                };
+                if name.starts_with(&self.ctx.key_name_prefix) {
+                    ensure!(
+                        entry.file_type()?.is_file(),
+                        "key file {} is not a regular file",
+                        entry.path().display()
+                    );
+                    keys.insert(name.to_owned());
+                }
+            }
+        }
+        Ok(keys)
+    }
+
+    fn audit_orphan_keys(&self) -> anyhow::Result<()> {
+        let mut recorded = HashSet::new();
+        let authorities = self.path().join("identity").join("authorities");
+        if authorities.exists() {
+            for authority in std::fs::read_dir(authorities)? {
+                let path = authority?.path().join("identity.json");
+                if path.exists() {
+                    let state: Value = serde_json::from_slice(&std::fs::read(&path)?)
+                        .with_context(|| format!("read {}", path.display()))?;
+                    for slot in ["current", "pending", "previous"] {
+                        if let Some(name) = state["keys"][slot]["key_name"].as_str() {
+                            validate_key_name(&self.ctx.key_name_prefix, name)?;
+                            recorded.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(progress) = self.in_progress()? {
+            recorded.insert(field(&progress, "key_name")?.to_owned());
+        }
+        let mut existing = self.file_keys_with_prefix()?;
+        #[cfg(windows)]
+        existing.extend(crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?);
+        let mut orphaned = existing.difference(&recorded).cloned().collect::<Vec<_>>();
+        orphaned.sort_unstable();
+        ensure!(
+            orphaned.is_empty(),
+            "unrecorded identity keys with run prefix: {}",
+            orphaned.join(", ")
+        );
+        Ok(())
+    }
+
+    fn cleanup_run_keys(&self) -> anyhow::Result<()> {
+        let files = self.file_keys_with_prefix();
+        #[cfg(windows)]
+        let machine_cleanup = crate::windows::cleanup_machine_keys(&self.ctx.key_name_prefix);
+        for name in files? {
+            std::fs::remove_file(self.key_file_path(&name))
+                .with_context(|| format!("delete run-owned file key {name}"))?;
+        }
+        #[cfg(windows)]
+        machine_cleanup?;
+        Ok(())
     }
 
     fn audit_stored_keys(&self) -> anyhow::Result<()> {
@@ -504,13 +682,28 @@ impl AgentCase {
             if path.exists() {
                 let state: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
                 let id = field(&state, "authority_id")?;
-                self.check_key_protection(id, &state)?;
+                self.check_key_protection_inner(id, &state, false)?;
             }
         }
         Ok(())
     }
 
     fn check_key_protection(&self, authority_id: &str, state: &Value) -> anyhow::Result<()> {
+        self.check_key_protection_inner(authority_id, state, true)
+    }
+
+    fn check_key_protection_inner(
+        &self,
+        authority_id: &str,
+        state: &Value,
+        require_current: bool,
+    ) -> anyhow::Result<()> {
+        if require_current {
+            ensure!(
+                state["keys"]["current"]["key_name"].is_string(),
+                "settled identity has no current key name"
+            );
+        }
         #[cfg(windows)]
         let _ = authority_id;
         #[cfg(unix)]
@@ -526,6 +719,7 @@ impl AgentCase {
             let Some(name) = state["keys"][slot]["key_name"].as_str() else {
                 continue;
             };
+            validate_key_name(&self.ctx.key_name_prefix, name)?;
             let expected_spki = state["keys"][slot]["certificate_chain"]
                 .as_array()
                 .map(|chain| -> anyhow::Result<Vec<u8>> {
@@ -537,9 +731,15 @@ impl AgentCase {
                     Ok(certificate.tbs_certificate().subject_public_key_info().to_der()?)
                 })
                 .transpose()?;
+            // A record can briefly name a key that has not been created yet or was already deleted (C15).
             #[cfg(windows)]
             if self.ctx.key_backend == KeyBackend::KeyStore {
-                if crate::windows::machine_key_exists(name)? {
+                let exists = crate::windows::machine_key_exists(name)?;
+                ensure!(
+                    exists || !require_current || slot != "current",
+                    "settled current machine key is missing"
+                );
+                if exists {
                     crate::windows::assert_non_exportable(name)?;
                     crate::windows::assert_machine_key_acl(name)?;
                     if let Some(expected) = &expected_spki {
@@ -549,21 +749,19 @@ impl AgentCase {
                             "{slot} machine key does not match its leaf SPKI"
                         );
                     }
-                } else {
-                    ensure!(slot == "previous", "{slot} machine key is missing");
                 }
             }
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             if self.ctx.key_backend == KeyBackend::File {
-                use std::os::unix::fs::PermissionsExt as _;
-                let path = self
-                    .path()
-                    .join("identity")
-                    .join("authorities")
-                    .join(authority_id)
-                    .join("keys")
-                    .join(format!("{name}.p8"));
+                let path = self.key_file_path(name);
+                ensure!(
+                    path.exists() || !require_current || slot != "current",
+                    "settled current file-backed key is missing"
+                );
                 if path.exists() {
+                    #[cfg(unix)]
+                    use std::os::unix::fs::PermissionsExt as _;
+                    #[cfg(unix)]
                     ensure!(
                         std::fs::metadata(&path)?.permissions().mode() & 0o777 == 0o600,
                         "{} is not mode 0600",
@@ -576,29 +774,28 @@ impl AgentCase {
                             "{slot} file key does not match its leaf SPKI"
                         );
                     }
-                } else {
-                    ensure!(slot == "previous", "{slot} file key is missing");
                 }
             }
             #[cfg(not(any(unix, windows)))]
-            let _ = (name, expected_spki);
+            let _ = expected_spki;
         }
-        #[cfg(unix)]
         if self.ctx.key_backend == KeyBackend::File {
-            let keys_dir = self
-                .path()
-                .join("identity")
-                .join("authorities")
-                .join(authority_id)
-                .join("keys");
+            let keys_dir = self.path().join("identity").join("keys");
             if keys_dir.exists() {
                 for entry in std::fs::read_dir(keys_dir)? {
-                    let path = entry?.path();
-                    ensure!(
-                        path.is_file() && path.extension().is_some_and(|ext| ext == "p8"),
-                        "leftover key-store temp file {}",
-                        path.display()
-                    );
+                    let entry = entry?;
+                    if entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&self.ctx.key_name_prefix)
+                    {
+                        let path = entry.path();
+                        ensure!(
+                            path.is_file() && path.extension().is_some_and(|ext| ext == "p8"),
+                            "leftover file-backend temp file {}",
+                            path.display()
+                        );
+                    }
                 }
             }
         }
@@ -653,7 +850,7 @@ impl Drop for AgentCase {
         self.kill_process_tree();
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
-            for _ in 0..20 {
+            for _ in 0..100 {
                 if child.try_wait().ok().flatten().is_some() {
                     break;
                 }
@@ -661,16 +858,17 @@ impl Drop for AgentCase {
             }
         }
         if !self.cleaned {
-            #[cfg(windows)]
-            crate::windows::cleanup_machine_keys(
-                self.path(),
-                &self.machine_keys,
-                &self.preexisting_keys,
-                &self.known_authorities,
-                self.ctx.mock() || self.ctx.cleanup_machine_keys,
-            );
+            if let Err(error) = self.audit_identity_tree() {
+                eprintln!("agent-case identity tree audit failed: {error:#}");
+            }
+            if let Err(error) = self.audit_orphan_keys() {
+                eprintln!("agent-case orphan audit failed: {error:#}");
+            }
             if let Err(error) = self.audit_tokens() {
                 eprintln!("agent-case cleanup audit failed: {error:#}");
+            }
+            if let Err(error) = self.cleanup_run_keys() {
+                eprintln!("agent-case key cleanup failed: {error:#}");
             }
         }
     }
@@ -696,6 +894,64 @@ async fn new_token(case: &AgentCase, uses: u32) -> anyhow::Result<Token> {
         .target
         .create_token(uses, Duration::from_secs(3600), None)
         .await
+}
+
+async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Result<(String, String)> {
+    let target = case.ctx.target.clone();
+    let before = count(&target.requests(Some(token)).await?, "enroll")?;
+    expect_status(
+        &target
+            .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": true }))
+            .await?,
+        200,
+    )?;
+    target.faults(&json!({ "drop_next_response": "enroll" })).await?;
+    case.write_pending(&token.text)?;
+    let started = Instant::now();
+    loop {
+        let requests = target.requests(Some(token)).await?;
+        let attempts = count(&requests, "enroll")?;
+        ensure!(
+            attempts <= before + 1 + count(&requests, "enroll_retry_503")?,
+            "agent retried enrollment successfully while the retry barrier was held"
+        );
+        let listing = target.devices_for(token, "").await?;
+        expect_status(&listing, 200)?;
+        let record = target.token_record(&token.id).await?;
+        expect_status(&record, 200)?;
+        if count(&listing.body, "totalCount")? == 1
+            && count(&record.body, "usedCount")? == 1
+            && let Some(progress) = case.in_progress()?
+        {
+            ensure!(attempts > before, "enrollment committed without a recorded request");
+            ensure!(
+                case.pending_path().exists(),
+                "agent deleted the pending file before receiving a response"
+            );
+            ensure!(
+                !case.has_stored_identity()?,
+                "agent stored an identity before receiving a response"
+            );
+            ensure!(
+                progress["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(token.text.as_bytes())),
+                "in-progress enrollment has the wrong full-token hash"
+            );
+            let key = field(&progress, "key_name")?.to_owned();
+            ensure!(key_exists(case, &key)?, "committed enrollment key is missing");
+            ensure!(
+                target.control("faults", &json!({})).await?.body["drop_next_response"].is_null(),
+                "the dropped enroll response fault was not consumed"
+            );
+            let id = field(&listing.body["data"][0], "id")?.to_owned();
+            return Ok((id, key));
+        }
+        case.check_running()?;
+        ensure!(
+            started.elapsed() < WAIT,
+            "agent did not commit a dropped-response enrollment and persist its key within 20 seconds"
+        );
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 async fn assert_terminal_stops(
@@ -801,25 +1057,24 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
         "stored identity has wrong full-token hash"
     );
     ensure!(
+        device["metadata"]["hostname"] == case.metadata_hostname,
+        "enrollment ignored the configured metadata hostname"
+    );
+    ensure!(
         state["keys"]["current"]["certificate_chain"]
             .as_array()
             .is_some_and(|chain| !chain.is_empty()),
         "stored identity has an empty current certificate chain"
     );
-    let mut names = std::collections::HashSet::new();
+    ensure!(
+        key_exists(case, key_name(state, "current")?)?,
+        "enrolled identity's current key is missing"
+    );
+    let mut names = HashSet::new();
     for slot in ["current", "pending", "previous"] {
         if let Some(name) = state["keys"][slot]["key_name"].as_str() {
-            let generation = name
-                .strip_prefix(&format!("DevolutionsAgent-Identity-{authority}-"))
-                .context("stored key name has the wrong authority prefix")?;
-            ensure!(
-                !generation.is_empty()
-                    && generation.len() <= 64
-                    && generation
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '-'),
-                "stored {slot} key name has an invalid generation"
-            );
+            validate_key_name(&case.ctx.key_name_prefix, name)
+                .with_context(|| format!("stored {slot} key name is invalid"))?;
             ensure!(names.insert(name), "stored key slots refer to the same key");
             if let Some(chain) = state["keys"][slot]["certificate_chain"].as_array() {
                 ensure!(!chain.is_empty(), "{slot} certificate chain is empty");
@@ -851,24 +1106,18 @@ fn key_name<'a>(state: &'a Value, slot: &str) -> anyhow::Result<&'a str> {
     field(&state["keys"][slot], "key_name")
 }
 
-fn key_exists(case: &AgentCase, authority_id: &str, name: &str) -> anyhow::Result<bool> {
+fn key_exists(case: &AgentCase, name: &str) -> anyhow::Result<bool> {
+    validate_key_name(&case.ctx.key_name_prefix, name)?;
     #[cfg(windows)]
     if case.ctx.key_backend == KeyBackend::KeyStore {
         return crate::windows::machine_key_exists(name);
     }
-    Ok(case
-        .path()
-        .join("identity")
-        .join("authorities")
-        .join(authority_id)
-        .join("keys")
-        .join(format!("{name}.p8"))
-        .exists())
+    Ok(case.key_file_path(name).exists())
 }
 
-async fn wait_key_deleted(case: &mut AgentCase, authority_id: &str, name: &str) -> anyhow::Result<()> {
+async fn wait_key_deleted(case: &mut AgentCase, name: &str) -> anyhow::Result<()> {
     let started = Instant::now();
-    while key_exists(case, authority_id, name)? {
+    while key_exists(case, name)? {
         case.check_running()?;
         ensure!(
             started.elapsed() < WAIT,
@@ -924,6 +1173,201 @@ pub(crate) async fn a_pending_file_enroll_success(ctx: Context) -> anyhow::Resul
             expect_status(&admin, 200)?;
             ensure!(admin.body["id"] == id, "enrolled device absent from admin API");
             assert_stored_identity(case, &token, &state, &admin.body)?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            let (id, key) = dropped_enrollment(case, &token).await?;
+            case.stop().await?;
+            let requests = target.requests(Some(&token)).await?;
+            ensure!(
+                count(&requests, "enroll")? == 1 + count(&requests, "enroll_retry_503")?,
+                "agent received an enrollment retry before it could be restarted"
+            );
+            ensure!(
+                case.in_progress()?
+                    .as_ref()
+                    .and_then(|record| record["key_name"].as_str())
+                    == Some(key.as_str())
+                    && case.pending_path().exists(),
+                "pending enrollment key was not persisted across agent stop"
+            );
+            let before_restart = count(&requests, "enroll")?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            case.start().await?;
+            let (recovered_id, state) = case.enrolled(&target, &token).await?;
+            ensure!(recovered_id == id, "retry created a second device");
+            ensure!(
+                count(&target.requests(Some(&token)).await?, "enroll")? > before_restart,
+                "agent did not retry enrollment after restart"
+            );
+            ensure!(
+                count(&target.token_record(&token.id).await?.body, "usedCount")? == 1,
+                "retry consumed a second token use"
+            );
+            ensure!(
+                key_name(&state, "current")? == key,
+                "agent did not reuse the in-progress key"
+            );
+            ensure!(
+                !case.in_progress_path().exists(),
+                "in-progress enrollment record survived success"
+            );
+            let admin = case.device(&target, &id).await?;
+            expect_status(&admin, 200)?;
+            assert_stored_identity(case, &token, &state, &admin.body)?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_enroll_new_token_replaces_in_progress_key(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let original_token = new_token(case, 1).await?;
+            let (original_id, original_key) = dropped_enrollment(case, &original_token).await?;
+            let replacement = new_token(case, 1).await?;
+            std::fs::remove_file(case.pending_path())?;
+            case.write_pending(&replacement.text)?;
+            let replacement_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(replacement.text.as_bytes()));
+            let started = Instant::now();
+            let replacement_key = loop {
+                if let Some(progress) = case.in_progress()?
+                    && progress["token_sha256"] == replacement_hash
+                {
+                    let name = field(&progress, "key_name")?;
+                    ensure!(name != original_key, "new pending token reused the original key name");
+                    if !key_exists(case, &original_key)? && key_exists(case, name)? {
+                        break name.to_owned();
+                    }
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not replace the in-progress token and key within 20 seconds"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            ensure!(
+                count(&target.devices_for(&replacement, "").await?.body, "totalCount")? == 0
+                    && count(&target.token_record(&replacement.id).await?.body, "usedCount")? == 0,
+                "retry barrier did not hold the replacement enrollment"
+            );
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            let (new_id, state) = case.enrolled(&target, &replacement).await?;
+            ensure!(
+                new_id != original_id,
+                "a different pending token reused the first device"
+            );
+            ensure!(
+                key_name(&state, "current")? == replacement_key,
+                "a different pending token did not retain its new enrollment key"
+            );
+            ensure!(
+                state["token_sha256"] == replacement_hash,
+                "replacement enrollment kept the original token hash"
+            );
+            wait_key_deleted(case, &original_key).await?;
+            ensure!(
+                !case.in_progress_path().exists() && !case.pending_path().exists(),
+                "replacement enrollment retained the old in-progress record"
+            );
+            ensure!(
+                count(&target.devices_for(&original_token, "").await?.body, "totalCount")? == 1
+                    && count(&target.token_record(&original_token.id).await?.body, "usedCount")? == 1
+                    && count(&target.token_record(&replacement.id).await?.body, "usedCount")? == 1,
+                "pending-token replacement changed enrollment use counts"
+            );
+            let admin = case.device(&target, &new_id).await?;
+            expect_status(&admin, 200)?;
+            assert_stored_identity(case, &replacement, &state, &admin.body)?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            let (id, key) = dropped_enrollment(case, &token).await?;
+            target.revoke(&id).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            let started = Instant::now();
+            let attempts = loop {
+                let requests = target.requests(Some(&token)).await?;
+                let attempts = count(&requests, "enroll")?;
+                ensure!(
+                    count(&requests, "enroll_device_revoked")? <= 1,
+                    "agent retried enrollment again after receiving device_revoked"
+                );
+                if count(&requests, "enroll_device_revoked")? == 1
+                    && !case.pending_path().exists()
+                    && !case.in_progress_path().exists()
+                    && !key_exists(case, &key)?
+                    && !case.has_stored_identity()?
+                {
+                    break attempts;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not remove the revoked enrollment, in-progress record and key within 20 seconds"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            ensure!(attempts >= 2, "agent did not retry the revoked enrollment");
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                case.check_running()?;
+                ensure!(
+                    count(&target.requests(Some(&token)).await?, "enroll")? == attempts,
+                    "agent sent another enrollment request after device_revoked"
+                );
+            }
+            case.stop().await?;
+            case.start().await?;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            case.check_running()?;
+            ensure!(
+                count(&target.requests(Some(&token)).await?, "enroll")? == attempts
+                    && !case.pending_path().exists()
+                    && !case.in_progress_path().exists()
+                    && !key_exists(case, &key)?
+                    && !case.has_stored_identity()?,
+                "permanently revoked enrollment resumed after restart"
+            );
+            ensure!(
+                count(&target.token_record(&token.id).await?.body, "usedCount")? == 1
+                    && count(&target.devices_for(&token, "").await?.body, "totalCount")? == 1,
+                "revoked enrollment created another device or consumed another use"
+            );
             Ok(())
         })
     })
@@ -1225,7 +1669,7 @@ pub(crate) async fn a_different_token_replaces_identity(ctx: Context) -> anyhow:
                     && next_state["token_sha256"] != first_state["token_sha256"],
                 "replacement did not store the new token hash"
             );
-            wait_key_deleted(case, &authority, &original_key).await?;
+            wait_key_deleted(case, &original_key).await?;
             ensure!(
                 case.state(&authority)?["device_id"] == next_id,
                 "stored identity not replaced"
@@ -1267,7 +1711,7 @@ pub(crate) async fn a_rejected_identity_replaced(ctx: Context) -> anyhow::Result
                     && new_state["token_sha256"] != old_state["token_sha256"],
                 "rejected identity replacement did not store the new token hash"
             );
-            wait_key_deleted(case, &authority, &old_key).await?;
+            wait_key_deleted(case, &old_key).await?;
             case.until_device(&target, &new_id, "replacement connection", |record| {
                 record["connected"] == true
             })
@@ -1419,10 +1863,10 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                     break record.body;
                 }
                 if let Ok(state) = case.state(&authority) {
-                    case.check_key_protection(&authority, &state)?;
+                    case.check_key_protection_inner(&authority, &state, false)?;
                 }
                 ensure!(
-                    key_exists(case, &authority, &old_key)?,
+                    key_exists(case, &old_key)?,
                     "old key was deleted before a replacement certificate authenticated"
                 );
                 case.check_running()?;
@@ -1470,7 +1914,7 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                 "stored current certificate does not match the authenticated new leaf"
             );
             case.check_key_protection(&authority, &final_state)?;
-            wait_key_deleted(case, &authority, &old_key).await?;
+            wait_key_deleted(case, &old_key).await?;
             let new_thumb = current_thumbprint(&renewed)?.to_owned();
             case.stop().await?;
             case.until_device(&target, &id, "offline channel after restart", |device| {
@@ -1508,6 +1952,12 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
             })
             .await?;
             let attempts = count(&target.requests(None).await?, "renew")?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "renew", "pause": true }))
+                    .await?,
+                200,
+            )?;
             target.faults(&json!({ "drop_next_response": "renew" })).await?;
             expect_status(
                 &target
@@ -1520,17 +1970,18 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 let record = case.device(&target, &id).await?;
                 expect_status(&record, 200)?;
                 let state = case.state(&authority)?;
-                let renew_count = count(&target.requests(None).await?, "renew")?;
+                let requests = target.requests(None).await?;
+                let renew_count = count(&requests, "renew")?;
                 ensure!(
-                    renew_count <= attempts + 1,
-                    "lost-response retry happened before the restart fixture could stop the agent"
+                    renew_count <= attempts + 1 + count(&requests, "renew_retry_503")?,
+                    "renewal retry succeeded while the retry barrier was held"
                 );
                 let pending = record.body["certificates"]
                     .as_array()
                     .context("missing certificates")?
                     .iter()
                     .find(|cert| cert["status"] == "pending");
-                if renew_count == attempts + 1
+                if renew_count > attempts
                     && let Some(pending) = pending
                     && let Ok(key) = key_name(&state, "pending")
                 {
@@ -1548,14 +1999,22 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 "drop-next-renew fault was not consumed"
             );
             case.stop().await?;
+            let requests = target.requests(None).await?;
             ensure!(
-                count(&target.requests(None).await?, "renew")? == attempts + 1,
-                "agent retried before it was stopped"
+                count(&requests, "renew")? == attempts + 1 + count(&requests, "renew_retry_503")?,
+                "renewal retry succeeded before the agent was stopped"
             );
             ensure!(
                 key_name(&case.state(&authority)?, "pending")? == pending_key,
                 "pending CSR key was not persisted across stop"
             );
+            let before_restart = count(&requests, "renew")?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "renew", "pause": false }))
+                    .await?,
+                200,
+            )?;
             case.start().await?;
             let renewed = case
                 .until_device(&target, &id, "retried renewal after restart", |device| {
@@ -1568,8 +2027,8 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 "lost renewal response created multiple new certificates"
             );
             ensure!(
-                count(&target.requests(None).await?, "renew")? >= attempts + 2,
-                "lost renewal response was not retried"
+                count(&target.requests(None).await?, "renew")? > before_restart,
+                "lost renewal response was not retried after restart"
             );
             let state = case.state(&authority)?;
             ensure!(
@@ -1599,6 +2058,10 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
             ensure!(
                 enrolled.body["metadata"].is_object(),
                 "enrollment metadata was not an object"
+            );
+            ensure!(
+                enrolled.body["metadata"]["hostname"] == case.metadata_hostname,
+                "enrollment ignored the metadata override"
             );
             let connected = if case.ctx.mock() {
                 ensure!(
@@ -1640,11 +2103,14 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
                 "channel did not update lastSeenAt"
             );
             ensure!(connected["metadata"].is_object(), "Hello metadata not stored");
+            ensure!(
+                connected["metadata"]["hostname"] == case.metadata_hostname,
+                "initial Hello ignored the metadata override"
+            );
             for key in REQUIRED_METADATA_KEYS {
-                let value = field(&enrolled.body["metadata"], key)?;
                 ensure!(
-                    !value.is_empty() && connected["metadata"][key] == value,
-                    "Hello did not refresh the required {key} metadata value"
+                    !field(&connected["metadata"], key)?.is_empty(),
+                    "Hello omitted required {key} metadata"
                 );
             }
             ensure!(
@@ -1713,15 +2179,18 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
-            let authority = field(&state, "authority_id")?.to_owned();
             let old_key = key_name(&state, "current")?.to_owned();
-            let old_thumb = current_thumbprint(
-                &case
-                    .until_device(&target, &id, "old-root channel", |record| record["connected"] == true)
-                    .await?,
-            )?
-            .to_owned();
+            let first = case
+                .until_device(&target, &id, "old-root channel", |record| record["connected"] == true)
+                .await?;
+            ensure!(
+                first["metadata"]["hostname"] == case.metadata_hostname,
+                "initial Hello ignored the metadata override"
+            );
+            let old_thumb = current_thumbprint(&first)?.to_owned();
             target.faults(&json!({ "channel_available": false })).await?;
+            let renewed_hostname = "conformance-renew";
+            case.set_metadata_hostname(renewed_hostname)?;
             expect_status(
                 &target
                     .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
@@ -1730,11 +2199,12 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
             )?;
             let pending = case
                 .until_device(&target, &id, "pending renewal without channel", |record| {
-                    record["certificates"].as_array().is_some_and(|certs| {
-                        certs
-                            .iter()
-                            .any(|cert| cert["status"] == "pending" && cert["thumbprint"] != old_thumb)
-                    })
+                    record["metadata"]["hostname"] == renewed_hostname
+                        && record["certificates"].as_array().is_some_and(|certs| {
+                            certs
+                                .iter()
+                                .any(|cert| cert["status"] == "pending" && cert["thumbprint"] != old_thumb)
+                        })
                 })
                 .await?;
             let new_thumb = pending["certificates"]
@@ -1747,7 +2217,7 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
                 .to_owned();
             for _ in 0..3 {
                 ensure!(
-                    key_exists(case, &authority, &old_key)?
+                    key_exists(case, &old_key)?
                         && current_thumbprint(&case.device(&target, &id).await?.body)? == old_thumb,
                     "old key was deleted before the pending key authenticated"
                 );
@@ -1763,18 +2233,24 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
                 "new channel authenticated while the channel was unavailable"
             );
             expect_status(&target.control("handshake", &json!({ "pause": true })).await?, 200)?;
+            let hello_hostname = "conformance-hello";
+            case.set_metadata_hostname(hello_hostname)?;
             target.faults(&json!({ "channel_available": true })).await?;
             let start = Instant::now();
-            loop {
+            let held_new_stream = loop {
                 let events = target.events(&id).await?;
-                let opened_new = events
-                    .iter()
-                    .any(|event| event["type"] == "stream_opened" && event["cert_thumbprint"] == new_thumb);
-                if opened_new && count(&target.requests(None).await?, "paused_hellos")? > 0 {
-                    break;
+                let paused = target.paused_stream_ids().await?;
+                if let Some(stream) = events.iter().find(|event| {
+                    event["type"] == "stream_opened"
+                        && event["cert_thumbprint"] == new_thumb
+                        && event["stream_id"]
+                            .as_str()
+                            .is_some_and(|id| paused.iter().any(|held| held == id))
+                }) {
+                    break field(stream, "stream_id")?.to_owned();
                 }
                 ensure!(
-                    key_exists(case, &authority, &old_key)?,
+                    key_exists(case, &old_key)?,
                     "old key was deleted while the new channel was still opening"
                 );
                 case.check_running()?;
@@ -1783,10 +2259,12 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
                     "agent did not reach the new-key handshake barrier"
                 );
                 tokio::time::sleep(POLL).await;
-            }
+            };
             for _ in 0..5 {
                 ensure!(
-                    key_exists(case, &authority, &old_key)?
+                    key_exists(case, &old_key)?
+                        && target.paused_stream_ids().await?.contains(&held_new_stream)
+                        && case.device(&target, &id).await?.body["metadata"]["hostname"] == renewed_hostname
                         && target.events(&id).await?.iter().all(|event| {
                             event["type"] != "stream_authenticated" || event["cert_thumbprint"] != new_thumb
                         }),
@@ -1798,7 +2276,7 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
             expect_status(&target.control("handshake", &json!({ "pause": false })).await?, 200)?;
             let start = Instant::now();
             loop {
-                let exists = key_exists(case, &authority, &old_key)?;
+                let exists = key_exists(case, &old_key)?;
                 let authenticated = target
                     .events(&id)
                     .await?
@@ -1816,7 +2294,9 @@ pub(crate) async fn a_old_key_survives_unavailable_channel(ctx: Context) -> anyh
                 tokio::time::sleep(POLL).await;
             }
             case.until_device(&target, &id, "new authenticated channel", |record| {
-                current_thumbprint(record).is_ok_and(|thumb| thumb == new_thumb) && record["connected"] == true
+                current_thumbprint(record).is_ok_and(|thumb| thumb == new_thumb)
+                    && record["connected"] == true
+                    && record["metadata"]["hostname"] == hello_hostname
             })
             .await?;
             assert_new_auth_precedes_old_close(&target, &id, &old_thumb, &new_thumb).await?;
@@ -2169,13 +2649,7 @@ pub(crate) async fn a_file_backend_permissions(ctx: Context) -> anyhow::Result<(
                 let (_, state) = case.enrolled(&target, &token).await?;
                 let authority = field(&state, "authority_id")?;
                 let name = key_name(&state, "current")?;
-                let key_file = case
-                    .path()
-                    .join("identity")
-                    .join("authorities")
-                    .join(authority)
-                    .join("keys")
-                    .join(format!("{name}.p8"));
+                let key_file = case.key_file_path(name);
                 for path in [key_file, case.identity_path(authority)] {
                     let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
                     ensure!(mode == 0o600, "{} has mode {mode:o}, expected 0600", path.display());
@@ -2369,6 +2843,141 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_names_require_this_runs_prefix_and_a_canonical_uuid() -> anyhow::Result<()> {
+        let prefix = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
+        let key_uuid = uuid::Uuid::new_v4();
+        validate_key_name(&prefix, &format!("{prefix}{key_uuid}"))?;
+        ensure!(
+            validate_key_name(&prefix, &format!("{prefix}{}", key_uuid.to_string().to_uppercase())).is_err(),
+            "uppercase UUID was accepted"
+        );
+        ensure!(
+            validate_key_name(&prefix, &format!("DevolutionsAgent-Identity-{key_uuid}")).is_err(),
+            "a key without the run prefix was accepted"
+        );
+        ensure!(
+            validate_key_name(&prefix, &format!("{prefix}{key_uuid}.p8")).is_err(),
+            "a key name with a file extension was accepted"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn orphan_audit_accepts_both_records_and_cleanup_is_prefix_scoped() -> anyhow::Result<()> {
+        let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join("agent-identity-conformance-tests");
+        std::fs::create_dir_all(&work_dir)?;
+        let prefix = format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4());
+        let target = Target::new("https://localhost/mock".to_owned(), "test".to_owned(), None, None)?;
+        let mut case = AgentCase::new(
+            Context {
+                target,
+                second: None,
+                target_kind: crate::TargetKind::Mock,
+                disposable_dvls_target: false,
+                dvls_rotation_window_secs: 60,
+                leaf_lifetime_secs: 90 * 24 * 3600,
+                expect_channel: true,
+                channel_available: true,
+                key_name_prefix: prefix.clone(),
+                agent_version: None,
+                unprivileged_admin_token: None,
+                agent_bin: PathBuf::new(),
+                key_backend: KeyBackend::File,
+                work_dir,
+            },
+            None,
+            false,
+        )
+        .await?;
+        let config: Value = serde_json::from_slice(&std::fs::read(case.path().join("agent.json"))?)?;
+        ensure!(
+            config["__debug__"]["identity"]["key_name_prefix"] == prefix,
+            "agent.json omitted the run prefix"
+        );
+        ensure!(
+            config["__debug__"]["identity"]["metadata_override_path"]
+                == case.metadata_override_path().to_string_lossy().as_ref(),
+            "agent.json omitted the metadata override path"
+        );
+        case.set_metadata_hostname("refreshed-host")?;
+        ensure!(
+            serde_json::from_slice::<Value>(&std::fs::read(case.metadata_override_path())?)?["hostname"]
+                == "refreshed-host",
+            "metadata override was not refreshed"
+        );
+        let name = format!("{prefix}{}", uuid::Uuid::new_v4());
+        let foreign = format!("DevolutionsAgent-Identity-{}", uuid::Uuid::new_v4());
+        std::fs::create_dir_all(case.key_file_path(&name).parent().context("key directory")?)?;
+        std::fs::write(case.key_file_path(&name), b"run-owned-key")?;
+        std::fs::write(case.key_file_path(&foreign), b"foreign-key")?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "an unexpected key file in the identity tree was accepted"
+        );
+        ensure!(
+            case.audit_orphan_keys().is_err(),
+            "an unrecorded file-backed key was accepted"
+        );
+        std::fs::write(
+            case.in_progress_path(),
+            serde_json::to_vec(&json!({ "version": 1, "token_sha256": "test-hash", "key_name": name }))?,
+        )?;
+        case.audit_orphan_keys()?;
+        std::fs::remove_file(case.in_progress_path())?;
+        let identity = case.identity_path(&uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(identity.parent().context("authority directory")?)?;
+        std::fs::write(
+            &identity,
+            serde_json::to_vec(&json!({ "keys": { "current": { "key_name": name } } }))?,
+        )?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&identity, std::fs::Permissions::from_mode(0o600))?;
+        }
+        let stored: Value = serde_json::from_slice(&std::fs::read(&identity)?)?;
+        let authority = identity
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .context("fixture authority")?;
+        case.check_key_protection(authority, &stored)?;
+        std::fs::remove_file(case.key_file_path(&name))?;
+        ensure!(
+            case.check_key_protection(authority, &stored).is_err(),
+            "settled identity accepted a missing current key"
+        );
+        std::fs::write(case.key_file_path(&name), b"run-owned-key")?;
+        case.audit_orphan_keys()?;
+        std::fs::remove_file(identity)?;
+        std::fs::write(
+            case.in_progress_path(),
+            serde_json::to_vec(&json!({ "version": 1, "token_sha256": "test-hash", "key_name": name }))?,
+        )?;
+        let leftover = case.path().join("identity").join("authorities").join("leftover.tmp");
+        std::fs::write(&leftover, b"temp")?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "leftover authority temp file was accepted"
+        );
+        std::fs::remove_file(leftover)?;
+        case.cleanup_run_keys()?;
+        ensure!(!case.key_file_path(&name).exists(), "run-owned key survived cleanup");
+        ensure!(
+            case.key_file_path(&foreign).exists(),
+            "cleanup deleted a key outside the run prefix"
+        );
+        std::fs::remove_file(case.key_file_path(&foreign))?;
+        case.audit_identity_tree()?;
+        case.finish().await?;
+        Ok(())
+    }
 
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {

@@ -20,8 +20,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/__mock__/faults", post(faults))
         .route("/__mock__/reset", post(reset))
         .route("/__mock__/time/advance", post(time_advance))
+        .route("/__mock__/time/freeze", post(time_freeze))
         .route("/__mock__/events", get(events))
-        .route("/__mock__/handshake", post(handshake))
+        .route("/__mock__/handshake", post(handshake).get(handshake_state))
+        .route("/__mock__/retry-barrier", post(retry_barrier))
         .route("/__mock__/requests", get(requests))
         .route("/__mock__/reconnect", post(reconnect))
         .with_state(app)
@@ -38,10 +40,17 @@ async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Reque
         || state.requests.enroll_by_token.values().sum(),
         |id| state.requests.enroll_by_token.get(&id).copied().unwrap_or(0),
     );
+    let enroll_device_revoked = query.token_id.map_or_else(
+        || state.requests.enroll_revoked_by_token.values().sum(),
+        |id| state.requests.enroll_revoked_by_token.get(&id).copied().unwrap_or(0),
+    );
     Json(json!({
         "enroll": enroll,
+        "enroll_device_revoked": enroll_device_revoked,
         "enroll_total": state.requests.enroll_total,
+        "enroll_retry_503": state.requests.enroll_retry_503,
         "renew": state.requests.renew,
+        "renew_retry_503": state.requests.renew_retry_503,
         "connect": state.requests.connect,
         "authenticated_connects": state.requests.authenticated_connects,
         "correlated_acks": state.requests.correlated_acks,
@@ -77,7 +86,46 @@ async fn handshake(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response
         Err(_) => return control_error(&ApiError::invalid_request("body requires a boolean pause field")),
     };
     app.handshake_gate.send_replace(!request.pause);
-    Json(json!({ "paused": request.pause })).into_response()
+    handshake_view(&app).await.into_response()
+}
+
+async fn handshake_state(AxumState(app): AxumState<Arc<App>>) -> Json<Value> {
+    handshake_view(&app).await
+}
+
+async fn handshake_view(app: &App) -> Json<Value> {
+    let gate = app.handshake_gate.subscribe();
+    let paused = !*gate.borrow();
+    let state = app.state.lock().await;
+    let mut paused_stream_ids = state.paused_hellos.iter().copied().collect::<Vec<_>>();
+    paused_stream_ids.sort_unstable();
+    Json(json!({ "paused": paused, "paused_stream_ids": paused_stream_ids }))
+}
+
+#[derive(Deserialize)]
+struct RetryBarrierRequest {
+    endpoint: String,
+    pause: bool,
+}
+
+async fn retry_barrier(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let request: RetryBarrierRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(_) => return control_error(&ApiError::invalid_request("body requires endpoint and boolean pause")),
+    };
+    let endpoint = match request.endpoint.as_str() {
+        "enroll" => DropTarget::Enroll,
+        "renew" => DropTarget::Renew,
+        _ => return control_error(&ApiError::invalid_request("endpoint must be enroll or renew")),
+    };
+    let mut state = app.state.lock().await;
+    if request.pause {
+        state.retry_barrier = Some(endpoint);
+        state.dropped_response = None;
+    } else if state.retry_barrier == Some(endpoint) {
+        state.retry_barrier = None;
+    }
+    Json(json!({ "paused": state.retry_barrier == Some(endpoint) })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -252,4 +300,24 @@ async fn time_advance(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Respo
     app.tick().await;
     let now = app.now();
     Json(json!({ "now": now, "server_time": rfc3339(now) })).into_response()
+}
+
+async fn time_freeze(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => return control_error(&ApiError::invalid_request("malformed JSON body")),
+    };
+    let Some(now) = value.get("now").and_then(Value::as_i64).filter(|now| *now != i64::MIN) else {
+        return control_error(&ApiError::invalid_request("`now` must be a Unix second"));
+    };
+    let mut state = app.state.lock().await;
+    app.clock.freeze_at(now);
+    state.tick(now);
+    let published_roots = state
+        .roots
+        .iter()
+        .filter(|root| root.published)
+        .map(|root| &root.thumbprint)
+        .collect::<Vec<_>>();
+    Json(json!({ "now": now, "published_roots": published_roots })).into_response()
 }

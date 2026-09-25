@@ -33,6 +33,7 @@ All time in the mock is the mock clock: real time plus an offset.
 `POST __mock__/time/advance` adds to the offset and `faults.clock_skew_secs` adds a skew on top.
 Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `last_seen_at` all use it.
 Advancing the clock immediately closes expired streams and applies rotation deadlines.
+`POST __mock__/time/freeze` is a test-only boundary probe that pins the mock clock to an exact Unix second and reports the published root thumbprints in the same state transition; reset restores real-time tracking.
 
 ## Routes
 
@@ -77,13 +78,17 @@ For permission tests, `<admin-token>-unprivileged` is authenticated without Agen
 | POST | `/__mock__/faults` | Merges `drop_next_response`, `fail_next_response`, `clock_skew_secs`, `leaf_lifetime_secs`, `channel_available` and `rotation_rate_limit_per_sec`; absent keys retain their value, and `null` clears optional fields. |
 | POST | `/__mock__/reset` | Clears tokens, devices, nonces, faults, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `device_unknown`. Responds `{ "authority_id" }`. |
 | POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock and immediately applies stream expiry and rotation deadlines; responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
+| POST | `/__mock__/time/freeze` | `{ "now": <unix second> }` pins time and returns `{ "now", "published_roots": ["<thumbprint>", ...] }` after applying expiry and rotation deadlines at that exact second. |
 | GET | `/__mock__/events?device_id=<uuid>` | Returns `{ "events": [...] }` in increasing `seq` order: `stream_opened`, `stream_authenticated`, `stream_closed` (with `status` and optional `error_code`), and `cert_status_changed`. |
-| POST | `/__mock__/handshake` | Test-only `{ "pause": true\|false }` holds valid Hello proofs before authentication so key-deletion ordering can be checked; reset releases the barrier. |
-| GET | `/__mock__/requests?token_id=<uuid>` | Reports per-token `enroll` attempts, total `enroll_total`, `renew`, `connect`, `authenticated_connects`, `correlated_acks`, `overlap_open` (only after proof), `active_streams`, and `paused_hellos`; omit `token_id` for total enroll attempts. Reset clears all counters. |
+| POST / GET | `/__mock__/handshake` | POST `{ "pause": true\|false }` holds valid Hello proofs before authentication; GET and POST report `paused` and `paused_stream_ids` so tests can match held proofs to opened streams. Reset releases the barrier. |
+| POST | `/__mock__/retry-barrier` | `{ "endpoint": "enroll"\|"renew", "pause": true\|false }` makes retries after a dropped response receive an unprocessed, empty HTTP 503 until released; reset clears it. |
+| GET | `/__mock__/requests?token_id=<uuid>` | Reports per-token `enroll` attempts and `enroll_device_revoked` rejections, total `enroll_total`, `enroll_retry_503`, `renew`, `renew_retry_503`, `connect`, `authenticated_connects`, `correlated_acks`, `overlap_open` (only after proof), `active_streams`, and `paused_hellos`; omit `token_id` for totals. Reset clears all counters. |
 | POST | `/__mock__/reconnect` | `{ "device_id": "<uuid>" }` pushes `Reconnect{reason:"mock"}` to the device's live streams; responds 202. |
 
 `drop_next_response` processes the next matching request, then aborts the connection without replying.
 `fail_next_response` rejects it before processing with `{ "endpoint": "enroll"|"renew", "status": 400..599, "error"?: "<§5.4 code>" }`; without `error`, the response body is empty.
+Arm the retry barrier before `drop_next_response` to prevent a fast retry from succeeding before the tester stops or revokes the agent.
+`enroll_device_revoked` counts enroll rejections for a previously issued key of a revoked or deleted device, including retries after a lost response.
 Rotation pushes default to 10 per rolling second and continue after an emergency deadline until the queue drains.
 The old root's signing key is discarded when rotation starts.
 

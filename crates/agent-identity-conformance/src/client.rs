@@ -195,6 +195,17 @@ impl Target {
         Ok(events.clone())
     }
 
+    pub(crate) async fn paused_stream_ids(&self) -> anyhow::Result<Vec<String>> {
+        let reply = self.send(Method::GET, "/__mock__/handshake", None, None, None).await?;
+        expect_status(&reply, 200)?;
+        reply.body["paused_stream_ids"]
+            .as_array()
+            .context("mock paused-stream ids are missing")?
+            .iter()
+            .map(|id| id.as_str().context("invalid paused-stream id").map(str::to_owned))
+            .collect()
+    }
+
     pub(crate) async fn faults(&self, faults: &Value) -> anyhow::Result<()> {
         expect_status(&self.control("faults", faults).await?, 200)
     }

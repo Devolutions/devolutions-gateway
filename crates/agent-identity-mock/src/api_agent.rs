@@ -136,8 +136,19 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     };
     let mut state = app.state.lock().await;
     state.observe_enroll(&secret);
-    if state.token_id(&secret).is_none() {
+    let Some(token_id) = state.token_id(&secret) else {
         return api_error_response(&app, &ApiError::token_invalid());
+    };
+    if state.retry_barrier == Some(DropTarget::Enroll) && state.dropped_response == Some(DropTarget::Enroll) {
+        state.requests.enroll_retry_503 += 1;
+        return injected_response(
+            &app,
+            FailNextResponse {
+                endpoint: DropTarget::Enroll,
+                status: 503,
+                error: None,
+            },
+        );
     }
     if let Some(fault) = state.fail_next_response(DropTarget::Enroll) {
         return injected_response(&app, fault);
@@ -152,12 +163,18 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     let now = app.now();
     let outcome = match state.enroll(&secret, &csr_der, metadata, now) {
         Ok(outcome) => outcome,
-        Err(err) => return api_error_response(&app, &err),
+        Err(err) => {
+            if err.code == "device_revoked" {
+                *state.requests.enroll_revoked_by_token.entry(token_id).or_default() += 1;
+            }
+            return api_error_response(&app, &err);
+        }
     };
     let should_drop = state.faults.drop_next_response == Some(DropTarget::Enroll);
     if should_drop {
         // One-shot: process and commit, then abort without a response (§11).
         state.faults.drop_next_response = None;
+        state.dropped_response = Some(DropTarget::Enroll);
     }
     let channel_available = state.faults.channel_available;
     drop(state);
@@ -191,6 +208,17 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     let now = app.now();
     let mut state = app.state.lock().await;
     state.requests.renew += 1;
+    if state.retry_barrier == Some(DropTarget::Renew) && state.dropped_response == Some(DropTarget::Renew) {
+        state.requests.renew_retry_503 += 1;
+        return injected_response(
+            &app,
+            FailNextResponse {
+                endpoint: DropTarget::Renew,
+                status: 503,
+                error: None,
+            },
+        );
+    }
     if let Some(fault) = state.fail_next_response(DropTarget::Renew) {
         return injected_response(&app, fault);
     }
@@ -237,6 +265,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
     let should_drop = state.faults.drop_next_response == Some(DropTarget::Renew);
     if should_drop {
         state.faults.drop_next_response = None;
+        state.dropped_response = Some(DropTarget::Renew);
     }
     drop(state);
 

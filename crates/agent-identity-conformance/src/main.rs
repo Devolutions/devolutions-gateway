@@ -24,6 +24,7 @@ use crate::client::Target;
 
 type TestFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type TestFn = fn(Context) -> TestFuture;
+const RUN_DEADLINE: Duration = Duration::from_secs(13 * 60);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -105,7 +106,7 @@ struct Context {
     leaf_lifetime_secs: u64,
     expect_channel: bool,
     channel_available: bool,
-    cleanup_machine_keys: bool,
+    key_name_prefix: String,
     agent_version: Option<String>,
     unprivileged_admin_token: Option<String>,
     agent_bin: PathBuf,
@@ -140,7 +141,6 @@ struct Options {
     leaf_lifetime_secs: u64,
     expect_channel: bool,
     allow_incomplete: bool,
-    cleanup_machine_keys: bool,
     agent_version: Option<String>,
 }
 
@@ -171,7 +171,6 @@ impl Default for Options {
             leaf_lifetime_secs: 90 * 24 * 3600,
             expect_channel: true,
             allow_incomplete: false,
-            cleanup_machine_keys: false,
             agent_version: None,
         }
     }
@@ -192,10 +191,6 @@ impl Options {
             }
             if flag == "--allow-incomplete" {
                 options.allow_incomplete = true;
-                continue;
-            }
-            if flag == "--cleanup-machine-keys" {
-                options.cleanup_machine_keys = true;
                 continue;
             }
             if flag == "--no-expect-channel" {
@@ -306,7 +301,7 @@ impl Options {
             leaf_lifetime_secs: self.leaf_lifetime_secs,
             expect_channel: self.expect_channel,
             channel_available,
-            cleanup_machine_keys: self.cleanup_machine_keys,
+            key_name_prefix: format!("DevolutionsAgent-Identity-conformance-{}-", uuid::Uuid::new_v4()),
             agent_version: self.agent_version,
             unprivileged_admin_token,
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
@@ -338,12 +333,17 @@ async fn run() -> anyhow::Result<()> {
     }
     ensure!(!selected.is_empty(), "no tests match the filter");
     let allow_incomplete = options.allow_incomplete;
-    let context = options.context().await?;
     let start = Instant::now();
+    let deadline = start + RUN_DEADLINE;
+    let context = tokio::time::timeout(RUN_DEADLINE, options.context())
+        .await
+        .context("conformance setup exceeded the 13-minute deadline")??;
+    println!("KEY NAME PREFIX {}", context.key_name_prefix);
     let mut totals = [0u32; 4];
     let mut protocol_elapsed = Duration::ZERO;
     let mut agent_elapsed = Duration::ZERO;
     let mut non_pass = Vec::new();
+    let mut deadline_exceeded = false;
     for test in selected {
         let test_start = Instant::now();
         let outcome = if test.mock_only && !context.mock() {
@@ -393,9 +393,15 @@ async fn run() -> anyhow::Result<()> {
             } else {
                 Duration::from_secs(90)
             };
-            match tokio::time::timeout(timeout, result).await {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let allowed = timeout.min(remaining);
+            match tokio::time::timeout(allowed, result).await {
                 Ok(Ok(())) => Outcome::Pass,
                 Ok(Err(error)) => Outcome::Fail(format!("{error:#}")),
+                Err(_) if allowed == remaining => {
+                    deadline_exceeded = true;
+                    Outcome::Fail("global 13-minute deadline exceeded".to_owned())
+                }
                 Err(_) => Outcome::Fail("timed out".to_owned()),
             }
         };
@@ -416,6 +422,9 @@ async fn run() -> anyhow::Result<()> {
             non_pass.push((label, test.name, reason));
         } else {
             println!("{label} {} ({} ms)", test.name, elapsed.as_millis());
+        }
+        if deadline_exceeded {
+            break;
         }
     }
     println!(
@@ -488,6 +497,7 @@ const TESTS: &[Test] = &[
     p!(p_device_cannot_impersonate_another),
     p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
+    p!(p_renew_rejects_sha384_csr),
     p!(p_signature_parser_wire_negatives),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
@@ -495,6 +505,7 @@ const TESTS: &[Test] = &[
     p!(p_renew_signature_rejected_on_connect).channel(),
     p!(p_renew_happy_path),
     p!(p_renew_idempotent_lost_response, mock_only),
+    p!(p_mock_enroll_retry_barrier, mock_only),
     p!(p_renew_second_pending_retires_first),
     p!(p_retired_pending_certificate_cannot_connect).channel(),
     p!(p_renew_within_grace, mock_only),
@@ -535,6 +546,9 @@ const TESTS: &[Test] = &[
     p!(p_error_body_shape),
     p!(p_mock_fault_response_not_processed, mock_only),
     a!(a_pending_file_enroll_success),
+    a!(a_enroll_lost_response_retried_across_restart, mock_only),
+    a!(a_enroll_new_token_replaces_in_progress_key, mock_only),
+    a!(a_enroll_revoked_before_response_is_permanent, mock_only),
     a!(a_pending_file_deleted_on_permanent_error),
     a!(a_pending_file_kept_on_transient_error),
     a!(a_token_never_logged),

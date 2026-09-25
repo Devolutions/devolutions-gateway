@@ -197,6 +197,11 @@ async fn open_at_url(target: &Target, channel_url: &str, headers: SignedHeaders)
     request
         .metadata_mut()
         .insert("signature", headers.signature.parse().context("encode signature")?);
+    if let Some(digest) = &headers.digest {
+        request
+            .metadata_mut()
+            .insert("content-digest", digest.parse().context("encode content digest")?);
+    }
     let stream = client.connect(request).await?.into_inner();
     Ok(ChannelStream {
         sender,

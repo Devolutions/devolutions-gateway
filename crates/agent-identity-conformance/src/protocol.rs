@@ -62,6 +62,13 @@ fn fresh_nonce() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+fn attach_content_digest(headers: &mut SignedHeaders, body: &[u8]) {
+    headers.digest = Some(format!(
+        "sha-256=:{}:",
+        base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(body))
+    ));
+}
+
 pub(crate) async fn wait_rotation_idle(target: &Target, window_secs: u64) -> anyhow::Result<()> {
     let started = Instant::now();
     loop {
@@ -112,6 +119,19 @@ async fn device(target: &Target, id: &str) -> anyhow::Result<Value> {
     let reply = target.device(id).await?;
     expect_status(&reply, 200)?;
     Ok(reply.body)
+}
+
+async fn assert_device_metadata_and_certificates_unchanged(
+    target: &Target,
+    id: &str,
+    before: &Value,
+) -> anyhow::Result<()> {
+    let after = device(target, id).await?;
+    ensure!(
+        after["metadata"] == before["metadata"] && after["certificates"] == before["certificates"],
+        "rejected key reuse changed device metadata or certificate identities/statuses"
+    );
+    Ok(())
 }
 
 async fn active_old_root_ids(target: &Target, issuer: &str) -> anyhow::Result<HashSet<String>> {
@@ -724,13 +744,13 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
             .await?,
         204,
     )?;
-    expect_error(
-        &ctx.target
-            .enroll(&other_token.text, &second_pending, &json!({}))
-            .await?,
-        403,
-        "device_revoked",
-    )?;
+    for key in [&identity.key, &first_pending, &second_pending] {
+        expect_error(
+            &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
+            403,
+            "device_revoked",
+        )?;
+    }
     ensure!(
         count(&ctx.target.token_record(&other_token.id).await?.body, "usedCount")? == 0,
         "key-reuse attempts consumed the other token"
@@ -741,12 +761,14 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
 pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "renew-a").await?;
     let (_, other) = issued(&ctx, "renew-b").await?;
+    let initial = device(&ctx.target, &identity.device_id).await?;
     for key in [&identity.key, &other.key] {
         expect_error(
             &ctx.target.renew(&identity, key, &json!({})).await?,
             400,
             "invalid_request",
         )?;
+        assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &initial).await?;
     }
     let pending = KeyPair::generate()?;
     let first = ctx.target.renew(&identity, &pending, &json!({})).await?;
@@ -759,18 +781,25 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
     );
     let replacement = KeyPair::generate()?;
     expect_status(&ctx.target.renew(&identity, &replacement, &json!({})).await?, 200)?;
+    let renewed = device(&ctx.target, &identity.device_id).await?;
     expect_error(
         &ctx.target.renew(&identity, &pending, &json!({})).await?,
         400,
         "invalid_request",
     )?;
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &renewed).await?;
     let other_pending = KeyPair::generate()?;
     expect_status(&ctx.target.renew(&other, &other_pending, &json!({})).await?, 200)?;
-    expect_error(
-        &ctx.target.renew(&identity, &other_pending, &json!({})).await?,
-        400,
-        "invalid_request",
-    )?;
+    let other_replacement = KeyPair::generate()?;
+    expect_status(&ctx.target.renew(&other, &other_replacement, &json!({})).await?, 200)?;
+    for key in [&other.key, &other_pending, &other_replacement] {
+        expect_error(
+            &ctx.target.renew(&identity, key, &json!({})).await?,
+            400,
+            "invalid_request",
+        )?;
+        assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &renewed).await?;
+    }
     ctx.target.revoke(&other.device_id).await?;
     expect_status(
         &ctx.target
@@ -778,17 +807,19 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
             .await?,
         204,
     )?;
-    expect_error(
-        &ctx.target.renew(&identity, &other_pending, &json!({})).await?,
-        400,
-        "invalid_request",
-    )?;
-    let device = device(&ctx.target, &identity.device_id).await?;
+    for key in [&other.key, &other_pending, &other_replacement] {
+        expect_error(
+            &ctx.target.renew(&identity, key, &json!({})).await?,
+            400,
+            "invalid_request",
+        )?;
+        assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &renewed).await?;
+    }
     ensure!(
-        device["certificates"].as_array().is_some_and(
+        renewed["certificates"].as_array().is_some_and(
             |certs| certs.len() == 3 && certs.iter().filter(|cert| cert["status"] == "pending").count() == 1
         ),
-        "rejected CSR key reuse created or replaced a certificate"
+        "renewal fixture did not have exactly one pending certificate"
     );
     Ok(())
 }
@@ -1028,6 +1059,30 @@ pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()>
     Ok(())
 }
 
+pub(crate) async fn p_renew_rejects_sha384_csr(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "original").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+    let csr = field(&vectors["csr"]["ecdsa_with_sha384"], "csr")?;
+    let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": { "hostname": "changed" } }))?;
+    let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
+    expect_error(
+        &ctx.target.signed_renew(&body, &signed, None).await?,
+        400,
+        "invalid_request",
+    )?;
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        before["metadata"] == after["metadata"]
+            && before["certificates"] == after["certificates"]
+            && after["certificates"]
+                .as_array()
+                .is_some_and(|certs| certs.iter().all(|cert| cert["status"] != "pending")),
+        "SHA-384 CSR changed metadata or created a pending certificate"
+    );
+    Ok(())
+}
+
 pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "replay").await?;
     let new_key = KeyPair::generate()?;
@@ -1096,14 +1151,16 @@ pub(crate) async fn p_replay_window_rejected(ctx: Context) -> anyhow::Result<()>
         expect_error(&rejected, 401, "clock_skew")?;
     }
     let old_created = now - 1_000;
-    let wrong_tag = identity.key.sign(
+    let mut wrong_tag = identity.key.sign(
         &identity.thumbprint,
-        "connect",
+        "renew",
         Some(&body),
         old_created,
         old_created + 60,
         &fresh_nonce(),
     );
+    wrong_tag.input = wrong_tag.input.replace(";tag=\"renew\"", ";tag=\"connect\"");
+    resign_input(&identity.key, &mut wrong_tag)?;
     expect_error(
         &ctx.target.signed_renew(&body, &wrong_tag, None).await?,
         401,
@@ -1130,7 +1187,8 @@ pub(crate) async fn p_connect_signature_replayed_to_renew(ctx: Context) -> anyho
     let (_, identity) = issued(&ctx, "cross-tag").await?;
     let new_key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
-    let connect_tag = identity.key.sign_now(&identity.thumbprint, "connect", Some(&body));
+    let mut connect_tag = identity.key.sign_now(&identity.thumbprint, "connect", None);
+    attach_content_digest(&mut connect_tag, &body);
     let rejected = ctx.target.signed_renew(&body, &connect_tag, None).await?;
     expect_error(&rejected, 401, "signature_invalid")?;
     Ok(())
@@ -1138,7 +1196,9 @@ pub(crate) async fn p_connect_signature_replayed_to_renew(ctx: Context) -> anyho
 
 pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "reverse-cross-tag").await?;
-    let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", None);
+    let csr = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
+    let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     let status = channel::open_with_headers(&ctx.target, &identity, renew_tag)
         .await
         .err()
@@ -1327,6 +1387,12 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
 pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "lost-renew").await?;
     let new_key = KeyPair::generate()?;
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "renew", "pause": true }))
+            .await?,
+        200,
+    )?;
     ctx.target.faults(&json!({ "drop_next_response": "renew" })).await?;
     let first = ctx.target.renew(&identity, &new_key, &json!({})).await;
     ensure!(first.is_err(), "fault did not drop the renew response");
@@ -1341,12 +1407,75 @@ pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Re
         pending_certs.len() == 1,
         "lost response did not commit exactly one pending certificate"
     );
+    expect_status(&ctx.target.renew(&identity, &new_key, &json!({})).await?, 503)?;
+    ensure!(
+        count(&ctx.target.requests(None).await?, "renew_retry_503")? == 1,
+        "mock did not block the renewal retry"
+    );
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "renew", "pause": false }))
+            .await?,
+        200,
+    )?;
     let retry = ctx.target.renew(&identity, &new_key, &json!({})).await?;
     expect_status(&retry, 200)?;
     let retry_thumbprint = thumbprint(retry.body["certificate_chain"][0].as_str().context("retry leaf")?)?;
     ensure!(
         pending_certs[0]["thumbprint"] == retry_thumbprint,
         "renew retry issued a second certificate"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<()> {
+    let token = token(&ctx, 1).await?;
+    let key = KeyPair::generate()?;
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": true }))
+            .await?,
+        200,
+    )?;
+    ctx.target.faults(&json!({ "drop_next_response": "enroll" })).await?;
+    ensure!(
+        ctx.target.enroll(&token.text, &key, &json!({})).await.is_err(),
+        "fault did not drop the enrollment response"
+    );
+    let listing = ctx.target.devices_for(&token, "").await?;
+    expect_status(&listing, 200)?;
+    ensure!(
+        count(&listing.body, "totalCount")? == 1
+            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        "dropped enrollment did not commit once"
+    );
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 503)?;
+    ensure!(
+        count(&ctx.target.requests(Some(&token)).await?, "enroll_retry_503")? == 1,
+        "mock did not block the enrollment retry"
+    );
+    expect_status(
+        &ctx.target
+            .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+            .await?,
+        200,
+    )?;
+    let replay = ctx.target.enroll(&token.text, &key, &json!({})).await?;
+    expect_status(&replay, 200)?;
+    ensure!(
+        replay.body["device_id"] == listing.body["data"][0]["id"]
+            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        "replay created a second device or consumed another use"
+    );
+    ctx.target.revoke(field(&replay.body, "device_id")?).await?;
+    expect_error(
+        &ctx.target.enroll(&token.text, &key, &json!({})).await?,
+        403,
+        "device_revoked",
+    )?;
+    ensure!(
+        count(&ctx.target.requests(Some(&token)).await?, "enroll_device_revoked")? == 1,
+        "mock did not record the revoked-key enrollment rejection"
     );
     Ok(())
 }
@@ -1618,6 +1747,17 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    let paused = ctx.target.paused_stream_ids().await?;
+    ensure!(
+        paused.len() == 1
+            && ctx
+                .target
+                .events(&identity.device_id)
+                .await?
+                .iter()
+                .any(|event| { event["type"] == "stream_opened" && event["stream_id"] == paused[0] }),
+        "mock handshake did not identify the held stream"
+    );
     let waiting = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         waiting["connected"] == false
@@ -1642,7 +1782,7 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
     );
     ensure!(
         device(&ctx.target, &identity.device_id).await?["metadata"]["hostname"] == "after-pause"
-            && count(&ctx.target.requests(None).await?, "paused_hellos")? == 0,
+            && ctx.target.paused_stream_ids().await?.is_empty(),
         "handshake release did not authenticate and clear the barrier"
     );
     Ok(())
@@ -2528,18 +2668,33 @@ pub(crate) async fn p_rotation_deadline_removes_old_root(ctx: Context) -> anyhow
         "old root not published"
     );
     if ctx.mock() {
-        let now = ctx.target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
-            .as_i64()
-            .context("mock clock is missing")?;
-        ensure!(deadline > now + 1, "mock deadline passed before boundary check");
-        ctx.target.advance(deadline - now - 1).await?;
+        let before = ctx
+            .target
+            .control("time/freeze", &json!({ "now": deadline - 1 }))
+            .await?;
+        expect_status(&before, 200)?;
+        ensure!(
+            before.body["now"] == deadline - 1
+                && before.body["published_roots"]
+                    .as_array()
+                    .is_some_and(|roots| roots.len() == 2 && roots.iter().any(|root| root == &old_thumb)),
+            "old root was removed before the deadline"
+        );
         ensure!(
             ctx.target.trust_anchor().await?["roots"]
                 .as_array()
-                .is_some_and(|roots| roots.len() == 2),
-            "old root was removed before the deadline"
+                .is_some_and(|roots| { roots.len() == 2 && roots.iter().any(|root| root["thumbprint"] == old_thumb) }),
+            "trust-anchor omitted the old root before the deadline"
         );
-        ctx.target.advance(1).await?;
+        let at_deadline = ctx.target.control("time/freeze", &json!({ "now": deadline })).await?;
+        expect_status(&at_deadline, 200)?;
+        ensure!(
+            at_deadline.body["now"] == deadline
+                && at_deadline.body["published_roots"]
+                    .as_array()
+                    .is_some_and(|roots| roots.len() == 1 && roots.iter().all(|root| root != &old_thumb)),
+            "old root remained published at the exact deadline"
+        );
     } else {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         ensure!(deadline > now + 2, "DVLS deadline passed before boundary check");
@@ -3013,60 +3168,19 @@ pub(crate) async fn p_admin_tokens_crud_and_states(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn p_admin_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    let path = "/api/v3/agent-identity/enrollment-tokens";
-    let missing = ctx.target.send(Method::GET, path, None, None, None).await?;
-    expect_status(&missing, 401)?;
-    let wrong = ctx
-        .target
-        .send(Method::GET, path, None, Some("wrong-admin-token"), None)
-        .await?;
-    expect_status(&wrong, 401)?;
-    assert_admin_writes_denied(&ctx, None, 401).await?;
-    assert_admin_writes_denied(&ctx, Some("wrong-admin-token"), 401).await?;
+    assert_admin_routes_denied(&ctx, None, 401).await?;
+    let invalid = format!("invalid-admin-{}", uuid::Uuid::new_v4());
+    assert_admin_routes_denied(&ctx, Some(&invalid), 401).await?;
     Ok(())
 }
 
-async fn assert_admin_writes_denied(ctx: &Context, bearer: Option<&str>, expected: u16) -> anyhow::Result<()> {
-    let token = token(ctx, 1).await?;
-    let identity = identity(&ctx.target, &token, "untouched").await?;
-    let before = device(&ctx.target, &identity.device_id).await?;
-    let name = format!("unauthorized-{}", uuid::Uuid::new_v4());
-    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
-    let body = serde_json::to_vec(&json!({ "name": name, "maxUses": 1, "expiresAt": expires }))?;
-    expect_status(
-        &ctx.target
-            .send(
-                Method::POST,
-                "/api/v3/agent-identity/enrollment-tokens",
-                Some(&body),
-                bearer,
-                None,
-            )
-            .await?,
-        expected,
-    )?;
-    let path = format!("/api/v3/agent-identity/devices/{}", identity.device_id);
-    expect_status(
-        &ctx.target
-            .send(Method::POST, &format!("{path}/revoke"), None, bearer, None)
-            .await?,
-        expected,
-    )?;
-    expect_status(
-        &ctx.target.send(Method::DELETE, &path, None, bearer, None).await?,
-        expected,
-    )?;
-    ensure!(
-        device(&ctx.target, &identity.device_id).await? == before,
-        "unauthorized admin write changed the device"
-    );
-    let mut page_number = 1;
+async fn assert_token_name_absent(target: &Target, name: &str) -> anyhow::Result<()> {
+    let mut page = 1;
     loop {
-        let listing = ctx
-            .target
+        let listing = target
             .admin(
                 Method::GET,
-                &format!("/enrollment-tokens?pageNumber={page_number}&pageSize=100"),
+                &format!("/enrollment-tokens?pageNumber={page}&pageSize=100"),
                 None,
             )
             .await?;
@@ -3074,15 +3188,113 @@ async fn assert_admin_writes_denied(ctx: &Context, bearer: Option<&str>, expecte
         ensure!(
             listing.body["data"]
                 .as_array()
-                .context("token listing")?
+                .context("token listing is missing data")?
                 .iter()
                 .all(|record| record["name"] != name),
             "unauthorized token creation changed server state"
         );
-        if page_number >= count(&listing.body, "totalPages")? {
+        if page >= count(&listing.body, "totalPages")? {
             break;
         }
-        page_number += 1;
+        page += 1;
+    }
+    Ok(())
+}
+
+async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expected: u16) -> anyhow::Result<()> {
+    let token = token(ctx, 1).await?;
+    let identity = identity(&ctx.target, &token, "untouched").await?;
+    let mut stream = if ctx.mock() && ctx.channel_available {
+        let mut stream = channel::open(&ctx.target, &identity).await?;
+        stream.hello(&identity, &[]).await?;
+        Some(stream)
+    } else {
+        None
+    };
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let token_record_before = ctx.target.token_record(&token.id).await?;
+    expect_status(&token_record_before, 200)?;
+    let roots_before = ctx.target.trust_anchor().await?;
+    let rotation_before = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    expect_status(&rotation_before, 200)?;
+    let events_before = if ctx.mock() {
+        Some(ctx.target.events(&identity.device_id).await?)
+    } else {
+        None
+    };
+    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
+    let unauthorized_name = format!("unauthorized-{}", uuid::Uuid::new_v4());
+    let create = serde_json::to_vec(&json!({
+        "name": &unauthorized_name,
+        "maxUses": 1,
+        "expiresAt": expires,
+    }))?;
+    let rename_payload = serde_json::to_vec(&json!({ "friendlyName": "unauthorized" }))?;
+    let rotation = if ctx.mock() {
+        serde_json::to_vec(&json!({ "deadline": "now" }))?
+    } else {
+        // A malformed request cannot rotate a non-disposable DVLS target even if authorization is broken.
+        b"{".to_vec()
+    };
+    let token_path = format!("/enrollment-tokens/{}", token.id);
+    let device_path = format!("/devices/{}", identity.device_id);
+    let routes = [
+        (Method::POST, "/enrollment-tokens".to_owned(), Some(create.as_slice())),
+        (Method::GET, "/enrollment-tokens".to_owned(), None),
+        (Method::GET, token_path.clone(), None),
+        (Method::DELETE, token_path, None),
+        (Method::GET, format!("/devices?enrollmentTokenId={}", token.id), None),
+        (Method::GET, device_path.clone(), None),
+        (Method::PATCH, device_path.clone(), Some(rename_payload.as_slice())),
+        (Method::DELETE, device_path.clone(), None),
+        (Method::POST, format!("{device_path}/revoke"), None),
+        (Method::POST, format!("{device_path}/request-renewal"), None),
+        (Method::GET, "/ca/rotation".to_owned(), None),
+        (Method::POST, "/ca/rotation".to_owned(), Some(rotation.as_slice())),
+    ];
+    for (method, route, body) in routes {
+        let route_path = format!("/api/v3/agent-identity{route}");
+        ensure!(
+            ctx.target
+                .send(method.clone(), &route_path, body, bearer, None)
+                .await?
+                .status
+                == expected,
+            "unauthorized {method} {route} was not denied with HTTP {expected}"
+        );
+        let after_token = ctx.target.token_record(&token.id).await?;
+        expect_status(&after_token, 200)?;
+        ensure!(
+            after_token.body == token_record_before.body,
+            "unauthorized {method} {route} changed the enrollment token"
+        );
+        if method == Method::POST && route == "/enrollment-tokens" {
+            assert_token_name_absent(&ctx.target, &unauthorized_name).await?;
+        }
+        ensure!(
+            device(&ctx.target, &identity.device_id).await? == before,
+            "unauthorized {method} {route} changed the device"
+        );
+        let after_rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+        expect_status(&after_rotation, 200)?;
+        ensure!(
+            after_rotation.body == rotation_before.body && ctx.target.trust_anchor().await? == roots_before,
+            "unauthorized {method} {route} changed CA rotation state"
+        );
+        if let Some(events) = &events_before {
+            ensure!(
+                ctx.target.events(&identity.device_id).await? == *events,
+                "unauthorized {method} {route} changed the channel or certificate events"
+            );
+        }
+    }
+    if let Some(stream) = stream.as_mut() {
+        ensure!(
+            tokio::time::timeout(Duration::from_millis(100), stream.stream.message())
+                .await
+                .is_err(),
+            "unauthorized admin route pushed a channel message"
+        );
     }
     Ok(())
 }
@@ -3092,18 +3304,7 @@ pub(crate) async fn p_admin_permission_denied(ctx: Context) -> anyhow::Result<()
         .unprivileged_admin_token
         .as_deref()
         .context("unprivileged admin fixture missing")?;
-    let forbidden = ctx
-        .target
-        .send(
-            Method::GET,
-            "/api/v3/agent-identity/enrollment-tokens",
-            None,
-            Some(unprivileged),
-            None,
-        )
-        .await?;
-    expect_status(&forbidden, 403)?;
-    assert_admin_writes_denied(&ctx, Some(unprivileged), 403).await?;
+    assert_admin_routes_denied(&ctx, Some(unprivileged), 403).await?;
     Ok(())
 }
 
@@ -3116,9 +3317,10 @@ pub(crate) async fn p_rotation_admin_write_requires_auth(ctx: Context) -> anyhow
     let rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     expect_status(&rotation, 200)?;
     let body = serde_json::to_vec(&json!({ "deadline": "now" }))?;
+    let invalid = format!("invalid-admin-{}", uuid::Uuid::new_v4());
     for (bearer, expected) in [
         (None, 401),
-        (Some("wrong-admin-token"), 401),
+        (Some(invalid.as_str()), 401),
         (ctx.unprivileged_admin_token.as_deref(), 403),
     ] {
         if expected == 403 && bearer.is_none() {
@@ -3176,7 +3378,8 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
     let issued = identity(&ctx.target, &token, "errors").await?;
     let key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": {} }))?;
-    let wrong_tag = issued.key.sign_now(&issued.thumbprint, "connect", Some(&body));
+    let mut wrong_tag = issued.key.sign_now(&issued.thumbprint, "connect", None);
+    attach_content_digest(&mut wrong_tag, &body);
     expect_error(
         &ctx.target.signed_renew(&body, &wrong_tag, None).await?,
         401,
