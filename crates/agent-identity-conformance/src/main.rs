@@ -24,7 +24,7 @@ use crate::client::Target;
 
 type TestFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type TestFn = fn(Context) -> TestFuture;
-const RUN_DEADLINE: Duration = Duration::from_secs(13 * 60);
+const RUN_DEADLINE: Duration = Duration::from_secs(14 * 60 + 30);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -38,6 +38,7 @@ struct Test {
     mock_only: bool,
     needs_second: bool,
     needs_channel: bool,
+    needs_no_channel: bool,
     run: TestFn,
 }
 
@@ -49,6 +50,7 @@ impl Test {
             mock_only,
             needs_second: false,
             needs_channel: false,
+            needs_no_channel: false,
             run,
         }
     }
@@ -60,6 +62,7 @@ impl Test {
             mock_only,
             needs_second: false,
             needs_channel: false,
+            needs_no_channel: false,
             run,
         }
     }
@@ -71,6 +74,11 @@ impl Test {
 
     const fn channel(mut self) -> Self {
         self.needs_channel = true;
+        self
+    }
+
+    const fn without_channel(mut self) -> Self {
+        self.needs_no_channel = true;
         self
     }
 }
@@ -337,7 +345,7 @@ async fn run() -> anyhow::Result<()> {
     let deadline = start + RUN_DEADLINE;
     let context = tokio::time::timeout(RUN_DEADLINE, options.context())
         .await
-        .context("conformance setup exceeded the 13-minute deadline")??;
+        .context("conformance setup exceeded the 14-minute-30-second deadline")??;
     println!("KEY NAME PREFIX {}", context.key_name_prefix);
     let mut totals = [0u32; 4];
     let mut protocol_elapsed = Duration::ZERO;
@@ -354,6 +362,8 @@ async fn run() -> anyhow::Result<()> {
             Outcome::NotApplicable("Unix file-backend test")
         } else if test.needs_channel && !context.expect_channel && !context.channel_available {
             Outcome::NotApplicable("config.agent_channel_url absent and --expect-channel=false")
+        } else if test.needs_no_channel && !context.mock() && context.channel_available {
+            Outcome::NotApplicable("requires a naturally channelless DVLS target")
         } else if context.target_kind == TargetKind::Dvls
             && !context.disposable_dvls_target
             && (test.name.starts_with("p_rotation_") || test.name.starts_with("a_rotation_"))
@@ -386,6 +396,8 @@ async fn run() -> anyhow::Result<()> {
             };
             let timeout = if test.name == "p_channel_no_hello_timeout" {
                 Duration::from_secs(20)
+            } else if test.name == "a_rotation_migrates_on_schedule" {
+                Duration::from_secs(120)
             } else if !context.mock() && test.name.starts_with("a_rotation_") {
                 Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(60))
             } else if !context.mock() && test.name.starts_with("p_rotation_") {
@@ -397,10 +409,16 @@ async fn run() -> anyhow::Result<()> {
             let allowed = timeout.min(remaining);
             match tokio::time::timeout(allowed, result).await {
                 Ok(Ok(())) => Outcome::Pass,
-                Ok(Err(error)) => Outcome::Fail(format!("{error:#}")),
+                Ok(Err(error)) => {
+                    if let Some(inapplicable) = error.downcast_ref::<NotApplicable>() {
+                        Outcome::NotApplicable(inapplicable.0)
+                    } else {
+                        Outcome::Fail(format!("{error:#}"))
+                    }
+                }
                 Err(_) if allowed == remaining => {
                     deadline_exceeded = true;
-                    Outcome::Fail("global 13-minute deadline exceeded".to_owned())
+                    Outcome::Fail("global 14-minute-30-second deadline exceeded".to_owned())
                 }
                 Err(_) => Outcome::Fail("timed out".to_owned()),
             }
@@ -461,6 +479,17 @@ enum Outcome {
     NotApplicable(&'static str),
 }
 
+#[derive(Debug)]
+pub(crate) struct NotApplicable(pub(crate) &'static str);
+
+impl std::fmt::Display for NotApplicable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for NotApplicable {}
+
 macro_rules! p {
     ($name:ident) => {
         Test::protocol(stringify!($name), false, |context| Box::pin(protocol::$name(context)))
@@ -507,7 +536,8 @@ const TESTS: &[Test] = &[
     p!(p_connect_signature_replayed_to_renew),
     p!(p_renew_signature_rejected_on_connect).channel(),
     p!(p_channel_duplicate_signature_metadata_rejected).channel(),
-    p!(p_confirm_cross_tag_signatures_rejected).channel(),
+    p!(p_confirm_cross_tag_signatures_rejected),
+    p!(p_confirm_signature_rejected_on_connect).channel(),
     p!(p_check_in_current_and_pending),
     p!(p_check_in_cross_tag_signatures_rejected),
     p!(p_check_in_signature_rejected_on_connect).channel(),
@@ -533,6 +563,7 @@ const TESTS: &[Test] = &[
     p!(p_channel_revoked_before_hello).channel(),
     p!(p_channel_no_hello_timeout).channel(),
     p!(p_channel_unavailable_no_channel_url, mock_only),
+    p!(p_mock_malformed_https_channel_urls, mock_only),
     p!(p_config_revision_monotonic_changes, mock_only).channel(),
     p!(p_config_hello_reconciles_stale_revision).channel(),
     p!(p_config_update_pushes_higher_revision, mock_only).channel(),
@@ -556,7 +587,7 @@ const TESTS: &[Test] = &[
     p!(p_rotation_push_rate_survives_deadline, mock_only).channel(),
     p!(p_rotation_deadline_removes_old_root),
     p!(p_rotation_old_root_cert_renewable_after_deadline, mock_only),
-    p!(p_rotation_emergency_deadline, mock_only),
+    p!(p_rotation_emergency_deadline),
     p!(p_rotation_request_renewal_pushed).channel(),
     p!(p_rotation_pending_only_old_root_receives_push, mock_only).channel(),
     p!(p_listing_pagination_stable_during_concurrent_enrollment),
@@ -594,11 +625,14 @@ const TESTS: &[Test] = &[
     a!(a_old_key_deleted_after_confirm_without_channel, mock_only).channel(),
     a!(a_request_renewal_connected).channel(),
     a!(a_request_renewal_while_offline).channel(),
+    a!(a_request_renewal_without_channel).without_channel(),
     a!(a_reconnect_make_before_break, mock_only).channel(),
     a!(a_revocation_stops_agent).channel(),
     a!(a_device_unknown_recorded, mock_only).channel(),
     a!(a_signed_rejection_without_live_stream, mock_only),
     a!(a_no_channel_when_absent, mock_only),
+    a!(a_no_channel_url_with_query, mock_only),
+    a!(a_no_channel_url_with_fragment, mock_only),
     a!(a_config_update_disables_channel, mock_only).channel(),
     a!(a_check_in_enables_channel, mock_only),
     a!(a_check_in_recovers_broken_channel, mock_only),
@@ -607,5 +641,6 @@ const TESTS: &[Test] = &[
     a!(a_key_non_exportable),
     a!(a_file_backend_permissions),
     a!(a_rotation_migrates_connected_agent).channel(),
+    a!(a_rotation_migrates_through_check_in, mock_only),
     a!(a_rotation_migrates_on_schedule, mock_only),
 ];

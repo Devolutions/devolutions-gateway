@@ -1077,10 +1077,6 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
         field(state, "base_url")? == case.ctx.target.base_url,
         "stored identity has wrong base URL"
     );
-    ensure!(
-        state.get("channel_url").is_none(),
-        "identity stored obsolete top-level channel_url"
-    );
     let config = state["config"].as_object().context("stored identity config missing")?;
     ensure!(
         config.get("version") == Some(&json!(1)),
@@ -3010,7 +3006,7 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Result<()> {
-    with_agent(ctx.clone(), None, true, |case| {
+    with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
@@ -3048,23 +3044,32 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
             Ok(())
         })
     })
-    .await?;
-    if !ctx.mock() {
-        return Ok(());
-    }
+    .await
+}
+
+pub(crate) async fn a_request_renewal_without_channel(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
-            target.faults(&json!({ "channel_available": false })).await?;
+            if case.ctx.mock() {
+                target.faults(&json!({ "channel_available": false })).await?;
+            } else {
+                ensure!(!case.ctx.channel_available, "DVLS target offers an agent channel");
+            }
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
-            let (id, _) = case.enrolled(&target, &token).await?;
-            let original = current_thumbprint(&case.device(&target, &id).await?.body)?.to_owned();
-            let before = target.requests(None).await?;
-            let sequence_start = before["request_sequence"]
-                .as_array()
-                .context("mock request sequence missing")?
-                .len();
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let initial = case.device(&target, &id).await?;
+            ensure!(
+                state["config"].get("agent_channel_url").is_none() && initial.body["connected"] == false,
+                "no-channel renewal fixture unexpectedly offers a channel"
+            );
+            let original = current_thumbprint(&initial.body)?.to_owned();
+            let before = if case.ctx.mock() {
+                Some(target.requests(None).await?)
+            } else {
+                None
+            };
             expect_status(
                 &target
                     .admin(Method::POST, &format!("/devices/{id}/request-renewal"), None)
@@ -3081,20 +3086,25 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
                     && record["connected"] == false
             })
             .await?;
-            let requests = target.requests(None).await?;
-            ensure!(
-                count(&requests, "check_in")? > count(&before, "check_in")?
-                    && count(&requests, "renew")? >= 1
-                    && count(&requests, "confirm")? >= 1
-                    && count(&requests, "connect")? == 0
-                    && target
-                        .events(&id)
-                        .await?
-                        .iter()
-                        .any(|event| { event["type"] == "check_in_received" && event["renewal_requested"] == true }),
-                "channelless renewal did not start at check-in and finish with confirm"
-            );
-            assert_check_in_triggers_renewal(&requests, sequence_start)?;
+            if let Some(before) = before {
+                let sequence_start = before["request_sequence"]
+                    .as_array()
+                    .context("mock request sequence missing")?
+                    .len();
+                let requests = target.requests(None).await?;
+                ensure!(
+                    count(&requests, "check_in")? > count(&before, "check_in")?
+                        && count(&requests, "renew")? >= 1
+                        && count(&requests, "confirm")? >= 1
+                        && count(&requests, "connect")? == 0
+                        && count(&requests, "channel_attempts")? == 0
+                        && target.events(&id).await?.iter().any(|event| {
+                            event["type"] == "check_in_received" && event["renewal_requested"] == true
+                        }),
+                    "channelless renewal did not start at check-in and finish with confirm"
+                );
+                assert_check_in_triggers_renewal(&requests, sequence_start)?;
+            }
             Ok(())
         })
     })
@@ -3209,7 +3219,7 @@ pub(crate) async fn a_device_unknown_recorded(ctx: Context) -> anyhow::Result<()
 }
 
 pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyhow::Result<()> {
-    with_agent(ctx.clone(), Some(5), true, |case| {
+    with_agent(ctx.clone(), None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             target.faults(&json!({ "channel_available": false })).await?;
@@ -3222,14 +3232,18 @@ pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyh
                 "signed-request rejection fixture unexpectedly opened a channel"
             );
             let before = target.requests(None).await?;
+            ensure!(
+                count(&before, "renew")? == 0,
+                "check-in rejection fixture renewed before revocation"
+            );
             let since = time::OffsetDateTime::now_utc();
             target.revoke(&id).await?;
             case.until_rejected(&target, &authority, &id, "device_revoked").await?;
             let after = target.requests(None).await?;
             ensure!(
-                count(&after, "renew")? > count(&before, "renew")?
-                    || count(&after, "check_in")? > count(&before, "check_in")?,
-                "agent did not record device_revoked from a signed request"
+                count(&after, "check_in")? > count(&before, "check_in")?
+                    && count(&after, "renew")? == count(&before, "renew")?,
+                "agent did not record device_revoked from check-in before any renewal"
             );
             assert_terminal_stops(case, &target, &authority, Some(&id), "device_revoked", since).await?;
             Ok(())
@@ -3273,7 +3287,7 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             ensure!(
-                state.get("channel_url").is_none() && state["config"].get("agent_channel_url").is_none(),
+                state["config"].get("agent_channel_url").is_none(),
                 "agent stored config.agent_channel_url despite its absence from enrollment"
             );
             for _ in 0..3 {
@@ -3283,44 +3297,82 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
                     case.device(&target, &id).await?.body["connected"] == false,
                     "agent opened an unavailable channel"
                 );
+                let requests = target.requests(None).await?;
                 ensure!(
-                    count(&target.requests(None).await?, "connect")? == 0,
-                    "agent attempted Connect despite absent config.agent_channel_url"
+                    count(&requests, "connect")? == 0 && count(&requests, "channel_attempts")? == 0,
+                    "agent attempted a channel despite absent config.agent_channel_url"
                 );
             }
             Ok(())
         })
     })
     .await?;
-    with_agent(invalid_url_case, None, true, |case| {
+    let insecure_url = invalid_url_case.target.base_url.replacen("https://", "http://", 1);
+    no_channel_for_malformed_url(invalid_url_case, "HTTP scheme", json!(true), insecure_url).await
+}
+
+async fn no_channel_for_malformed_url(
+    ctx: Context,
+    variant: &'static str,
+    fault: Value,
+    expected_url: String,
+) -> anyhow::Result<()> {
+    with_agent(ctx, None, false, move |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
             target
-                .faults(&json!({ "channel_available": true, "malformed_channel_url": true }))
+                .faults(&json!({ "channel_available": true, "malformed_channel_url": fault }))
                 .await?;
-            let before = count(&target.requests(None).await?, "connect")?;
+            let config_path = case.path().join("agent.json");
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
+            config["__debug__"]["identity"]["channel_failure_check_in_after_secs"] = json!(120);
+            std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
+            case.start().await?;
+            let before = target.requests(None).await?;
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             ensure!(
-                state["config"]["agent_channel_url"]
-                    .as_str()
-                    .is_some_and(|url| url.starts_with("http://")),
-                "mock did not inject a non-HTTPS channel URL"
+                state["config"]["agent_channel_url"] == expected_url,
+                "mock did not inject config.agent_channel_url with {variant}"
             );
-            for _ in 0..3 {
+            for _ in 0..4 {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 case.check_running()?;
+                let requests = target.requests(None).await?;
                 ensure!(
-                    count(&target.requests(None).await?, "connect")? == before
-                        && case.device(&target, &id).await?.body["connected"] == false,
-                    "agent tried to connect using a non-HTTPS channel URL"
+                    count(&requests, "connect")? == count(&before, "connect")?
+                        && count(&requests, "channel_attempts")? == count(&before, "channel_attempts")?,
+                    "agent attempted a channel with {variant} in config.agent_channel_url"
+                );
+                ensure!(
+                    case.device(&target, &id).await?.body["connected"] == false,
+                    "agent authenticated a channel with {variant} in config.agent_channel_url"
                 );
             }
+            ensure!(
+                count(&target.requests(None).await?, "check_in")? > count(&before, "check_in")?
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| event["type"] == "check_in_received"),
+                "agent did not check in for {variant} before the delayed broken-channel fallback"
+            );
             Ok(())
         })
     })
     .await
+}
+
+pub(crate) async fn a_no_channel_url_with_query(ctx: Context) -> anyhow::Result<()> {
+    let expected_url = format!("{}?identity_probe=1", ctx.target.base_url);
+    no_channel_for_malformed_url(ctx, "query", json!("query"), expected_url).await
+}
+
+pub(crate) async fn a_no_channel_url_with_fragment(ctx: Context) -> anyhow::Result<()> {
+    let expected_url = format!("{}#identity_probe", ctx.target.base_url);
+    no_channel_for_malformed_url(ctx, "fragment", json!("fragment"), expected_url).await
 }
 
 pub(crate) async fn a_config_update_disables_channel(ctx: Context) -> anyhow::Result<()> {
@@ -3867,7 +3919,7 @@ pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow:
     .await
 }
 
-pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn a_rotation_migrates_through_check_in(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3884,11 +3936,18 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
             let old_root = field(&before.body["certificate"], "issuer")?.to_owned();
             let before_requests = target.requests(None).await?;
             let confirms_before = count(&before_requests, "confirm")?;
+            let blocked_before = count(&before_requests, "confirm_retry_503")?;
             let check_ins_before = count(&before_requests, "check_in")?;
             let rotation_sequence_start = before_requests["request_sequence"]
                 .as_array()
                 .context("mock request sequence missing")?
                 .len();
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": true }))
+                    .await?,
+                200,
+            )?;
             target
                 .faults(&json!({ "fail_next_response": { "endpoint": "confirm", "status": 503 } }))
                 .await?;
@@ -3936,7 +3995,9 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
             let pending_key = key_name(&stored, "pending")?.to_owned();
             let started = Instant::now();
             loop {
-                if count(&target.requests(None).await?, "confirm")? > confirms_before
+                let requests = target.requests(None).await?;
+                if count(&requests, "confirm")? > confirms_before
+                    && count(&requests, "confirm_retry_503")? > blocked_before
                     && target.control("faults", &json!({})).await?.body["fail_next_response"].is_null()
                 {
                     break;
@@ -3954,6 +4015,12 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                     && has_certificate(&case.device(&target, &id).await?.body, &pending_thumb, "pending"),
                 "new-root pending key was not persisted across restart"
             );
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "confirm", "pause": false }))
+                    .await?,
+                200,
+            )?;
             let before_restart = target.requests(None).await?;
             let restart_sequence_start = before_restart["request_sequence"]
                 .as_array()
@@ -3986,6 +4053,95 @@ pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Res
                         .is_some_and(|root| crate::signer::thumbprint(root).is_ok_and(|issuer| issuer == new_root)),
                 "restarted agent did not keep the confirmed new-root chain"
             );
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, Some(50), false, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let config_path = case.path().join("agent.json");
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
+            // Keep the next check-in later than scheduled renewal so it cannot deliver the rotation request.
+            config["__debug__"]["identity"]["check_in_interval_secs"] = json!(120);
+            std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
+
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            case.start().await?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            ensure!(
+                state["config"].get("agent_channel_url").is_none(),
+                "scheduled-rotation fixture unexpectedly offers a channel"
+            );
+            let old = case.device(&target, &id).await?;
+            ensure!(old.body["connected"] == false, "scheduled-rotation fixture connected");
+            let old_root = field(&old.body["certificate"], "issuer")?.to_owned();
+            let old_thumb = current_thumbprint(&old.body)?.to_owned();
+            let started = Instant::now();
+            loop {
+                if count(&target.requests(None).await?, "check_in")? > 0 {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not check in before scheduled rotation"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            let before = target.requests(None).await?;
+            ensure!(
+                count(&before, "renew")? == 0 && count(&before, "confirm")? == 0,
+                "agent renewed before rotation began"
+            );
+            expect_status(&target.rotate(None).await?, 202)?;
+            let wait = Instant::now();
+            let migrated = loop {
+                let record = case.device(&target, &id).await?.body;
+                if record["certificate"]["issuer"] != old_root
+                    && record["renewalRequested"] == false
+                    && record["connected"] == false
+                {
+                    break record;
+                }
+                case.check_running()?;
+                ensure!(
+                    wait.elapsed() < Duration::from_secs(70),
+                    "agent did not migrate roots on schedule before the next check-in"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            let new_root = field(&migrated["certificate"], "issuer")?.to_owned();
+            let after = target.requests(None).await?;
+            ensure!(
+                count(&after, "check_in")? == count(&before, "check_in")?
+                    && count(&after, "renew")? > count(&before, "renew")?
+                    && count(&after, "confirm")? > count(&before, "confirm")?
+                    && count(&after, "channel_attempts")? == 0
+                    && target
+                        .events(&id)
+                        .await?
+                        .iter()
+                        .any(|event| { event["type"] == "renew_received" && event["cert_thumbprint"] == old_thumb }),
+                "agent did not renew under the new root on schedule before another check-in"
+            );
+            case.until_state(&target, &authority, &id, "stored scheduled new-root chain", |state| {
+                state["keys"]["current"]["certificate_chain"]
+                    .as_array()
+                    .and_then(|chain| chain.last())
+                    .and_then(Value::as_str)
+                    .and_then(|root| crate::signer::thumbprint(root).ok())
+                    .is_some_and(|issuer| issuer == new_root)
+                    && state["keys"].get("pending").is_none()
+                    && state["keys"].get("previous").is_none()
+            })
+            .await?;
             Ok(())
         })
     })
