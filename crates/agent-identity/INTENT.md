@@ -10,10 +10,17 @@ After enrollment, the agent authenticates to its authority with that identity, r
 The channel is expected to work in typical deployments.
 Features that need push, such as PEDM policies, require it.
 
-Agent Identity and Agent Tunnel are distinct trust boundaries.
-Agent Tunnel enrolls server endpoints with a Gateway instance, whose root is owned by Gateway.
-Agent Identity enrolls user devices with DVLS, whose root is owned by DVLS.
-They may share implementation pieces (key generation and custody), not operational behavior.
+Agent Tunnel currently has its own enrollment, against a root owned by Gateway.
+After V1, it is expected to move onto Agent Identity, and its current enrollment to be deprecated:
+
+- DVLS registers each device's certificate thumbprint with the Gateway, and keeps it current on every renewal, revocation and deletion;
+- DVLS delivers the Gateway URL through the device's config;
+- the agent authenticates to the Gateway with its Agent Identity, over mTLS.
+
+A relying party such as the Gateway never accepts the RFC 9421 signatures or channel proofs the agent sends to its authority.
+It authenticates the device with a protocol bound to itself, so that neither side can relay the other's authentication.
+
+V1 must not preclude this migration.
 
 ## Specification
 
@@ -43,8 +50,8 @@ Non-goals for V1:
 - an enrollment approval queue;
 - PEDM payloads on the agent channel;
 - TPM-backed keys;
-- migrating Agent Tunnel onto Agent Identity;
-- shared or federated roots, or an authority trusting identities issued by another: identities are independent, one per authority;
+- migrating Agent Tunnel onto Agent Identity, and any other relying party (see Background);
+- shared or federated roots: identities are independent, one per authority;
 - de-duplication of reimaged devices;
 - un-revocation;
 - multi-node DVLS;

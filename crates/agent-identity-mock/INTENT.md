@@ -13,8 +13,8 @@ It implements, exactly as [CONTRACT.md](../../docs/agent-identity/CONTRACT.md) s
 - It does not reuse the agent's request and response types, or its signing code.
 - It verifies signatures and channel proofs with its own oracle, written from the contract, not with the `httpsig` crate the agent signs with.
   A signature-base bug shared by both sides would otherwise pass the suite.
-- The oracle is self-contained: pure functions, no I/O, time passed in, and no dependency on the rest of the mock.
-  Reviewing it never requires reasoning about how it interacts with other code.
+- The oracle is self-contained and LLM-owned: pure functions, no I/O, time passed in, and no dependency on the rest of the mock.
+  Humans treat it as a black box; trust in it comes from its narrow API and from the shared test vectors it must pass.
 
 If the mock and the agent shared an interpretation of the contract, the conformance suite could not detect a misreading of it.
 
