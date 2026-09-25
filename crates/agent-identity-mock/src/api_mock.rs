@@ -59,6 +59,7 @@ async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Reque
         "confirm_retry_503": state.requests.confirm_retry_503,
         "check_in": state.requests.check_in,
         "connect": state.requests.connect,
+        "channel_attempts": state.requests.channel_attempts,
         "redirect_hits": state.requests.redirect_hits,
         "request_sequence": state.requests.request_sequence,
         "authenticated_connects": state.requests.authenticated_connects,
@@ -225,7 +226,12 @@ fn faults_view(faults: &Faults) -> Value {
         "leaf_lifetime_secs": faults.leaf_lifetime_secs,
         "channel_available": faults.channel_available,
         "channel_broken": faults.channel_broken,
-        "malformed_channel_url": faults.malformed_channel_url,
+        "malformed_channel_url": match faults.malformed_channel_url {
+            None => json!(false),
+            Some(crate::state::MalformedChannelUrl::Http) => json!(true),
+            Some(crate::state::MalformedChannelUrl::Query) => json!("query"),
+            Some(crate::state::MalformedChannelUrl::Fragment) => json!("fragment"),
+        },
         "rotation_rate_limit_per_sec": faults.rotation_rate_limit_per_sec,
     })
 }
@@ -330,8 +336,18 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 _ => return invalid("channel_broken must be a boolean"),
             },
             "malformed_channel_url" => match value {
-                Value::Bool(b) => state.faults.malformed_channel_url = *b,
-                _ => return invalid("malformed_channel_url must be a boolean"),
+                Value::Null | Value::Bool(false) => state.faults.malformed_channel_url = None,
+                Value::Bool(true) => {
+                    state.faults.malformed_channel_url = Some(crate::state::MalformedChannelUrl::Http);
+                }
+                Value::String(value) => {
+                    state.faults.malformed_channel_url = Some(match value.as_str() {
+                        "query" => crate::state::MalformedChannelUrl::Query,
+                        "fragment" => crate::state::MalformedChannelUrl::Fragment,
+                        _ => return invalid("malformed_channel_url must be true, false, query, fragment or null"),
+                    });
+                }
+                _ => return invalid("malformed_channel_url must be true, false, query, fragment or null"),
             },
             "rotation_rate_limit_per_sec" => match value {
                 Value::Null => state.faults.rotation_rate_limit_per_sec = None,

@@ -78,6 +78,13 @@ impl Dispatcher {
     }
 
     async fn handle(self, request: http::Request<Incoming>) -> Result<OutResponse, ConnectionAborted> {
+        if request
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .is_some_and(|value| value.as_bytes().starts_with(b"application/grpc"))
+        {
+            self.app.state.lock().await.requests.channel_attempts += 1;
+        }
         let path = request.uri().path().to_owned();
         let stripped = match strip_prefix(&self.prefix, &path) {
             Some(stripped) => stripped.to_owned(),

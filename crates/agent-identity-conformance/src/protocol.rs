@@ -453,9 +453,10 @@ pub(crate) async fn p_channel_url_expectation(ctx: Context) -> anyhow::Result<()
         );
     }
     if let Some(channel_url) = &identity.agent_channel_url {
+        let parsed = reqwest::Url::parse(channel_url).context("parse config.agent_channel_url")?;
         ensure!(
-            reqwest::Url::parse(channel_url)?.scheme() == "https",
-            "config.agent_channel_url must use HTTPS"
+            parsed.scheme() == "https" && parsed.query().is_none() && parsed.fragment().is_none(),
+            "config.agent_channel_url must be an HTTPS URL without a query or fragment"
         );
         if ctx.mock() {
             ensure!(
@@ -1429,17 +1430,6 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
     let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
-
-    let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
-    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
-        .await
-        .err()
-        .context("confirm-tagged signature opened a channel")?;
-    channel::expect_status(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
-        Code::Unauthenticated,
-        "signature_invalid",
-    )?;
     let csr = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let mut confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
@@ -1458,6 +1448,70 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
     Ok(())
 }
 
+pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "confirm-to-connect").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
+        .await
+        .err()
+        .context("confirm-tagged signature opened a channel")?;
+    channel::expect_status(
+        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        Code::Unauthenticated,
+        "signature_invalid",
+    )?;
+    let pending_key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &pending_key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], pending_key)?;
+    ensure!(
+        has_certificate(
+            &device(&ctx.target, &identity.device_id).await?,
+            &identity.thumbprint,
+            "pending"
+        ),
+        "confirm-to-Connect fixture did not issue a pending certificate"
+    );
+    let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
+    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
+        .await
+        .err()
+        .context("pending confirm-tagged signature opened a channel")?;
+    channel::expect_status(
+        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        Code::Unauthenticated,
+        "signature_invalid",
+    )?;
+    let unchanged = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        unchanged["connected"] == false
+            && has_certificate(&unchanged, &old_thumb, "current")
+            && has_certificate(&unchanged, &identity.thumbprint, "pending"),
+        "confirm-tagged channel probe changed certificate status or connected the device"
+    );
+    Ok(())
+}
+
+async fn next_last_seen_second(ctx: &Context) -> anyhow::Result<()> {
+    if ctx.mock() {
+        ctx.target.advance(2).await
+    } else {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        Ok(())
+    }
+}
+
+fn last_seen_at(device: &Value) -> anyhow::Result<Option<time::OffsetDateTime>> {
+    match device.get("lastSeenAt") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(timestamp)) => Ok(Some(
+            time::OffsetDateTime::parse(timestamp, &Rfc3339).context("invalid lastSeenAt")?,
+        )),
+        Some(_) => anyhow::bail!("lastSeenAt must be an RFC 3339 string when present"),
+    }
+}
+
 pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "check-in").await?;
     let enrolled = identity.config.clone();
@@ -1466,23 +1520,19 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         enrolled["revision"].as_u64().is_some(),
         "enrollment did not provide an unsigned config revision"
     );
-    if ctx.mock() {
-        ctx.target.advance(2).await?;
-    } else {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
+    next_last_seen_second(&ctx).await?;
     let current = ctx
         .target
         .check_in(&identity, &json!({ "hostname": "current-check-in" }))
         .await?;
     expect_status(&current, 200)?;
     let after = device(&ctx.target, &identity.device_id).await?;
+    let current_seen = last_seen_at(&after)?.context("current check-in did not set lastSeenAt")?;
     ensure!(
         current.body["config"] == enrolled
             && current.body["renewal_requested"] == false
             && after["metadata"]["hostname"] == "current-check-in"
-            && time::OffsetDateTime::parse(field(&after, "lastSeenAt")?, &Rfc3339)?
-                > time::OffsetDateTime::parse(field(&before, "lastSeenAt")?, &Rfc3339)?,
+            && last_seen_at(&before)?.is_none_or(|previous| current_seen > previous),
         "current-certificate check-in did not return config or refresh metadata and lastSeenAt"
     );
     expect_status(
@@ -1499,23 +1549,25 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let before_pending = device(&ctx.target, &identity.device_id).await?;
+    next_last_seen_second(&ctx).await?;
     let pending = ctx
         .target
         .check_in(&identity, &json!({ "hostname": "pending-check-in" }))
         .await?;
     expect_status(&pending, 200)?;
+    let after_pending = device(&ctx.target, &identity.device_id).await?;
+    let pending_seen = last_seen_at(&after_pending)?.context("pending check-in did not set lastSeenAt")?;
     ensure!(
         pending.body["config"] == enrolled
             && pending.body["renewal_requested"] == true
-            && has_certificate(
-                &device(&ctx.target, &identity.device_id).await?,
-                &identity.thumbprint,
-                "pending"
-            )
-            && device(&ctx.target, &identity.device_id).await?["metadata"]["hostname"] == "pending-check-in",
-        "pending-certificate check-in did not return config, renewal flag or metadata"
+            && has_certificate(&after_pending, &identity.thumbprint, "pending")
+            && after_pending["metadata"]["hostname"] == "pending-check-in"
+            && last_seen_at(&before_pending)?.is_none_or(|previous| pending_seen > previous),
+        "pending-certificate check-in did not return config or refresh metadata and lastSeenAt"
     );
-    let before_invalid = device(&ctx.target, &identity.device_id).await?;
+    let before_invalid = after_pending;
+    next_last_seen_second(&ctx).await?;
     let signed = identity.key.sign_now(&identity.thumbprint, "check-in", Some(b"{}"));
     expect_error(
         &ctx.target.signed_check_in(b"{}", &signed).await?,
@@ -2582,7 +2634,7 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
         .await?;
     expect_status(&reply, 200)?;
     ensure!(
-        reply.body.get("channel_url").is_none() && reply.body["config"].get("agent_channel_url").is_none(),
+        reply.body["config"].get("agent_channel_url").is_none(),
         "enroll included config.agent_channel_url for unavailable channel"
     );
     let identity = Identity::from_enrollment(key, &reply)?;
@@ -2599,6 +2651,39 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
             .downcast_ref::<tonic::Status>()
             .is_some_and(|status| status.code() == Code::Unavailable),
         "unavailable channel did not return gRPC UNAVAILABLE"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_mock_malformed_https_channel_urls(ctx: Context) -> anyhow::Result<()> {
+    for (variant, suffix) in [("query", "?identity_probe=1"), ("fragment", "#identity_probe")] {
+        ctx.target.faults(&json!({ "malformed_channel_url": variant })).await?;
+        let (_, identity) = issued(&ctx, variant).await?;
+        ensure!(
+            identity.agent_channel_url.as_deref() == Some(format!("{}{suffix}", ctx.target.base_url).as_str()),
+            "mock did not return an HTTPS agent_channel_url with a {variant}"
+        );
+    }
+    ctx.target.faults(&json!({ "malformed_channel_url": null })).await?;
+    let (_, restored) = issued(&ctx, "restored-channel-url").await?;
+    ensure!(
+        restored.agent_channel_url.as_deref() == Some(ctx.target.base_url.as_str()),
+        "clearing the malformed-URL fault did not restore the HTTPS channel URL"
+    );
+    let before = ctx.target.requests(None).await?;
+    let response = ctx
+        .target
+        .http
+        .post(format!("{}/not-the-channel", ctx.target.base_url))
+        .header(reqwest::header::CONTENT_TYPE, "application/grpc")
+        .send()
+        .await?;
+    ensure!(response.status() == 404, "mock accepted an unrelated gRPC path");
+    let after = ctx.target.requests(None).await?;
+    ensure!(
+        count(&after, "channel_attempts")? == count(&before, "channel_attempts")? + 1
+            && count(&after, "connect")? == count(&before, "connect")?,
+        "mock did not count a gRPC channel attempt on an unrelated path"
     );
     Ok(())
 }
@@ -2717,9 +2802,28 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
-    let (_, identity) = issued(&ctx, "stale-config").await?;
+    let (_, mut identity) = issued(&ctx, "stale-config").await?;
+    if count(&identity.config, "revision")? == 0 {
+        if !ctx.mock() {
+            return Err(
+                crate::NotApplicable("revision zero has no lower value and DVLS has no config-update fixture").into(),
+            );
+        }
+        expect_status(
+            &ctx.target
+                .control("config", &json!({ "fields": { "conformance_stale_hello": true } }))
+                .await?,
+            200,
+        )?;
+        let updated = check_in_config(&ctx.target, &identity).await?;
+        ensure!(
+            count(&updated, "revision")? > 0,
+            "mock did not raise revision zero before the stale-Hello probe"
+        );
+        identity.config = updated;
+    }
     let current_revision = count(&identity.config, "revision")?;
-    let announced_revision = current_revision.saturating_sub(1);
+    let announced_revision = current_revision - 1;
     let mut stale = channel::open(&ctx.target, &identity).await?;
     let challenge = stale.challenge().await?;
     let hello_id = stale
@@ -2733,21 +2837,12 @@ pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> an
         ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
         "stale Hello did not receive Welcome first"
     );
-    if current_revision == 0 {
-        ensure!(
-            tokio::time::timeout(Duration::from_millis(200), stale.stream.message())
-                .await
-                .is_err(),
-            "revision zero received a ConfigUpdate despite having no lower unsigned revision"
-        );
-    } else {
-        let (update, config) = next_config_update(&mut stale).await?;
-        ensure!(
-            config == identity.config,
-            "stale Hello did not receive the current config immediately after Welcome"
-        );
-        stale.ack(&update).await?;
-    }
+    let (update, config) = next_config_update(&mut stale).await?;
+    ensure!(
+        config == identity.config,
+        "stale Hello did not receive the current config immediately after Welcome"
+    );
+    stale.ack(&update).await?;
 
     let mut current = channel::open(&ctx.target, &identity).await?;
     current.hello(&identity, &[]).await?;
@@ -2770,7 +2865,7 @@ pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> an
                     .iter()
                     .filter(|event| event["type"] == "config_update_sent")
                     .count()
-                    == usize::from(current_revision > 0),
+                    == 1,
             "mock did not distinguish stale from current Hello revisions"
         );
     }
@@ -3643,7 +3738,10 @@ pub(crate) async fn p_rotation_completes_immediately_without_old_root_devices(ct
     );
     let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     expect_status(&status, 200)?;
-    ensure!(status.body == started.body, "completed rotation did not remain idle");
+    ensure!(
+        rotation_snapshot(&status.body)? == rotation_snapshot(&started.body)?,
+        "completed rotation did not remain idle"
+    );
     let roots = ctx.target.trust_anchor().await?;
     let published = roots["roots"].as_array().context("published roots")?;
     ensure!(
@@ -4042,16 +4140,50 @@ pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Conte
 }
 
 pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Result<()> {
+    if !ctx.mock() {
+        ensure!(
+            ctx.disposable_dvls_target,
+            "DVLS rotation requires --disposable-dvls-target"
+        );
+        wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
+    }
+    let (_, identity) = issued(&ctx, "emergency-old-root").await?;
     let before = ctx.target.trust_anchor().await?;
-    let old_thumb = field(&before["roots"][0], "thumbprint")?.to_owned();
-    let started = ctx.target.rotate(Some("now")).await?;
-    expect_status(&started, 202)?;
-    let after = ctx.target.trust_anchor().await?;
-    let published = after["roots"].as_array().context("emergency roots")?;
-    ensure!(published.len() == 1, "emergency deadline did not remove old root");
+    let roots = before["roots"].as_array().context("roots before emergency rotation")?;
     ensure!(
-        published[0]["thumbprint"] != old_thumb,
-        "emergency deadline retained old root"
+        roots.len() == 1,
+        "emergency rotation did not start with one published root"
+    );
+    let old_thumb = field(&roots[0], "thumbprint")?.to_owned();
+    let old_device = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        old_device["status"] == "active"
+            && old_device["connected"] == false
+            && old_device["certificate"]["issuer"] == old_thumb
+            && has_certificate(&old_device, &identity.thumbprint, "current"),
+        "emergency rotation fixture lacks an active, unconnected old-root device"
+    );
+    expect_status(&ctx.target.rotate(Some("now")).await?, 202)?;
+    let started = Instant::now();
+    loop {
+        let after = ctx.target.trust_anchor().await?;
+        let published = after["roots"].as_array().context("emergency roots")?;
+        if published.len() == 1 && published[0]["thumbprint"] != old_thumb {
+            break;
+        }
+        ensure!(
+            !ctx.mock() && started.elapsed() < Duration::from_secs(2),
+            "emergency deadline retained the old root while its device was active"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let remaining = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        remaining["status"] == "active"
+            && remaining["connected"] == false
+            && remaining["certificate"]["issuer"] == old_thumb
+            && has_certificate(&remaining, &identity.thumbprint, "current"),
+        "emergency rotation changed the old-root device rather than only publishing the new root"
     );
     Ok(())
 }
@@ -4375,9 +4507,15 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
             .await?,
         200,
     )?;
+    next_last_seen_second(&ctx).await?;
+    expect_status(
+        &ctx.target
+            .check_in(&active, &json!({ "hostname": "filter-host" }))
+            .await?,
+        200,
+    )?;
     let observed = device(&ctx.target, &active.device_id).await?;
-    let last_seen = field(&observed, "lastSeenAt")?;
-    let instant = time::OffsetDateTime::parse(last_seen, &Rfc3339)?;
+    let instant = last_seen_at(&observed)?.context("check-in did not set lastSeenAt for filtering")?;
     let after = (instant - time::Duration::seconds(1)).format(&Rfc3339)?;
     let before = (instant + time::Duration::seconds(1)).format(&Rfc3339)?;
     for (query, expected) in [
@@ -4536,6 +4674,123 @@ async fn assert_token_name_absent(target: &Target, name: &str) -> anyhow::Result
     Ok(())
 }
 
+fn known_response_fields(value: &Value, required: &[&str], optional: &[&str]) -> anyhow::Result<Value> {
+    let object = value.as_object().context("response is not a JSON object")?;
+    let mut fields = serde_json::Map::new();
+    for &name in required {
+        let field = object
+            .get(name)
+            .with_context(|| format!("response omitted required {name}"))?;
+        ensure!(!field.is_null(), "required response field {name} is null");
+        fields.insert(name.to_owned(), field.clone());
+    }
+    for &name in optional {
+        if let Some(field) = object.get(name).filter(|field| !field.is_null()) {
+            fields.insert(name.to_owned(), field.clone());
+        }
+    }
+    Ok(Value::Object(fields))
+}
+
+fn trust_anchor_snapshot(value: &Value) -> anyhow::Result<Vec<Value>> {
+    let roots = value["roots"]
+        .as_array()
+        .context("trust-anchor response omitted roots")?;
+    let mut known = roots
+        .iter()
+        .map(|root| {
+            for name in ["certificate", "thumbprint", "not_before", "not_after"] {
+                let _ = field(root, name)?;
+            }
+            known_response_fields(root, &["certificate", "thumbprint", "not_before", "not_after"], &[])
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    known.sort_by(|left, right| left["thumbprint"].as_str().cmp(&right["thumbprint"].as_str()));
+    Ok(known)
+}
+
+fn rotation_snapshot(value: &Value) -> anyhow::Result<Value> {
+    let _ = field(value, "phase")?;
+    let _ = count(value, "activeDevicesOnOldRoot")?;
+    let mut known = known_response_fields(value, &["phase", "activeDevicesOnOldRoot"], &["deadline"])?;
+    if known.get("deadline").is_some() {
+        let _ = field(&known, "deadline")?;
+    }
+    for name in ["oldRoot", "newRoot"] {
+        if let Some(root) = value.get(name).filter(|root| !root.is_null()) {
+            let _ = field(root, "thumbprint")?;
+            let _ = field(root, "notAfter")?;
+            known[name] = known_response_fields(root, &["thumbprint", "notAfter"], &[])?;
+        }
+    }
+    Ok(known)
+}
+
+fn token_record_snapshot(value: &Value) -> anyhow::Result<Value> {
+    known_response_fields(
+        value,
+        &[
+            "id",
+            "name",
+            "maxUses",
+            "usedCount",
+            "expiresAt",
+            "state",
+            "createdAt",
+            "createdBy",
+        ],
+        &["friendlyNameFormat", "config"],
+    )
+}
+
+fn device_snapshot(value: &Value) -> anyhow::Result<Value> {
+    let mut known = known_response_fields(
+        value,
+        &[
+            "id",
+            "friendlyName",
+            "status",
+            "connected",
+            "metadata",
+            "certificates",
+            "enrollmentToken",
+            "createdAt",
+            "renewalRequested",
+        ],
+        &["lastSeenAt", "certificate", "revokedAt"],
+    )?;
+    if let Some(certificate) = value.get("certificate").filter(|certificate| !certificate.is_null()) {
+        known["certificate"] = known_response_fields(certificate, &["notAfter", "issuer"], &[])?;
+    }
+    if let Some(certificates) = value.get("certificates") {
+        known["certificates"] = Value::Array(
+            certificates
+                .as_array()
+                .context("device certificates are not an array")?
+                .iter()
+                .map(|certificate| {
+                    known_response_fields(
+                        certificate,
+                        &[
+                            "thumbprint",
+                            "serialNumber",
+                            "notBefore",
+                            "notAfter",
+                            "issuer",
+                            "status",
+                        ],
+                        &[],
+                    )
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        );
+    }
+    if let Some(token) = value.get("enrollmentToken") {
+        known["enrollmentToken"] = known_response_fields(token, &["id", "name"], &[])?;
+    }
+    Ok(known)
+}
+
 async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expected: u16) -> anyhow::Result<()> {
     let token = token(ctx, 1).await?;
     let identity = identity(&ctx.target, &token, "untouched").await?;
@@ -4546,12 +4801,14 @@ async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expecte
     } else {
         None
     };
-    let before = device(&ctx.target, &identity.device_id).await?;
+    let before = device_snapshot(&device(&ctx.target, &identity.device_id).await?)?;
     let token_record_before = ctx.target.token_record(&token.id).await?;
     expect_status(&token_record_before, 200)?;
-    let roots_before = ctx.target.trust_anchor().await?;
+    let token_record_before = token_record_snapshot(&token_record_before.body)?;
+    let roots_before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     let rotation_before = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     expect_status(&rotation_before, 200)?;
+    let rotation_before = rotation_snapshot(&rotation_before.body)?;
     let events_before = if ctx.mock() {
         Some(ctx.target.events(&identity.device_id).await?)
     } else {
@@ -4600,20 +4857,21 @@ async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expecte
         let after_token = ctx.target.token_record(&token.id).await?;
         expect_status(&after_token, 200)?;
         ensure!(
-            after_token.body == token_record_before.body,
+            token_record_snapshot(&after_token.body)? == token_record_before,
             "unauthorized {method} {route} changed the enrollment token"
         );
         if method == Method::POST && route == "/enrollment-tokens" {
             assert_token_name_absent(&ctx.target, &unauthorized_name).await?;
         }
         ensure!(
-            device(&ctx.target, &identity.device_id).await? == before,
+            device_snapshot(&device(&ctx.target, &identity.device_id).await?)? == before,
             "unauthorized {method} {route} changed the device"
         );
         let after_rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
         expect_status(&after_rotation, 200)?;
         ensure!(
-            after_rotation.body == rotation_before.body && ctx.target.trust_anchor().await? == roots_before,
+            rotation_snapshot(&after_rotation.body)? == rotation_before
+                && trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == roots_before,
             "unauthorized {method} {route} changed CA rotation state"
         );
         if let Some(events) = &events_before {
@@ -4648,9 +4906,10 @@ pub(crate) async fn p_rotation_admin_write_requires_auth(ctx: Context) -> anyhow
         ctx.mock() || ctx.disposable_dvls_target,
         "rotation authorization requires a disposable DVLS target"
     );
-    let before = ctx.target.trust_anchor().await?;
+    let before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     let rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
     expect_status(&rotation, 200)?;
+    let rotation = rotation_snapshot(&rotation.body)?;
     let body = serde_json::to_vec(&json!({ "deadline": "now" }))?;
     let invalid = format!("invalid-admin-{}", uuid::Uuid::new_v4());
     for (bearer, expected) in [
@@ -4674,11 +4933,11 @@ pub(crate) async fn p_rotation_admin_write_requires_auth(ctx: Context) -> anyhow
             expected,
         )?;
         ensure!(
-            ctx.target.trust_anchor().await? == before,
+            trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == before,
             "unauthorized rotation changed published roots"
         );
         ensure!(
-            ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body == rotation.body,
+            rotation_snapshot(&ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body)? == rotation,
             "unauthorized rotation changed state"
         );
     }
@@ -4834,6 +5093,130 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
 
     use super::*;
+
+    #[test]
+    fn last_seen_may_be_missing_before_check_in() -> anyhow::Result<()> {
+        ensure!(
+            last_seen_at(&json!({}))?.is_none() && last_seen_at(&json!({ "lastSeenAt": null }))?.is_none(),
+            "missing and null admin lastSeenAt must both mean unseen"
+        );
+        ensure!(
+            last_seen_at(&json!({ "lastSeenAt": "2026-09-25T12:00:00Z" }))?.is_some(),
+            "check-in timestamp was not parsed"
+        );
+        ensure!(
+            last_seen_at(&json!({ "lastSeenAt": 123 })).is_err()
+                && last_seen_at(&json!({ "lastSeenAt": "invalid" })).is_err(),
+            "invalid admin lastSeenAt was accepted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn authorization_snapshots_ignore_unknown_fields() -> anyhow::Result<()> {
+        let roots = json!({
+            "roots": [{
+                "certificate": "root",
+                "thumbprint": "root-id",
+                "not_before": "start",
+                "not_after": "end"
+            }]
+        });
+        let mut noisy_roots = roots.clone();
+        noisy_roots["request_id"] = json!("one");
+        noisy_roots["roots"][0]["request_id"] = json!("two");
+        ensure!(
+            trust_anchor_snapshot(&roots)? == trust_anchor_snapshot(&noisy_roots)?,
+            "unknown trust-anchor fields changed the published-root snapshot"
+        );
+        noisy_roots["roots"][0]["thumbprint"] = json!("other-root");
+        ensure!(
+            trust_anchor_snapshot(&roots)? != trust_anchor_snapshot(&noisy_roots)?,
+            "changed root identity was ignored"
+        );
+        noisy_roots["roots"][0]["thumbprint"] = Value::Null;
+        ensure!(
+            trust_anchor_snapshot(&noisy_roots).is_err(),
+            "explicit null root thumbprint was accepted"
+        );
+
+        let rotation = json!({ "phase": "idle", "activeDevicesOnOldRoot": 0 });
+        let mut noisy_rotation = rotation.clone();
+        noisy_rotation["request_id"] = json!("different");
+        noisy_rotation["deadline"] = Value::Null;
+        noisy_rotation["oldRoot"] = Value::Null;
+        noisy_rotation["newRoot"] = Value::Null;
+        ensure!(
+            rotation_snapshot(&rotation)? == rotation_snapshot(&noisy_rotation)?,
+            "unknown or null optional rotation fields changed the no-state-change snapshot"
+        );
+        noisy_rotation["phase"] = Value::Null;
+        ensure!(
+            rotation_snapshot(&noisy_rotation).is_err(),
+            "explicit null required rotation phase was accepted"
+        );
+        let token = json!({
+            "id": "token-id",
+            "name": "test",
+            "maxUses": 1,
+            "usedCount": 1,
+            "expiresAt": "future",
+            "state": "exhausted",
+            "createdAt": "now",
+            "createdBy": "admin"
+        });
+        let mut noisy_token = token.clone();
+        noisy_token["request_id"] = json!("different");
+        noisy_token["friendlyNameFormat"] = Value::Null;
+        noisy_token["config"] = Value::Null;
+        ensure!(
+            token_record_snapshot(&token)? == token_record_snapshot(&noisy_token)?,
+            "unknown or null optional token fields changed the no-state-change snapshot"
+        );
+        noisy_token["usedCount"] = Value::Null;
+        ensure!(
+            token_record_snapshot(&noisy_token).is_err(),
+            "explicit null required token use count was accepted"
+        );
+        let device = json!({
+            "id": "device-id",
+            "friendlyName": "test",
+            "status": "active",
+            "connected": false,
+            "metadata": {},
+            "certificates": [],
+            "enrollmentToken": { "id": "token-id", "name": "test" },
+            "createdAt": "now",
+            "renewalRequested": false,
+            "certificate": { "issuer": "root-id", "notAfter": "end" }
+        });
+        let mut noisy_device = device.clone();
+        noisy_device["request_id"] = json!("different");
+        noisy_device["certificate"]["request_id"] = json!("different");
+        noisy_device["lastSeenAt"] = Value::Null;
+        noisy_device["revokedAt"] = Value::Null;
+        ensure!(
+            device_snapshot(&device)? == device_snapshot(&noisy_device)?,
+            "unknown or null optional device fields changed the no-state-change snapshot"
+        );
+        let mut no_certificate = device;
+        no_certificate
+            .as_object_mut()
+            .context("device fixture must be an object")?
+            .remove("certificate");
+        let mut null_certificate = no_certificate.clone();
+        null_certificate["certificate"] = Value::Null;
+        ensure!(
+            device_snapshot(&no_certificate)? == device_snapshot(&null_certificate)?,
+            "null optional device certificate was not treated as absent"
+        );
+        noisy_device["metadata"] = Value::Null;
+        ensure!(
+            device_snapshot(&noisy_device).is_err(),
+            "explicit null required device metadata was accepted"
+        );
+        Ok(())
+    }
 
     #[test]
     fn chain_requires_published_root_validity_and_signed_p256_links() -> anyhow::Result<()> {

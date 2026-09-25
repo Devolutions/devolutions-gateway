@@ -82,6 +82,13 @@ pub(crate) struct FailNextResponse {
     pub(crate) retry_after_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MalformedChannelUrl {
+    Http,
+    Query,
+    Fragment,
+}
+
 /// §11 fault knobs. Merged field-by-field by `POST __mock__/faults`.
 #[derive(Debug, Clone)]
 pub(crate) struct Faults {
@@ -91,7 +98,7 @@ pub(crate) struct Faults {
     pub(crate) leaf_lifetime_secs: Option<i64>,
     pub(crate) channel_available: bool,
     pub(crate) channel_broken: bool,
-    pub(crate) malformed_channel_url: bool,
+    pub(crate) malformed_channel_url: Option<MalformedChannelUrl>,
     pub(crate) rotation_rate_limit_per_sec: Option<u32>,
 }
 
@@ -104,7 +111,7 @@ impl Default for Faults {
             leaf_lifetime_secs: None,
             channel_available: true,
             channel_broken: false,
-            malformed_channel_url: false,
+            malformed_channel_url: None,
             rotation_rate_limit_per_sec: None,
         }
     }
@@ -290,6 +297,7 @@ pub(crate) struct RequestCounts {
     pub(crate) confirm_retry_503: u64,
     pub(crate) check_in: u64,
     pub(crate) connect: u64,
+    pub(crate) channel_attempts: u64,
     pub(crate) redirect_hits: u64,
     pub(crate) request_sequence: Vec<&'static str>,
     pub(crate) authenticated_connects: u64,
@@ -745,10 +753,11 @@ impl State {
         self.next_device_seq += 1;
         let mut config = json!({ "version": 1, "revision": 1 });
         if self.faults.channel_available {
-            let url = if self.faults.malformed_channel_url {
-                base_url.replacen("https://", "http://", 1)
-            } else {
-                base_url.to_owned()
+            let url = match self.faults.malformed_channel_url {
+                Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
+                Some(MalformedChannelUrl::Query) => format!("{base_url}?identity_probe=1"),
+                Some(MalformedChannelUrl::Fragment) => format!("{base_url}#identity_probe"),
+                None => base_url.to_owned(),
             };
             config["agent_channel_url"] = json!(url);
         }

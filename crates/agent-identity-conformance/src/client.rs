@@ -376,10 +376,6 @@ impl Identity {
             .map(|entry| entry.as_str().context("invalid chain entry").map(str::to_owned))
             .collect::<anyhow::Result<Vec<_>>>()?;
         ensure!(!chain.is_empty(), "empty certificate chain");
-        ensure!(
-            reply.body.get("channel_url").is_none(),
-            "enrollment used obsolete top-level channel_url"
-        );
         let config = reply.body["config"].as_object().context("missing enrollment config")?;
         ensure!(
             config.get("version") == Some(&json!(1)),
@@ -483,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn enrollment_omission_differs_from_explicit_null() -> anyhow::Result<()> {
+    fn enrollment_accepts_unknown_fields_but_not_null_known_fields() -> anyhow::Result<()> {
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let certificate = field(&vectors["keys"][0], "certificate")?;
         let mut reply = Reply {
@@ -495,11 +491,13 @@ mod tests {
                 "config": { "version": 1, "revision": 1 },
             }),
         };
+        reply.body["channel_url"] = Value::Null;
+        reply.body["extra_response_field"] = json!({ "nested": true });
+        reply.body["config"]["product_field"] = json!("product-specific");
+        let identity = Identity::from_enrollment(KeyPair::generate()?, &reply)?;
         ensure!(
-            Identity::from_enrollment(KeyPair::generate()?, &reply)?
-                .agent_channel_url
-                .is_none(),
-            "omitted config.agent_channel_url was not accepted"
+            identity.agent_channel_url.is_none() && identity.config["product_field"] == "product-specific",
+            "unknown response fields or omitted config.agent_channel_url were not accepted"
         );
         reply.body["config"]["agent_channel_url"] = Value::Null;
         ensure!(
@@ -507,11 +505,29 @@ mod tests {
             "explicit null config.agent_channel_url was accepted"
         );
         reply.body["config"]["agent_channel_url"] = json!("https://host/mock");
-        reply.body["channel_url"] = Value::Null;
         ensure!(
-            Identity::from_enrollment(KeyPair::generate()?, &reply).is_err(),
-            "obsolete top-level channel_url was accepted"
+            Identity::from_enrollment(KeyPair::generate()?, &reply)?
+                .agent_channel_url
+                .as_deref()
+                == Some("https://host/mock"),
+            "unknown top-level channel_url overrode config.agent_channel_url"
         );
+        for name in ["authority_id", "device_id", "certificate_chain", "config"] {
+            let mut invalid = reply.clone();
+            invalid.body[name] = Value::Null;
+            ensure!(
+                Identity::from_enrollment(KeyPair::generate()?, &invalid).is_err(),
+                "explicit null {name} was accepted"
+            );
+        }
+        for name in ["version", "revision", "agent_channel_url"] {
+            let mut invalid = reply.clone();
+            invalid.body["config"][name] = Value::Null;
+            ensure!(
+                Identity::from_enrollment(KeyPair::generate()?, &invalid).is_err(),
+                "explicit null config.{name} was accepted"
+            );
+        }
         Ok(())
     }
 }
