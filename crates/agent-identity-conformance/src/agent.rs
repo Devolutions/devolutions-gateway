@@ -354,7 +354,9 @@ impl AgentCase {
             use std::os::unix::process::CommandExt as _;
             command.as_std_mut().process_group(0);
         }
-        let mut process = command.spawn().context("spawn devolutions-agent run")?;
+        let process = command.spawn().context("spawn devolutions-agent run")?;
+        #[cfg(windows)]
+        let mut process = process;
         #[cfg(windows)]
         {
             let pid = process.id().context("agent has no process ID")?;
@@ -690,9 +692,13 @@ impl AgentCase {
                 recorded.insert(field(&progress, "key_name")?.to_owned());
             }
         }
-        let mut existing = self.file_keys_with_prefix()?;
+        let existing = self.file_keys_with_prefix()?;
         #[cfg(windows)]
-        existing.extend(crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?);
+        let existing = {
+            let mut existing = existing;
+            existing.extend(crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?);
+            existing
+        };
         let mut orphaned = existing.difference(&recorded).cloned().collect::<Vec<_>>();
         orphaned.sort_unstable();
         ensure!(
