@@ -1,6 +1,6 @@
 # Agent Identity — Contract (draft v0.5)
 
-Status: v0.5 draft; E1–E9 decisions applied; clarifications C1–C18 (orchestrator, 2026-09-25). Benoit approved C1, C2, C4–C10, C12–C16, C17 (`confirm`, replacing C3's promote-on-first-use) and C18 (`config.agent_channel_url`), plus the former Phase 0 proposals.
+Status: v0.5; E1–E9 decisions applied; clarifications C1–C20 (orchestrator, 2026-09-25), all approved by Benoit: C17 `confirm` (replaces C3's promote-on-first-use), C18 `config.agent_channel_url`, C19 config revisions with `ConfigUpdate` and the `GET config` fallback, C20 channel renames.
 Owner: top-level orchestrator.
 Changes go lead → top-level → Benoit.
 Once approved, it is committed to devolutions-gateway at `docs/agent-identity/CONTRACT.md` with the `.proto` and test vectors next to it.
@@ -77,6 +77,7 @@ Paths (identical for every product):
 | POST | `{u}/api/agent-identity/v1/enroll` | `Authorization: Bearer <token>` |
 | POST | `{u}/api/agent-identity/v1/renew` | RFC 9421, `tag="renew"` |
 | POST | `{u}/api/agent-identity/v1/confirm` | RFC 9421, `tag="confirm"`, signed with the new key (§5.5) |
+| GET | `{u}/api/agent-identity/v1/config` | RFC 9421, `tag="config"` (§5.6) |
 
 ### 5.1 `GET trust-anchor`
 
@@ -105,12 +106,15 @@ Request:
   "device_id": "<uuid>",
   "friendly_name": "...",
   "certificate_chain": ["<base64 DER leaf>", "<base64 DER root>"],
-  "config": { "version": 1, "agent_channel_url": "https://host/dvls" }
+  "config": { "version": 1, "revision": 1, "agent_channel_url": "https://host/dvls" }
 }
 ```
 
 - `authority_id` is stable for a server instance (DVLS: generated once, stored in settings).
 - `config` is versioned (`version` is the schema version); the agent ignores unknown fields.
+- `config.revision` (C19): unsigned integer, assigned by the server, strictly increasing per device whenever the device's effective config changes.
+  The agent replaces its stored config only with a higher revision.
+  Delivery of later revisions is covered in §7.3 (agent channel) and §5.6 (HTTP fallback).
 - `config.agent_channel_url` (C18) is the base URL of the agent channel (§7). It's absent when the server doesn't offer the agent channel to this device, whatever the reason (the topology can't host it, it's disabled, or a product authenticates agents over its own channel); the agent then opens no agent channel for that authority.
   Products may add their own fields later (e.g. a PSU channel URL); both can coexist.
 
@@ -143,7 +147,7 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 | `token_expired` | 401 | `now ≥ expires_at` | permanent |
 | `device_revoked` | 403 | Device revoked | terminal |
 | `device_unknown` | 401 | Certificate not registered, or device deleted | terminal |
-| `certificate_expired` | 401 | Expired (for `connect`) or beyond grace (for `renew`) | re-enroll required |
+| `certificate_expired` | 401 | Expired (for `connect`, `confirm`, `config`) or beyond grace (for `renew`) | re-enroll required, except on `confirm` (renew again with a fresh key, §8) |
 | `signature_invalid` | 401 | Bad signature, wrong `tag`, bad digest, replayed nonce, malformed params | transient |
 | `clock_skew` | 401 | `created`/`expires` outside tolerance | transient, adjust clock |
 | `invalid_request` | 400 | Malformed body, CSR or metadata | transient (agent bug; keep retrying with backoff) |
@@ -162,11 +166,22 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 - `204` in both cases.
 - `confirm` is the only operation that promotes a certificate; renew and channel connect never do.
 
+### 5.6 `GET config` (C19, HTTP fallback)
+
+- Signed with the current key (§6), `tag="config"`, components `("@method")`, no body.
+- The signing certificate must be `current` or `pending` and unexpired (no grace).
+- `200`: `{ "config": { ... } }`, the device's effective config (same shape as in §5.2, with its current `revision`).
+- It's the fallback for authorities without a working agent channel; with a working channel, config arrives through §7.3.
+  When the agent polls:
+  - no `config.agent_channel_url`: at service start, then every 24 h (±10% jitter);
+  - `config.agent_channel_url` present but no stream authenticated for 1 h: once, then every 24 h (±10% jitter) until a stream authenticates;
+  - otherwise, never.
+
 ## 6. RFC 9421 profile
 
 - Label `sig`.
-- `Signature-Input: sig=(<components>);created=<int>;expires=<int>;nonce="<base64url 16 random bytes>";keyid="<thumbprint>";alg="ecdsa-p256-sha256";tag="<renew|connect|confirm>"`.
-- Components: `renew` → `("@method" "content-digest")`; `connect` and `confirm` → `("@method")`.
+- `Signature-Input: sig=(<components>);created=<int>;expires=<int>;nonce="<base64url 16 random bytes>";keyid="<thumbprint>";alg="ecdsa-p256-sha256";tag="<renew|connect|confirm|config>"`.
+- Components: `renew` → `("@method" "content-digest")`; `connect`, `confirm` and `config` → `("@method")`.
 - `Content-Digest: sha-256=:<base64>:` (RFC 9530).
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
@@ -182,21 +197,21 @@ This body is on every non-2xx response under `{u}/api/agent-identity/v1/`, inclu
 - On `clock_skew`, the agent may retry once with `created` offset by `server_time − local_time`.
 - Libraries (approved, E4): Rust `httpsig` (signature base + custom `SigningKey`, `httpsig-hyper` for `content-digest` on `renew`); .NET NSign for signature base and ECDSA verification.
   Only the policy checks above (tag, window, key resolution, nonce commit) are our code; any other gap is escalated.
-- Shared test vectors (`docs/agent-identity/test-vectors.json`): fixed P-256 key, fixed requests for all three tags, exact signature base strings, valid signatures, a channel proof (§7.3), and negative cases (including cross-tag cases for `confirm`); plus RFC 9421 Appendix B.2.4 as a sanity check.
+- Shared test vectors (`docs/agent-identity/test-vectors.json`): fixed P-256 key, fixed requests for all four tags, exact signature base strings, valid signatures, a channel proof (§7.3), and negative cases (including cross-tag cases between every pair of tags); plus RFC 9421 Appendix B.2.4 as a sanity check.
   In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request.
 
 ## 7. Channel (gRPC)
 
 ### 7.1 Service
 
-Package `devolutions.agent.identity.channel.v1`.
-The `.proto` is the single source for every language: Rust (`agent-identity-channel-proto` crate) and .NET (`Devolutions.AgentIdentity.Channel` NuGet package, built from the same file in devolutions-gateway).
+Package `devolutions.agent.channel.v1` (C20).
+The `.proto` is the single source for every language: Rust (`agent-channel-proto` crate) and .NET (`Devolutions.Agent.Channel` NuGet package, built from the same file in devolutions-gateway).
 
 ```proto
 syntax = "proto3";
-package devolutions.agent.identity.channel.v1;
+package devolutions.agent.channel.v1;
 
-option csharp_namespace = "Devolutions.AgentIdentity.Channel.V1";
+option csharp_namespace = "Devolutions.Agent.Channel.V1";
 
 import "google/protobuf/timestamp.proto";
 
@@ -222,7 +237,13 @@ message ServerMessage {
     RenewRequested renew_requested = 12;
     Reconnect reconnect = 13;
     Challenge challenge = 14;
+    ConfigUpdate config_update = 15;
   }
+}
+
+// C19: the device's effective config (§5.2 shape) as a UTF-8 JSON object.
+message ConfigUpdate {
+  string config_json = 1;
 }
 
 message Challenge {
@@ -256,8 +277,8 @@ message Reconnect {
 
 ### 7.2 URL and path prefix
 
-- gRPC path: `<agent_channel_url path>/devolutions.agent.identity.channel.v1.AgentChannel/Connect`.
-  With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.identity.channel.v1.AgentChannel/Connect`; the agent's tower layer adds the prefix.
+- gRPC path: `<agent_channel_url path>/devolutions.agent.channel.v1.AgentChannel/Connect`.
+  With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.channel.v1.AgentChannel/Connect`; the agent's tower layer adds the prefix.
 - The opening request carries `signature-input`, `signature` metadata with `tag="connect"`.
 
 ### 7.3 Sequence
@@ -272,6 +293,13 @@ message Reconnect {
 5. If the request-renewal flag is set, the server sends `RenewRequested` after `Welcome` on every connect until the device confirms a newer certificate; the agent replies `Ack` (`correlation_id` = message `id`).
 6. `Reconnect` asks the agent to open a new stream; the agent opens it, then closes the old one.
    The agent uses the same routine after its own `confirm` succeeds.
+7. Config (C19): `Hello.applied_state_versions["config"]` carries the agent's stored `config.revision`.
+   If the device's current revision is higher, the server sends `ConfigUpdate` after `Welcome`.
+   When the device's effective config changes, the server bumps the revision and sends `ConfigUpdate` on the device's live streams.
+   The agent stores it if the revision is higher, replies `Ack` (`correlation_id` = message `id`), and applies it:
+   - `agent_channel_url` removed: it closes the stream and stops connecting;
+   - `agent_channel_url` changed: it reconnects to the new URL, opening the new stream before closing the old one;
+   - `agent_channel_url` added (only reachable through §5.6): it connects.
 - No server push, metadata update or `connected` state happens before step 4 succeeds.
 - Rationale: the header signature isn't bound to the stream; the fresh challenge makes captured opening headers (TLS-terminating proxies, TLS inspection, header logs) useless for opening a stream.
 - An active intermediary in the path is out of scope (it can read the plaintext anyway); TLS channel binding is a possible later addition.
@@ -376,11 +404,15 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
       "backoff_max_secs": 2,
       "pending_poll_interval_ms": 200,
       "acl_grant_current_user": true,
-      "key_name_prefix": "DevolutionsAgentTest-3f2a9c1e-"
+      "key_name_prefix": "DevolutionsAgentTest-3f2a9c1e-",
+      "config_poll_interval_secs": 5,
+      "channel_failure_config_poll_after_secs": 3
     }
   }
 }
 ```
+
+- `__debug__.identity.config_poll_interval_secs` and `channel_failure_config_poll_after_secs` (test use, C19): replace the 24 h and 1 h values of §5.6; with either set, the ±10% jitter is off.
 
 - `__debug__.identity.key_name_prefix` (test use, C15): replaces the default key-name prefix `DevolutionsAgent-Identity-` (§10.3); the tester sets a unique prefix per run and deletes only keys with it.
 - `__debug__.identity.metadata_override_path` (test use, C16): path to a JSON object of string values, read at every send (enroll, renew, `Hello`).
@@ -438,7 +470,7 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
   The agent can't observe revocation otherwise.
   Once `rejected` is set, the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key (crash safety).
-- `config` is stored exactly as received (unknown fields included).
+- `config` is stored exactly as received (unknown fields included), and replaced only by a higher `revision` (C19).
 - Key names (C15): `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
   The authority isn't known when the enrollment key is created, and key-store keys can't be renamed.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
@@ -472,9 +504,12 @@ Errors: DVLS v3 conventions; the mock returns `{ "error", "message" }` with the 
 - Implements §5, §7 and §9 per contract; shares only the `.proto` with the agent.
 - Serves under a configurable path prefix (the conformance run uses `/mock`), so the agent's path-prefix handling is exercised; the Docker DVLS target has no prefix.
 - Mock-only control API under `{u}/__mock__/`:
-  - `POST faults` `{ drop_next_response?: "enroll"|"renew"|"confirm", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, rotation_rate_limit_per_sec? }`.
+  - `POST faults` `{ drop_next_response?: "enroll"|"renew"|"confirm"|"config", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, channel_broken?, rotation_rate_limit_per_sec? }`.
     `channel_available: false` makes new enroll responses omit `config.agent_channel_url` and makes channel opens fail with `UNAVAILABLE`.
-  - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew"|"confirm", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
+    Changing `channel_available` bumps every device's config revision (the URL appears or disappears) and pushes `ConfigUpdate` on live streams, like a DVLS admin toggling "Agent channel enabled".
+    `channel_broken: true` (C19) makes channel opens fail with `UNAVAILABLE` without changing the config, like a proxy that breaks gRPC.
+  - `POST config` `{ "fields": { ... } }` (C19): merges extra fields (not `version`, `revision` or `agent_channel_url`) into every device's effective config, bumps the revisions and pushes `ConfigUpdate` on live streams; used to check propagation and the preservation of unknown fields.
+  - `POST faults` also takes `fail_next_response?: { endpoint: "enroll"|"renew"|"confirm"|"config", status: <int>, error?: <§5.4 code> }` (C13): one-shot, the request isn't processed; with `error`, the body is the §5.4 shape, otherwise empty.
   - `POST reset`.
   - `POST time/advance` `{ secs }` (for grace and deadline tests); stream expiry and rotation deadlines are re-evaluated immediately on advance.
   - `GET events?device_id=<uuid>` (C13): ordered channel and certificate events for that device (`stream_opened`, `stream_authenticated`, `stream_closed` with status, `cert_status_changed`), each with a monotonic sequence number, so make-before-break is asserted from ordering rather than polling.

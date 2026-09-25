@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 Push-Location -Path $PSScriptRoot
 
 try {
-    $Project = "./Devolutions.AgentIdentity.Channel/Devolutions.AgentIdentity.Channel.csproj"
+    $Project = "./Devolutions.Agent.Channel/Devolutions.Agent.Channel.csproj"
 
     dotnet build $Project --configuration Release
     if ($LASTEXITCODE -ne 0) { throw "dotnet build failed" }

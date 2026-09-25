@@ -1,7 +1,7 @@
 syntax = "proto3";
-package devolutions.agent.identity.channel.v1;
+package devolutions.agent.channel.v1;
 
-option csharp_namespace = "Devolutions.AgentIdentity.Channel.V1";
+option csharp_namespace = "Devolutions.Agent.Channel.V1";
 
 import "google/protobuf/timestamp.proto";
 
@@ -27,7 +27,13 @@ message ServerMessage {
     RenewRequested renew_requested = 12;
     Reconnect reconnect = 13;
     Challenge challenge = 14;
+    ConfigUpdate config_update = 15;
   }
+}
+
+// C19: the device's effective config (§5.2 shape) as a UTF-8 JSON object.
+message ConfigUpdate {
+  string config_json = 1;
 }
 
 message Challenge {

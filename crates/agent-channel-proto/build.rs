@@ -7,5 +7,5 @@ fn main() {
     tonic_build::configure()
         .build_transport(false)
         .compile_protos_with_config(config, &["proto/channel.proto"], &["proto"])
-        .expect("failed to compile agent identity channel proto");
+        .expect("failed to compile agent channel proto");
 }
