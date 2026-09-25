@@ -166,9 +166,18 @@ fn current_user_sid() -> anyhow::Result<String> {
     Ok(sid.to_owned())
 }
 
+pub(crate) fn running_as_system() -> anyhow::Result<bool> {
+    Ok(current_user_sid()? == "S-1-5-18")
+}
+
 pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let encrypted = protect(contents, false, true)?;
-    let sddl = format!("D:P(A;;FA;;;SY)(A;;FA;;;{})", current_user_sid()?);
+    let current_user = current_user_sid()?;
+    let sddl = if current_user == "S-1-5-18" {
+        "D:P(A;;FA;;;SY)".to_owned()
+    } else {
+        format!("D:P(A;;FA;;;SY)(A;;FA;;;{current_user})")
+    };
     let sddl = wide(std::ffi::OsStr::new(&sddl));
     let mut raw = PSECURITY_DESCRIPTOR::default();
     // SAFETY: sddl is NUL-terminated and raw is an output pointer owned by this function.
@@ -226,7 +235,11 @@ pub(crate) fn pending_acl_is_protected(path: &Path) -> anyhow::Result<()> {
     let descriptor = SecurityDescriptor(raw);
     let acl = protected_dacl_sddl(descriptor.0)?;
     let user_sid = canonical_sddl_sid(&current_user_sid()?)?;
-    let expected_aces = format!("(A;;FA;;;SY)(A;;FA;;;{user_sid})");
+    let expected_aces = if user_sid == "SY" {
+        "(A;;FA;;;SY)".to_owned()
+    } else {
+        format!("(A;;FA;;;SY)(A;;FA;;;{user_sid})")
+    };
     ensure!(
         has_only_required_aces(&acl, &user_sid),
         "pending-file DACL grants access beyond SYSTEM and the current user: actual SDDL {acl}; expected ACEs {expected_aces}"
@@ -243,6 +256,10 @@ fn protected_dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> anyhow::Result<Strin
         control & SE_DACL_PROTECTED.0 != 0,
         "security descriptor DACL is not protected"
     );
+    dacl_sddl(descriptor)
+}
+
+fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> anyhow::Result<String> {
     let mut sddl = PWSTR::null();
     // SAFETY: The descriptor is valid and the output string is owned until freed with LocalFree.
     unsafe {
@@ -320,9 +337,40 @@ fn has_only_required_aces(sddl: &str, user_sid: &str) -> bool {
     }
     aces.sort_unstable();
     let user_ace = format!("A;;FA;;;{user_sid}");
-    let mut expected = ["A;;FA;;;SY", &user_ace];
+    let mut expected = vec!["A;;FA;;;SY"];
+    if user_sid != "SY" {
+        expected.push(&user_ace);
+    }
     expected.sort_unstable();
     aces == expected
+}
+
+fn has_only_key_principals(sddl: &str, user_sid: &str, grant_current_user: bool) -> bool {
+    if !sddl.starts_with("D:") {
+        return false;
+    }
+    let Some(start) = sddl.find('(') else {
+        return false;
+    };
+    let mut rest = &sddl[start..];
+    let mut system = false;
+    let mut user = false;
+    while let Some(after_open) = rest.strip_prefix('(') {
+        let Some(close) = after_open.find(')') else {
+            return false;
+        };
+        let fields = after_open[..close].split(';').collect::<Vec<_>>();
+        if fields.len() != 6 || fields[0] != "A" || fields[2].is_empty() {
+            return false;
+        }
+        match fields[5] {
+            "SY" => system = true,
+            sid if grant_current_user && sid == user_sid => user = true,
+            _ => return false,
+        }
+        rest = &after_open[close + 1..];
+    }
+    rest.is_empty() && system && (user || !grant_current_user || user_sid == "SY")
 }
 
 struct Provider(NCRYPT_PROV_HANDLE);
@@ -474,7 +522,7 @@ pub(crate) fn assert_non_exportable(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn assert_machine_key_acl(name: &str) -> anyhow::Result<()> {
+pub(crate) fn assert_machine_key_acl(name: &str, grant_current_user: bool) -> anyhow::Result<()> {
     let provider = Provider::open()?;
     let key = provider.key(name)?.context("machine key not found for ACL check")?;
     let mut needed = 0;
@@ -500,11 +548,16 @@ pub(crate) fn assert_machine_key_acl(name: &str) -> anyhow::Result<()> {
             DACL_SECURITY_INFORMATION,
         )?
     };
-    let acl = protected_dacl_sddl(PSECURITY_DESCRIPTOR(bytes.as_mut_ptr().cast()))?;
+    let acl = dacl_sddl(PSECURITY_DESCRIPTOR(bytes.as_mut_ptr().cast()))?;
     let user_sid = canonical_sddl_sid(&current_user_sid()?)?;
     ensure!(
-        has_only_required_aces(&acl, &user_sid),
-        "machine-key DACL grants access beyond SYSTEM and the current user: actual SDDL {acl}; expected ACEs (A;;FA;;;SY)(A;;FA;;;{user_sid})"
+        has_only_key_principals(&acl, &user_sid, grant_current_user),
+        "machine-key DACL must grant SYSTEM{} and no other principal: actual SDDL {acl}",
+        if grant_current_user {
+            format!(" and current user {user_sid}")
+        } else {
+            String::new()
+        }
     );
     Ok(())
 }
@@ -602,9 +655,32 @@ mod tests {
         let sid = "S-1-5-21-42";
         assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)", sid));
         assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;LA)", "LA"));
+        assert!(has_only_required_aces("D:P(A;;FA;;;SY)", "SY"));
         assert!(!has_only_required_aces(
             "D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)(A;;FA;;;WD)",
             sid
+        ));
+    }
+
+    #[test]
+    fn machine_key_acl_checks_principals_not_rights_or_ace_order() {
+        let sid = "S-1-5-21-42";
+        assert!(has_only_key_principals(
+            "D:PAI(A;;0x10000;;;S-1-5-21-42)(A;;GR;;;SY)",
+            sid,
+            true
+        ));
+        assert!(has_only_key_principals("D:(A;;GR;;;SY)", sid, false));
+        assert!(!has_only_key_principals(
+            "D:(A;;GR;;;SY)(A;;GR;;;S-1-5-21-42)",
+            sid,
+            false
+        ));
+        assert!(!has_only_key_principals("D:(A;;GR;;;SY)", sid, true));
+        assert!(!has_only_key_principals(
+            "D:(A;;GR;;;SY)(A;;GR;;;S-1-5-21-42)(A;;GR;;;WD)",
+            sid,
+            true
         ));
     }
 

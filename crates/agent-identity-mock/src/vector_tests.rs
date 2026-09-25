@@ -1,6 +1,6 @@
 //! Run the shared vectors (`docs/agent-identity/test-vectors.json`) through the oracle's public API.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -182,11 +182,65 @@ fn run_case(registry: &HashMap<String, RegisteredCert>, nonces: &mut NonceStore,
 fn http_signature_cases() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
     let registry = registry(&vectors.http_signature.registered);
+    let mut required_component_vectors = HashSet::from([
+        "renew_over_covered_components",
+        "renew_reordered_components",
+        "renew_duplicated_components",
+        "connect_over_covered_components",
+        "connect_duplicated_components",
+        "confirm_over_covered_components",
+        "confirm_duplicated_components",
+        "check_in_over_covered_components",
+        "check_in_reordered_components",
+        "check_in_duplicated_components",
+    ]);
     for case in &vectors.http_signature.cases {
+        if required_component_vectors.remove(case.name.as_str()) {
+            assert_eq!(case.expected, "signature_invalid", "case {}", case.name);
+        }
         let mut nonces = NonceStore::default();
         let actual = run_case(&registry, &mut nonces, case);
         assert_eq!(actual, case.expected, "case {}", case.name);
     }
+    assert!(
+        required_component_vectors.is_empty(),
+        "missing same-tag component vectors: {required_component_vectors:?}"
+    );
+}
+
+#[test]
+fn check_in_two_digest_members_uses_the_oracle() {
+    let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
+    let registry = registry(&vectors.http_signature.registered);
+    let case = vectors
+        .http_signature
+        .cases
+        .iter()
+        .find(|case| case.name == "check_in_two_digest_members")
+        .expect("check-in two-digest-member vector exists");
+    assert_eq!(case.endpoint, "check-in");
+    assert_eq!(case.expected, "signature_invalid");
+    let keyid = case.headers["signature-input"]
+        .split(";keyid=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("vector keyid");
+    let encoded_signature = case.headers["signature"]
+        .strip_prefix("sig=:")
+        .and_then(|value| value.strip_suffix(':'))
+        .expect("vector signature");
+    assert!(
+        verify_raw_signature(
+            &registry.get(keyid).expect("registered vector key").public_key,
+            case.signature_base.as_bytes(),
+            &STANDARD.decode(encoded_signature).expect("signature base64")
+        ),
+        "check-in two-member vector is not signed over its source-valid base"
+    );
+    assert_eq!(
+        run_case(&registry, &mut NonceStore::default(), case),
+        "signature_invalid"
+    );
 }
 
 #[test]

@@ -199,6 +199,25 @@ async fn active_old_root_ids(ctx: &Context, issuer: &str) -> anyhow::Result<Hash
     }
 }
 
+fn require_isolated_old_root_fixture(active: &HashSet<String>, expected: &[&str], mock: bool) -> anyhow::Result<()> {
+    ensure!(
+        expected.iter().all(|id| active.contains(*id)),
+        "newly enrolled device is missing from the active old-root listing"
+    );
+    if active.len() > expected.len() {
+        if !mock {
+            return Err(crate::Incomplete("disposable DVLS target has other active old-root devices").into());
+        }
+        anyhow::bail!("mock reset left unrelated active old-root devices");
+    }
+    Ok(())
+}
+
+async fn isolated_old_root_fixture(ctx: &Context, issuer: &str, expected: &[&str]) -> anyhow::Result<()> {
+    let active = active_old_root_ids(ctx, issuer).await?;
+    require_isolated_old_root_fixture(&active, expected, ctx.mock())
+}
+
 async fn signed_renew(target: &Target, current: &Identity, key: &KeyPair, metadata: &Value) -> anyhow::Result<Reply> {
     target.renew(current, key, metadata).await
 }
@@ -882,18 +901,28 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
     );
     let first_pending = KeyPair::generate()?;
     expect_status(&ctx.target.renew(&identity, &first_pending, &json!({})).await?, 200)?;
-    expect_error(
-        &ctx.target.enroll(&other_token.text, &first_pending, &json!({})).await?,
-        400,
-        "invalid_request",
-    )?;
+    let pending_before = device(&ctx.target, &identity.device_id).await?;
+    for bearer in [&other_token.text, &original_token.text] {
+        expect_error(
+            &ctx.target.enroll(bearer, &first_pending, &json!({})).await?,
+            400,
+            "invalid_request",
+        )?;
+    }
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &pending_before).await?;
     let second_pending = KeyPair::generate()?;
     expect_status(&ctx.target.renew(&identity, &second_pending, &json!({})).await?, 200)?;
-    expect_error(
-        &ctx.target.enroll(&other_token.text, &first_pending, &json!({})).await?,
-        400,
-        "invalid_request",
-    )?;
+    let retired_before = device(&ctx.target, &identity.device_id).await?;
+    for bearer in [&other_token.text, &original_token.text] {
+        for key in [&first_pending, &second_pending] {
+            expect_error(
+                &ctx.target.enroll(bearer, key, &json!({})).await?,
+                400,
+                "invalid_request",
+            )?;
+        }
+    }
+    assert_device_metadata_and_certificates_unchanged(&ctx.target, &identity.device_id, &retired_before).await?;
     ctx.target.revoke(&identity.device_id).await?;
     for key in [&identity.key, &first_pending, &second_pending] {
         expect_error(
@@ -908,16 +937,20 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
             .await?,
         204,
     )?;
-    for key in [&identity.key, &first_pending, &second_pending] {
-        expect_error(
-            &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
-            403,
-            "device_revoked",
-        )?;
+    for bearer in [&other_token.text, &original_token.text] {
+        for key in [&identity.key, &first_pending, &second_pending] {
+            expect_error(
+                &ctx.target.enroll(bearer, key, &json!({})).await?,
+                403,
+                "device_revoked",
+            )?;
+        }
     }
     ensure!(
-        count(&ctx.target.token_record(&other_token.id).await?.body, "usedCount")? == 0,
-        "key-reuse attempts consumed the other token"
+        count(&ctx.target.token_record(&other_token.id).await?.body, "usedCount")? == 0
+            && count(&ctx.target.token_record(&original_token.id).await?.body, "usedCount")? == 1
+            && count(&ctx.target.devices_for(&original_token, "").await?.body, "totalCount")? == 0,
+        "key-reuse attempts consumed a token use or recreated a deleted device"
     );
     Ok(())
 }
@@ -1691,6 +1724,147 @@ fn resign_input(key: &KeyPair, headers: &mut SignedHeaders) -> anyhow::Result<()
     Ok(())
 }
 
+fn sign_with_components(
+    identity: &Identity,
+    tag: &str,
+    body: Option<&[u8]>,
+    path: &str,
+    components: &[&str],
+) -> anyhow::Result<SignedHeaders> {
+    let mut signed = identity.key.sign_now(&identity.thumbprint, tag, body);
+    let profile = if body.is_some() {
+        "(\"@method\" \"content-digest\")"
+    } else {
+        "(\"@method\")"
+    };
+    let covered = format!(
+        "({})",
+        components
+            .iter()
+            .map(|component| format!("\"{component}\""))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    ensure!(signed.input.contains(profile), "unexpected signature profile");
+    signed.input = signed.input.replacen(profile, &covered, 1);
+    let mut base = String::new();
+    for component in components {
+        match *component {
+            "@method" => base.push_str("\"@method\": POST\n"),
+            "content-digest" => {
+                base.push_str(&format!(
+                    "\"content-digest\": {}\n",
+                    signed.digest.as_deref().context("missing content-digest")?
+                ));
+            }
+            "@path" => base.push_str(&format!("\"@path\": {path}\n")),
+            _ => anyhow::bail!("unexpected covered component {component}"),
+        }
+    }
+    base.push_str(&format!(
+        "\"@signature-params\": {}",
+        signed.input.strip_prefix("sig=").context("missing signature label")?
+    ));
+    let signature: Signature = identity.key.key.sign(base.as_bytes());
+    identity.key.key.verifying_key().verify(base.as_bytes(), &signature)?;
+    signed.signature = format!(
+        "sig=:{}:",
+        base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+    );
+    Ok(signed)
+}
+
+pub(crate) async fn p_same_tag_covered_components_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "same-tag-components").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let http_prefix = reqwest::Url::parse(&ctx.target.base_url)?
+        .path()
+        .trim_end_matches('/')
+        .to_owned();
+    let next_key = KeyPair::generate()?;
+    for tag in ["renew", "check-in", "confirm"] {
+        let path = format!("{http_prefix}/api/agent-identity/v1/{tag}");
+        for variant in ["over-covered", "reordered", "duplicated"] {
+            let with_body = tag != "confirm";
+            let components = match (variant, with_body) {
+                ("over-covered", true) => vec!["@method", "content-digest", "@path"],
+                ("over-covered", false) => vec!["@method", "@path"],
+                ("reordered", true) => vec!["content-digest", "@method"],
+                ("reordered", false) => continue,
+                ("duplicated", true) => vec!["@method", "content-digest", "content-digest"],
+                ("duplicated", false) => vec!["@method", "@method"],
+                _ => unreachable!("all component variants are known"),
+            };
+            let body = match tag {
+                "renew" => Some(serde_json::to_vec(
+                    &json!({ "csr": next_key.csr, "metadata": { "hostname": "must-not-change" } }),
+                )?),
+                "check-in" => Some(serde_json::to_vec(
+                    &json!({ "metadata": { "hostname": "must-not-change" } }),
+                )?),
+                _ => None,
+            };
+            let signed = sign_with_components(&identity, tag, body.as_deref(), &path, &components)?;
+            let reply = match tag {
+                "renew" => {
+                    ctx.target
+                        .signed_renew(body.as_deref().context("renew body")?, &signed, None)
+                        .await?
+                }
+                "check-in" => {
+                    ctx.target
+                        .signed_check_in(body.as_deref().context("check-in body")?, &signed)
+                        .await?
+                }
+                "confirm" => ctx.target.signed_confirm(&signed, None).await?,
+                _ => unreachable!("all HTTP tags are known"),
+            };
+            expect_error(&reply, 401, "signature_invalid")
+                .with_context(|| format!("{variant} {tag} components were accepted"))?;
+            ensure!(
+                device(&ctx.target, &identity.device_id).await? == before,
+                "{variant} {tag} components changed device state"
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_same_tag_connect_components_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "same-tag-connect-components").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let channel_prefix = reqwest::Url::parse(
+        identity
+            .agent_channel_url
+            .as_deref()
+            .context("same-tag connect requires a channel URL")?,
+    )?
+    .path()
+    .trim_end_matches('/')
+    .to_owned();
+    let path = format!("{channel_prefix}/devolutions.agent.channel.v1.AgentChannel/Connect");
+    for (variant, components) in [
+        ("over-covered", &["@method", "@path"][..]),
+        ("duplicated", &["@method", "@method"][..]),
+    ] {
+        let signed = sign_with_components(&identity, "connect", None, &path, components)?;
+        let failure = channel::open_with_headers(&ctx.target, &identity, signed)
+            .await
+            .err()
+            .with_context(|| format!("{variant} connect components authenticated a channel"))?;
+        channel::expect_status(
+            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+            Code::Unauthenticated,
+            "signature_invalid",
+        )?;
+        ensure!(
+            device(&ctx.target, &identity.device_id).await? == before,
+            "{variant} connect components changed device state"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "wire-negatives").await?;
     let original = device(&ctx.target, &identity.device_id).await?;
@@ -1749,7 +1923,7 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
             }
             "two_digest_members" => {
                 let digest = headers.digest.take().context("signed content digest")?;
-                let sha512 = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
+                let sha512 = base64::engine::general_purpose::STANDARD.encode(sha2::Sha512::digest(&body));
                 headers.digest = Some(format!("{digest}, sha-512=:{sha512}:"));
                 resign_input(&identity.key, &mut headers)?;
             }
@@ -1787,41 +1961,69 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
             "wire-negative variant {variant} changed device state"
         );
     }
-    for repeated in ["content-digest", "signature-input", "signature"] {
-        let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
-        let digest = signed.digest.as_deref().context("signed digest missing")?;
-        let mut headers = http::HeaderMap::new();
-        headers.insert("content-digest", digest.parse()?);
-        headers.insert("signature-input", signed.input.parse()?);
-        headers.insert("signature", signed.signature.parse()?);
-        let repeated_value = match repeated {
-            "content-digest" => digest,
-            "signature-input" => &signed.input,
-            "signature" => &signed.signature,
-            _ => unreachable!("all repeated names are known"),
+    let check_in_body = serde_json::to_vec(&json!({ "metadata": { "hostname": "rejected-check-in" } }))?;
+    let mut check_in_headers = identity
+        .key
+        .sign_now(&identity.thumbprint, "check-in", Some(&check_in_body));
+    let digest = check_in_headers
+        .digest
+        .take()
+        .context("signed check-in digest missing")?;
+    let sha512 = base64::engine::general_purpose::STANDARD.encode(sha2::Sha512::digest(&check_in_body));
+    check_in_headers.digest = Some(format!("{digest}, sha-512=:{sha512}:"));
+    resign_input(&identity.key, &mut check_in_headers)?;
+    expect_error(
+        &ctx.target.signed_check_in(&check_in_body, &check_in_headers).await?,
+        401,
+        "signature_invalid",
+    )?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await? == original,
+        "correctly signed check-in with two Content-Digest members changed device state"
+    );
+    for (tag, request_body) in [("renew", &body), ("check-in", &check_in_body)] {
+        let repeated_fields: &[&str] = if tag == "renew" {
+            &["content-digest", "signature-input", "signature"]
+        } else {
+            &["content-digest"]
         };
-        headers.append(repeated, repeated_value.parse()?);
-        let response = ctx
-            .target
-            .http
-            .post(format!("{}/api/agent-identity/v1/renew", ctx.target.base_url))
-            .headers(headers)
-            .header("content-type", "application/json")
-            .body(body.clone())
-            .send()
-            .await?;
-        let reply = Reply {
-            status: response.status().as_u16(),
-            body: response.json().await?,
-        };
-        expect_error(&reply, 401, "signature_invalid")?;
-        let after = device(&ctx.target, &identity.device_id).await?;
-        ensure!(
-            after["metadata"] == original["metadata"]
-                && after["certificates"] == original["certificates"]
-                && after["lastSeenAt"] == original["lastSeenAt"],
-            "duplicate {repeated} headers changed device state"
-        );
+        for &repeated in repeated_fields {
+            let mut signed = identity.key.sign_now(&identity.thumbprint, tag, Some(request_body));
+            let digest = signed.digest.as_deref().context("signed digest missing")?.to_owned();
+            if repeated == "content-digest" {
+                signed.digest = Some(format!("{digest}, {digest}"));
+                resign_input(&identity.key, &mut signed)?;
+            }
+            let mut headers = http::HeaderMap::new();
+            headers.insert("content-digest", digest.parse()?);
+            headers.insert("signature-input", signed.input.parse()?);
+            headers.insert("signature", signed.signature.parse()?);
+            let repeated_value = match repeated {
+                "content-digest" => &digest,
+                "signature-input" => &signed.input,
+                "signature" => &signed.signature,
+                _ => unreachable!("all repeated names are known"),
+            };
+            headers.append(repeated, repeated_value.parse()?);
+            let response = ctx
+                .target
+                .http
+                .post(format!("{}/api/agent-identity/v1/{tag}", ctx.target.base_url))
+                .headers(headers)
+                .header("content-type", "application/json")
+                .body(request_body.clone())
+                .send()
+                .await?;
+            let reply = Reply {
+                status: response.status().as_u16(),
+                body: response.json().await?,
+            };
+            expect_error(&reply, 401, "signature_invalid")?;
+            ensure!(
+                device(&ctx.target, &identity.device_id).await? == original,
+                "duplicate {repeated} headers on {tag} changed device state"
+            );
+        }
     }
     Ok(())
 }
@@ -1869,19 +2071,30 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
         key: identity.key.key.clone(),
         csr: identity.key.csr.clone(),
     };
+    if ctx.mock() {
+        ctx.target.advance(2).await?;
+    }
     expect_status(
         &ctx.target
             .renew(&identity, &replay_key, &json!({ "hostname": "pending-replay" }))
             .await?,
         200,
     )?;
+    let replayed = device(&ctx.target, &identity.device_id).await?;
     ensure!(
-        has_certificate(
-            &device(&ctx.target, &identity.device_id).await?,
-            &identity.thumbprint,
-            "pending"
-        ),
-        "pending-signed renewal promoted the certificate"
+        has_certificate(&replayed, &identity.thumbprint, "pending")
+            && replayed["metadata"]["hostname"] == "pending-replay",
+        "replayed renew did not update metadata or promoted the pending certificate"
+    );
+    if ctx.mock() {
+        ensure!(
+            last_seen_at(&replayed)? > last_seen_at(&pending)?,
+            "replayed renew did not refresh lastSeenAt"
+        );
+    }
+    ensure!(
+        replayed["friendlyName"] == original_name,
+        "replayed renew changed friendly name"
     );
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     ensure!(
@@ -1974,6 +2187,10 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, mut identity) = issued(&ctx, "expired-confirm").await?;
     let old_thumb = identity.thumbprint.clone();
+    let old_key = KeyPair {
+        key: identity.key.key.clone(),
+        csr: identity.key.csr.clone(),
+    };
     let key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
@@ -1981,12 +2198,34 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
     ctx.target.advance(21).await?;
     let before = device(&ctx.target, &identity.device_id).await?;
     expect_error(&ctx.target.confirm(&identity).await?, 401, "certificate_expired")?;
+    expect_error(
+        &ctx.target
+            .check_in(&identity, &json!({ "hostname": "expired-pending" }))
+            .await?,
+        401,
+        "certificate_expired",
+    )?;
+    let old_confirm = old_key.sign_now(&old_thumb, "confirm", None);
+    expect_error(
+        &ctx.target.signed_confirm(&old_confirm, None).await?,
+        401,
+        "certificate_expired",
+    )?;
+    let old_body = serde_json::to_vec(&json!({ "metadata": { "hostname": "expired-current" } }))?;
+    let old_check_in = old_key.sign_now(&old_thumb, "check-in", Some(&old_body));
+    expect_error(
+        &ctx.target.signed_check_in(&old_body, &old_check_in).await?,
+        401,
+        "certificate_expired",
+    )?;
     let after = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         after["certificates"] == before["certificates"]
+            && after["metadata"] == before["metadata"]
+            && after["lastSeenAt"] == before["lastSeenAt"]
             && has_certificate(&after, &old_thumb, "current")
             && has_certificate(&after, &identity.thumbprint, "pending"),
-        "expired pending confirm changed certificate statuses"
+        "expired current or pending check-in/confirm changed device state"
     );
     Ok(())
 }
@@ -2270,8 +2509,17 @@ pub(crate) async fn p_renew_beyond_grace(ctx: Context) -> anyhow::Result<()> {
 pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "revoke").await?;
     ctx.target.revoke(&identity.device_id).await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
     let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
     expect_error(&reply, 403, "device_revoked")?;
+    expect_error(&ctx.target.confirm(&identity).await?, 403, "device_revoked")?;
+    expect_error(
+        &ctx.target
+            .check_in(&identity, &json!({ "hostname": "should-not-update" }))
+            .await?,
+        403,
+        "device_revoked",
+    )?;
     let next = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "correct" } }))?;
     let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
@@ -2287,6 +2535,10 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
         403,
         "device_revoked",
     )?;
+    ensure!(
+        device(&ctx.target, &identity.device_id).await? == before,
+        "revoked renew, confirm or check-in changed device state"
+    );
     Ok(())
 }
 
@@ -2308,13 +2560,21 @@ pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> anyhow::Result<()> {
-    let (_, identity) = issued(&ctx, "delete").await?;
+    let (token, identity) = issued(&ctx, "delete").await?;
     let path = format!("/devices/{}", identity.device_id);
     expect_status(&ctx.target.admin(Method::DELETE, &path, None).await?, 409)?;
     ctx.target.revoke(&identity.device_id).await?;
     expect_status(&ctx.target.admin(Method::DELETE, &path, None).await?, 204)?;
     let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
     expect_error(&reply, 401, "device_unknown")?;
+    expect_error(&ctx.target.confirm(&identity).await?, 401, "device_unknown")?;
+    expect_error(
+        &ctx.target
+            .check_in(&identity, &json!({ "hostname": "should-not-update" }))
+            .await?,
+        401,
+        "device_unknown",
+    )?;
     let next = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "correct" } }))?;
     let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
@@ -2330,6 +2590,12 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
         401,
         "device_unknown",
     )?;
+    ensure!(
+        ctx.target.device(&identity.device_id).await?.status == 404
+            && count(&ctx.target.devices_for(&token, "").await?.body, "totalCount")? == 0
+            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        "deleted key was reintroduced by renew, confirm or check-in"
+    );
     Ok(())
 }
 
@@ -2802,13 +3068,11 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
+    if !ctx.mock() {
+        return Err(crate::Incomplete("DVLS has no config-change fixture for a stale Hello").into());
+    }
     let (_, mut identity) = issued(&ctx, "stale-config").await?;
     if count(&identity.config, "revision")? == 0 {
-        if !ctx.mock() {
-            return Err(
-                crate::NotApplicable("revision zero has no lower value and DVLS has no config-update fixture").into(),
-            );
-        }
         expect_status(
             &ctx.target
                 .control("config", &json!({ "fields": { "conformance_stale_hello": true } }))
@@ -3832,6 +4096,125 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
                 == 3,
         "rotation maximum or device count excluded a pending certificate or counted one device twice"
     );
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: Context) -> anyhow::Result<()> {
+    ensure!(
+        ctx.mock() || ctx.disposable_dvls_target,
+        "requires a disposable DVLS target"
+    );
+    wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
+    let original_root = field(&ctx.target.trust_anchor().await?["roots"][0], "thumbprint")?.to_owned();
+    isolated_old_root_fixture(&ctx, &original_root, &[]).await?;
+    let (_, first) = issued(&ctx, "disposable-deadline-first").await?;
+    let (_, second) = issued(&ctx, "disposable-deadline-second").await?;
+    expect_status(
+        &ctx.target.renew(&second, &KeyPair::generate()?, &json!({})).await?,
+        200,
+    )?;
+    if let Err(error) = isolated_old_root_fixture(&ctx, &original_root, &[&first.device_id, &second.device_id]).await {
+        for id in [&first.device_id, &second.device_id] {
+            let _ = ctx.target.revoke(id).await;
+        }
+        return Err(error);
+    }
+    let now = chain_evaluation_time(&ctx).await?;
+    let mut candidate_dates = Vec::new();
+    for id in [&first.device_id, &second.device_id] {
+        let record = device(&ctx.target, id).await?;
+        for cert in record["certificates"]
+            .as_array()
+            .context("own certificates are missing")?
+        {
+            let not_after = time::OffsetDateTime::parse(field(cert, "notAfter")?, &Rfc3339)?;
+            if matches!(field(cert, "status")?, "current" | "pending")
+                && field(cert, "issuer")? == original_root
+                && not_after.unix_timestamp() > now
+            {
+                candidate_dates.push(not_after);
+            }
+        }
+    }
+    ensure!(
+        candidate_dates.len() == 3,
+        "fixture did not issue two current and one pending old-root certificate"
+    );
+    let maximum = candidate_dates
+        .into_iter()
+        .max()
+        .context("own old-root maximum is missing")?;
+    let too_late = (maximum + time::Duration::days(1)).format(&Rfc3339)?;
+    expect_status(&ctx.target.rotate(Some(&too_late)).await?, 400)?;
+    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    expect_status(&status, 200)?;
+    ensure!(
+        status.body["phase"] == "idle"
+            && ctx.target.trust_anchor().await?["roots"]
+                .as_array()
+                .is_some_and(|roots| roots.len() == 1 && roots[0]["thumbprint"] == original_root),
+        "deadline above the maximum of own enrolled certificates started a rotation"
+    );
+    for id in [&first.device_id, &second.device_id] {
+        ctx.target.revoke(id).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: Context) -> anyhow::Result<()> {
+    ensure!(
+        ctx.mock() || ctx.disposable_dvls_target,
+        "requires a disposable DVLS target"
+    );
+    wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
+    let old_root = field(&ctx.target.trust_anchor().await?["roots"][0], "thumbprint")?.to_owned();
+    isolated_old_root_fixture(&ctx, &old_root, &[]).await?;
+    let (_, mut identity) = issued(&ctx, "disposable-early-completion").await?;
+    let original = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        field(&original["certificate"], "issuer")? == old_root,
+        "disposable fixture enrolled under a different root"
+    );
+    if let Err(error) = isolated_old_root_fixture(&ctx, &old_root, &[&identity.device_id]).await {
+        let _ = ctx.target.revoke(&identity.device_id).await;
+        return Err(error);
+    }
+    let maximum = time::OffsetDateTime::parse(field(&original["certificate"], "notAfter")?, &Rfc3339)?;
+    let now = chain_evaluation_time(&ctx).await?;
+    let deadline = maximum.min(time::OffsetDateTime::from_unix_timestamp(
+        now + i64::try_from(ctx.dvls_rotation_window_secs)?,
+    )?);
+    ensure!(
+        deadline.unix_timestamp() > now + 2,
+        "own certificate expires before an early-completion probe"
+    );
+    let started = ctx.target.rotate(Some(&deadline.format(&Rfc3339)?)).await?;
+    expect_status(&started, 202)?;
+    ensure!(
+        started.body["phase"] == "rotating" && count(&started.body, "activeDevicesOnOldRoot")? == 1,
+        "disposable target does not have exactly one active old-root device"
+    );
+    let new_root = field(&started.body["newRoot"], "thumbprint")?.to_owned();
+    let new_key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    expect_status(&status, 200)?;
+    let published = ctx.target.trust_anchor().await?;
+    ensure!(
+        old_root != new_root
+            && status.body["phase"] == "idle"
+            && count(&status.body, "activeDevicesOnOldRoot")? == 0
+            && chain_evaluation_time(&ctx).await? < deadline.unix_timestamp()
+            && published["roots"]
+                .as_array()
+                .is_some_and(|roots| roots.len() == 1 && roots[0]["thumbprint"] == new_root)
+            && device(&ctx.target, &identity.device_id).await?["certificate"]["issuer"] == new_root,
+        "rotation did not complete when the last old-root device migrated before its deadline"
+    );
+    ctx.target.revoke(&identity.device_id).await?;
     Ok(())
 }
 
@@ -5109,6 +5492,24 @@ mod tests {
                 && last_seen_at(&json!({ "lastSeenAt": "invalid" })).is_err(),
             "invalid admin lastSeenAt was accepted"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn disposable_rotation_requires_an_isolated_old_root() -> anyhow::Result<()> {
+        let active = HashSet::from(["own".to_owned(), "other".to_owned()]);
+        let error = require_isolated_old_root_fixture(&active, &["own"], false)
+            .expect_err("occupied disposable DVLS fixture must be incomplete");
+        ensure!(
+            error.downcast_ref::<crate::Incomplete>().is_some(),
+            "occupied disposable DVLS fixture did not report SKIP"
+        );
+        ensure!(
+            require_isolated_old_root_fixture(&active, &["own"], true).is_err(),
+            "mock reset left an unexpected active old-root device"
+        );
+        require_isolated_old_root_fixture(&HashSet::from(["own".to_owned()]), &["own"], false)?;
+        require_isolated_old_root_fixture(&HashSet::new(), &[], false)?;
         Ok(())
     }
 

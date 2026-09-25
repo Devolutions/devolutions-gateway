@@ -412,6 +412,8 @@ async fn run() -> anyhow::Result<()> {
                 Ok(Err(error)) => {
                     if let Some(inapplicable) = error.downcast_ref::<NotApplicable>() {
                         Outcome::NotApplicable(inapplicable.0)
+                    } else if let Some(incomplete) = error.downcast_ref::<Incomplete>() {
+                        Outcome::Skip(incomplete.0)
                     } else {
                         Outcome::Fail(format!("{error:#}"))
                     }
@@ -490,6 +492,17 @@ impl std::fmt::Display for NotApplicable {
 
 impl std::error::Error for NotApplicable {}
 
+#[derive(Debug)]
+pub(crate) struct Incomplete(pub(crate) &'static str);
+
+impl std::fmt::Display for Incomplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for Incomplete {}
+
 macro_rules! p {
     ($name:ident) => {
         Test::protocol(stringify!($name), false, |context| Box::pin(protocol::$name(context)))
@@ -530,6 +543,8 @@ const TESTS: &[Test] = &[
     p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
     p!(p_renew_rejects_sha384_csr),
+    p!(p_same_tag_covered_components_rejected),
+    p!(p_same_tag_connect_components_rejected).channel(),
     p!(p_signature_parser_wire_negatives),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
@@ -582,6 +597,8 @@ const TESTS: &[Test] = &[
     p!(p_rotation_completes_early_when_last_device_migrates, mock_only),
     p!(p_rotation_completes_immediately_without_old_root_devices, mock_only),
     p!(p_rotation_deadline_bound, mock_only),
+    p!(p_rotation_disposable_deadline_above_own_max_rejected),
+    p!(p_rotation_disposable_completes_before_future_deadline),
     p!(p_rotation_grace_renewal_after_early_completion, mock_only),
     p!(p_rotation_completes_early_at_certificate_expiry_via_freeze, mock_only),
     p!(p_rotation_push_rate_survives_deadline, mock_only).channel(),
@@ -609,6 +626,8 @@ const TESTS: &[Test] = &[
     a!(a_enroll_revoked_before_response_is_permanent, mock_only),
     a!(a_pending_file_deleted_on_permanent_error),
     a!(a_pending_file_kept_on_transient_error),
+    a!(a_renew_transient_failures_retry_without_state_change, mock_only).channel(),
+    a!(a_check_in_transient_failures_retry_without_state_change, mock_only),
     a!(a_token_never_logged),
     a!(a_same_token_no_enrollment),
     a!(a_same_token_rejected_identity_no_enrollment).channel(),
@@ -618,7 +637,9 @@ const TESTS: &[Test] = &[
     a!(a_renewal_happy_path).channel(),
     a!(a_renewal_lost_response_retried, mock_only).channel(),
     a!(a_renewal_lost_confirm_response_retried, mock_only).channel(),
+    a!(a_confirm_barrier_blocks_channelless_traffic, mock_only),
     a!(a_confirm_expired_pending_renews_with_fresh_key, mock_only),
+    a!(a_confirm_expired_pending_beyond_grace_rejects, mock_only),
     a!(a_expired_current_renews_in_grace_or_rejects_beyond, mock_only).channel(),
     a!(a_channel_connected_and_metadata).channel(),
     a!(a_make_before_break_on_renewal).channel(),

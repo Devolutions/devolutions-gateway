@@ -842,7 +842,11 @@ impl State {
                 .iter()
                 .find(|root| root.thumbprint == certificate.issuer)
                 .expect("issuing root is known");
-            return Ok(vec![certificate.der.clone(), root.cert_der.clone()]);
+            let chain = vec![certificate.der.clone(), root.cert_der.clone()];
+            let device = self.devices.get_mut(&device_id).expect("device exists");
+            device.metadata = metadata;
+            device.last_seen_at = Some(now);
+            return Ok(chain);
         }
 
         let issued_seq = self.serial_seq;
