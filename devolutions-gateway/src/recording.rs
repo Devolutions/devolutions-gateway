@@ -13,7 +13,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
@@ -26,6 +26,7 @@ use crate::token::{JrecTokenClaims, RecordingFileCategory, RecordingFileType};
 
 const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
 const BUFFER_WRITER_SIZE: usize = 64 * 1024;
+const LOG_PUSH_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +70,8 @@ pub enum PushOutcome {
     Done,
     /// The underlying file write failed because the recording storage volume is full.
     StorageFull,
+    /// The push reached the size limit of its file type and was closed.
+    SizeLimitReached,
 }
 
 #[derive(TypedBuilder)]
@@ -137,7 +140,9 @@ where
                 // larger buffer size to reduce the number of flushes
                 let mut file = BufWriter::with_capacity(BUFFER_WRITER_SIZE, file);
                 let mut shutdown_signal_clone = shutdown_signal.clone();
-                let copy_fut = io::copy(&mut client_stream, &mut file);
+                let size_limit = push_size_limit(file_type);
+                let mut limited_stream = (&mut client_stream).take(size_limit);
+                let copy_fut = io::copy(&mut limited_stream, &mut file);
                 let is_media = file_type.category() == RecordingFileCategory::Media;
                 let signal_loop = tokio::spawn({
                     let recordings = recordings.clone();
@@ -162,6 +167,10 @@ where
                 let res = tokio::select! {
                     res = copy_fut => {
                         match res {
+                            Ok(written) if written >= size_limit => {
+                                warn!(%session_id, %file_type, size_limit, "Recording push reached its size limit; closing push stream");
+                                Ok(PushOutcome::SizeLimitReached)
+                            }
                             Ok(_) => Ok(PushOutcome::Done),
                             Err(e) if is_storage_full(&e) => {
                                 warn!(%session_id, "Recording storage is full; closing push stream");
@@ -172,7 +181,7 @@ where
                     },
                     _ = shutdown_signal.wait() => {
                         trace!("Received shutdown signal");
-                        client_stream.shutdown().await.context("shutdown").map(|_| PushOutcome::Done)
+                        limited_stream.get_mut().shutdown().await.context("shutdown").map(|_| PushOutcome::Done)
                     },
                 };
 
@@ -191,6 +200,13 @@ where
             .context("disconnect")?;
 
         res
+    }
+}
+
+fn push_size_limit(file_type: RecordingFileType) -> u64 {
+    match file_type.category() {
+        RecordingFileCategory::Media => u64::MAX,
+        RecordingFileCategory::Log => LOG_PUSH_SIZE_LIMIT,
     }
 }
 
@@ -1037,6 +1053,8 @@ async fn remux(input_path: Utf8PathBuf) {
 
 #[cfg(test)]
 mod tests {
+    use devolutions_gateway_task::ShutdownHandle;
+
     use super::*;
     use crate::session::session_manager_channel;
 
@@ -1276,5 +1294,99 @@ mod tests {
 
         assert!(h.is_terminated(id));
         h.expect_kill(id).await;
+    }
+
+    #[tokio::test]
+    async fn log_push_size_limit_closes_only_the_log_push() {
+        let recordings_dir = tempfile::tempdir().expect("temp dir");
+        let recordings_path = Utf8PathBuf::from_path_buf(recordings_dir.path().to_path_buf()).expect("UTF-8 path");
+        let (recordings, rx) = recording_message_channel();
+        let (session_manager_handle, session_manager_rx) = session_manager_channel();
+        let _kills = session_manager_rx.spawn_mock();
+        let (job_queue_handle, _job_queue_rx) = JobQueueHandle::new();
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let manager = RecordingManagerTask::new(rx, recordings_path.clone(), session_manager_handle, job_queue_handle);
+        tokio::spawn(recording_manager_task(manager, shutdown_signal.clone()));
+
+        let id = Uuid::new_v4();
+        let push = |client_stream, file_type| {
+            let claims: JrecTokenClaims = serde_json::from_value(serde_json::json!({
+                "jet_aid": id,
+                "jet_rop": "push",
+                "exp": 0,
+                "jti": Uuid::new_v4(),
+            }))
+            .expect("push claims");
+
+            tokio::spawn(
+                ClientPush::builder()
+                    .recordings(recordings.clone())
+                    .claims(claims)
+                    .client_stream(client_stream)
+                    .file_type(file_type)
+                    .session_id(id)
+                    .shutdown_signal(shutdown_signal.clone())
+                    .build()
+                    .run(),
+            )
+        };
+
+        let (mut media_client, media_server) = io::duplex(BUFFER_WRITER_SIZE);
+        let media_push = push(media_server, RecordingFileType::WebM);
+        media_client.write_all(b"media").await.expect("write media");
+
+        wait_until_connected(&recordings, id).await;
+
+        let (mut log_client, log_server) = io::duplex(BUFFER_WRITER_SIZE);
+        let log_push = push(log_server, RecordingFileType::SessionRecordingLog);
+        tokio::spawn(async move {
+            let chunk = vec![b'x'; BUFFER_WRITER_SIZE];
+            while log_client.write_all(&chunk).await.is_ok() {}
+        });
+
+        let log_outcome = log_push.await.expect("join log push").expect("log push");
+        assert!(matches!(log_outcome, PushOutcome::SizeLimitReached));
+
+        let log_file = recordings_path.join(id.to_string()).join("recording-1.slog");
+        let log_size = std::fs::metadata(&log_file).expect("log file").len();
+        assert_eq!(log_size, LOG_PUSH_SIZE_LIMIT);
+
+        assert!(matches!(
+            recordings.get_state(id).await.expect("state"),
+            Some(OnGoingRecordingState::Connected)
+        ));
+        assert!(!media_push.is_finished());
+
+        drop(media_client);
+        let media_outcome = media_push.await.expect("join media push").expect("media push");
+        assert!(matches!(media_outcome, PushOutcome::Done));
+    }
+
+    async fn wait_until_connected(recordings: &RecordingMessageSender, id: Uuid) {
+        for _ in 0..500 {
+            if let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(id).await {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("recording {id} never connected");
+    }
+
+    #[test]
+    fn only_log_pushes_have_a_size_limit() {
+        assert_eq!(
+            push_size_limit(RecordingFileType::SessionRecordingLog),
+            LOG_PUSH_SIZE_LIMIT
+        );
+
+        for file_type in [
+            RecordingFileType::WebM,
+            RecordingFileType::TRP,
+            RecordingFileType::Asciicast,
+        ] {
+            assert_eq!(push_size_limit(file_type), u64::MAX);
+        }
     }
 }

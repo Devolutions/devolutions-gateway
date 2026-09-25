@@ -182,6 +182,10 @@ async fn handle_jrec_push(
             warn!(client = %source_addr, %session_id, "JREC push closed: storage full");
             close_handle.app_close(STORAGE_FULL_CLOSE_CODE).await;
         }
+        Ok(PushOutcome::SizeLimitReached) => {
+            warn!(client = %source_addr, %session_id, %file_type, "JREC push closed: size limit reached");
+            close_handle.app_close(SIZE_LIMIT_REACHED_CLOSE_CODE).await;
+        }
         Err(error) => {
             close_handle.server_error("forwarding failure".to_owned()).await;
             error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
@@ -195,6 +199,9 @@ async fn handle_jrec_push(
 /// Codes in 4000-4999 are reserved for private application use per
 /// <https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code>.
 const STORAGE_FULL_CLOSE_CODE: u16 = 4010;
+
+/// WebSocket close code sent on `/jrec/push/{id}` when the pushed file reached the size limit of its file type.
+const SIZE_LIMIT_REACHED_CLOSE_CODE: u16 = 4011;
 
 /// Deletes a recording stored on this instance
 #[cfg_attr(feature = "openapi", utoipa::path(
