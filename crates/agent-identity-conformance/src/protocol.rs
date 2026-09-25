@@ -1266,10 +1266,10 @@ pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()>
     Ok(())
 }
 
-pub(crate) async fn p_signature_parameter_order_accepted(ctx: Context) -> anyhow::Result<()> {
+async fn renew_in_alternate_parameter_order(ctx: &Context) -> anyhow::Result<(Identity, SignedHeaders)> {
     use SignatureParameter::{Algorithm, Created, Expires, KeyId, Nonce, Tag};
 
-    let (_, mut identity) = issued(&ctx, "parameter-order").await?;
+    let (_, mut identity) = issued(ctx, "parameter-order").await?;
     let new_key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({
         "csr": new_key.csr,
@@ -1290,7 +1290,18 @@ pub(crate) async fn p_signature_parameter_order_accepted(ctx: Context) -> anyhow
             && renewed["metadata"]["hostname"] == "renewed-in-alternate-order",
         "alternate-order renew did not create a pending certificate and update metadata"
     );
+    Ok((identity, renew_headers))
+}
 
+pub(crate) async fn p_signature_parameter_order_accepted_renew(ctx: Context) -> anyhow::Result<()> {
+    renew_in_alternate_parameter_order(&ctx).await?;
+    Ok(())
+}
+
+pub(crate) async fn p_signature_parameter_order_accepted_connect(ctx: Context) -> anyhow::Result<()> {
+    use SignatureParameter::{Algorithm, Created, Expires, KeyId, Nonce, Tag};
+
+    let (identity, renew_headers) = renew_in_alternate_parameter_order(&ctx).await?;
     let connect_headers = identity.key.sign_now_with_order(
         &identity.thumbprint,
         "connect",
