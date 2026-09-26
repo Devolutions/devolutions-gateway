@@ -101,6 +101,7 @@ dependencies = [
 name = "agent-identity"
 version = "0.0.0"
 dependencies = [
+ "agent-identity-httpsig",
  "agent-identity-keys",
  "anyhow",
  "base64 0.22.1",
@@ -108,11 +109,15 @@ dependencies = [
  "der 0.8.1",
  "hex",
  "hostname 0.4.2",
+ "httpdate",
  "libc",
  "p256 0.14.0-rc.14",
+ "reqwest",
+ "rustls-pemfile 2.2.0",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "spki 0.8.0",
  "sysinfo",
  "time",
  "tracing",
@@ -1887,6 +1892,8 @@ dependencies = [
 name = "devolutions-agent"
 version = "2026.3.0"
 dependencies = [
+ "agent-identity",
+ "agent-identity-keys",
  "agent-tunnel-proto",
  "anyhow",
  "async-trait",
@@ -1940,6 +1947,7 @@ dependencies = [
  "win-api-wrappers",
  "windows 0.61.3",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]
