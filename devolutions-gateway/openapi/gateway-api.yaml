@@ -950,7 +950,7 @@ paths:
       - Tasks
       summary: Gets the status of a background task.
       description: |-
-        Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.
+        Task records are kept forever, including across Gateway restarts.
 
         This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
       operationId: GetTask

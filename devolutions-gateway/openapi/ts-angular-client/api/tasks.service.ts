@@ -96,7 +96,7 @@ export class TasksService {
 
     /**
      * Gets the status of a background task.
-     * Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+     * Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
      * @param id Task ID
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
