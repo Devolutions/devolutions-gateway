@@ -21,12 +21,17 @@ use rand::RngExt as _;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use time::format_description::well_known::Rfc3339;
+use tokio::io::AsyncWriteExt as _;
 use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{Target, Token, count, decoded_certificate, expect_status, field};
 use crate::protocol::has_certificate;
 use crate::{Context, KeyBackend};
+
+#[cfg(windows)]
+#[path = "system_fixture.rs"]
+mod system_fixture;
 
 type CaseFuture<'a> = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
 const WAIT: Duration = Duration::from_secs(20);
@@ -43,7 +48,7 @@ const KNOWN_METADATA_KEYS: [&str; 8] = [
 ];
 const REQUIRED_METADATA_KEYS: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
 
-fn token_file_id(token: &str) -> String {
+pub(crate) fn token_file_id(token: &str) -> String {
     Sha256::digest(token.as_bytes())
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -69,7 +74,7 @@ fn canonical_authority_dir(path: &Path) -> bool {
         == Some(true)
 }
 
-fn contains_pkcs8_material(contents: &[u8]) -> bool {
+pub(crate) fn contains_pkcs8_material(contents: &[u8]) -> bool {
     const PEM_MARKERS: [&[u8]; 2] = [b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN ENCRYPTED PRIVATE KEY-----"];
     PEM_MARKERS
         .iter()
@@ -114,7 +119,7 @@ fn temporary_name(name: &str, expected: &str) -> bool {
             .any(|extension| suffix.ends_with(extension))
 }
 
-fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, key_prefix: &str) -> bool {
+pub(crate) fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, key_prefix: &str) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -198,6 +203,31 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
         ensure!(
             metadata["machine_id"] == expected.trim(),
             "agent metadata machine_id differs from /etc/machine-id"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn assert_no_token_fragments(contents: &[u8], token: &str, path: &Path) -> anyhow::Result<()> {
+    let mut parts = token.split('.');
+    let _ = parts.next();
+    let bag = parts.next().context("registered token has no bag")?;
+    let secret = parts.next().context("registered token has no secret")?;
+    for fragment in [token.as_bytes(), bag.as_bytes(), secret.as_bytes()] {
+        if fragment.is_empty() {
+            continue;
+        }
+        ensure!(
+            !contents.windows(fragment.len()).any(|chunk| chunk == fragment),
+            "enrollment token leaked into {}",
+            path.display()
+        );
+    }
+    for fragment in secret.as_bytes().windows(12) {
+        ensure!(
+            !contents.windows(12).any(|chunk| chunk == fragment),
+            "twelve-character enrollment secret fragment leaked into {}",
+            path.display()
         );
     }
     Ok(())
@@ -963,6 +993,10 @@ impl AgentCase {
     }
 
     fn audit_tokens(&self) -> anyhow::Result<()> {
+        self.audit_tokens_excluding(None)
+    }
+
+    fn audit_tokens_excluding(&self, excluded: Option<&Path>) -> anyhow::Result<()> {
         let mut stack = vec![self.path().to_path_buf()];
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(dir)? {
@@ -972,32 +1006,14 @@ impl AgentCase {
                     stack.push(path);
                     continue;
                 }
-                if self.tokens.iter().any(|token| path == self.pending_path_for(token)) {
+                if excluded == Some(path.as_path())
+                    || self.tokens.iter().any(|token| path == self.pending_path_for(token))
+                {
                     continue;
                 }
                 let contents = std::fs::read(&path)?;
                 for token in &self.tokens {
-                    let mut parts = token.split('.');
-                    let _ = parts.next();
-                    let bag = parts.next().context("registered token has no bag")?;
-                    let secret = parts.next().context("registered token has no secret")?;
-                    for fragment in [token.as_bytes(), bag.as_bytes(), secret.as_bytes()] {
-                        if fragment.is_empty() {
-                            continue;
-                        }
-                        ensure!(
-                            !contents.windows(fragment.len()).any(|chunk| chunk == fragment),
-                            "enrollment token leaked into {}",
-                            path.display()
-                        );
-                    }
-                    for fragment in secret.as_bytes().windows(12) {
-                        ensure!(
-                            !contents.windows(12).any(|chunk| chunk == fragment),
-                            "twelve-character enrollment secret fragment leaked into {}",
-                            path.display()
-                        );
-                    }
+                    assert_no_token_fragments(&contents, token, &path)?;
                 }
             }
         }
@@ -2091,6 +2107,162 @@ pub(crate) async fn a_same_token_no_enrollment(ctx: Context) -> anyhow::Result<(
     .await
 }
 
+#[derive(Clone, Copy)]
+enum PermanentTokenOutcome {
+    Exhausted,
+    Invalid,
+    Malformed,
+}
+
+async fn same_token_after_permanent_outcome(ctx: Context, outcome: PermanentTokenOutcome) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            let (pending, expected_devices, expected_uses) = match outcome {
+                PermanentTokenOutcome::Exhausted => {
+                    let key = crate::signer::KeyPair::generate()?;
+                    expect_status(&target.enroll(&token.text, &key, &json!({})).await?, 200)?;
+                    (token.text.clone(), 1, 1)
+                }
+                PermanentTokenOutcome::Invalid => {
+                    let (prefix, secret) = token.text.rsplit_once('.').context("token structure")?;
+                    let mut bytes = URL_SAFE_NO_PAD.decode(secret)?;
+                    bytes[0] ^= 1;
+                    (format!("{prefix}.{}", URL_SAFE_NO_PAD.encode(bytes)), 0, 0)
+                }
+                PermanentTokenOutcome::Malformed => {
+                    let (_, secret) = token.text.rsplit_once('.').context("token structure")?;
+                    (format!("dvaet1.not-base64!.{secret}"), 0, 0)
+                }
+            };
+            let before = if case.ctx.mock() {
+                Some(count(&target.requests(None).await?, "enroll_total")?)
+            } else {
+                None
+            };
+            case.write_pending(&pending)?;
+            case.until_pending_deleted(&target, &pending, &token, expected_devices, expected_uses)
+                .await?;
+            if let Some(before) = before {
+                let expected = before + u64::from(!matches!(outcome, PermanentTokenOutcome::Malformed));
+                ensure!(
+                    count(&target.requests(None).await?, "enroll_total")? == expected,
+                    "initial permanent outcome sent the wrong number of enrollment requests"
+                );
+            }
+            assert_same_token_replay_dropped(case, &target, &token, &pending, expected_devices, expected_uses).await
+        })
+    })
+    .await
+}
+
+async fn assert_same_token_replay_dropped(
+    case: &mut AgentCase,
+    target: &Target,
+    token: &Token,
+    pending: &str,
+    expected_devices: u64,
+    expected_uses: u64,
+) -> anyhow::Result<()> {
+    let attempts = if case.ctx.mock() {
+        Some(count(&target.requests(None).await?, "enroll_total")?)
+    } else {
+        None
+    };
+    case.write_pending(pending)?;
+    let started = Instant::now();
+    loop {
+        assert_replay_unchanged(target, token, expected_devices, expected_uses, attempts).await?;
+        if !case.pending_path_for(pending).exists() && !case.in_progress_path_for(pending).exists() {
+            break;
+        }
+        case.check_running()?;
+        ensure!(
+            started.elapsed() < WAIT,
+            "agent did not discard the rewritten permanently failed token within 20 seconds"
+        );
+        tokio::time::sleep(POLL).await;
+    }
+    let settled = Instant::now();
+    while settled.elapsed() < Duration::from_secs(3) {
+        assert_replay_unchanged(target, token, expected_devices, expected_uses, attempts).await?;
+        ensure!(
+            !case.pending_path_for(pending).exists() && !case.in_progress_path_for(pending).exists(),
+            "rewritten permanently failed token reappeared"
+        );
+        case.check_running()?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Ok(())
+}
+
+async fn assert_replay_unchanged(
+    target: &Target,
+    token: &Token,
+    expected_devices: u64,
+    expected_uses: u64,
+    attempts: Option<u64>,
+) -> anyhow::Result<()> {
+    let listing = target.devices_for(token, "").await?;
+    expect_status(&listing, 200)?;
+    ensure!(
+        count(&listing.body, "totalCount")? == expected_devices,
+        "rewritten permanently failed token created another device"
+    );
+    let record = target.token_record(&token.id).await?;
+    expect_status(&record, 200)?;
+    ensure!(
+        count(&record.body, "usedCount")? == expected_uses,
+        "rewritten permanently failed token consumed another use"
+    );
+    if let Some(attempts) = attempts {
+        ensure!(
+            count(&target.requests(None).await?, "enroll_total")? == attempts,
+            "rewritten permanently failed token sent an enrollment request"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn a_same_token_after_token_exhausted_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Exhausted).await
+}
+
+pub(crate) async fn a_same_token_after_token_invalid_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Invalid).await
+}
+
+pub(crate) async fn a_same_token_after_token_malformed_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Malformed).await
+}
+
+pub(crate) async fn a_same_token_after_device_revoked_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let token = new_token(case, 1).await?;
+            let (id, key) = dropped_enrollment(case, &token).await?;
+            target.revoke(&id).await?;
+            expect_status(
+                &target
+                    .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+                    .await?,
+                200,
+            )?;
+            case.until_pending_deleted(&target, &token.text, &token, 1, 1).await?;
+            ensure!(
+                count(&target.requests(Some(&token)).await?, "enroll_device_revoked")? == 1
+                    && !key_exists(case, &key)?
+                    && target.device(&id).await?.body["status"] == "revoked",
+                "lost response was not followed by a permanent device_revoked outcome"
+            );
+            assert_same_token_replay_dropped(case, &target, &token, &token.text, 1, 1).await
+        })
+    })
+    .await
+}
+
 pub(crate) async fn a_same_token_rejected_identity_no_enrollment(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
@@ -2334,6 +2506,100 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
                     !case.pending_path_for(&candidate).exists() && !case.in_progress_path_for(&candidate).exists(),
                     "{reason} wrote pending enrollment state"
                 );
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+async fn enroll_cli_from_stdin(case: &AgentCase, input: &[u8]) -> anyhow::Result<std::process::Output> {
+    let output = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut child = Command::new(&case.ctx.agent_bin)
+            .args(["identity", "enroll", "-"])
+            .env("DAGENT_CONFIG_PATH", case.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("start identity enroll CLI with stdin")?;
+        let mut stdin = child.stdin.take().context("identity enroll CLI has no stdin")?;
+        if let Err(error) = stdin.write_all(input).await {
+            ensure!(
+                error.kind() == std::io::ErrorKind::BrokenPipe,
+                "write token to identity enroll CLI stdin: {error}"
+            );
+        }
+        drop(stdin);
+        child.wait_with_output().await.context("wait for identity enroll CLI")
+    })
+    .await
+    .context("identity enroll CLI with stdin timed out")??;
+    use std::io::Write as _;
+    for (name, contents) in [("cli-stdout.log", &output.stdout), ("cli-stderr.log", &output.stderr)] {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(case.path().join(name))?
+            .write_all(contents)?;
+    }
+    Ok(output)
+}
+
+fn assert_no_pending_files(case: &AgentCase) -> anyhow::Result<()> {
+    let dir = case.path().join("identity").join("pending");
+    if dir.exists() {
+        ensure!(
+            std::fs::read_dir(dir)?.next().is_none(),
+            "identity enroll CLI created pending or in-progress state for invalid stdin"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn a_cli_identity_enroll_stdin(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, false, |case| {
+        Box::pin(async move {
+            let token = new_token(case, 1).await?;
+            case.add_token(&token.text);
+            let output = enroll_cli_from_stdin(case, format!(" \t{} \r\n", token.text).as_bytes()).await?;
+            ensure!(
+                output.status.success(),
+                "identity enroll CLI rejected a valid token on stdin"
+            );
+            let pending = case.pending_path();
+            ensure!(
+                pending.exists(),
+                "identity enroll CLI did not write stdin token's pending file"
+            );
+            ensure!(
+                String::from_utf8_lossy(&output.stdout).contains(&pending.to_string_lossy().to_string()),
+                "identity enroll CLI did not print the stdin token's pending path"
+            );
+            #[cfg(windows)]
+            crate::windows::pending_acl_is_protected(&pending)?;
+            #[cfg(windows)]
+            let data = crate::windows::unprotect_pending(&std::fs::read(&pending)?)?;
+            #[cfg(unix)]
+            let data = std::fs::read(&pending)?;
+            let contents: Value = serde_json::from_slice(&data)?;
+            ensure!(
+                contents["version"] == 1 && contents["token"] == token.text,
+                "CLI did not trim stdin to exactly the enrollment token"
+            );
+            std::fs::remove_file(pending)?;
+            let (prefix, secret) = token.text.rsplit_once('.').context("token structure")?;
+            let bag = prefix.rsplit_once('.').context("token bag")?.1;
+            let invalid = format!("dvaet2.{bag}.{secret}");
+            for (name, input) in [
+                ("invalid token", format!("{invalid}\r\n").into_bytes()),
+                ("immediate EOF", Vec::new()),
+                ("whitespace-only line", b" \t \r\n".to_vec()),
+            ] {
+                let output = enroll_cli_from_stdin(case, &input).await?;
+                ensure!(!output.status.success(), "identity enroll CLI accepted {name} on stdin");
+                assert_no_pending_files(case)?;
             }
             Ok(())
         })
@@ -4357,9 +4623,10 @@ pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
         })
         .await?;
         if !crate::windows::running_as_system()? {
-            return Err(
-                crate::Incomplete("SYSTEM agent fixture required to test key ACL without current-user grant").into(),
-            );
+            if !crate::windows::running_as_elevated_administrator()? {
+                return Err(crate::NotApplicable("requires an elevated administrator for the SYSTEM fixture").into());
+            }
+            return system_fixture::run(ctx).await;
         }
         return with_agent(ctx, None, false, |case| {
             Box::pin(async move {
