@@ -1,0 +1,65 @@
+syntax = "proto3";
+package devolutions.agent.channel.v1;
+
+option csharp_namespace = "Devolutions.Agent.Channel.V1";
+
+import "google/protobuf/timestamp.proto";
+
+service AgentChannel {
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message AgentMessage {
+  string id = 1;
+  optional string correlation_id = 2;
+  oneof payload {
+    Hello hello = 10;
+    Ack ack = 11;
+  }
+}
+
+message ServerMessage {
+  string id = 1;
+  optional string correlation_id = 2;
+  oneof payload {
+    Welcome welcome = 10;
+    Ack ack = 11;
+    RenewRequested renew_requested = 12;
+    Reconnect reconnect = 13;
+    Challenge challenge = 14;
+    ConfigUpdate config_update = 15;
+  }
+}
+
+// C19: the device's effective config (§5.2 shape) as a UTF-8 JSON object.
+message ConfigUpdate {
+  string config_json = 1;
+}
+
+message Challenge {
+  // 32 random bytes, fresh per stream.
+  bytes challenge = 1;
+}
+
+message Hello {
+  map<string, string> metadata = 1;
+  repeated string capabilities = 2;
+  map<string, uint64> applied_state_versions = 3;
+  // Proof of key possession bound to this stream (§7.3).
+  bytes proof = 4;
+}
+
+message Welcome {
+  google.protobuf.Timestamp server_time = 1;
+}
+
+message Ack {}
+
+message RenewRequested {
+  // "admin" or "rotation".
+  string reason = 1;
+}
+
+message Reconnect {
+  string reason = 1;
+}

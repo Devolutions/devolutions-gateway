@@ -1,0 +1,30 @@
+[package]
+name = "agent-identity-httpsig"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "HTTP request signing for Agent Identity"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-identity-keys = { path = "../agent-identity-keys" }
+anyhow = "1"
+base64 = "0.22"
+http = "1"
+httpsig = { version = "=0.0.24", default-features = false }
+p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+rand = "0.10"
+sfv = "0.14"
+sha2 = "0.11"
+signature = "3"
+tokio = { version = "1", features = ["sync"] }
+tower = "0.5"
+url = "2"
+
+[dev-dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
+tower = { version = "0.5", features = ["util"] }

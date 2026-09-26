@@ -1,0 +1,50 @@
+[package]
+name = "agent-identity"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Agent Identity enrollment data, metadata and local storage"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-identity-httpsig = { path = "../agent-identity-httpsig" }
+agent-identity-keys = { path = "../agent-identity-keys" }
+anyhow = "1"
+base64 = "0.22"
+camino = "1"
+der = "0.8"
+hex = "0.4"
+hostname = "0.4"
+httpdate = "1"
+p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+rustls-pemfile = "2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+spki = "0.8"
+sysinfo = "0.35"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tracing = "0.1"
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+x509-cert = { version = "0.3", features = ["builder"] }
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+win-api-wrappers = { path = "../win-api-wrappers" }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+] }

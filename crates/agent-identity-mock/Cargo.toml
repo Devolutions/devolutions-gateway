@@ -1,0 +1,58 @@
+[package]
+name = "agent-identity-mock"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Mock server (conformance oracle) for the Agent Identity V1 contract"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-channel-proto = { path = "../agent-channel-proto" }
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+der = "0.8"
+futures = "0.3"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = "1"
+hyper-util = { version = "0.1", features = [
+    "http1",
+    "http2",
+    "server",
+    "server-auto",
+    "tokio",
+    "service",
+] }
+# Pinned to the RC: `picky` pins `=0.14.0-rc.14` and the resolver cannot hold two
+# semver-compatible p256 versions.
+p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+prost-types = "0.13"
+rand = "0.10"
+rcgen = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+spki = "0.8"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = { version = "1.52", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "time",
+    "sync",
+    "io-util",
+    "fs",
+] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+x509-cert = { version = "0.3", features = ["builder"] }
+
