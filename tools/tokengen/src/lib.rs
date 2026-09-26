@@ -150,6 +150,18 @@ pub struct NetScanClaim {
     pub jet_gw_id: Option<Uuid>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct TaskClaims {
+    pub jet_tk: TaskKind,
+    pub jet_aid: Uuid,
+    pub jet_task_reuse: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_gw_id: Option<Uuid>,
+    pub exp: i64,
+    pub nbf: i64,
+    pub jti: Uuid,
+}
+
 // --- Enums --- //
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -219,9 +231,16 @@ macro_rules! impl_from_str {
     };
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskKind {
+    AiLog,
+}
+
 impl_from_str!(ApplicationProtocol);
 impl_from_str!(RecordingOperation);
 impl_from_str!(RecordingPolicy);
+impl_from_str!(TaskKind);
 
 // --- SubCommandArgs Enum --- //
 
@@ -285,6 +304,11 @@ pub enum SubCommandArgs {
         revoked_jti_list: Vec<Uuid>,
     },
     NetScan {},
+    Task {
+        jet_tk: TaskKind,
+        jet_aid: Option<Uuid>,
+        jet_task_reuse: bool,
+    },
 }
 
 pub fn generate_token(
@@ -548,6 +572,22 @@ pub fn generate_token(
                 jet_gw_id,
             };
             ("NETSCAN", serde_json::to_value(claims)?)
+        }
+        SubCommandArgs::Task {
+            jet_tk,
+            jet_aid,
+            jet_task_reuse,
+        } => {
+            let claims = TaskClaims {
+                jet_tk,
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
+                jet_task_reuse,
+                jet_gw_id,
+                exp,
+                nbf,
+                jti,
+            };
+            ("TASK", serde_json::to_value(claims)?)
         }
     };
 

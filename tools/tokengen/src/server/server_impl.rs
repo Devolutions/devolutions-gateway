@@ -9,7 +9,7 @@ use axum::routing::post;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ApplicationProtocol, RecordingOperation, SubCommandArgs, generate_token};
+use crate::{ApplicationProtocol, RecordingOperation, SubCommandArgs, TaskKind, generate_token};
 
 pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_path: Option<PathBuf>) -> Router {
     Router::new()
@@ -23,6 +23,7 @@ pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_p
         .route("/kdc", post(kdc_handler))
         .route("/jrl", post(jrl_handler))
         .route("/netscan", post(netscan_handler))
+        .route("/task", post(task_handler))
         .layer(Extension(provisioner_key_path))
         .layer(Extension(delegation_key_path))
 }
@@ -267,6 +268,24 @@ pub(crate) async fn netscan_handler(
     .await
 }
 
+pub(crate) async fn task_handler(
+    Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
+    Json(request): Json<TaskRequest>,
+) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
+    handle_subcommand(
+        provisioner_key_path,
+        delegation_key_path,
+        request.common,
+        SubCommandArgs::Task {
+            jet_tk: request.jet_tk,
+            jet_aid: request.jet_aid,
+            jet_task_reuse: request.jet_task_reuse,
+        },
+    )
+    .await
+}
+
 async fn handle_subcommand(
     provisioner_key_path: Arc<PathBuf>,
     delegation_key_path: Option<PathBuf>,
@@ -386,4 +405,14 @@ pub(crate) struct JrlRequest {
 pub(crate) struct NetScanRequest {
     #[serde(flatten)]
     common: CommonRequest,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TaskRequest {
+    #[serde(flatten)]
+    common: CommonRequest,
+    jet_tk: TaskKind,
+    jet_aid: Option<Uuid>,
+    #[serde(default)]
+    jet_task_reuse: bool,
 }
