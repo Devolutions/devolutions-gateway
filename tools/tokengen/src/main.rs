@@ -2,7 +2,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use tokengen::{ApplicationProtocol, RecordingOperation, SubCommandArgs, generate_token};
+use tokengen::{ApplicationProtocol, RecordingOperation, SubCommandArgs, TaskKind, generate_token};
 use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -142,6 +142,15 @@ fn sign(
         },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
+        SignSubCommand::Task {
+            jet_tk,
+            jet_aid,
+            jet_task_reuse,
+        } => SubCommandArgs::Task {
+            jet_tk,
+            jet_aid,
+            jet_task_reuse,
+        },
     };
 
     let validity_duration = humantime::parse_duration(validity_duration)?;
@@ -291,4 +300,12 @@ enum SignSubCommand {
         jti: Vec<Uuid>,
     },
     NetScan {},
+    Task {
+        #[clap(long)]
+        jet_tk: TaskKind,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_task_reuse: bool,
+    },
 }

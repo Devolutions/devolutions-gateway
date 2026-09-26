@@ -209,6 +209,28 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void TaskClaimsForAiLog()
+    {
+        const string EXPECTED = """{"jet_tk":"ai-log","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_task_reuse":false,"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = TaskClaims.ForAiLog(gatewayId, sessionId);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+        Assert.Equal("TASK", claims.GetContentType());
+        Assert.Equal(600, claims.GetDefaultLifetime());
+    }
+
+    [Fact]
+    public void TaskClaimsForReusableAiLog()
+    {
+        const string EXPECTED = """{"jet_tk":"ai-log","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_task_reuse":true,"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = TaskClaims.ForAiLog(gatewayId, sessionId, reusable: true);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void EnrollmentClaimsAllFields()
     {
         const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777","jet_agent_name":"site-a"}""";
