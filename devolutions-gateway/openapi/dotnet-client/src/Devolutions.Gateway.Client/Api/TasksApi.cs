@@ -32,7 +32,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Gets the status of a background task.
         /// </summary>
         /// <remarks>
-        /// Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Gets the status of a background task.
         /// </summary>
         /// <remarks>
-        /// Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -83,7 +83,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Gets the status of a background task.
         /// </summary>
         /// <remarks>
-        /// Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -95,7 +95,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Gets the status of a background task.
         /// </summary>
         /// <remarks>
-        /// Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -339,7 +339,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Gets the status of a background task. Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Gets the status of a background task. Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -351,7 +351,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Gets the status of a background task. Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Gets the status of a background task. Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -396,7 +396,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Gets the status of a background task. Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Gets the status of a background task. Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>
@@ -409,7 +409,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Gets the status of a background task. Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Gets the status of a background task. Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Task ID</param>

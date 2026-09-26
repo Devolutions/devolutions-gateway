@@ -13,7 +13,7 @@ All URIs are relative to *http://localhost*
 
 Gets the status of a background task.
 
-Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 
 ### Example
 ```csharp
