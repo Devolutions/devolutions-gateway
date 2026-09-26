@@ -13,7 +13,6 @@ members = [
 # Intent-only directories until their crates land (Phase 2).
 exclude = [
     "crates/agent-channel-client",
-    "crates/agent-identity",
 ]
 default-members = [
     "devolutions-agent",
