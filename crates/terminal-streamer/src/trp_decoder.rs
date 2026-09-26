@@ -80,16 +80,141 @@ impl AsyncRead for AsyncReadChannel {
     }
 }
 
+/// Decodes a complete TRP recording into asciicast v2 lines, each ending with a newline.
+///
+/// A truncated last packet, as left by an interrupted recording, is ignored.
+pub fn decode_to_asciicast(mut input: &[u8]) -> anyhow::Result<String> {
+    let mut decoder = TrpDecoder::default();
+    let mut output = String::new();
+
+    while input.len() >= PACKET_HEADER_SIZE {
+        let (header, rest) = input.split_at(PACKET_HEADER_SIZE);
+        let header = PacketHeader::parse(header.try_into()?);
+
+        let Some((payload, rest)) = rest.split_at_checked(usize::from(header.size)) else {
+            break;
+        };
+        input = rest;
+
+        for line in decoder.push(&header, payload)? {
+            output.push_str(&line);
+            output.push('\n');
+        }
+    }
+
+    for line in decoder.finish() {
+        output.push_str(&line);
+        output.push('\n');
+    }
+
+    Ok(output)
+}
+
+const PACKET_HEADER_SIZE: usize = 8;
+
+struct PacketHeader {
+    time_delta: u32,
+    event_type: u16,
+    size: u16,
+}
+
+impl PacketHeader {
+    fn parse(buffer: &[u8; PACKET_HEADER_SIZE]) -> Self {
+        Self {
+            time_delta: u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]),
+            event_type: u16::from_le_bytes([buffer[4], buffer[5]]),
+            size: u16::from_le_bytes([buffer[6], buffer[7]]),
+        }
+    }
+}
+
+/// Turns TRP packets into asciicast lines, holding the events that come before the terminal setup.
+struct TrpDecoder {
+    time: f64,
+    before_setup_cache: Option<Vec<AsciinemaEvent>>,
+    header: AsciinemaHeader,
+}
+
+impl Default for TrpDecoder {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            before_setup_cache: Some(Vec::new()),
+            header: AsciinemaHeader::default(),
+        }
+    }
+}
+
+impl TrpDecoder {
+    fn push(&mut self, packet: &PacketHeader, payload: &[u8]) -> anyhow::Result<Vec<String>> {
+        self.time += f64::from(packet.time_delta) / 1000.0;
+        let time = self.time;
+
+        let mut lines = Vec::new();
+
+        match packet.event_type {
+            0 | 1 => {
+                let payload = String::from_utf8_lossy(payload).into_owned();
+                let event = if packet.event_type == 0 {
+                    AsciinemaEvent::TerminalOutput { payload, time }
+                } else {
+                    AsciinemaEvent::UserInput { payload, time }
+                };
+                match self.before_setup_cache {
+                    Some(ref mut cache) => cache.push(event),
+                    None => lines.push(event.to_json()),
+                }
+            }
+            2 => {
+                // Terminal size change. Payload is little-endian [columns, rows].
+                if payload.len() < 4 {
+                    anyhow::bail!("invalid terminal size change payload length (len={})", payload.len());
+                }
+                self.header.col = u16::from_le_bytes([payload[0], payload[1]]);
+                self.header.row = u16::from_le_bytes([payload[2], payload[3]]);
+                if self.before_setup_cache.is_none() {
+                    let event = AsciinemaEvent::Resize {
+                        width: self.header.col,
+                        height: self.header.row,
+                        time,
+                    };
+                    lines.push(event.to_json());
+                }
+            }
+            4 => {
+                // Terminal setup
+                if let Some(cache) = self.before_setup_cache.take() {
+                    lines.push(self.header.to_json());
+                    lines.extend(cache.iter().map(AsciinemaEvent::to_json));
+                } else {
+                    warn!("Received terminal setup event but cache is empty");
+                }
+            }
+            _ => {}
+        }
+
+        Ok(lines)
+    }
+
+    /// Flushes the cached events of a recording that never sent its terminal setup.
+    fn finish(self) -> Vec<String> {
+        match self.before_setup_cache {
+            Some(cache) => core::iter::once(self.header.to_json())
+                .chain(cache.iter().map(AsciinemaEvent::to_json))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+}
+
 async fn parse_trp_stream(
     mut input_stream: impl AsyncRead + Unpin + Send + 'static,
     mut tx: tokio::sync::mpsc::Sender<anyhow::Result<String>>,
 ) -> anyhow::Result<()> {
-    let mut time = 0.0;
-    let mut before_setup_cache = Some(Vec::new());
-    let mut header = AsciinemaHeader::default();
+    let mut decoder = TrpDecoder::default();
 
     loop {
-        let mut packet_head_buffer = [0u8; 8];
+        let mut packet_head_buffer = [0u8; PACKET_HEADER_SIZE];
         if let Err(e) = input_stream.read_exact(&mut packet_head_buffer).await {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -98,13 +223,9 @@ async fn parse_trp_stream(
             anyhow::bail!(e);
         }
 
-        let time_delta = u32::from_le_bytes(packet_head_buffer[0..4].try_into()?);
-        let event_type = u16::from_le_bytes(packet_head_buffer[4..6].try_into()?);
-        let size = u16::from_le_bytes(packet_head_buffer[6..8].try_into()?);
+        let packet = PacketHeader::parse(&packet_head_buffer);
 
-        time += f64::from(time_delta) / 1000.0;
-
-        let mut event_payload = vec![0u8; size as usize];
+        let mut event_payload = vec![0u8; usize::from(packet.size)];
         if let Err(e) = input_stream.read_exact(&mut event_payload).await {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -113,73 +234,8 @@ async fn parse_trp_stream(
             anyhow::bail!(e);
         }
 
-        match event_type {
-            0 => {
-                // Terminal output
-                let event_payload = String::from_utf8_lossy(&event_payload).into_owned();
-                let event = AsciinemaEvent::TerminalOutput {
-                    payload: event_payload,
-                    time,
-                };
-                match before_setup_cache {
-                    Some(ref mut cache) => {
-                        cache.push(event);
-                    }
-                    None => {
-                        send(&mut tx, event.to_json()).await?;
-                    }
-                }
-            }
-            1 => {
-                let event_payload = String::from_utf8_lossy(&event_payload).into_owned();
-                let event = AsciinemaEvent::UserInput {
-                    payload: event_payload,
-                    time,
-                };
-                match before_setup_cache {
-                    Some(ref mut cache) => {
-                        cache.push(event);
-                    }
-                    None => {
-                        send(&mut tx, event.to_json()).await?;
-                    }
-                }
-            }
-            2 => {
-                // Terminal size change. Payload is little-endian [columns, rows].
-                if event_payload.len() < 4 {
-                    anyhow::bail!(
-                        "invalid terminal size change payload length (len={})",
-                        event_payload.len()
-                    );
-                }
-                header.col = u16::from_le_bytes(event_payload[0..2].try_into()?);
-                header.row = u16::from_le_bytes(event_payload[2..4].try_into()?);
-                if before_setup_cache.is_none() {
-                    let event = AsciinemaEvent::Resize {
-                        width: header.col,
-                        height: header.row,
-                        time,
-                    };
-                    send(&mut tx, event.to_json()).await?;
-                }
-            }
-            4 => {
-                // Terminal setup
-                if before_setup_cache.is_some() {
-                    let header_json = header.to_json();
-                    send(&mut tx, header_json).await?;
-                    if let Some(ref mut cache) = before_setup_cache {
-                        for event in cache.drain(..) {
-                            send(&mut tx, event.to_json()).await?;
-                        }
-                    }
-                    before_setup_cache = None;
-                } else {
-                    warn!("Received terminal setup event but cache is empty");
-                }
-            }
-            _ => {}
+        for line in decoder.push(&packet, &event_payload)? {
+            send(&mut tx, line).await?;
         }
     }
 }
@@ -188,4 +244,52 @@ async fn send(sender: &mut tokio::sync::mpsc::Sender<anyhow::Result<String>>, mu
     json.push('\n');
     sender.send(Ok(json)).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn packet(time_delta: u32, event_type: u16, payload: &[u8]) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&time_delta.to_le_bytes());
+        packet.extend_from_slice(&event_type.to_le_bytes());
+        packet.extend_from_slice(&u16::try_from(payload.len()).expect("small payload").to_le_bytes());
+        packet.extend_from_slice(payload);
+        packet
+    }
+
+    #[test]
+    fn decodes_a_complete_recording_and_ignores_a_truncated_tail() {
+        let mut trp = Vec::new();
+        trp.extend(packet(0, 2, &[100, 0, 30, 0]));
+        trp.extend(packet(500, 0, b"$ "));
+        trp.extend(packet(0, 4, &[]));
+        trp.extend(packet(1000, 1, b"l"));
+        trp.extend(packet(250, 0, b"ls\r\n"));
+        trp.extend(&packet(10, 0, b"lost")[..9]);
+
+        let cast = decode_to_asciicast(&trp).expect("valid recording");
+
+        assert_eq!(
+            cast,
+            concat!(
+                "{\"version\": 2, \"width\": 100, \"height\": 30}\n",
+                "[0.5,\"o\",\"$ \"]\n",
+                "[1.5,\"i\",\"l\"]\n",
+                r#"[1.75,"o","ls\u000d\u000a"]"#,
+                "\n",
+            )
+        );
+    }
+
+    #[test]
+    fn events_of_a_recording_without_setup_are_kept() {
+        let cast = decode_to_asciicast(&packet(2000, 0, b"x")).expect("valid recording");
+
+        assert_eq!(
+            cast,
+            "{\"version\": 2, \"width\": 80, \"height\": 24}\n[2,\"o\",\"x\"]\n"
+        );
+    }
 }
