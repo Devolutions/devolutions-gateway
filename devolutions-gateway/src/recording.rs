@@ -220,7 +220,7 @@ impl ActiveRecordings {
         self.0.lock().clone()
     }
 
-    fn insert(&self, id: Uuid) -> usize {
+    pub(crate) fn insert(&self, id: Uuid) -> usize {
         let mut guard = self.0.lock();
         guard.insert(id);
         guard.len()

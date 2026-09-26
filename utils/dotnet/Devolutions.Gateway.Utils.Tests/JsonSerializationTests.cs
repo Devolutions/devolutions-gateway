@@ -187,6 +187,16 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void ScopeClaimsTasksRead()
+    {
+        const string EXPECTED = """{"scope":"gateway.tasks.read","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayTasksRead);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void TaskClaimsForAiLog()
     {
         const string EXPECTED = """{"jet_tk":"ai-log","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";

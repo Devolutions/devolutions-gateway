@@ -340,6 +340,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
+        tasks: devolutions_gateway::tasks::TaskRegistry::new(),
     };
 
     for listener in &conf.listeners {
