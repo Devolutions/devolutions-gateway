@@ -3,6 +3,7 @@
 
 use std::io;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,7 +12,10 @@ use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
 use base64::Engine as _;
+use devolutions_gateway::job_queue::{JobQueueCtx, JobQueueTask, JobRunnerTask};
+use devolutions_gateway::tasks::{SECRETS_LOST_ERROR, TaskService};
 use devolutions_gateway::{DgwState, MockHandles};
+use devolutions_gateway_task::{ChildTask, ShutdownHandle, Task as _};
 use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
@@ -37,32 +41,146 @@ const CONFIG: &str = r#"{
     }
 }"#;
 
-fn make_router(config: &str) -> anyhow::Result<(Router, impl Sized)> {
-    let (state, handles) = DgwState::mock(config)?;
-    let MockHandles {
-        session_manager_rx,
-        recording_manager_rx,
-        subscriber_rx,
-        job_queue_rx,
-        traffic_audit_rx,
-        shutdown_handle,
-    } = handles;
+struct Gateway {
+    app: Router,
+    shutdown_handle: ShutdownHandle,
+    job_tasks: Vec<ChildTask<anyhow::Result<()>>>,
+    _mock_handles: Box<dyn Send>,
+}
 
-    // The auth middleware asks the session manager about any token carrying `jet_aid`; nothing answers in the mock.
-    drop(session_manager_rx);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Jobs {
+    Run,
+    QueueOnly,
+}
 
-    let app =
-        devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
-    Ok((
-        app,
-        (
+impl Gateway {
+    /// Starts a Gateway whose task and job databases live in `dir`, so a later start acts as a restart.
+    async fn start(config: &str, dir: &Path, jobs: Jobs) -> anyhow::Result<Self> {
+        let (mut state, handles) = DgwState::mock(config)?;
+        let MockHandles {
+            session_manager_rx,
             recording_manager_rx,
             subscriber_rx,
             job_queue_rx,
             traffic_audit_rx,
+            shutdown_handle: mock_shutdown_handle,
+        } = handles;
+
+        // The auth middleware asks the session manager about any token carrying `jet_aid`; nothing answers in the mock.
+        drop(session_manager_rx);
+
+        state.tasks = TaskService::open(tasks_db(dir).to_str().unwrap()).await?;
+
+        let job_queue_ctx = JobQueueCtx::init(&job_queue_db(dir)).await?;
+        state.tasks.reconcile(&job_queue_ctx).await?;
+        state.job_queue_handle = job_queue_ctx.job_queue_handle.clone();
+
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let mut job_tasks = Vec::new();
+
+        if jobs == Jobs::Run {
+            let runner = JobRunnerTask::new(&job_queue_ctx, state.clone());
+            job_tasks.push(ChildTask::spawn(runner.run(shutdown_signal.clone())));
+        }
+
+        job_tasks.push(ChildTask::spawn(JobQueueTask::new(job_queue_ctx).run(shutdown_signal)));
+
+        let app = devolutions_gateway::make_http_service(state)
+            .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
+
+        Ok(Self {
+            app,
             shutdown_handle,
-        ),
-    ))
+            job_tasks,
+            _mock_handles: Box::new((
+                recording_manager_rx,
+                subscriber_rx,
+                job_queue_rx,
+                traffic_audit_rx,
+                mock_shutdown_handle,
+            )),
+        })
+    }
+
+    async fn stop(self) {
+        self.shutdown_handle.signal();
+
+        for task in self.job_tasks {
+            task.join().await.unwrap().unwrap();
+        }
+    }
+}
+
+fn tasks_db(dir: &Path) -> PathBuf {
+    dir.join("provisioner_tasks.db")
+}
+
+fn job_queue_db(dir: &Path) -> PathBuf {
+    dir.join("job_queue.db")
+}
+
+async fn queued_job_count(dir: &Path) -> u64 {
+    let conn = job_queue_libsql::libsql::Builder::new_local(job_queue_db(dir))
+        .build()
+        .await
+        .unwrap()
+        .connect()
+        .unwrap();
+
+    let row = conn
+        .query("SELECT count(*) FROM job_queue", ())
+        .await
+        .unwrap()
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+
+    row.get::<u64>(0).unwrap()
+}
+
+async fn wait_for_queued_jobs(dir: &Path, expected: u64) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while queued_job_count(dir).await != expected {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("job queue reaches the expected size");
+}
+
+/// Every file of both databases, WAL included, since SQLite may not have checkpointed yet.
+fn database_bytes(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.to_str().unwrap().contains(".db"))
+        .map(|path| {
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect()
+}
+
+fn contains(haystack: &[u8], needle: &str) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle.as_bytes())
+}
+
+fn assert_databases_hold_settings_but_not_the_key(dir: &Path) {
+    let files = database_bytes(dir);
+    assert!(files.iter().any(|(path, _)| path.ends_with("job_queue.db")));
+    assert!(files.iter().any(|(path, _)| path.ends_with("provisioner_tasks.db")));
+
+    let all = files
+        .iter()
+        .flat_map(|(_, bytes)| bytes.iter().copied())
+        .collect::<Vec<_>>();
+    assert!(contains(&all, "gpt-test"), "the scan sees the persisted settings");
+
+    for (path, bytes) in &files {
+        assert!(!contains(bytes, API_KEY), "{} holds the API key", path.display());
+    }
 }
 
 fn unsigned_jws(cty: &str, payload: &Value) -> String {
@@ -175,7 +293,7 @@ impl CapturedLogs {
     }
 }
 
-fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
+fn capture_logs() -> (CapturedLogs, impl Sized) {
     let logs = CapturedLogs::default();
     let writer = logs.clone();
     let guard = tracing_subscriber::fmt()
@@ -183,12 +301,19 @@ fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
         .with_max_level(tracing::Level::TRACE)
         .with_ansi(false)
         .set_default();
-    (logs, guard)
+
+    // With one registered dispatcher, tracing takes callsite interest from the thread that hits it first,
+    // so a parallel test thread without a subscriber would disable these events for everyone.
+    let second_dispatcher = tracing::Dispatch::new(tracing_subscriber::registry());
+
+    (logs, (guard, second_dispatcher))
 }
 
 #[tokio::test]
 async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     let started = start_task(&app).await;
     assert_eq!(started["kind"], "ai-log");
@@ -210,7 +335,9 @@ async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
 
 #[tokio::test]
 async fn start_requires_a_task_token() {
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     let (status, _) = send(&app, start_request(None, &ai_params())).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -221,7 +348,9 @@ async fn start_requires_a_task_token() {
 
 #[tokio::test]
 async fn status_requires_the_tasks_read_scope() {
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
     let id = start_task(&app).await["id"].as_str().unwrap().parse::<Uuid>().unwrap();
 
     let (status, _) = send(&app, status_request(None, id)).await;
@@ -239,7 +368,9 @@ async fn status_requires_the_tasks_read_scope() {
 
 #[tokio::test]
 async fn unknown_task_is_not_found() {
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     let (status, _) = send(
         &app,
@@ -252,7 +383,9 @@ async fn unknown_task_is_not_found() {
 
 #[tokio::test]
 async fn invalid_ai_settings_are_typed_bad_requests() {
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     for (params, expected) in [
         (json!({ "provider": "openai", "model": "gpt-test" }), "missing_api_key"),
@@ -283,7 +416,9 @@ async fn invalid_ai_settings_are_typed_bad_requests() {
 #[tokio::test]
 async fn api_key_never_appears_in_responses_or_logs() {
     let (logs, _guard) = capture_logs();
-    let (app, _handles) = make_router(CONFIG).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     let started = start_task(&app).await;
     assert!(!started.to_string().contains(API_KEY));
@@ -306,7 +441,9 @@ async fn api_key_never_appears_in_responses_or_logs() {
 #[tokio::test]
 async fn endpoints_are_hidden_when_unstable_is_disabled() {
     let config = CONFIG.replace("\"enable_unstable\": true", "\"enable_unstable\": false");
-    let (app, _handles) = make_router(&config).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(&config, dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
 
     let (status, _) = send(&app, start_request(Some(&task_token()), &ai_params())).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -317,4 +454,72 @@ async fn endpoints_are_hidden_when_unstable_is_disabled() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn neither_database_ever_holds_the_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+
+    let started = start_task(&gateway.app).await;
+    let id = started["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+    assert_eq!(wait_until_finished(&gateway.app, id).await["state"], "failed");
+    wait_for_queued_jobs(dir.path(), 0).await;
+
+    gateway.stop().await;
+
+    assert_databases_hold_settings_but_not_the_key(dir.path());
+}
+
+#[tokio::test]
+async fn after_a_restart_the_ephemeral_task_fails_without_retry() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let before = Gateway::start(CONFIG, dir.path(), Jobs::QueueOnly).await.unwrap();
+    let started = start_task(&before.app).await;
+    let id = started["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+    wait_for_queued_jobs(dir.path(), 1).await;
+    before.stop().await;
+
+    assert_databases_hold_settings_but_not_the_key(dir.path());
+
+    let after = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let finished = wait_until_finished(&after.app, id).await;
+
+    assert_eq!(
+        finished,
+        json!({
+            "id": id,
+            "kind": "ai-log",
+            "state": "failed",
+            "error": SECRETS_LOST_ERROR,
+        })
+    );
+
+    wait_for_queued_jobs(dir.path(), 0).await;
+    after.stop().await;
+
+    assert_databases_hold_settings_but_not_the_key(dir.path());
+}
+
+#[tokio::test]
+async fn task_records_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let before = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let id = start_task(&before.app).await["id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    let finished = wait_until_finished(&before.app, id).await;
+    before.stop().await;
+
+    let after = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let (status, body) = send(&after.app, status_request(Some(&scope_token("gateway.tasks.read")), id)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), finished);
+
+    after.stop().await;
 }

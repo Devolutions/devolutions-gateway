@@ -5,9 +5,11 @@ use secrecy::SecretString;
 use url::Url;
 use uuid::Uuid;
 
-use super::{BackgroundTask, Persistence, Progress, StartError};
+use super::{EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, StartError, TaskCtx, TaskError, TaskKind};
 use crate::DgwState;
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiLogTarget {
     pub session_id: Uuid,
 }
@@ -30,8 +32,18 @@ pub struct AiLogParams {
     pub max_output_tokens: Option<u32>,
 }
 
+/// The persisted part of [`AiLogParams`]: everything but the API key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiLogSettings {
+    pub provider: AiProvider,
+    pub model: String,
+    pub base_url: Option<Url>,
+    pub max_output_tokens: Option<u32>,
+}
+
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiProvider {
     #[serde(rename = "openai")]
     OpenAi,
@@ -66,74 +78,120 @@ pub enum AiLogSubstate {
 #[derive(Debug, Serialize)]
 pub enum AiLogOutput {}
 
-#[derive(Debug)]
-pub struct AiLogTask {
-    #[expect(dead_code, reason = "read by the ai-log runner, which comes in a later change")]
-    session_id: Uuid,
-    #[expect(dead_code, reason = "read by the ai-log runner, which comes in a later change")]
-    client: AiClient,
-    #[expect(dead_code, reason = "read by the ai-log runner, which comes in a later change")]
-    max_output_tokens: Option<u32>,
-}
+pub enum AiLogTask {}
 
-impl BackgroundTask for AiLogTask {
+impl TaskKind for AiLogTask {
     const KIND: &'static str = "ai-log";
-    const PERSISTENCE: Persistence = Persistence::InMemory;
+    const RETRY: RetryPolicy = RetryPolicy::JOB_QUEUE;
 
-    type Params = AiLogParams;
     type Target = AiLogTarget;
+    type Params = AiLogSettings;
     type Substate = AiLogSubstate;
     type Output = AiLogOutput;
 
-    fn prepare(target: AiLogTarget, params: AiLogParams, state: &DgwState) -> Result<Self, StartError> {
+    async fn run(ctx: TaskCtx<Self>) -> Result<AiLogOutput, TaskError> {
+        let Some(api_key) = ctx.secrets() else {
+            return Err(TaskError::Permanent(SECRETS_LOST_ERROR.to_owned()));
+        };
+
+        let _client = build_client(&ctx.params, Some(api_key), &ctx.state)
+            .map_err(|error| TaskError::Permanent(error.message()))?;
+
+        Err(TaskError::Permanent("ai-log task not implemented yet".to_owned()))
+    }
+}
+
+impl EphemeralTask for AiLogTask {
+    type Secrets = SecretString;
+    type Request = AiLogParams;
+
+    fn prepare(
+        target: &AiLogTarget,
+        request: AiLogParams,
+        state: &DgwState,
+    ) -> Result<(AiLogSettings, SecretString), StartError> {
         if state.recordings.active_recordings.contains(target.session_id) {
             return Err(StartError::TargetBusy("recording_active"));
         }
 
-        let provider = Provider::from(params.provider);
+        let AiLogParams {
+            provider,
+            model,
+            api_key,
+            base_url,
+            max_output_tokens,
+        } = request;
 
-        let mut builder = AiClient::builder().provider(provider).model(params.model);
+        let settings = AiLogSettings {
+            provider,
+            model,
+            base_url,
+            max_output_tokens,
+        };
 
-        if let Some(api_key) = params.api_key {
-            builder = builder.api_key(api_key);
-        }
-
-        let endpoint = params.base_url.clone().or_else(|| provider.default_base_url());
-
-        if let Some(base_url) = params.base_url {
-            builder = builder.base_url(base_url);
-        }
-
-        // Without an endpoint, `build` reports the missing base URL before it needs the HTTP client.
-        if let Some(endpoint) = endpoint {
-            let proxy_config = state.conf_handle.get_conf().proxy.to_proxy_config();
-
-            let http_client =
-                http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &endpoint, &proxy_config)
-                    .map_err(|error| {
-                        error!(%error, "Failed to build the HTTP client for the AI provider");
-                        StartError::Internal
-                    })?;
-
-            builder = builder.http_client(http_client);
-        }
-
-        let client = builder.build().map_err(|error| {
-            let code = build_error_code(&error);
-            warn!(%error, code, "Invalid AI settings");
-            StartError::InvalidParams(code)
+        build_client(&settings, api_key.as_ref(), state).map_err(|error| match error {
+            ClientError::Build(error) => {
+                let code = build_error_code(&error);
+                warn!(%error, code, "Invalid AI settings");
+                StartError::InvalidParams(code)
+            }
+            ClientError::HttpClient(error) => {
+                error!(%error, "Failed to build the HTTP client for the AI provider");
+                StartError::Internal
+            }
         })?;
 
-        Ok(Self {
-            session_id: target.session_id,
-            client,
-            max_output_tokens: params.max_output_tokens,
-        })
+        let api_key = api_key.ok_or(StartError::InvalidParams("missing_api_key"))?;
+
+        Ok((settings, api_key))
+    }
+}
+
+enum ClientError {
+    Build(BuildError),
+    HttpClient(reqwest::Error),
+}
+
+impl ClientError {
+    fn message(&self) -> String {
+        match self {
+            ClientError::Build(error) => error.to_string(),
+            ClientError::HttpClient(error) => format!("failed to build the HTTP client: {error}"),
+        }
+    }
+}
+
+fn build_client(
+    settings: &AiLogSettings,
+    api_key: Option<&SecretString>,
+    state: &DgwState,
+) -> Result<AiClient, ClientError> {
+    let provider = Provider::from(settings.provider);
+
+    let mut builder = AiClient::builder().provider(provider).model(settings.model.clone());
+
+    if let Some(api_key) = api_key {
+        builder = builder.api_key(api_key.clone());
     }
 
-    async fn run(self, _progress: Progress<AiLogSubstate>) -> anyhow::Result<AiLogOutput> {
-        anyhow::bail!("ai-log task not implemented yet")
+    let endpoint = settings.base_url.clone().or_else(|| provider.default_base_url());
+
+    if let Some(base_url) = settings.base_url.clone() {
+        builder = builder.base_url(base_url);
     }
+
+    // Without an endpoint, `build` reports the missing base URL before it needs the HTTP client.
+    if let Some(endpoint) = endpoint {
+        let proxy_config = state.conf_handle.get_conf().proxy.to_proxy_config();
+
+        let http_client =
+            http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &endpoint, &proxy_config)
+                .map_err(ClientError::HttpClient)?;
+
+        builder = builder.http_client(http_client);
+    }
+
+    builder.build().map_err(ClientError::Build)
 }
 
 fn build_error_code(error: &BuildError) -> &'static str {
@@ -142,6 +200,20 @@ fn build_error_code(error: &BuildError) -> &'static str {
         BuildError::MissingApiKey(_) => "missing_api_key",
         BuildError::MissingBaseUrl(_) => "missing_base_url",
         _ => "invalid_ai_settings",
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by the ai-log runner, which comes in a later change")
+)]
+fn classify_ai_error(error: &devolutions_gateway_ai::Error) -> TaskError {
+    let message = error.to_string();
+
+    if error.is_transient() {
+        TaskError::Transient(message)
+    } else {
+        TaskError::Permanent(message)
     }
 }
 
@@ -168,33 +240,39 @@ mod tests {
         .expect("valid params")
     }
 
+    fn target() -> AiLogTarget {
+        AiLogTarget {
+            session_id: Uuid::new_v4(),
+        }
+    }
+
     #[tokio::test]
     async fn refuses_a_session_that_is_still_recording() {
         let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
-        let session_id = Uuid::new_v4();
-        state.recordings.active_recordings.insert(session_id);
+        let target = target();
+        state.recordings.active_recordings.insert(target.session_id);
 
-        let error = AiLogTask::prepare(AiLogTarget { session_id }, params(), &state).expect_err("session is busy");
+        let error = AiLogTask::prepare(&target, params(), &state).expect_err("session is busy");
 
         assert_eq!(error, StartError::TargetBusy("recording_active"));
     }
 
     #[tokio::test]
-    async fn debug_never_shows_the_api_key() {
+    async fn persisted_settings_never_hold_the_api_key() {
         let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
 
         let params = params();
         assert!(!format!("{params:?}").contains(API_KEY));
 
-        let task = AiLogTask::prepare(
-            AiLogTarget {
-                session_id: Uuid::new_v4(),
-            },
-            params,
-            &state,
-        )
-        .expect("valid task");
-        assert!(!format!("{task:?}").contains(API_KEY));
+        let (settings, api_key) = AiLogTask::prepare(&target(), params, &state).expect("valid task");
+
+        let persisted = serde_json::to_string(&settings).expect("serializable settings");
+        assert_eq!(
+            persisted,
+            r#"{"provider":"openai","model":"gpt-test","baseUrl":null,"maxOutputTokens":null}"#
+        );
+        assert!(!format!("{settings:?}").contains(API_KEY));
+        assert!(!format!("{api_key:?}").contains(API_KEY));
     }
 
     #[test]
@@ -208,5 +286,41 @@ mod tests {
             build_error_code(&BuildError::MissingBaseUrl(Provider::OpenAiCompatible)),
             "missing_base_url"
         );
+    }
+
+    #[test]
+    fn rate_limits_server_and_network_errors_are_transient() {
+        let status = |status| devolutions_gateway_ai::Error::Status {
+            status,
+            message: "failed".to_owned(),
+            code: None,
+            retry_after: None,
+        };
+
+        let network = devolutions_gateway_ai::Error::Transport {
+            message: "connection refused".to_owned(),
+        };
+        assert!(matches!(classify_ai_error(&network), TaskError::Transient(_)));
+
+        for code in [429, 500, 503] {
+            assert!(
+                matches!(classify_ai_error(&status(code)), TaskError::Transient(_)),
+                "{code}"
+            );
+        }
+
+        for code in [400, 401, 403, 404] {
+            assert!(
+                matches!(classify_ai_error(&status(code)), TaskError::Permanent(_)),
+                "{code}"
+            );
+        }
+
+        assert!(matches!(
+            classify_ai_error(&devolutions_gateway_ai::Error::InvalidOutput {
+                reason: "no valid action line".to_owned()
+            }),
+            TaskError::Permanent(_)
+        ));
     }
 }
