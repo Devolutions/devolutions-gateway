@@ -190,10 +190,10 @@ pub(crate) fn create_protected_directory(
     }
     let mut options = fs::OpenOptions::new();
     options
-        .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | WRITE_OWNER).0)
+        .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC).0)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0);
-    let directory = options.open(path)?;
+    let mut directory = options.open(path)?;
     let metadata = directory.metadata()?;
     ensure!(
         metadata.file_type().is_dir() && !is_reparse_point(&metadata),
@@ -204,6 +204,25 @@ pub(crate) fn create_protected_directory(
     let owner_is_trusted = owner == system || owner == user;
     if !owner_is_trusted || verify_dacl(descriptor.0, expected.clone()).is_err() {
         // A foreign owner could widen its own DACL again, so repair ownership and access together.
+        if !owner_is_trusted {
+            let original_id = file_id_info(&directory)?;
+            options.access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | WRITE_OWNER).0);
+            let reopened = options
+                .open(path)
+                .context("open identity directory for ownership repair")?;
+            let metadata = reopened.metadata()?;
+            ensure!(
+                metadata.file_type().is_dir() && !is_reparse_point(&metadata),
+                "identity directory changed during ownership repair"
+            );
+            let reopened_id = file_id_info(&reopened)?;
+            ensure!(
+                original_id.VolumeSerialNumber == reopened_id.VolumeSerialNumber
+                    && original_id.FileId.Identifier == reopened_id.FileId.Identifier,
+                "identity directory changed during ownership repair"
+            );
+            directory = reopened;
+        }
         let dacl = protected_dacl(&expected)?;
         let mut security_info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
         if !owner_is_trusted {
@@ -559,6 +578,10 @@ fn verify_staging_destination(data_directory: &File, staged: &File, expected: &s
 }
 
 fn volume_serial(file: &File) -> anyhow::Result<u64> {
+    Ok(file_id_info(file)?.VolumeSerialNumber)
+}
+
+fn file_id_info(file: &File) -> anyhow::Result<FILE_ID_INFO> {
     use std::os::windows::io::AsRawHandle as _;
 
     let mut info = FILE_ID_INFO::default();
@@ -571,8 +594,8 @@ fn volume_serial(file: &File) -> anyhow::Result<u64> {
             u32::try_from(size_of::<FILE_ID_INFO>())?,
         )
     }
-    .context("inspect pending volume")?;
-    Ok(info.VolumeSerialNumber)
+    .context("inspect file identity")?;
+    Ok(info)
 }
 
 #[expect(
