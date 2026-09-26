@@ -10,6 +10,8 @@ mod client;
 mod protocol;
 mod signer;
 #[cfg(windows)]
+mod system_probe;
+#[cfg(windows)]
 mod windows;
 
 use std::env;
@@ -328,6 +330,17 @@ async fn main() {
 }
 
 async fn run() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    if env::args_os()
+        .nth(1)
+        .is_some_and(|flag| flag == std::ffi::OsStr::new("--system-probe"))
+    {
+        let mut args = env::args_os().skip(2);
+        let request = PathBuf::from(args.next().context("--system-probe requires a request path")?);
+        let result = PathBuf::from(args.next().context("--system-probe requires a result path")?);
+        ensure!(args.next().is_none(), "--system-probe accepts exactly two paths");
+        return system_probe::run(&request, &result);
+    }
     let options = Options::parse()?;
     let selected: Vec<&Test> = TESTS
         .iter()
@@ -396,6 +409,8 @@ async fn run() -> anyhow::Result<()> {
             };
             let timeout = if test.name == "p_channel_no_hello_timeout" {
                 Duration::from_secs(20)
+            } else if test.name == "a_key_non_exportable" && cfg!(windows) {
+                Duration::from_secs(240)
             } else if test.name == "a_rotation_migrates_on_schedule" {
                 Duration::from_secs(120)
             } else if !context.mock() && test.name.starts_with("a_rotation_") {
@@ -632,10 +647,15 @@ const TESTS: &[Test] = &[
     a!(a_check_in_transient_failures_retry_without_state_change, mock_only),
     a!(a_token_never_logged),
     a!(a_same_token_no_enrollment),
+    a!(a_same_token_after_token_exhausted_no_enrollment),
+    a!(a_same_token_after_token_invalid_no_enrollment),
+    a!(a_same_token_after_token_malformed_no_enrollment),
+    a!(a_same_token_after_device_revoked_no_enrollment, mock_only),
     a!(a_same_token_rejected_identity_no_enrollment).channel(),
     a!(a_different_token_replaces_identity),
     a!(a_rejected_identity_replaced).channel(),
     a!(a_cli_identity_enroll_writes_pending_file),
+    a!(a_cli_identity_enroll_stdin),
     a!(a_renewal_happy_path).channel(),
     a!(a_renewal_lost_response_retried, mock_only).channel(),
     a!(a_renewal_lost_confirm_response_retried, mock_only).channel(),

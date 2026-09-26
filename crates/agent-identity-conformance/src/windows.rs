@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-use std::ffi::c_void;
+use std::ffi::{OsString, c_void};
 use std::io::Write as _;
 use std::mem::size_of;
-use std::os::windows::ffi::OsStrExt as _;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::windows::io::FromRawHandle as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, ensure};
 use windows::Win32::Foundation::{
@@ -31,10 +31,33 @@ use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
 };
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+use windows::Win32::System::Threading::{
+    OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 const ENTROPY: &[u8] = b"Devolutions.Agent.PendingEnrollment.v1";
+const STILL_ACTIVE: u32 = 259;
+const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn CreateWellKnownSid(kind: i32, domain: *const c_void, sid: *mut c_void, length: *mut u32) -> i32;
+    fn CheckTokenMembership(token: *mut c_void, sid: *const c_void, member: *mut i32) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn QueryFullProcessImageNameW(process: *mut c_void, flags: u32, name: *mut u16, length: *mut u32) -> i32;
+    fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
+    fn TerminateProcess(process: *mut c_void, code: u32) -> i32;
+    fn WaitForSingleObject(process: *mut c_void, milliseconds: u32) -> u32;
+}
+
+#[link(name = "psapi")]
+unsafe extern "system" {
+    fn EnumProcesses(process_ids: *mut u32, buffer_bytes: u32, needed_bytes: *mut u32) -> i32;
+}
 
 pub(crate) struct AgentJob(HANDLE);
 
@@ -170,8 +193,39 @@ pub(crate) fn running_as_system() -> anyhow::Result<bool> {
     Ok(current_user_sid()? == "S-1-5-18")
 }
 
+pub(crate) fn running_as_elevated_administrator() -> anyhow::Result<bool> {
+    const WIN_BUILTIN_ADMINISTRATORS_SID: i32 = 26;
+    let mut sid = [0u8; 68];
+    let mut length = u32::try_from(sid.len())?;
+    ensure!(
+        // SAFETY: The SID buffer has the maximum documented SID length and length is writable.
+        unsafe {
+            CreateWellKnownSid(
+                WIN_BUILTIN_ADMINISTRATORS_SID,
+                std::ptr::null(),
+                sid.as_mut_ptr().cast(),
+                &mut length,
+            )
+        } != 0,
+        "create Administrators SID: {}",
+        std::io::Error::last_os_error()
+    );
+    let mut member = 0;
+    ensure!(
+        // SAFETY: A null token checks this process's effective token against the valid SID above.
+        unsafe { CheckTokenMembership(std::ptr::null_mut(), sid.as_ptr().cast(), &mut member) } != 0,
+        "check effective administrator membership: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(member != 0)
+}
+
 pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let encrypted = protect(contents, false, true)?;
+    write_protected_file(path, &encrypted)
+}
+
+pub(crate) fn write_protected_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let current_user = current_user_sid()?;
     let sddl = if current_user == "S-1-5-18" {
         "D:P(A;;FA;;;SY)".to_owned()
@@ -210,8 +264,158 @@ pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> 
     };
     // SAFETY: CreateFileW returned an owned handle, transferred to File for closing on drop.
     let mut file = unsafe { std::fs::File::from_raw_handle(handle.0) };
-    file.write_all(&encrypted)?;
+    file.write_all(contents)?;
     file.sync_all()?;
+    Ok(())
+}
+
+struct ProcessHandle(HANDLE);
+
+impl Drop for ProcessHandle {
+    fn drop(&mut self) {
+        // SAFETY: OpenProcess returned an owned handle.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+fn agent_pid(pid_file: &Path) -> anyhow::Result<Option<u32>> {
+    let text = match std::fs::read_to_string(pid_file) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(text.trim().parse().context("invalid SYSTEM agent PID file")?))
+}
+
+fn process_image(handle: &ProcessHandle) -> anyhow::Result<PathBuf> {
+    let mut name = vec![0u16; 32_768];
+    let mut length = u32::try_from(name.len())?;
+    ensure!(
+        // SAFETY: The handle is open with query permission, and name and length are writable.
+        unsafe { QueryFullProcessImageNameW(handle.0.0, 0, name.as_mut_ptr(), &mut length) } != 0,
+        "read SYSTEM agent image path: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(PathBuf::from(OsString::from_wide(&name[..usize::try_from(length)?])))
+}
+
+fn process_running(handle: &ProcessHandle) -> anyhow::Result<bool> {
+    let mut code = 0;
+    ensure!(
+        // SAFETY: The process handle remains valid while Windows writes its exit code.
+        unsafe { GetExitCodeProcess(handle.0.0, &mut code) } != 0,
+        "read SYSTEM agent exit code: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(code == STILL_ACTIVE)
+}
+
+fn open_agent_process(pid: u32, agent_bin: &Path, terminate: bool) -> anyhow::Result<Option<(ProcessHandle, bool)>> {
+    let access = if terminate {
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE
+    } else {
+        PROCESS_QUERY_LIMITED_INFORMATION
+    };
+    // SAFETY: The PID came from the fixture's PID file, and OpenProcess validates the requested rights.
+    let handle = match unsafe { OpenProcess(access, false, pid) } {
+        Ok(handle) => ProcessHandle(handle),
+        Err(error) if error.code().0 == 0x8007_0057u32.cast_signed() => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let actual = std::fs::canonicalize(process_image(&handle)?)?;
+    let expected = std::fs::canonicalize(agent_bin)?;
+    ensure!(
+        actual
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected.to_string_lossy()),
+        "SYSTEM agent PID belongs to a different executable"
+    );
+    let running = process_running(&handle)?;
+    Ok(Some((handle, running)))
+}
+
+fn process_ids() -> anyhow::Result<Vec<u32>> {
+    let mut ids = vec![0u32; 4096];
+    loop {
+        let mut needed = 0;
+        ensure!(
+            // SAFETY: Windows writes at most the buffer's size and reports the byte count.
+            unsafe {
+                EnumProcesses(
+                    ids.as_mut_ptr(),
+                    u32::try_from(ids.len() * size_of::<u32>())?,
+                    &mut needed,
+                )
+            } != 0,
+            "enumerate processes for SYSTEM agent cleanup: {}",
+            std::io::Error::last_os_error()
+        );
+        let count = usize::try_from(needed)? / size_of::<u32>();
+        if count < ids.len() {
+            ids.truncate(count);
+            return Ok(ids);
+        }
+        ensure!(ids.len() < 65_536, "process enumeration exceeds 65536 entries");
+        ids.resize(ids.len() * 2, 0);
+    }
+}
+
+pub(crate) fn case_agent_processes(agent_bin: &Path) -> anyhow::Result<Vec<u32>> {
+    let expected = std::fs::canonicalize(agent_bin)?;
+    let mut matches = Vec::new();
+    for pid in process_ids()? {
+        if pid == 0 {
+            continue;
+        }
+        // SAFETY: Each PID came from Windows; unrelated inaccessible processes are skipped.
+        let Ok(handle) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+            continue;
+        };
+        let handle = ProcessHandle(handle);
+        let Ok(actual) = process_image(&handle).and_then(|path| std::fs::canonicalize(path).map_err(Into::into)) else {
+            continue;
+        };
+        if actual
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected.to_string_lossy())
+            && process_running(&handle)?
+        {
+            matches.push(pid);
+        }
+    }
+    Ok(matches)
+}
+
+pub(crate) fn system_agent_running(pid_file: &Path, agent_bin: &Path) -> anyhow::Result<Option<bool>> {
+    let Some(pid) = agent_pid(pid_file)? else {
+        return Ok(None);
+    };
+    Ok(open_agent_process(pid, agent_bin, false)?.map(|(_, running)| running))
+}
+
+pub(crate) fn stop_system_agent(agent_bin: &Path) -> anyhow::Result<()> {
+    for pid in case_agent_processes(agent_bin)? {
+        if let Some((handle, true)) = open_agent_process(pid, agent_bin, true)? {
+            ensure!(
+                // SAFETY: The handle belongs to this fixture's uniquely copied agent executable.
+                unsafe { TerminateProcess(handle.0.0, 1) } != 0,
+                "terminate SYSTEM agent PID {pid}: {}",
+                std::io::Error::last_os_error()
+            );
+            ensure!(
+                // SAFETY: The owned process handle remains valid until the wait completes.
+                unsafe { WaitForSingleObject(handle.0.0, 5_000) } == 0,
+                "SYSTEM agent PID {pid} did not exit within five seconds"
+            );
+        }
+    }
+    ensure!(
+        case_agent_processes(agent_bin)?.is_empty(),
+        "fixture agent executable still has a running process"
+    );
     Ok(())
 }
 
@@ -626,6 +830,68 @@ pub(crate) fn cleanup_machine_keys(prefix: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct OwnedChild(std::process::Child);
+
+    impl Drop for OwnedChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    #[ignore = "spawned by the missing-PID cleanup test"]
+    fn process_sentinel() {
+        if std::env::var_os("AGENT_IDENTITY_PROCESS_SENTINEL").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    }
+
+    #[test]
+    fn system_agent_cleanup_finds_process_without_published_pid() -> anyhow::Result<()> {
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join("agent-identity-windows-tests");
+        std::fs::create_dir_all(&scratch)?;
+        let dir = tempfile::Builder::new().prefix("system-process-").tempdir_in(scratch)?;
+        let image = dir.path().join("case-agent.exe");
+        std::fs::copy(std::env::current_exe()?, &image)?;
+        let pid_file = dir.path().join("system-agent.pid");
+        std::fs::write(&pid_file, b"")?;
+        let mut child = OwnedChild(
+            std::process::Command::new(&image)
+                .args(["--ignored", "--exact", "windows::tests::process_sentinel"])
+                .env("AGENT_IDENTITY_PROCESS_SENTINEL", "1")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?,
+        );
+        let started = std::time::Instant::now();
+        loop {
+            if case_agent_processes(&image)?.contains(&child.0.id()) {
+                break;
+            }
+            ensure!(
+                child.0.try_wait()?.is_none(),
+                "process sentinel exited before the cleanup test could observe it"
+            );
+            ensure!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "process sentinel did not become visible"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        ensure!(agent_pid(&pid_file)?.is_none(), "PID file must still be empty");
+        stop_system_agent(&image)?;
+        ensure!(
+            child.0.wait()?.code() == Some(1) && case_agent_processes(&image)?.is_empty(),
+            "case agent remained alive after image-based cleanup"
+        );
+        Ok(())
+    }
 
     #[test]
     fn pending_file_dpapi_and_protected_acl() -> anyhow::Result<()> {
