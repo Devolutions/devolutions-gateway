@@ -423,7 +423,7 @@ async fn wait_for_registered_agent(
     timeout: Duration,
     container_logs: impl Fn() -> String,
 ) {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let deadline = Instant::now() + timeout;
     let mut last_response = serde_json::Value::Null;
 
@@ -562,13 +562,18 @@ async fn assert_explicit_ip_is_refused(http_port: u16, key: &PrivateKey, agent_i
     );
 }
 
+fn http_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::new()
+}
+
 async fn delete_agent(http_port: u16, key: &PrivateKey, agent_id: Uuid) {
     let claims = ScopeTokenClaims {
         scope: AccessScope::AgentDelete,
         exp: unix_timestamp() + 60,
         jti: Uuid::new_v4(),
     };
-    let response = reqwest::Client::new()
+    let response = http_client()
         .delete(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents/{agent_id}"))
         .bearer_auth(sign(key, "SCOPE", &claims))
         .send()
@@ -583,7 +588,7 @@ async fn list_agents(http_port: u16, key: &PrivateKey) -> Vec<serde_json::Value>
         exp: unix_timestamp() + 60,
         jti: Uuid::new_v4(),
     };
-    reqwest::Client::new()
+    http_client()
         .get(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents"))
         .bearer_auth(sign(key, "SCOPE", &claims))
         .send()

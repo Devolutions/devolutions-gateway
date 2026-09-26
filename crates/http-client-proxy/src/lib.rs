@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::Context as _;
 use ipnet::IpNet;
 use parking_lot::RwLock;
-use tracing::warn;
+use tracing::{debug, warn};
 use url::Url;
 
 /// Manual proxy configuration with protocol-specific URLs and exclude list.
@@ -223,6 +223,49 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
     Ok(Some(proxy_url))
 }
 
+/// Makes the client trust exactly the platform's native root certificates, verified by rustls with `ring`.
+///
+/// This keeps the trust behavior of reqwest 0.12's `rustls-tls-native-roots` feature.
+/// reqwest 0.13 otherwise uses `rustls-platform-verifier`, which delegates verification to the OS.
+/// Like reqwest 0.12, native certificates that rustls cannot parse are skipped.
+/// The `ring` provider is installed as the process default if no provider is installed yet.
+pub fn with_native_roots(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let result = rustls_native_certs::load_native_certs();
+
+    for error in result.errors {
+        debug!(%error, "Error when loading native certificate");
+    }
+
+    let mut store = rustls::RootCertStore::empty();
+    let mut certs = Vec::with_capacity(result.certs.len());
+    let mut invalid_count = 0usize;
+
+    for cert in result.certs {
+        let parsed = store
+            .add(cert.clone())
+            .ok()
+            .and_then(|()| reqwest::Certificate::from_der(&cert).ok());
+
+        match parsed {
+            Some(cert) => certs.push(cert),
+            None => invalid_count += 1,
+        }
+    }
+
+    debug!(
+        valid_count = certs.len(),
+        invalid_count, "Loaded native root certificates"
+    );
+
+    if certs.is_empty() {
+        warn!("No valid certificates found in platform native certificate store");
+    }
+
+    builder.tls_certs_only(certs)
+}
+
 /// Builds a reqwest client with proxy configuration for a specific target URL.
 ///
 /// This function uses the provided configuration to determine the appropriate
@@ -230,7 +273,8 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
 ///
 /// # Arguments
 ///
-/// * `builder` - A reqwest::ClientBuilder to start with (may have timeout, TLS config, etc.)
+/// * `builder` - A reqwest::ClientBuilder to start with (may have timeout, etc.); its root certificates are
+///   replaced by [`with_native_roots`]
 /// * `url` - The URL that the client will connect to (used for proxy selection)
 /// * `config` - Proxy configuration (mode, manual URLs, exclude list)
 ///
@@ -260,6 +304,8 @@ pub fn build_client_with_proxy(
             }
         }
     };
+
+    builder = with_native_roots(builder);
 
     if let Some(proxy_url) = proxy_url {
         // Create reqwest::Proxy from the proxy URL.

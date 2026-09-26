@@ -325,7 +325,11 @@ async fn fwd_http(
     use tokio_tungstenite::connect_async_tls_with_config;
 
     // Default HTTP client for typical usage.
-    static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+    static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+        http_client_proxy::with_native_roots(reqwest::Client::builder())
+            .build()
+            .expect("parameters known to be valid only")
+    });
 
     // Dangerous HTTP client, only to be used when absolutely necessary.
     // E.g.: VMware services are often using untrusted self-signed certificates.

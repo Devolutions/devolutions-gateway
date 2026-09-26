@@ -42,7 +42,7 @@ prost-types = "0.13"
 quinn = "0.11"
 rand = "0.8" # FIXME(@CBenoit): maybe we don't need this crate
 rcgen = { version = "0.13", features = ["pem"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "socks", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = "2.2"
 rustls-pki-types = "1"
@@ -89,7 +89,7 @@ time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
 now-package-broker = { path = "../crates/now-package-broker" }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "socks"] }
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }

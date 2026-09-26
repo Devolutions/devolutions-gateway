@@ -50,7 +50,7 @@ picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"]
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 rstest = "0.25"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
