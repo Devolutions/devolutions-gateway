@@ -132,6 +132,15 @@ export class Configuration {
             };
         }
 
+        // init default task_token credential
+        if (!this.credentials['task_token']) {
+            this.credentials['task_token'] = () => {
+                return typeof this.accessToken === 'function'
+                    ? this.accessToken()
+                    : this.accessToken;
+            };
+        }
+
         // init default web_app_custom_auth credential
         if (!this.credentials['web_app_custom_auth']) {
             this.credentials['web_app_custom_auth'] = () => {

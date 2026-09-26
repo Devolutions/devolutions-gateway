@@ -166,6 +166,8 @@ Class | Method | HTTP request | Description
 *PreflightApi* | [**PostPreflight**](docs/PreflightApi.md#postpreflight) | **POST** /jet/preflight | Performs a batch of preflight operations
 *SessionsApi* | [**GetSessions**](docs/SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions
 *SessionsApi* | [**TerminateSession**](docs/SessionsApi.md#terminatesession) | **POST** /jet/session/{id}/terminate | Terminate forcefully a running session
+*TasksApi* | [**GetTask**](docs/TasksApi.md#gettask) | **GET** /jet/tasks/{id} | Gets the status of a background task.
+*TasksApi* | [**StartTask**](docs/TasksApi.md#starttask) | **POST** /jet/tasks | Starts a background task.
 *TrafficApi* | [**AckTrafficEvents**](docs/TrafficApi.md#acktrafficevents) | **POST** /jet/traffic/ack | Acknowledge traffic audit events and remove them from the queue
 *TrafficApi* | [**ClaimTrafficEvents**](docs/TrafficApi.md#claimtrafficevents) | **POST** /jet/traffic/claim | Claim traffic audit events for processing
 *UpdateApi* | [**GetUpdateProducts**](docs/UpdateApi.md#getupdateproducts) | **GET** /jet/update | Retrieve the currently installed version of each Devolutions product.
@@ -186,6 +188,10 @@ Class | Method | HTTP request | Description
  - [Model.AgentDomainAdvertisement](docs/AgentDomainAdvertisement.md)
  - [Model.AgentInfo](docs/AgentInfo.md)
  - [Model.AgentStatus](docs/AgentStatus.md)
+ - [Model.AiLogParams](docs/AiLogParams.md)
+ - [Model.AiLogSubstate](docs/AiLogSubstate.md)
+ - [Model.AiLogSubstateOneOf](docs/AiLogSubstateOneOf.md)
+ - [Model.AiProvider](docs/AiProvider.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)
@@ -237,6 +243,9 @@ Class | Method | HTTP request | Description
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
  - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
+ - [Model.TaskErrorResponse](docs/TaskErrorResponse.md)
+ - [Model.TaskInfo](docs/TaskInfo.md)
+ - [Model.TaskState](docs/TaskState.md)
  - [Model.TrafficEventResponse](docs/TrafficEventResponse.md)
  - [Model.TransportProtocolResponse](docs/TransportProtocolResponse.md)
  - [Model.UpdateProductInfo](docs/UpdateProductInfo.md)
@@ -270,6 +279,11 @@ Authentication schemes defined for the API:
 
 <a id="scope_token"></a>
 ### scope_token
+
+- **Type**: Bearer Authentication
+
+<a id="task_token"></a>
+### task_token
 
 - **Type**: Bearer Authentication
 
