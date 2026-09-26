@@ -162,6 +162,7 @@ pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub job_queue_database: Utf8PathBuf,
     pub traffic_audit_database: Utf8PathBuf,
+    pub provisioner_tasks_database: Utf8PathBuf,
     pub tls: Option<Tls>,
     pub credssp_tls: CredsspTls,
     pub provisioner_public_key: PublicKey,
@@ -371,6 +372,12 @@ impl Conf {
             .unwrap_or_else(|| Utf8PathBuf::from("traffic_audit.db"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
+        let provisioner_tasks_database = conf_file
+            .provisioner_tasks_database
+            .clone()
+            .unwrap_or_else(|| Utf8PathBuf::from("provisioner_tasks.db"))
+            .pipe_ref(|path| normalize_data_path(path, &data_dir));
+
         let jrl_file = conf_file
             .jrl_file
             .clone()
@@ -429,6 +436,7 @@ impl Conf {
             log_file,
             job_queue_database,
             traffic_audit_database,
+            provisioner_tasks_database,
             tls,
             credssp_tls,
             provisioner_public_key,
@@ -1248,6 +1256,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub traffic_audit_database: Option<Utf8PathBuf>,
 
+        /// (Unstable) Path to the SQLite database file for the records of the tasks started by the provisioner
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub provisioner_tasks_database: Option<Utf8PathBuf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -1311,6 +1323,7 @@ pub mod dto {
                 web_app: None,
                 job_queue_database: None,
                 traffic_audit_database: None,
+                provisioner_tasks_database: None,
                 agent_tunnel: None,
                 proxy: None,
                 debug: None,

@@ -1,61 +1,105 @@
-//! One-shot background tasks, started through `POST /jet/tasks` and polled through `GET /jet/tasks/{id}`.
+//! Background tasks started by the provisioner through `POST /jet/tasks` and polled through `GET /jet/tasks/{id}`.
 //!
-//! Tasks are kept in memory only, so they are lost when Gateway restarts.
+//! Every task has a record in the provisioner task database, kept forever so it can be audited.
+//! Each task runs as a job of the job queue. The job definition holds only the persisted, non-secret parameters,
+//! so a [`DurableTask`] resumes after a restart. The secrets of an [`EphemeralTask`] stay in memory only:
+//! when Gateway restarts, the task fails instead.
 
 pub mod ai_log;
 
 use core::marker::PhantomData;
-use std::collections::HashMap;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context as _;
+use async_trait::async_trait;
 use parking_lot::Mutex;
+use provisioner_task_store_libsql::{LibSqlProvisionerTaskStore, NewTask, TaskRecord, TaskState};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 use uuid::Uuid;
 
 use crate::DgwState;
+use crate::job_queue::{JOB_MAX_ATTEMPTS, JobQueueCtx};
 
 /// Number of tasks running at the same time; other tasks wait in the `NotStarted` state.
 pub const MAX_CONCURRENT_TASKS: usize = 2;
 
-/// Longest time a task may run, not counting the time it waits for a free slot.
+/// Longest time one attempt of a task may run, not counting the time it waits for a free slot.
 pub const TASK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
-/// How long the status of a finished task can still be read.
-pub const FINISHED_TASK_RETENTION: Duration = Duration::from_secs(60 * 60);
+pub const SECRETS_LOST_ERROR: &str = "gateway restarted, API key no longer available";
 
-/// Where the tasks of one kind are stored.
+pub const JOB_LOST_ERROR: &str = "gateway restarted, task job no longer exists";
+
+/// Why a run of a task failed; the message is stored in the task record and returned by the API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskError {
+    /// Worth another attempt later, such as a rate limit or a network error.
+    Transient(String),
+    /// Another attempt would fail the same way.
+    Permanent(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Persistence {
-    /// Tasks are dropped when Gateway restarts.
-    InMemory,
+pub struct RetryPolicy {
+    /// Attempts in total, capped by the job queue.
+    pub max_attempts: u32,
+}
+
+impl RetryPolicy {
+    pub const NO_RETRY: Self = Self { max_attempts: 1 };
+
+    pub const JOB_QUEUE: Self = Self {
+        max_attempts: JOB_MAX_ATTEMPTS,
+    };
 }
 
 /// A kind of one-shot background task.
-pub trait BackgroundTask: Sized + Send + 'static {
+pub trait TaskKind: Sized + Send + Sync + 'static {
     /// Value of the TASK token `jet_tk` claim.
     const KIND: &'static str;
 
-    const PERSISTENCE: Persistence;
-
-    /// Kind-specific request body of `POST /jet/tasks`.
-    type Params: DeserializeOwned;
+    /// How many times a run ending with [`TaskError::Transient`] is attempted.
+    const RETRY: RetryPolicy;
 
     /// What the task works on, taken from the TASK token.
-    type Target;
+    type Target: Serialize + DeserializeOwned + Send + Sync + 'static;
+
+    /// Persisted parameters; they must never hold a secret.
+    type Params: Serialize + DeserializeOwned + Send + Sync + 'static;
 
     /// Progress reported while the task is running.
-    type Substate: Serialize + Default + Send;
+    type Substate: Serialize + Default + Send + Sync + 'static;
 
-    type Output: Serialize + Send;
+    type Output: Serialize + Send + 'static;
 
-    /// Checks the request and builds the task, before it is registered.
-    fn prepare(target: Self::Target, params: Self::Params, state: &DgwState) -> Result<Self, StartError>;
+    fn run(ctx: TaskCtx<Self>) -> impl Future<Output = Result<Self::Output, TaskError>> + Send;
+}
 
-    fn run(self, progress: Progress<Self::Substate>) -> impl Future<Output = anyhow::Result<Self::Output>> + Send;
+/// A task whose inputs are all persisted, so it resumes after a restart.
+pub trait DurableTask: TaskKind {
+    /// Checks the request before the task is recorded.
+    fn prepare(target: &Self::Target, params: &Self::Params, state: &DgwState) -> Result<(), StartError>;
+}
+
+/// A task that needs secrets, kept in memory only until the task finishes.
+pub trait EphemeralTask: TaskKind {
+    type Secrets: Send + Sync + 'static;
+
+    /// Body of `POST /jet/tasks`, holding both the parameters and the secrets.
+    type Request: DeserializeOwned;
+
+    /// Checks the request and splits it into the persisted parameters and the secrets.
+    fn prepare(
+        target: &Self::Target,
+        request: Self::Request,
+        state: &DgwState,
+    ) -> Result<(Self::Params, Self::Secrets), StartError>;
 }
 
 /// Reason why a task was not started.
@@ -79,393 +123,453 @@ pub enum TaskStatus {
 #[derive(Debug, Clone)]
 pub struct TaskSnapshot {
     pub id: Uuid,
-    pub kind: &'static str,
+    pub kind: String,
     pub status: TaskStatus,
 }
 
-struct TaskEntry {
-    kind: &'static str,
-    status: TaskStatus,
+impl From<TaskRecord> for TaskSnapshot {
+    fn from(record: TaskRecord) -> Self {
+        let status = match record.state {
+            TaskState::NotStarted => TaskStatus::NotStarted,
+            TaskState::Running => TaskStatus::Running {
+                substate: parse_json(record.substate.as_deref()),
+            },
+            TaskState::Success => TaskStatus::Success {
+                result: parse_json(record.result.as_deref()),
+            },
+            TaskState::Failed => TaskStatus::Failed {
+                error: record.error.unwrap_or_default(),
+            },
+        };
+
+        Self {
+            id: record.id,
+            kind: record.kind,
+            status,
+        }
+    }
 }
 
-type TaskMap = Arc<Mutex<HashMap<Uuid, TaskEntry>>>;
+/// What a run of a task gets.
+pub struct TaskCtx<K: TaskKind> {
+    pub id: Uuid,
+    /// Starts at 1.
+    pub attempt: u32,
+    pub target: K::Target,
+    pub params: K::Params,
+    pub state: DgwState,
+    pub progress: Progress<K::Substate>,
+    secrets: Option<Arc<dyn Any + Send + Sync>>,
+}
+
+impl<K: EphemeralTask> TaskCtx<K> {
+    pub fn secrets(&self) -> Option<&K::Secrets> {
+        self.secrets.as_deref().and_then(|secrets| secrets.downcast_ref())
+    }
+}
 
 /// Lets a running task update its substate.
 pub struct Progress<S> {
     id: Uuid,
-    tasks: TaskMap,
+    tasks: TaskService,
     _substate: PhantomData<fn(S)>,
 }
 
 impl<S: Serialize> Progress<S> {
-    pub fn set(&self, substate: &S) {
-        let substate = to_json_value(substate);
+    pub async fn set(&self, substate: &S) {
+        let stored = match self.tasks.store().await {
+            Ok(store) => store.set_substate(self.id, &to_json(substate)).await,
+            Err(error) => Err(error),
+        };
 
-        if let Some(entry) = self.tasks.lock().get_mut(&self.id) {
-            entry.status = TaskStatus::Running { substate };
+        if let Err(error) = stored {
+            warn!(task.id = %self.id, error = format!("{error:#}"), "Failed to store the task substate");
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Limits {
-    max_concurrent: usize,
+type SecretsMap = HashMap<Uuid, Arc<dyn Any + Send + Sync>>;
+
+struct TaskServiceInner {
+    store: OnceCell<LibSqlProvisionerTaskStore>,
+    /// Where the store is opened on first use, when it was not opened up front.
+    lazy_path: &'static str,
+    secrets: Mutex<SecretsMap>,
+    slots: Semaphore,
     timeout: Duration,
-    retention: Duration,
 }
 
-/// In-memory registry of the background tasks, keyed by task ID.
+/// Starts background tasks, runs them as jobs and reads their records.
 #[derive(Clone)]
-pub struct TaskRegistry {
-    tasks: TaskMap,
-    slots: Arc<Semaphore>,
-    limits: Limits,
+pub struct TaskService {
+    inner: Arc<TaskServiceInner>,
 }
 
-impl Default for TaskRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl TaskService {
+    /// Opens the task database at `path`.
+    pub async fn open(path: &str) -> anyhow::Result<Self> {
+        let store = LibSqlProvisionerTaskStore::open(path)
+            .await
+            .context("failed to open the provisioner task database")?;
 
-impl TaskRegistry {
-    pub fn new() -> Self {
-        Self::with_limits(Limits {
-            max_concurrent: MAX_CONCURRENT_TASKS,
-            timeout: TASK_TIMEOUT,
-            retention: FINISHED_TASK_RETENTION,
-        })
+        Ok(Self::with_limits(
+            OnceCell::new_with(Some(store)),
+            MAX_CONCURRENT_TASKS,
+            TASK_TIMEOUT,
+        ))
     }
 
-    fn with_limits(limits: Limits) -> Self {
+    /// Opens an in-memory database on first use, so tests that never start a task never create one.
+    #[doc(hidden)]
+    pub fn mock() -> Self {
+        Self::with_limits(OnceCell::new(), MAX_CONCURRENT_TASKS, TASK_TIMEOUT)
+    }
+
+    fn with_limits(store: OnceCell<LibSqlProvisionerTaskStore>, max_concurrent: usize, timeout: Duration) -> Self {
         Self {
-            tasks: Arc::new(Mutex::new(HashMap::new())),
-            slots: Arc::new(Semaphore::new(limits.max_concurrent)),
-            limits,
+            inner: Arc::new(TaskServiceInner {
+                store,
+                lazy_path: ":memory:",
+                secrets: Mutex::new(HashMap::new()),
+                slots: Semaphore::new(max_concurrent),
+                timeout,
+            }),
         }
     }
 
-    pub fn get(&self, id: Uuid) -> Option<TaskSnapshot> {
-        self.tasks.lock().get(&id).map(|entry| TaskSnapshot {
-            id,
-            kind: entry.kind,
-            status: entry.status.clone(),
-        })
+    async fn store(&self) -> anyhow::Result<&LibSqlProvisionerTaskStore> {
+        self.inner
+            .store
+            .get_or_try_init(|| LibSqlProvisionerTaskStore::open(self.inner.lazy_path))
+            .await
     }
 
-    /// Parses the kind-specific parameters, prepares the task and runs it in the background.
-    pub fn start<K: BackgroundTask>(
+    pub async fn get(&self, id: Uuid) -> anyhow::Result<Option<TaskSnapshot>> {
+        Ok(self.store().await?.get(id).await?.map(TaskSnapshot::from))
+    }
+
+    /// Fails every unfinished task that has no job left in the queue; call it at startup, before the job runner.
+    pub async fn reconcile(&self, job_queue: &JobQueueCtx) -> anyhow::Result<()> {
+        let defs = job_queue
+            .job_defs(TaskJob::NAME)
+            .await
+            .context("failed to list the task jobs")?;
+
+        self.reconcile_with_job_defs(&defs).await
+    }
+
+    async fn reconcile_with_job_defs(&self, defs: &[String]) -> anyhow::Result<()> {
+        let queued = defs
+            .iter()
+            .filter_map(|def| serde_json::from_str::<TaskJobDef>(def).ok())
+            .map(|def| def.task_id)
+            .collect::<HashSet<_>>();
+
+        let store = self.store().await?;
+
+        for id in store.unfinished().await? {
+            if !queued.contains(&id) && store.fail(id, JOB_LOST_ERROR).await? {
+                warn!(task.id = %id, "Background task has no job left; marked as failed");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Parses the request of an ephemeral task, records the task and queues its job.
+    pub async fn start_ephemeral<K: EphemeralTask>(
         &self,
         target: K::Target,
-        params: &[u8],
+        body: &[u8],
+        token_jti: Uuid,
         state: &DgwState,
     ) -> Result<TaskSnapshot, StartError> {
-        match K::PERSISTENCE {
-            Persistence::InMemory => {}
-        }
-
-        // The serde error is not logged because it may quote the rejected value, which could be the API key.
-        let params = serde_json::from_slice::<K::Params>(params).map_err(|error| {
-            warn!(
-                task.kind = K::KIND,
-                category = ?error.classify(),
-                line = error.line(),
-                column = error.column(),
-                "Invalid task parameters"
-            );
-            StartError::InvalidParams("invalid_params")
-        })?;
-
-        let task = K::prepare(target, params, state)?;
-
-        Ok(self.spawn(task))
+        let request = parse_body::<K, K::Request>(body)?;
+        let (params, secrets) = K::prepare(&target, request, state)?;
+        self.create::<K>(&target, &params, token_jti, Some(Arc::new(secrets)), state)
+            .await
     }
 
-    fn spawn<K: BackgroundTask>(&self, task: K) -> TaskSnapshot {
+    /// Parses the parameters of a durable task, records the task and queues its job.
+    pub async fn start_durable<K: DurableTask>(
+        &self,
+        target: K::Target,
+        body: &[u8],
+        token_jti: Uuid,
+        state: &DgwState,
+    ) -> Result<TaskSnapshot, StartError> {
+        let params = parse_body::<K, K::Params>(body)?;
+        K::prepare(&target, &params, state)?;
+        self.create::<K>(&target, &params, token_jti, None, state).await
+    }
+
+    async fn create<K: TaskKind>(
+        &self,
+        target: &K::Target,
+        params: &K::Params,
+        token_jti: Uuid,
+        secrets: Option<Arc<dyn Any + Send + Sync>>,
+        state: &DgwState,
+    ) -> Result<TaskSnapshot, StartError> {
         let id = Uuid::new_v4();
 
-        self.tasks.lock().insert(
-            id,
-            TaskEntry {
-                kind: K::KIND,
-                status: TaskStatus::NotStarted,
-            },
-        );
-
-        info!(task.id = %id, task.kind = K::KIND, "Background task created");
-
-        let tasks = Arc::clone(&self.tasks);
-        let slots = Arc::clone(&self.slots);
-        let limits = self.limits;
-
-        tokio::spawn(async move {
-            let status = match Arc::clone(&slots).acquire_owned().await {
-                Ok(permit) => {
-                    let status = run_task(id, task, &tasks, limits.timeout).await;
-                    drop(permit);
-                    status
-                }
-                Err(_) => TaskStatus::Failed {
-                    error: "task slots are closed".to_owned(),
-                },
-            };
-
-            match &status {
-                TaskStatus::Failed { error } => {
-                    warn!(task.id = %id, task.kind = K::KIND, %error, "Background task failed");
-                }
-                _ => info!(task.id = %id, task.kind = K::KIND, "Background task succeeded"),
+        let (target, params) = match (serde_json::to_value(target), serde_json::to_value(params)) {
+            (Ok(target), Ok(params)) => (target, params),
+            (Err(error), _) | (_, Err(error)) => {
+                error!(%error, task.kind = K::KIND, "Failed to serialize the task definition");
+                return Err(StartError::Internal);
             }
+        };
 
-            if let Some(entry) = tasks.lock().get_mut(&id) {
-                entry.status = status;
-            }
+        let def = TaskJobDef {
+            task_id: id,
+            kind: K::KIND.to_owned(),
+            target,
+            params,
+        };
 
-            tokio::time::sleep(limits.retention).await;
-            tasks.lock().remove(&id);
-        });
-
-        TaskSnapshot {
-            id,
-            kind: K::KIND,
-            status: TaskStatus::NotStarted,
+        // The job may run as soon as it is queued, so the secrets must be in place first.
+        if let Some(secrets) = secrets {
+            self.inner.secrets.lock().insert(id, secrets);
         }
+
+        let inserted = match self.store().await {
+            Ok(store) => {
+                store
+                    .insert(NewTask {
+                        id,
+                        kind: K::KIND,
+                        target: &def.target.to_string(),
+                        params: &def.params.to_string(),
+                        token_jti,
+                    })
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+
+        if let Err(error) = inserted {
+            error!(task.id = %id, task.kind = K::KIND, error = format!("{error:#}"), "Failed to record the task");
+            self.forget_secrets(id);
+            return Err(StartError::Internal);
+        }
+
+        let job = TaskJob {
+            def,
+            state: state.clone(),
+        };
+
+        if let Err(error) = state.job_queue_handle.enqueue(job).await {
+            error!(task.id = %id, task.kind = K::KIND, error = format!("{error:#}"), "Failed to queue the task");
+            self.fail(id, "failed to queue the task").await;
+            return Err(StartError::Internal);
+        }
+
+        info!(task.id = %id, task.kind = K::KIND, %token_jti, "Background task created");
+
+        Ok(TaskSnapshot {
+            id,
+            kind: K::KIND.to_owned(),
+            status: TaskStatus::NotStarted,
+        })
+    }
+
+    async fn execute_ephemeral<K: EphemeralTask>(&self, def: TaskJobDef, state: &DgwState) -> anyhow::Result<()> {
+        let secrets = self.inner.secrets.lock().get(&def.task_id).cloned();
+
+        match secrets {
+            Some(secrets) => self.execute::<K>(def, state, Some(secrets)).await,
+            None => {
+                warn!(task.id = %def.task_id, task.kind = K::KIND, "Background task secrets are gone");
+                self.fail(def.task_id, SECRETS_LOST_ERROR).await;
+                Ok(())
+            }
+        }
+    }
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "no durable task kind exists yet"))]
+    async fn execute_durable<K: DurableTask>(&self, def: TaskJobDef, state: &DgwState) -> anyhow::Result<()> {
+        self.execute::<K>(def, state, None).await
+    }
+
+    /// Runs one attempt; an error asks the job queue to try again later.
+    async fn execute<K: TaskKind>(
+        &self,
+        def: TaskJobDef,
+        state: &DgwState,
+        secrets: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> anyhow::Result<()> {
+        let id = def.task_id;
+
+        let (target, params) = match (
+            serde_json::from_value::<K::Target>(def.target),
+            serde_json::from_value::<K::Params>(def.params),
+        ) {
+            (Ok(target), Ok(params)) => (target, params),
+            (Err(error), _) | (_, Err(error)) => {
+                error!(task.id = %id, task.kind = K::KIND, %error, "Invalid task definition");
+                self.fail(id, "invalid task definition").await;
+                return Ok(());
+            }
+        };
+
+        let _permit = self.inner.slots.acquire().await.context("task slots are closed")?;
+
+        let substate = to_json(&K::Substate::default());
+
+        let store = self.store().await?;
+
+        let Some(attempt) = store.start_attempt(id, &substate).await? else {
+            debug!(task.id = %id, task.kind = K::KIND, "Background task is already finished");
+            self.forget_secrets(id);
+            return Ok(());
+        };
+
+        info!(task.id = %id, task.kind = K::KIND, attempt, "Background task running");
+
+        let ctx = TaskCtx {
+            id,
+            attempt,
+            target,
+            params,
+            state: state.clone(),
+            progress: Progress {
+                id,
+                tasks: self.clone(),
+                _substate: PhantomData,
+            },
+            secrets,
+        };
+
+        let max_attempts = K::RETRY.max_attempts.min(JOB_MAX_ATTEMPTS);
+
+        match run_attempt::<K>(ctx, self.inner.timeout).await {
+            Ok(output) => {
+                store.succeed(id, &to_json(&output)).await?;
+                info!(task.id = %id, task.kind = K::KIND, attempt, "Background task succeeded");
+            }
+            Err(TaskError::Transient(error)) if attempt < max_attempts => {
+                warn!(task.id = %id, task.kind = K::KIND, attempt, max_attempts, %error, "Background task attempt failed");
+                store.retry_later(id, &error).await?;
+                anyhow::bail!("background task attempt failed: {error}");
+            }
+            Err(TaskError::Transient(error) | TaskError::Permanent(error)) => {
+                warn!(task.id = %id, task.kind = K::KIND, attempt, %error, "Background task failed");
+                store.fail(id, &error).await?;
+            }
+        }
+
+        self.forget_secrets(id);
+
+        Ok(())
+    }
+
+    async fn fail(&self, id: Uuid, error: &str) {
+        self.forget_secrets(id);
+
+        let stored = match self.store().await {
+            Ok(store) => store.fail(id, error).await.map(|_| ()),
+            Err(store_error) => Err(store_error),
+        };
+
+        if let Err(store_error) = stored {
+            error!(task.id = %id, error = format!("{store_error:#}"), "Failed to record the task failure");
+        }
+    }
+
+    fn forget_secrets(&self, id: Uuid) {
+        self.inner.secrets.lock().remove(&id);
     }
 }
 
-async fn run_task<K: BackgroundTask>(id: Uuid, task: K, tasks: &TaskMap, timeout: Duration) -> TaskStatus {
-    if let Some(entry) = tasks.lock().get_mut(&id) {
-        entry.status = TaskStatus::Running {
-            substate: to_json_value(&K::Substate::default()),
-        };
-    }
-
-    info!(task.id = %id, task.kind = K::KIND, "Background task running");
-
-    let progress = Progress {
-        id,
-        tasks: Arc::clone(tasks),
-        _substate: PhantomData,
-    };
-
-    // The task runs on its own Tokio task so a panic ends as a failure instead of a task stuck in `Running`.
-    let mut handle = tokio::spawn(task.run(progress));
+async fn run_attempt<K: TaskKind>(ctx: TaskCtx<K>, timeout: Duration) -> Result<K::Output, TaskError> {
+    // The run has its own Tokio task so a panic ends as a failure instead of a task stuck in `Running`.
+    let mut handle = tokio::spawn(K::run(ctx));
 
     match tokio::time::timeout(timeout, &mut handle).await {
-        Ok(Ok(Ok(output))) => TaskStatus::Success {
-            result: to_json_value(&output),
-        },
-        Ok(Ok(Err(error))) => TaskStatus::Failed {
-            error: format!("{error:#}"),
-        },
-        Ok(Err(_)) => TaskStatus::Failed {
-            error: "task panicked".to_owned(),
-        },
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(_)) => Err(TaskError::Permanent("task panicked".to_owned())),
         Err(_) => {
             handle.abort();
-            TaskStatus::Failed {
-                error: "task timed out".to_owned(),
-            }
+            Err(TaskError::Permanent("task timed out".to_owned()))
         }
     }
 }
 
-fn to_json_value<T: Serialize>(value: &T) -> serde_json::Value {
-    serde_json::to_value(value).unwrap_or_else(|error| {
-        error!(%error, "Failed to serialize a task value");
-        serde_json::Value::Null
+fn parse_body<K: TaskKind, T: DeserializeOwned>(body: &[u8]) -> Result<T, StartError> {
+    // The serde error is not logged because it may quote the rejected value, which could be a secret.
+    serde_json::from_slice::<T>(body).map_err(|error| {
+        warn!(
+            task.kind = K::KIND,
+            category = ?error.classify(),
+            line = error.line(),
+            column = error.column(),
+            "Invalid task parameters"
+        );
+        StartError::InvalidParams("invalid_params")
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use tokio::sync::oneshot;
+fn to_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|error| {
+        error!(%error, "Failed to serialize a task value");
+        "null".to_owned()
+    })
+}
 
-    use super::*;
+fn parse_json(json: Option<&str>) -> serde_json::Value {
+    json.and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
 
-    #[derive(Default, Serialize)]
-    struct TestSubstate {
-        step: u32,
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskJobDef {
+    task_id: Uuid,
+    kind: String,
+    target: serde_json::Value,
+    params: serde_json::Value,
+}
 
-    struct TestTask {
-        started: Option<oneshot::Sender<()>>,
-        finish: oneshot::Receiver<anyhow::Result<u32>>,
-    }
+/// Job running one attempt of a background task.
+pub(crate) struct TaskJob {
+    def: TaskJobDef,
+    state: DgwState,
+}
 
-    impl BackgroundTask for TestTask {
-        const KIND: &'static str = "test";
-        const PERSISTENCE: Persistence = Persistence::InMemory;
+impl TaskJob {
+    pub(crate) const NAME: &'static str = "provisioner-task";
 
-        type Params = ();
-        type Target = ();
-        type Substate = TestSubstate;
-        type Output = u32;
-
-        fn prepare(_: (), (): (), _: &DgwState) -> Result<Self, StartError> {
-            unreachable!("tests spawn test tasks directly")
-        }
-
-        async fn run(mut self, progress: Progress<TestSubstate>) -> anyhow::Result<u32> {
-            progress.set(&TestSubstate { step: 1 });
-
-            if let Some(started) = self.started.take() {
-                let _ = started.send(());
-            }
-
-            self.finish.await?
-        }
-    }
-
-    struct Controls {
-        started: oneshot::Receiver<()>,
-        finish: oneshot::Sender<anyhow::Result<u32>>,
-    }
-
-    fn test_task() -> (TestTask, Controls) {
-        let (started_tx, started_rx) = oneshot::channel();
-        let (finish_tx, finish_rx) = oneshot::channel();
-
-        (
-            TestTask {
-                started: Some(started_tx),
-                finish: finish_rx,
-            },
-            Controls {
-                started: started_rx,
-                finish: finish_tx,
-            },
-        )
-    }
-
-    fn registry(max_concurrent: usize, timeout: Duration) -> TaskRegistry {
-        TaskRegistry::with_limits(Limits {
-            max_concurrent,
-            timeout,
-            retention: Duration::from_secs(3600),
-        })
-    }
-
-    async fn wait_for_final_status(registry: &TaskRegistry, id: Uuid) -> TaskStatus {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let status = registry.get(id).expect("task is registered").status;
-
-                if matches!(status, TaskStatus::Success { .. } | TaskStatus::Failed { .. }) {
-                    return status;
-                }
-
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("task finishes")
-    }
-
-    #[tokio::test]
-    async fn status_goes_from_not_started_to_running_to_failed() {
-        let registry = registry(1, Duration::from_secs(60));
-        let (task, controls) = test_task();
-
-        let snapshot = registry.spawn(task);
-        assert_eq!(snapshot.status, TaskStatus::NotStarted);
-        assert_eq!(snapshot.kind, "test");
-
-        controls.started.await.expect("task starts");
-        assert_eq!(
-            registry.get(snapshot.id).expect("task").status,
-            TaskStatus::Running {
-                substate: serde_json::json!({ "step": 1 })
-            }
-        );
-
-        let _ = controls.finish.send(Err(anyhow::anyhow!("boom")));
-        assert_eq!(
-            wait_for_final_status(&registry, snapshot.id).await,
-            TaskStatus::Failed {
-                error: "boom".to_owned()
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn success_carries_the_result() {
-        let registry = registry(1, Duration::from_secs(60));
-        let (task, controls) = test_task();
-
-        let id = registry.spawn(task).id;
-        let _ = controls.finish.send(Ok(42));
-
-        assert_eq!(
-            wait_for_final_status(&registry, id).await,
-            TaskStatus::Success {
-                result: serde_json::json!(42)
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn concurrency_limit_keeps_extra_tasks_not_started() {
-        let registry = registry(2, Duration::from_secs(60));
-        let (first, first_controls) = test_task();
-        let (second, second_controls) = test_task();
-        let (third, mut third_controls) = test_task();
-
-        let first_id = registry.spawn(first).id;
-        let _second_id = registry.spawn(second).id;
-        let third_id = registry.spawn(third).id;
-
-        first_controls.started.await.expect("first starts");
-        second_controls.started.await.expect("second starts");
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(third_controls.started.try_recv().is_err());
-        assert_eq!(registry.get(third_id).expect("task").status, TaskStatus::NotStarted);
-
-        let _ = first_controls.finish.send(Ok(1));
-        wait_for_final_status(&registry, first_id).await;
-
-        third_controls.started.await.expect("third starts once a slot is free");
-    }
-
-    #[tokio::test]
-    async fn task_times_out() {
-        let registry = registry(1, Duration::from_millis(20));
-        let (task, _controls) = test_task();
-
-        let id = registry.spawn(task).id;
-
-        assert_eq!(
-            wait_for_final_status(&registry, id).await,
-            TaskStatus::Failed {
-                error: "task timed out".to_owned()
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn finished_task_is_removed_after_retention() {
-        let registry = TaskRegistry::with_limits(Limits {
-            max_concurrent: 1,
-            timeout: Duration::from_secs(60),
-            retention: Duration::from_millis(10),
-        });
-        let (task, controls) = test_task();
-
-        let id = registry.spawn(task).id;
-        let _ = controls.finish.send(Ok(1));
-
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while registry.get(id).is_some() {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("task is removed");
-    }
-
-    #[test]
-    fn unknown_task_is_none() {
-        assert!(TaskRegistry::new().get(Uuid::new_v4()).is_none());
+    pub(crate) fn read_json(json: &str, state: DgwState) -> anyhow::Result<Self> {
+        let def = serde_json::from_str(json).context("failed to deserialize the task job")?;
+        Ok(Self { def, state })
     }
 }
+
+#[async_trait]
+impl job_queue::Job for TaskJob {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn write_json(&self) -> anyhow::Result<String> {
+        serde_json::to_string(&self.def).context("failed to serialize the task job")
+    }
+
+    async fn run(&mut self) -> anyhow::Result<()> {
+        let tasks = self.state.tasks.clone();
+        let def = self.def.clone();
+
+        match def.kind.as_str() {
+            ai_log::AiLogTask::KIND => tasks.execute_ephemeral::<ai_log::AiLogTask>(def, &self.state).await,
+            kind => {
+                error!(task.id = %def.task_id, task.kind = kind, "Unknown task kind");
+                tasks.fail(def.task_id, "unknown task kind").await;
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

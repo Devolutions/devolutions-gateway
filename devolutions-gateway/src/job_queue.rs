@@ -11,6 +11,11 @@ use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
 
+use crate::DgwState;
+
+/// Attempts of a job before the queue gives up on it.
+pub const JOB_MAX_ATTEMPTS: u32 = 5;
+
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
@@ -38,6 +43,7 @@ pub struct JobRunnerTask {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
     queue: DynJobQueue,
+    state: DgwState,
 }
 
 impl JobQueueCtx {
@@ -59,6 +65,7 @@ impl JobQueueCtx {
         let queue = job_queue_libsql::LibSqlJobQueue::builder()
             .runner_waker(runner_waker.clone())
             .conn(conn)
+            .max_attempts(JOB_MAX_ATTEMPTS)
             .build();
 
         let queue = Arc::new(queue);
@@ -81,6 +88,11 @@ impl JobQueueCtx {
             job_queue_rx: rx,
             job_queue_handle: handle,
         })
+    }
+
+    /// Returns the JSON definition of every queued job with this name.
+    pub async fn job_defs(&self, name: &str) -> anyhow::Result<Vec<String>> {
+        self.queue.job_defs(name).await
     }
 }
 
@@ -197,11 +209,12 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 }
 
 impl JobRunnerTask {
-    pub fn new(ctx: &JobQueueCtx) -> Self {
+    pub fn new(ctx: &JobQueueCtx, state: DgwState) -> Self {
         Self {
             notify_runner: Arc::clone(&ctx.notify_runner),
             runner_waker: RunnerWaker::clone(&ctx.runner_waker),
             queue: Arc::clone(&ctx.queue),
+            state,
         }
     }
 }
@@ -225,9 +238,10 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         notify_runner,
         runner_waker,
         queue,
+        state,
     } = ctx;
 
-    let reader = DgwJobReader;
+    let reader = DgwJobReader { state };
 
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
@@ -279,12 +293,15 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     Ok(())
 }
 
-struct DgwJobReader;
+struct DgwJobReader {
+    state: DgwState,
+}
 
 impl JobReader for DgwJobReader {
     fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
         use crate::api::jrec::DeleteRecordingsJob;
         use crate::recording::RemuxJob;
+        use crate::tasks::TaskJob;
 
         match name {
             RemuxJob::NAME => {
@@ -296,6 +313,7 @@ impl JobReader for DgwJobReader {
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;
                 Ok(Box::new(job))
             }
+            TaskJob::NAME => Ok(Box::new(TaskJob::read_json(json, self.state.clone())?)),
             _ => anyhow::bail!("unknown job name: {name}"),
         }
     }

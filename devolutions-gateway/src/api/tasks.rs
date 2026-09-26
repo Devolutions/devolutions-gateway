@@ -53,7 +53,8 @@ pub(crate) async fn start_task(
         TaskKind::AiLog { jet_aid } => {
             state
                 .tasks
-                .start::<AiLogTask>(AiLogTarget { session_id: jet_aid }, &body, &state)?
+                .start_ephemeral::<AiLogTask>(AiLogTarget { session_id: jet_aid }, &body, claims.jti, &state)
+                .await?
         }
     };
 
@@ -62,7 +63,7 @@ pub(crate) async fn start_task(
 
 /// Gets the status of a background task.
 ///
-/// Finished tasks are kept for one hour, and every task is dropped when Gateway restarts.
+/// Task records are kept forever, including across Gateway restarts.
 ///
 /// This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -90,6 +91,8 @@ pub(crate) async fn get_task(
     state
         .tasks
         .get(id)
+        .await
+        .map_err(HttpError::internal().with_msg("failed to read the task").err())?
         .map(|snapshot| Json(TaskInfo::from(snapshot)))
         .ok_or_else(|| HttpError::not_found().msg("task not found"))
 }
@@ -124,7 +127,7 @@ pub(crate) struct TaskInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TaskState {
-    /// The task waits for a free slot.
+    /// The task waits for a free slot or for its next attempt.
     NotStarted,
     Running,
     Success,
@@ -142,7 +145,7 @@ impl From<TaskSnapshot> for TaskInfo {
 
         Self {
             id: snapshot.id,
-            kind: snapshot.kind.to_owned(),
+            kind: snapshot.kind,
             state,
             substate,
             result,
