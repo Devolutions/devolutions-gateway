@@ -42,6 +42,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tunnel::list_agents,
         crate::api::tunnel::get_agent,
         crate::api::tunnel::delete_agent,
+        crate::api::tasks::start_task,
+        crate::api::tasks::get_task,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -108,6 +110,12 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tunnel::AgentDomainAdvertisement,
         crate::api::tunnel::AgentStatus,
         crate::api::tunnel::AgentInfo,
+        crate::api::tasks::TaskInfo,
+        crate::api::tasks::TaskState,
+        crate::api::tasks::TaskErrorResponse,
+        crate::tasks::ai_log::AiLogParams,
+        crate::tasks::ai_log::AiProvider,
+        crate::tasks::ai_log::AiLogSubstate,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -234,6 +242,19 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some("Single-use token authorizing Agent Tunnel enrollment".to_owned()))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "task_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "Token authorizing one kind of background task on a specific target".to_owned(),
+                    ))
                     .build(),
             ),
         );

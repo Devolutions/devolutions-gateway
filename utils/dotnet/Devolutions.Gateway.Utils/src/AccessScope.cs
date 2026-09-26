@@ -30,6 +30,7 @@ public struct AccessScope
     public static AccessScope GatewayNetMonitorDrain = new AccessScope("gateway.net.monitor.drain");
     public static AccessScope GatewayAgentDelete = new AccessScope("gateway.agent.delete");
     public static AccessScope GatewayAgentRead = new AccessScope("gateway.agent.read");
+    public static AccessScope GatewayTasksRead = new AccessScope("gateway.tasks.read");
 
     public override string? ToString()
     {
