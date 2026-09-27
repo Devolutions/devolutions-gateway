@@ -7,25 +7,27 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::extract::{TaskToken, TasksReadScope};
-use crate::http::HttpError;
-#[cfg(feature = "openapi")]
-#[expect(unused_imports, reason = "utoipa refers to the request body schema by its name only")]
-use crate::tasks::ai_log::AiLogParams;
 use crate::tasks::ai_log::{AiLogTarget, AiLogTask};
-use crate::tasks::{StartError, TaskSnapshot, TaskStatus};
+use crate::tasks::{TaskErrorCode, TaskService, TaskSnapshot, TaskStatus};
 use crate::token::TaskKind;
 
-pub fn make_router<S>(state: DgwState) -> Router<S> {
+#[derive(Clone)]
+pub(crate) struct TasksState {
+    gateway: DgwState,
+    tasks: TaskService,
+}
+
+pub fn make_router<S>(state: DgwState, tasks: TaskService) -> Router<S> {
     Router::new()
         .route("/", routing::post(start_task))
         .route("/{id}", routing::get(get_task))
-        .with_state(state)
+        .with_state(TasksState { gateway: state, tasks })
 }
 
 /// Starts a background task.
 ///
 /// The task kind and its target come from the TASK token.
-/// The request body holds the kind-specific parameters: `AiLogParams` for `ai-log`.
+/// The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.
 ///
 /// This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -33,27 +35,27 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     operation_id = "StartTask",
     tag = "Tasks",
     path = "/jet/tasks",
-    request_body(content = AiLogParams, description = "Kind-specific task parameters", content_type = "application/json"),
+    request_body(content = Object, description = "Kind-specific task parameters, such as `AiLogParams` for `ai-log`", content_type = "application/json"),
     responses(
         (status = 202, description = "Task was accepted and runs in the background", body = TaskInfo),
         (status = 400, description = "Invalid task parameters", body = TaskErrorResponse),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 409, description = "The task target is busy, such as a session that is still recording", body = TaskErrorResponse),
-        (status = 500, description = "Unexpected server error"),
+        (status = 500, description = "Unexpected server error", body = TaskErrorResponse),
     ),
     security(("task_token" = [])),
 ))]
 pub(crate) async fn start_task(
-    State(state): State<DgwState>,
+    State(state): State<TasksState>,
     TaskToken(claims): TaskToken,
     body: Bytes,
-) -> Result<(StatusCode, Json<TaskInfo>), StartTaskError> {
+) -> Result<(StatusCode, Json<TaskInfo>), TaskErrorCode> {
     let snapshot = match claims.kind {
         TaskKind::AiLog { jet_aid } => {
             state
                 .tasks
-                .start_ephemeral::<AiLogTask>(AiLogTarget { session_id: jet_aid }, &body, claims.jti, &state)
+                .start_ephemeral::<AiLogTask>(AiLogTarget { session_id: jet_aid }, &body, claims.jti, &state.gateway)
                 .await?
         }
     };
@@ -79,22 +81,24 @@ pub(crate) async fn start_task(
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "No task with this ID"),
+        (status = 404, description = "No task with this ID", body = TaskErrorResponse),
+        (status = 500, description = "Unexpected server error", body = TaskErrorResponse),
     ),
     security(("scope_token" = ["gateway.tasks.read"])),
 ))]
 pub(crate) async fn get_task(
-    State(state): State<DgwState>,
+    State(state): State<TasksState>,
     _scope: TasksReadScope,
     extract::Path(id): extract::Path<Uuid>,
-) -> Result<Json<TaskInfo>, HttpError> {
-    state
-        .tasks
-        .get(id)
-        .await
-        .map_err(HttpError::internal().with_msg("failed to read the task").err())?
+) -> Result<Json<TaskInfo>, TaskErrorCode> {
+    let snapshot = state.tasks.get(id).await.map_err(|error| {
+        error!(task.id = %id, error = format!("{error:#}"), "Failed to read the task");
+        TaskErrorCode::Internal
+    })?;
+
+    snapshot
         .map(|snapshot| Json(TaskInfo::from(snapshot)))
-        .ok_or_else(|| HttpError::not_found().msg("task not found"))
+        .ok_or(TaskErrorCode::TaskNotFound)
 }
 
 /// A background task and its status.
@@ -154,33 +158,31 @@ impl From<TaskSnapshot> for TaskInfo {
     }
 }
 
-/// Why a task was not started.
+/// Why a task request failed.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 pub(crate) struct TaskErrorResponse {
-    /// Stable error code, such as `invalid_params`, `missing_model`, `missing_api_key`, `missing_base_url`,
-    /// `invalid_ai_settings` or `recording_active`.
-    error: &'static str,
+    error: TaskErrorCode,
 }
 
-pub(crate) struct StartTaskError(StartError);
-
-impl From<StartError> for StartTaskError {
-    fn from(error: StartError) -> Self {
-        Self(error)
-    }
-}
-
-impl IntoResponse for StartTaskError {
+impl IntoResponse for TaskErrorCode {
     fn into_response(self) -> Response {
-        let (status, error) = match self.0 {
-            StartError::InvalidParams(code) => (StatusCode::BAD_REQUEST, code),
-            StartError::TargetBusy(code) => (StatusCode::CONFLICT, code),
-            StartError::Internal => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        let status = match self {
+            TaskErrorCode::InvalidParams
+            | TaskErrorCode::MissingModel
+            | TaskErrorCode::MissingApiKey
+            | TaskErrorCode::MissingBaseUrl
+            | TaskErrorCode::InvalidAiSettings => StatusCode::BAD_REQUEST,
+            TaskErrorCode::RecordingActive => StatusCode::CONFLICT,
+            TaskErrorCode::TaskNotFound => StatusCode::NOT_FOUND,
+            TaskErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        warn!(%status, error, "Task rejected");
+        // Server errors are logged where they happen.
+        if status.is_client_error() {
+            debug!(%status, error = ?self, "Task request rejected");
+        }
 
-        (status, Json(TaskErrorResponse { error })).into_response()
+        (status, Json(TaskErrorResponse { error: self })).into_response()
     }
 }

@@ -14,40 +14,53 @@ fn new_task<'a>(id: Uuid, token_jti: Uuid) -> NewTask<'a> {
     }
 }
 
-async fn memory_store() -> LibSqlProvisionerTaskStore {
-    LibSqlProvisionerTaskStore::open(":memory:").await.unwrap()
-}
-
-#[tokio::test]
-async fn migrations_set_user_version_and_are_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("provisioner_tasks.db");
-    let path = path.to_str().unwrap();
-
-    let id = Uuid::new_v4();
-    {
-        let store = LibSqlProvisionerTaskStore::open(path).await.unwrap();
-        store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
-    }
-
-    let store = LibSqlProvisionerTaskStore::open(path).await.unwrap();
-    assert!(store.get(id).await.unwrap().is_some());
-
-    let conn = libsql::Builder::new_local(path)
+async fn connect(path: &str) -> libsql::Connection {
+    libsql::Builder::new_local(path)
         .build()
         .await
         .unwrap()
         .connect()
-        .unwrap();
-    let row = conn
-        .query("PRAGMA user_version", ())
-        .await
         .unwrap()
-        .next()
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(row.get::<u64>(0).unwrap(), 1);
+}
+
+async fn open(path: &str) -> LibSqlProvisionerTaskStore {
+    LibSqlProvisionerTaskStore::init(connect(path).await).await.unwrap()
+}
+
+async fn memory_store() -> LibSqlProvisionerTaskStore {
+    open(":memory:").await
+}
+
+async fn query_u64(conn: &libsql::Connection, sql_query: &str) -> u64 {
+    let row = conn.query(sql_query, ()).await.unwrap().next().await.unwrap().unwrap();
+    row.get::<u64>(0).unwrap()
+}
+
+#[tokio::test]
+async fn migrations_leave_user_version_alone_and_are_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisioner_tasks.db");
+    let path = path.to_str().unwrap();
+
+    // Another schema in the same database, such as the job queue, owns `user_version`.
+    let conn = connect(path).await;
+    conn.execute("PRAGMA user_version = 7", ()).await.unwrap();
+
+    let id = Uuid::new_v4();
+    {
+        let store = LibSqlProvisionerTaskStore::init(conn.clone()).await.unwrap();
+        store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+    }
+
+    let store = open(path).await;
+    assert!(store.get(id).await.unwrap().is_some());
+
+    assert_eq!(query_u64(&conn, "PRAGMA user_version").await, 7);
+    assert_eq!(
+        query_u64(&conn, "SELECT max(version) FROM task_schema_version").await,
+        1
+    );
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 1);
 }
 
 #[tokio::test]
@@ -158,7 +171,7 @@ async fn rows_are_never_deleted() {
 
     let ids = [(); 3].map(|()| Uuid::new_v4());
     {
-        let store = LibSqlProvisionerTaskStore::open(path).await.unwrap();
+        let store = open(path).await;
         for id in ids {
             store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
         }
@@ -166,7 +179,7 @@ async fn rows_are_never_deleted() {
         store.fail(ids[1], "boom").await.unwrap();
     }
 
-    let store = LibSqlProvisionerTaskStore::open(path).await.unwrap();
+    let store = open(path).await;
     for id in ids {
         assert!(store.get(id).await.unwrap().is_some(), "{id}");
     }

@@ -9,10 +9,8 @@ use anyhow::Context as _;
 use libsql::{Connection, Row};
 use uuid::Uuid;
 
-#[rustfmt::skip]
-pub use libsql;
-
 // Released migrations are never modified; new ones are appended.
+// The job queue in the same database owns `PRAGMA user_version`, so this schema keeps its version in a table.
 const MIGRATIONS: &[&str] = &[
     // Migration 0
     "CREATE TABLE task (
@@ -106,17 +104,11 @@ pub struct LibSqlProvisionerTaskStore {
 }
 
 impl LibSqlProvisionerTaskStore {
-    /// Opens the database at `path` (or `:memory:`) and applies the pending migrations.
-    pub async fn open(path: &str) -> anyhow::Result<Self> {
-        let conn = libsql::Builder::new_local(path)
-            .build()
-            .await
-            .context("failed to open libSQL database")?
-            .connect()
-            .context("failed to connect to libSQL")?;
-
+    /// Applies the pending migrations on `conn`, which the caller has opened and configured.
+    ///
+    /// The database may hold other tables, such as a job queue.
+    pub async fn init(conn: Connection) -> anyhow::Result<Self> {
         let store = Self { conn };
-        store.apply_pragmas().await?;
         store.migrate().await?;
 
         Ok(store)
@@ -297,46 +289,18 @@ impl LibSqlProvisionerTaskStore {
         Ok(ids)
     }
 
-    async fn apply_pragmas(&self) -> anyhow::Result<()> {
-        const PRAGMAS: &str = "
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA busy_timeout = 15000;
-            PRAGMA cache_size = -3000;
-            PRAGMA temp_store = MEMORY;
-        ";
-
-        let mut batch_rows = self
-            .conn
-            .execute_batch(PRAGMAS)
-            .await
-            .context("failed to batch execute SQL query")?;
-
-        while let Some(rows) = batch_rows.next_stmt_row() {
-            let Some(mut rows) = rows else {
-                continue;
-            };
-
-            while let Ok(Some(row)) = rows.next().await {
-                trace!(?row, "PRAGMA row");
-            }
-        }
-
-        Ok(())
-    }
-
     async fn migrate(&self) -> anyhow::Result<()> {
-        let user_version = self.query_user_version().await?;
+        let schema_version = self.query_schema_version().await?;
 
-        match MIGRATIONS.get(user_version..) {
+        match MIGRATIONS.get(schema_version..) {
             Some(remaining) if !remaining.is_empty() => {
                 info!(
-                    user_version,
-                    migration_count = MIGRATIONS.len() - user_version,
+                    schema_version,
+                    migration_count = MIGRATIONS.len() - schema_version,
                     "Start migration"
                 );
 
-                for (sql_query, migration_id) in remaining.iter().zip(user_version..MIGRATIONS.len()) {
+                for (sql_query, migration_id) in remaining.iter().zip(schema_version..MIGRATIONS.len()) {
                     trace!(migration_id, %sql_query, "Apply migration");
 
                     self.conn
@@ -344,28 +308,36 @@ impl LibSqlProvisionerTaskStore {
                         .await
                         .with_context(|| format!("failed to execute migration {migration_id}"))?;
 
-                    self.update_user_version(migration_id + 1)
+                    self.update_schema_version(migration_id + 1)
                         .await
-                        .context("failed to update user version")?;
+                        .context("failed to update the schema version")?;
                 }
 
                 info!("Migration complete");
             }
             None => {
-                warn!(user_version, "user_version is set to an unexpected value");
+                warn!(schema_version, "Task schema version is set to an unexpected value");
             }
             _ => {
-                debug!(user_version, "Database is already up to date");
+                debug!(schema_version, "Database is already up to date");
             }
         }
 
         Ok(())
     }
 
-    async fn query_user_version(&self) -> anyhow::Result<usize> {
+    async fn query_schema_version(&self) -> anyhow::Result<usize> {
+        self.conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS task_schema_version (version INT NOT NULL) STRICT",
+                (),
+            )
+            .await
+            .context("failed to create the schema version table")?;
+
         let row = self
             .conn
-            .query("PRAGMA user_version", ())
+            .query("SELECT coalesce(max(version), 0) FROM task_schema_version", ())
             .await
             .context("failed to execute SQL query")?
             .next()
@@ -373,16 +345,16 @@ impl LibSqlProvisionerTaskStore {
             .context("failed to read the row")?
             .context("no row returned")?;
 
-        let value = row.get::<u64>(0).context("failed to read user_version value")?;
+        let value = row.get::<u64>(0).context("failed to read the schema version")?;
 
-        usize::try_from(value).context("user_version is too big")
+        usize::try_from(value).context("schema version is too big")
     }
 
-    async fn update_user_version(&self, value: usize) -> anyhow::Result<()> {
-        let sql_query = format!("PRAGMA user_version = {value}");
+    async fn update_schema_version(&self, value: usize) -> anyhow::Result<()> {
+        let value = i64::try_from(value).context("schema version is too big")?;
 
         self.conn
-            .execute(&sql_query, ())
+            .execute("INSERT INTO task_schema_version (version) VALUES (?1)", [value])
             .await
             .context("failed to execute SQL query")?;
 

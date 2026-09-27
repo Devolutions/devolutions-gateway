@@ -48,7 +48,10 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
 
     if state.conf_handle.get_conf().debug.enable_unstable {
         router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
-        router = router.nest("/jet/tasks", tasks::make_router(state.clone()));
+    }
+
+    if let Some(task_service) = state.tasks.clone() {
+        router = router.nest("/jet/tasks", tasks::make_router(state.clone(), task_service));
     }
 
     router.with_state(state)

@@ -69,7 +69,8 @@ pub struct DgwState {
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
-    pub tasks: tasks::TaskService,
+    /// Set only when the unstable task system is enabled.
+    pub tasks: Option<tasks::TaskService>,
 }
 
 #[doc(hidden)]
@@ -112,7 +113,7 @@ impl DgwState {
             synthetic_kdc_registry,
             monitoring_state,
             agent_tunnel_handle: None,
-            tasks: tasks::TaskService::mock(),
+            tasks: None,
         };
 
         let handles = MockHandles {
