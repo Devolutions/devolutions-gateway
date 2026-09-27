@@ -154,7 +154,6 @@ pub struct NetScanClaim {
 pub struct TaskClaims {
     pub jet_tk: TaskKind,
     pub jet_aid: Uuid,
-    pub jet_task_reuse: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_gw_id: Option<Uuid>,
     pub exp: i64,
@@ -307,7 +306,6 @@ pub enum SubCommandArgs {
     Task {
         jet_tk: TaskKind,
         jet_aid: Option<Uuid>,
-        jet_task_reuse: bool,
     },
 }
 
@@ -573,15 +571,10 @@ pub fn generate_token(
             };
             ("NETSCAN", serde_json::to_value(claims)?)
         }
-        SubCommandArgs::Task {
-            jet_tk,
-            jet_aid,
-            jet_task_reuse,
-        } => {
+        SubCommandArgs::Task { jet_tk, jet_aid } => {
             let claims = TaskClaims {
                 jet_tk,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
-                jet_task_reuse,
                 jet_gw_id,
                 exp,
                 nbf,

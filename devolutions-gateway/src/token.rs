@@ -571,10 +571,6 @@ pub struct TaskTokenClaims {
     #[serde(flatten)]
     pub kind: TaskKind,
 
-    /// Whether the token can be used more than once before it expires.
-    #[serde(default)]
-    pub jet_task_reuse: bool,
-
     /// JWT expiration time claim.
     pub exp: i64,
 
@@ -1216,16 +1212,11 @@ fn validate_token_impl(
             }
         }
 
-        // SCOPE, NETSCAN, JMUX, and single-use TASK tokens can never be reused.
+        // SCOPE, NETSCAN, JMUX, and TASK tokens can never be reused.
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Task(TaskTokenClaims {
-            jti: id,
-            exp,
-            jet_task_reuse: false,
-            ..
-        }) => match token_cache.lock().entry(id) {
+        | AccessTokenClaims::Task(TaskTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 return Err(TokenError::UnexpectedReplay {
                     reason: "never allowed for this use case",
@@ -1276,13 +1267,10 @@ fn validate_token_impl(
             }
         },
 
-        // JREC pull tokens and reusable TASK tokens can be re-used at will until they are expired.
+        // JREC pull tokens can be re-used at will until they are expired.
         AccessTokenClaims::Jrec(JrecTokenClaims {
             jet_rop: RecordingOperation::Pull,
             ..
-        })
-        | AccessTokenClaims::Task(TaskTokenClaims {
-            jet_task_reuse: true, ..
         }) => {}
 
         // BRIDGE tokens can be re-used at will until they are expired.
@@ -2049,33 +2037,17 @@ mod tests {
                 jet_aid: Uuid::parse_str("5e3e833f-84c7-4541-b676-acc3299e39b8").expect("UUID"),
             }
         );
-        assert!(!claims.jet_task_reuse);
     }
 
     #[test]
-    fn single_use_task_token_is_rejected_on_second_use() {
+    fn task_token_is_rejected_on_second_use() {
         let fixture = TaskTokenFixture::new();
-
-        for claims in [
-            task_claims(serde_json::json!({})),
-            task_claims(serde_json::json!({ "jet_task_reuse": false })),
-        ] {
-            let token = fixture.sign(&claims);
-
-            fixture.validate(&token, None).expect("first use");
-            let error = fixture.validate(&token, None).err().expect("second use is rejected");
-
-            assert!(matches!(error, TokenError::UnexpectedReplay { .. }), "{error:?}");
-        }
-    }
-
-    #[test]
-    fn reusable_task_token_is_accepted_twice() {
-        let fixture = TaskTokenFixture::new();
-        let token = fixture.sign(&task_claims(serde_json::json!({ "jet_task_reuse": true })));
+        let token = fixture.sign(&task_claims(serde_json::json!({})));
 
         fixture.validate(&token, None).expect("first use");
-        fixture.validate(&token, None).expect("second use");
+        let error = fixture.validate(&token, None).err().expect("second use is rejected");
+
+        assert!(matches!(error, TokenError::UnexpectedReplay { .. }), "{error:?}");
     }
 
     #[test]
