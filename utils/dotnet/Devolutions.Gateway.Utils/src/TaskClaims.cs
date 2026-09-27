@@ -5,7 +5,7 @@ namespace Devolutions.Gateway.Utils;
 public class TaskClaims : IGatewayClaims
 {
     [JsonPropertyName("jet_tk")]
-    public string TaskKind { get; set; }
+    public TaskKind TaskKind { get; set; }
 
     [JsonPropertyName("jet_aid")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -14,7 +14,7 @@ public class TaskClaims : IGatewayClaims
     [JsonPropertyName("jet_gw_id")]
     public Guid ScopeGatewayId { get; set; }
 
-    private TaskClaims(Guid scopeGatewayId, string taskKind)
+    private TaskClaims(Guid scopeGatewayId, TaskKind taskKind)
     {
         this.ScopeGatewayId = scopeGatewayId;
         this.TaskKind = taskKind;
@@ -27,7 +27,7 @@ public class TaskClaims : IGatewayClaims
     /// <param name="sessionId">Session to describe.</param>
     public static TaskClaims ForAiLog(Guid scopeGatewayId, Guid sessionId)
     {
-        return new TaskClaims(scopeGatewayId, "ai-log")
+        return new TaskClaims(scopeGatewayId, TaskKind.AiLog)
         {
             SessionId = sessionId,
         };
