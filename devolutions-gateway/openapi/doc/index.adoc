@@ -2617,7 +2617,12 @@ Task records are kept forever, including across Gateway restarts.  This endpoint
 
 | 404
 | No task with this ID
-|  <<>>
+|  <<TaskErrorResponse>>
+
+
+| 500
+| Unexpected server error
+|  <<TaskErrorResponse>>
 
 |===
 
@@ -2640,7 +2645,7 @@ Starts a background task.
 
 ===== Description
 
-The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 
 
 // markup not found, no include::{specDir}jet/tasks/POST/spec.adoc[opts=optional]
@@ -2667,8 +2672,8 @@ The task kind and its target come from the TASK token. The request body holds th
 |===
 |Name| Description| Required| Default| Pattern
 
-| AiLogParams
-| Kind-specific task parameters <<AiLogParams>>
+| body
+| Kind-specific task parameters, such as `AiLogParams` for `ai-log` <<object>>
 | X
 | 
 | 
@@ -2723,7 +2728,7 @@ The task kind and its target come from the TASK token. The request body holds th
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<TaskErrorResponse>>
 
 |===
 
@@ -3768,7 +3773,7 @@ endif::internal-generation[]
 [#AiLogParams]
 === _AiLogParams_ 
 
-AI settings used by an &#x60;ai-log&#x60; task.
+AI settings used by an &#x60;ai-log&#x60; task: the body of &#x60;POST /jet/tasks&#x60; for a TASK token of kind &#x60;ai-log&#x60;.
 
 
 [.fields-AiLogParams]
@@ -3777,10 +3782,10 @@ AI settings used by an &#x60;ai-log&#x60; task.
 | Field Name| Required| Nullable | Type| Description | Format
 
 | apiKey
-| 
 | X
+| 
 |   String  
-| Required by every provider; kept in memory for this task only.
+| Kept in memory for this task only.
 |     
 
 | baseUrl
@@ -5900,10 +5905,35 @@ Subscriber configuration
 
 
 
+[#TaskErrorCode]
+=== _TaskErrorCode_ 
+
+Stable code telling a client why a task request failed; safe to show.
+
+
+
+
+[.fields-TaskErrorCode]
+[cols="1"]
+|===
+| Enum Values
+
+| invalid_params
+| missing_model
+| missing_api_key
+| missing_base_url
+| invalid_ai_settings
+| recording_active
+| task_not_found
+| internal
+
+|===
+
+
 [#TaskErrorResponse]
 === _TaskErrorResponse_ 
 
-Why a task was not started.
+Why a task request failed.
 
 
 [.fields-TaskErrorResponse]
@@ -5914,9 +5944,9 @@ Why a task was not started.
 | error
 | X
 | 
-|   String  
-| Stable error code, such as `invalid_params`, `missing_model`, `missing_api_key`, `missing_base_url`, `invalid_ai_settings` or `recording_active`.
-|     
+|  <<TaskErrorCode>>  
+| 
+|    invalid_params, missing_model, missing_api_key, missing_base_url, invalid_ai_settings, recording_active, task_not_found, internal,  
 
 |===
 

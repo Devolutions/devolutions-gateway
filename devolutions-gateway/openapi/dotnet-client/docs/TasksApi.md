@@ -106,16 +106,17 @@ catch (ApiException e)
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **404** | No task with this ID |  -  |
+| **500** | Unexpected server error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 <a id="starttask"></a>
 # **StartTask**
-> TaskInfo StartTask (AiLogParams aiLogParams)
+> TaskInfo StartTask (Object body)
 
 Starts a background task.
 
-The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 
 ### Example
 ```csharp
@@ -141,12 +142,12 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new TasksApi(httpClient, config, httpClientHandler);
-            var aiLogParams = new AiLogParams(); // AiLogParams | Kind-specific task parameters
+            var body = null;  // Object | Kind-specific task parameters, such as `AiLogParams` for `ai-log`
 
             try
             {
                 // Starts a background task.
-                TaskInfo result = apiInstance.StartTask(aiLogParams);
+                TaskInfo result = apiInstance.StartTask(body);
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -167,7 +168,7 @@ This returns an ApiResponse object which contains the response data, status code
 try
 {
     // Starts a background task.
-    ApiResponse<TaskInfo> response = apiInstance.StartTaskWithHttpInfo(aiLogParams);
+    ApiResponse<TaskInfo> response = apiInstance.StartTaskWithHttpInfo(body);
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -184,7 +185,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **aiLogParams** | [**AiLogParams**](AiLogParams.md) | Kind-specific task parameters |  |
+| **body** | **Object** | Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60; |  |
 
 ### Return type
 

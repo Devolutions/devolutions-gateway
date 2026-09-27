@@ -17,8 +17,6 @@ import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
 
 // @ts-ignore
-import { AiLogParams } from '../model/aiLogParams';
-// @ts-ignore
 import { TaskErrorResponse } from '../model/taskErrorResponse';
 // @ts-ignore
 import { TaskInfo } from '../model/taskInfo';
@@ -168,17 +166,17 @@ export class TasksService {
 
     /**
      * Starts a background task.
-     * The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
-     * @param aiLogParams Kind-specific task parameters
+     * The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+     * @param body Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public startTask(aiLogParams: AiLogParams, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<TaskInfo>;
-    public startTask(aiLogParams: AiLogParams, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<TaskInfo>>;
-    public startTask(aiLogParams: AiLogParams, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<TaskInfo>>;
-    public startTask(aiLogParams: AiLogParams, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
-        if (aiLogParams === null || aiLogParams === undefined) {
-            throw new Error('Required parameter aiLogParams was null or undefined when calling startTask.');
+    public startTask(body: object, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<TaskInfo>;
+    public startTask(body: object, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<TaskInfo>>;
+    public startTask(body: object, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<TaskInfo>>;
+    public startTask(body: object, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+        if (body === null || body === undefined) {
+            throw new Error('Required parameter body was null or undefined when calling startTask.');
         }
 
         let localVarHeaders = this.defaultHeaders;
@@ -237,7 +235,7 @@ export class TasksService {
         return this.httpClient.request<TaskInfo>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
-                body: aiLogParams,
+                body: body,
                 responseType: <any>responseType_,
                 withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,

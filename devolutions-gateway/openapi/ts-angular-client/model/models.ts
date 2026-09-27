@@ -60,6 +60,7 @@ export * from './setUpdateScheduleRequest';
 export * from './subProvisionerKey';
 export * from './subscriber';
 export * from './targetConnectionOptions';
+export * from './taskErrorCode';
 export * from './taskErrorResponse';
 export * from './taskInfo';
 export * from './taskState';

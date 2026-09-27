@@ -53,23 +53,23 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <returns>TaskInfo</returns>
-        TaskInfo StartTask(AiLogParams aiLogParams);
+        TaskInfo StartTask(Object body);
 
         /// <summary>
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <returns>ApiResponse of TaskInfo</returns>
-        ApiResponse<TaskInfo> StartTaskWithHttpInfo(AiLogParams aiLogParams);
+        ApiResponse<TaskInfo> StartTaskWithHttpInfo(Object body);
         #endregion Synchronous Operations
     }
 
@@ -106,25 +106,25 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of TaskInfo</returns>
-        System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(AiLogParams aiLogParams, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (TaskInfo)</returns>
-        System.Threading.Tasks.Task<ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(AiLogParams aiLogParams, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -458,28 +458,28 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <returns>TaskInfo</returns>
-        public TaskInfo StartTask(AiLogParams aiLogParams)
+        public TaskInfo StartTask(Object body)
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = StartTaskWithHttpInfo(aiLogParams);
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = StartTaskWithHttpInfo(body);
             return localVarResponse.Data;
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <returns>ApiResponse of TaskInfo</returns>
-        public Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> StartTaskWithHttpInfo(AiLogParams aiLogParams)
+        public Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> StartTaskWithHttpInfo(Object body)
         {
-            // verify the required parameter 'aiLogParams' is set
-            if (aiLogParams == null)
-                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'aiLogParams' when calling TasksApi->StartTask");
+            // verify the required parameter 'body' is set
+            if (body == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'body' when calling TasksApi->StartTask");
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
@@ -498,7 +498,7 @@ namespace Devolutions.Gateway.Client.Api
             var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
             if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
 
-            localVarRequestOptions.Data = aiLogParams;
+            localVarRequestOptions.Data = body;
 
             // authentication (task_token) required
             // bearer authentication required
@@ -520,30 +520,30 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of TaskInfo</returns>
-        public async System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(AiLogParams aiLogParams, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = await StartTaskWithHttpInfoAsync(aiLogParams, cancellationToken).ConfigureAwait(false);
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = await StartTaskWithHttpInfoAsync(body, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body holds the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="aiLogParams">Kind-specific task parameters</param>
+        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (TaskInfo)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(AiLogParams aiLogParams, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
-            // verify the required parameter 'aiLogParams' is set
-            if (aiLogParams == null)
-                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'aiLogParams' when calling TasksApi->StartTask");
+            // verify the required parameter 'body' is set
+            if (body == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'body' when calling TasksApi->StartTask");
 
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -564,7 +564,7 @@ namespace Devolutions.Gateway.Client.Api
             var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
             if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
 
-            localVarRequestOptions.Data = aiLogParams;
+            localVarRequestOptions.Data = body;
 
             // authentication (task_token) required
             // bearer authentication required

@@ -28,11 +28,17 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Why a task was not started.
+    /// Why a task request failed.
     /// </summary>
     [DataContract(Name = "TaskErrorResponse")]
     public partial class TaskErrorResponse : IValidatableObject
     {
+
+        /// <summary>
+        /// Gets or Sets Error
+        /// </summary>
+        [DataMember(Name = "error", IsRequired = true, EmitDefaultValue = true)]
+        public TaskErrorCode Error { get; set; }
         /// <summary>
         /// Initializes a new instance of the <see cref="TaskErrorResponse" /> class.
         /// </summary>
@@ -41,23 +47,11 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="TaskErrorResponse" /> class.
         /// </summary>
-        /// <param name="error">Stable error code, such as &#x60;invalid_params&#x60;, &#x60;missing_model&#x60;, &#x60;missing_api_key&#x60;, &#x60;missing_base_url&#x60;, &#x60;invalid_ai_settings&#x60; or &#x60;recording_active&#x60;. (required).</param>
-        public TaskErrorResponse(string error = default(string))
+        /// <param name="error">error (required).</param>
+        public TaskErrorResponse(TaskErrorCode error = default(TaskErrorCode))
         {
-            // to ensure "error" is required (not null)
-            if (error == null)
-            {
-                throw new ArgumentNullException("error is a required property for TaskErrorResponse and cannot be null");
-            }
             this.Error = error;
         }
-
-        /// <summary>
-        /// Stable error code, such as &#x60;invalid_params&#x60;, &#x60;missing_model&#x60;, &#x60;missing_api_key&#x60;, &#x60;missing_base_url&#x60;, &#x60;invalid_ai_settings&#x60; or &#x60;recording_active&#x60;.
-        /// </summary>
-        /// <value>Stable error code, such as &#x60;invalid_params&#x60;, &#x60;missing_model&#x60;, &#x60;missing_api_key&#x60;, &#x60;missing_base_url&#x60;, &#x60;invalid_ai_settings&#x60; or &#x60;recording_active&#x60;.</value>
-        [DataMember(Name = "error", IsRequired = true, EmitDefaultValue = true)]
-        public string Error { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object

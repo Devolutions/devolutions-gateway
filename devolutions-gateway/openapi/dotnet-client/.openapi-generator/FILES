@@ -74,6 +74,7 @@ docs/SetUpdateScheduleRequest.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
 docs/TargetConnectionOptions.md
+docs/TaskErrorCode.md
 docs/TaskErrorResponse.md
 docs/TaskInfo.md
 docs/TaskState.md
@@ -181,6 +182,7 @@ src/Devolutions.Gateway.Client/Model/SetUpdateScheduleRequest.cs
 src/Devolutions.Gateway.Client/Model/SubProvisionerKey.cs
 src/Devolutions.Gateway.Client/Model/Subscriber.cs
 src/Devolutions.Gateway.Client/Model/TargetConnectionOptions.cs
+src/Devolutions.Gateway.Client/Model/TaskErrorCode.cs
 src/Devolutions.Gateway.Client/Model/TaskErrorResponse.cs
 src/Devolutions.Gateway.Client/Model/TaskInfo.cs
 src/Devolutions.Gateway.Client/Model/TaskState.cs
