@@ -207,6 +207,9 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
 }
 
 fn main() {
+    // reqwest is built with `rustls-no-provider` and panics on client build without a default provider.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
     if let Some(cmd) = env::args().nth(1) {

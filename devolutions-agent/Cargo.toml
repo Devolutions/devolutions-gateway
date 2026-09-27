@@ -59,6 +59,7 @@ url = { version = "2.5", features = ["serde"] }
 x509-parser = "0.16"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
+# FIXME: "server" still pulls reqwest 0.12 via ironrdp-tokio 0.10; drop it once ironrdp-tokio uses reqwest 0.13.
 [dependencies.ironrdp]
 version = "0.17"
 default-features = false

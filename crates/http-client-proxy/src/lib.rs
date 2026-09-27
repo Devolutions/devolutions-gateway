@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::fmt::Write as _;
 use std::net::IpAddr;
 use std::str::FromStr;
 
@@ -223,21 +224,26 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
     Ok(Some(proxy_url))
 }
 
-/// Makes the client trust exactly the platform's native root certificates, verified by rustls with `ring`.
+/// Makes the client trust exactly the platform's native root certificates, verified by rustls.
 ///
 /// This keeps the trust behavior of reqwest 0.12's `rustls-tls-native-roots` feature.
 /// reqwest 0.13 otherwise uses `rustls-platform-verifier`, which delegates verification to the OS.
-/// Like reqwest 0.12, native certificates that rustls cannot parse are skipped.
-/// The `ring` provider is installed as the process default if no provider is installed yet.
-pub fn with_native_roots(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+/// Like reqwest 0.12, native certificates that rustls cannot parse are skipped,
+/// and an error is returned when the store has certificates but none of them is valid.
+///
+/// The caller must install a process-wide default rustls crypto provider (e.g. `ring`) beforehand,
+/// otherwise reqwest panics when the client is built.
+pub fn with_native_roots(builder: reqwest::ClientBuilder) -> anyhow::Result<reqwest::ClientBuilder> {
+    let certs = native_root_certs(rustls_native_certs::load_native_certs())?;
+    Ok(builder.tls_certs_only(certs))
+}
 
-    let result = rustls_native_certs::load_native_certs();
-
-    for error in result.errors {
+fn native_root_certs(result: rustls_native_certs::CertificateResult) -> anyhow::Result<Vec<reqwest::Certificate>> {
+    for error in &result.errors {
         debug!(%error, "Error when loading native certificate");
     }
 
+    // reqwest 0.13 fails the whole build on the first certificate rustls rejects, so filter them out first.
     let mut store = rustls::RootCertStore::empty();
     let mut certs = Vec::with_capacity(result.certs.len());
     let mut invalid_count = 0usize;
@@ -259,11 +265,26 @@ pub fn with_native_roots(builder: reqwest::ClientBuilder) -> reqwest::ClientBuil
         invalid_count, "Loaded native root certificates"
     );
 
-    if certs.is_empty() {
-        warn!("No valid certificates found in platform native certificate store");
+    // Same error, message and source as reqwest 0.12 returned from `ClientBuilder::build`.
+    if certs.is_empty() && invalid_count > 0 {
+        let source = if result.errors.is_empty() {
+            anyhow::Error::msg("zero valid certificates found in native root store")
+        } else {
+            let mut acc = String::new();
+            for error in &result.errors {
+                let _ = writeln!(&mut acc, "{error}");
+            }
+            anyhow::Error::msg(acc)
+        };
+
+        return Err(source.context("builder error"));
     }
 
-    builder.tls_certs_only(certs)
+    if certs.is_empty() {
+        warn!("No certificates found in platform native certificate store");
+    }
+
+    Ok(certs)
 }
 
 /// Builds a reqwest client with proxy configuration for a specific target URL.
@@ -285,7 +306,7 @@ pub fn build_client_with_proxy(
     mut builder: reqwest::ClientBuilder,
     url: &Url,
     config: &ProxyConfig,
-) -> reqwest::Result<reqwest::Client> {
+) -> anyhow::Result<reqwest::Client> {
     let proxy_url = match config {
         ProxyConfig::Off => {
             // No proxy mode - never use a proxy.
@@ -305,7 +326,7 @@ pub fn build_client_with_proxy(
         }
     };
 
-    builder = with_native_roots(builder);
+    builder = with_native_roots(builder)?;
 
     if let Some(proxy_url) = proxy_url {
         // Create reqwest::Proxy from the proxy URL.
@@ -316,7 +337,7 @@ pub fn build_client_with_proxy(
         builder = builder.proxy(proxy);
     }
 
-    builder.build()
+    Ok(builder.build()?)
 }
 
 /// Gets or creates a cached HTTP client with proxy configuration.
@@ -341,7 +362,7 @@ pub fn get_or_create_cached_client(
     builder: reqwest::ClientBuilder,
     url: &Url,
     config: &ProxyConfig,
-) -> reqwest::Result<reqwest::Client> {
+) -> anyhow::Result<reqwest::Client> {
     /// Global cache for HTTP clients.
     static CLIENT_CACHE: std::sync::LazyLock<RwLock<ClientCache>> =
         std::sync::LazyLock::new(|| RwLock::new(ClientCache::new()));
@@ -371,4 +392,29 @@ pub fn get_or_create_cached_client(
     cache.insert(cache_key, client.clone());
 
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_valid_native_roots_fails_like_reqwest_0_12() {
+        let mut result = rustls_native_certs::CertificateResult::default();
+        result.certs.push(vec![0xDE, 0xAD].into());
+
+        let error = native_root_certs(result).err().map(|error| format!("{error:#}"));
+
+        assert_eq!(
+            error.as_deref(),
+            Some("builder error: zero valid certificates found in native root store")
+        );
+    }
+
+    #[test]
+    fn empty_native_store_is_not_an_error() {
+        let certs = native_root_certs(rustls_native_certs::CertificateResult::default());
+
+        assert!(certs.is_ok_and(|certs| certs.is_empty()));
+    }
 }

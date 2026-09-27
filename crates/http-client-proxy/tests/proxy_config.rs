@@ -1,8 +1,17 @@
 #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
-use http_client_proxy::{ManualProxyConfig, ProxyConfig, build_client_with_proxy};
+use http_client_proxy::{ManualProxyConfig, ProxyConfig};
 use rstest::rstest;
 use url::Url;
+
+fn build_client_with_proxy(
+    builder: reqwest::ClientBuilder,
+    url: &Url,
+    config: &ProxyConfig,
+) -> anyhow::Result<reqwest::Client> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    http_client_proxy::build_client_with_proxy(builder, url, config)
+}
 
 #[rstest]
 #[case("http://example.com", true)]

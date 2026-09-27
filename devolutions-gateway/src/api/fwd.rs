@@ -325,8 +325,10 @@ async fn fwd_http(
     use tokio_tungstenite::connect_async_tls_with_config;
 
     // Default HTTP client for typical usage.
+    // Panics like reqwest 0.12's `Client::new` did when the native store holds no valid certificate.
     static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         http_client_proxy::with_native_roots(reqwest::Client::builder())
+            .expect("native root store holds at least one valid certificate")
             .build()
             .expect("parameters known to be valid only")
     });

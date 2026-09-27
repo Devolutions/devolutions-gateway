@@ -158,6 +158,7 @@ fn generate_key_and_csr(agent_name: &str) -> Result<(String, String)> {
 
 async fn request_enrollment(gateway_url: &str, enrollment_token: &str, csr_pem: &str) -> Result<EnrollResponse> {
     let client = http_client_proxy::with_native_roots(reqwest::Client::builder())
+        .context("load native root certificates")?
         .build()
         .context("build HTTP client")?;
     let enroll_url = format!("{}/jet/tunnel/enroll", gateway_url.trim_end_matches('/'));

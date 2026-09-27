@@ -47,7 +47,7 @@ pub(crate) enum UpdaterError {
     #[error("missing registry value")]
     MissingRegistryValue,
     #[error("failed to download file at {url}")]
-    FileDownload { source: reqwest::Error, url: String },
+    FileDownload { source: anyhow::Error, url: String },
     #[error("invalid UTF-8")]
     Utf8,
     #[error("IO error")]

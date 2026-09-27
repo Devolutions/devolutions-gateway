@@ -53,7 +53,7 @@ pub(crate) async fn download_binary(url: &str, proxy_conf: &ProxyConf) -> Result
             .send()
             .and_then(|response| response.bytes())
             .map_err(|source| UpdaterError::FileDownload {
-                source,
+                source: source.into(),
                 url: url.to_owned(),
             })
             .await?;
