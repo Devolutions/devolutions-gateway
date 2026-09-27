@@ -994,9 +994,16 @@ async fn shadow_recording(
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
-    let Ok(recording_files) = recordings.list_files(id).await else {
-        warn!(%id, "Shadow recording rejected: failed to list recording files");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
+    let recording_files = match recordings.list_files(id).await {
+        Ok(Some(recording_files)) => recording_files,
+        Ok(None) => {
+            debug!(%id, "Shadow recording rejected: only a Log is being pushed");
+            return close_with_error(ws, StreamerCloseCode::StreamingEnded);
+        }
+        Err(_) => {
+            warn!(%id, "Shadow recording rejected: failed to list recording files");
+            return close_with_error(ws, StreamerCloseCode::InternalError);
+        }
     };
 
     let Some(recording_path) = recording_files.last() else {

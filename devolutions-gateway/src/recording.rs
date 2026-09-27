@@ -42,6 +42,7 @@ struct JrecManifest {
     start_time: i64,
     duration: i64,
     files: Vec<JrecFile>,
+    /// Append-only, like `files`: artifact names and `CurrentArtifact` indices are derived from positions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     logs: Vec<JrecLog>,
 }
@@ -123,8 +124,8 @@ where
             }
         };
 
-        let recording_file = match recordings.connect(session_id, file_type, disconnected_ttl).await {
-            Ok(recording_file) => recording_file,
+        let (recording_file, artifact) = match recordings.connect(session_id, file_type, disconnected_ttl).await {
+            Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
                 client_stream.shutdown().await.context("shutdown")?;
@@ -161,7 +162,10 @@ where
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    recordings.new_chunk_appended(session_id)?;
+                                    // Log data is not media, so it must not wake `/shadow` streamers.
+                                    if let CurrentArtifact::Recording(_) = artifact {
+                                        recordings.new_chunk_appended(session_id)?;
+                                    }
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -251,6 +255,12 @@ pub enum OnGoingRecordingState {
     LastSeen { timestamp: i64 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurrentArtifact {
+    Recording(usize),
+    Log(usize),
+}
+
 #[derive(Debug, Clone)]
 struct OnGoingRecording {
     state: OnGoingRecordingState,
@@ -258,7 +268,7 @@ struct OnGoingRecording {
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
-    pushing_log: bool,
+    artifact: CurrentArtifact,
 }
 
 enum RecordingManagerMessage {
@@ -266,7 +276,7 @@ enum RecordingManagerMessage {
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-        channel: oneshot::Sender<Utf8PathBuf>,
+        channel: oneshot::Sender<(Utf8PathBuf, CurrentArtifact)>,
     },
     Disconnect {
         id: Uuid,
@@ -277,7 +287,7 @@ enum RecordingManagerMessage {
     },
     ListFiles {
         id: Uuid,
-        channel: oneshot::Sender<Vec<Utf8PathBuf>>,
+        channel: oneshot::Sender<Option<Vec<Utf8PathBuf>>>,
     },
     GetCount {
         channel: oneshot::Sender<usize>,
@@ -342,7 +352,7 @@ impl RecordingMessageSender {
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-    ) -> anyhow::Result<Utf8PathBuf> {
+    ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
@@ -429,7 +439,8 @@ impl RecordingMessageSender {
         Ok(rx.await?)
     }
 
-    pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
+    /// Returns `None` when the ongoing push is a Log: there is no Recording to stream.
+    pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Option<Vec<Utf8PathBuf>>> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::ListFiles {
@@ -525,7 +536,7 @@ impl RecordingManagerTask {
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-    ) -> anyhow::Result<Utf8PathBuf> {
+    ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
         if let Some(ongoing) = self.ongoing_recordings.get(&id)
@@ -537,31 +548,31 @@ impl RecordingManagerTask {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        let (manifest, recording_file, pushing_log) = if recording_path.exists() {
+        let (manifest, recording_file, artifact) = if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
 
             let mut existing_manifest =
                 JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
 
-            let pushing_log = file_type == RecordingFileType::SessionRecordingLog && existing_manifest.has_recording();
-
-            let file_name = if pushing_log {
-                let file_name = format!("log-{}.{}", existing_manifest.logs.len(), file_type.extension());
-                existing_manifest.logs.push(JrecLog {
-                    file_name: file_name.clone(),
-                });
-                file_name
-            } else {
-                let next_file_idx = existing_manifest.files.len();
-                let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
-                let file_name = format!("recording-{next_file_idx}.{}", file_type.extension());
-                existing_manifest.files.push(JrecFile {
-                    start_time,
-                    duration: 0,
-                    file_name: file_name.clone(),
-                });
-                file_name
-            };
+            let (file_name, artifact) =
+                if file_type == RecordingFileType::SessionRecordingLog && existing_manifest.has_recording() {
+                    let idx = existing_manifest.logs.len();
+                    let file_name = format!("log-{idx}.{}", file_type.extension());
+                    existing_manifest.logs.push(JrecLog {
+                        file_name: file_name.clone(),
+                    });
+                    (file_name, CurrentArtifact::Log(idx))
+                } else {
+                    let idx = existing_manifest.files.len();
+                    let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
+                    let file_name = format!("recording-{idx}.{}", file_type.extension());
+                    existing_manifest.files.push(JrecFile {
+                        start_time,
+                        duration: 0,
+                        file_name: file_name.clone(),
+                    });
+                    (file_name, CurrentArtifact::Recording(idx))
+                };
 
             let recording_file = recording_path.join(&file_name);
 
@@ -569,7 +580,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("override existing manifest")?;
 
-            (existing_manifest, recording_file, pushing_log)
+            (existing_manifest, recording_file, artifact)
         } else {
             debug!(path = %recording_path, "Create recording directory");
 
@@ -599,7 +610,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("write initial manifest to disk")?;
 
-            (initial_manifest, recording_file, false)
+            (initial_manifest, recording_file, CurrentArtifact::Recording(0))
         };
 
         let active_recording_count = self.rx.active_recordings.insert(id);
@@ -625,7 +636,7 @@ impl RecordingManagerTask {
                 manifest_path,
                 session_must_be_recorded,
                 disconnected_ttl,
-                pushing_log,
+                artifact,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -639,7 +650,7 @@ impl RecordingManagerTask {
             );
         }
 
-        Ok(recording_file)
+        Ok((recording_file, artifact))
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
@@ -655,24 +666,16 @@ impl RecordingManagerTask {
 
         ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
 
-        let current_file_name = if ongoing.pushing_log {
-            &ongoing
-                .manifest
-                .logs
-                .last()
-                .context("no log file (this is a bug)")?
-                .file_name
-        } else {
-            let current_file = ongoing
-                .manifest
-                .files
-                .last_mut()
-                .context("no recording file (this is a bug)")?;
-            current_file.duration = end_time - current_file.start_time;
+        let current_file_name = match ongoing.artifact {
+            CurrentArtifact::Recording(idx) => {
+                let current_file = &mut ongoing.manifest.files[idx];
+                current_file.duration = end_time - current_file.start_time;
 
-            ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
+                ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
 
-            &current_file.file_name
+                &current_file.file_name
+            }
+            CurrentArtifact::Log(idx) => &ongoing.manifest.logs[idx].file_name,
         };
 
         let recording_file_path = ongoing
@@ -837,8 +840,8 @@ async fn recording_manager_task(
                 match msg {
                     RecordingManagerMessage::Connect { id, file_type, disconnected_ttl, channel  } => {
                         match manager.handle_connect(id, file_type, disconnected_ttl).await {
-                            Ok(recording_file) => {
-                                let _ = channel.send(recording_file);
+                            Ok(connected) => {
+                                let _ = channel.send(connected);
                             }
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
@@ -890,6 +893,9 @@ async fn recording_manager_task(
                     },
                     RecordingManagerMessage::ListFiles { id, channel } => {
                         match manager.ongoing_recordings.get(&id) {
+                            Some(recording) if matches!(recording.artifact, CurrentArtifact::Log(_)) => {
+                                let _ = channel.send(None);
+                            }
                             Some(recording) => {
                                 let recordings_folder = recording.manifest_path.parent().expect("a parent");
 
@@ -900,7 +906,7 @@ async fn recording_manager_task(
                                     .map(|file| recordings_folder.join(&file.file_name))
                                     .collect();
 
-                                let _ = channel.send(files);
+                                let _ = channel.send(Some(files));
                             }
                             None => {
                                 warn!(%id, "No recording found for provided ID");
@@ -1072,12 +1078,57 @@ mod tests {
         }
 
         async fn connect(&self, id: Uuid, file_type: RecordingFileType) -> String {
-            let path = self
+            let (path, _) = self
                 .sender
                 .connect(id, file_type, Duration::ZERO)
                 .await
                 .expect("connect");
             path.file_name().expect("file name").to_owned()
+        }
+
+        async fn client_push_wakes_streamers(&self, id: Uuid, file_type: RecordingFileType) -> bool {
+            let claims = serde_json::from_value(json!({
+                "jet_aid": id,
+                "jet_rop": "push",
+                "exp": i64::MAX,
+                "jti": Uuid::new_v4(),
+            }))
+            .expect("claims");
+            let (mut client, server) = io::duplex(1024);
+            let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+            let push = tokio::spawn(
+                ClientPush::builder()
+                    .recordings(self.sender.clone())
+                    .claims(claims)
+                    .client_stream(server)
+                    .file_type(file_type)
+                    .session_id(id)
+                    .shutdown_signal(shutdown_signal)
+                    .build()
+                    .run(),
+            );
+
+            let (tx, mut woken) = oneshot::channel();
+            self.sender.add_new_chunk_listener(id, tx);
+
+            // The push flushes, and so signals, whenever it runs out of input.
+            let woke = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    client.write_all(b"chunk").await.expect("write chunk");
+                    tokio::select! {
+                        _ = &mut woken => break,
+                        () = tokio::time::sleep(Duration::from_millis(20)) => {}
+                    }
+                }
+            })
+            .await
+            .is_ok();
+
+            drop(client);
+            push.await.expect("join push").expect("push");
+            self.sender.get_count().await.expect("sync with manager");
+            drop(shutdown_handle);
+            woke
         }
 
         async fn disconnect(&self, id: Uuid) {
@@ -1158,7 +1209,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shadow_file_list_excludes_logs() {
+    async fn shadow_streams_ongoing_recording() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness.connect(id, RecordingFileType::WebM).await;
+
+        let files = harness.sender.list_files(id).await.expect("list files");
+
+        let files = files.expect("a Recording is being pushed");
+        let file_names: Vec<_> = files.iter().filter_map(|path| path.file_name()).collect();
+        assert_eq!(file_names, ["recording-0.webm"]);
+    }
+
+    #[tokio::test]
+    async fn shadow_refuses_while_only_a_log_is_pushed() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.push(id, RecordingFileType::WebM).await;
@@ -1166,8 +1230,31 @@ mod tests {
 
         let files = harness.sender.list_files(id).await.expect("list files");
 
-        let file_names: Vec<_> = files.iter().filter_map(|path| path.file_name()).collect();
-        assert_eq!(file_names, ["recording-0.webm"]);
+        assert!(files.is_none());
+    }
+
+    #[tokio::test]
+    async fn log_chunks_do_not_wake_streamers() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness.push(id, RecordingFileType::WebM).await;
+
+        assert!(
+            !harness
+                .client_push_wakes_streamers(id, RecordingFileType::SessionRecordingLog)
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn log_only_session_slog_chunks_wake_streamers() {
+        let harness = Harness::start();
+
+        assert!(
+            harness
+                .client_push_wakes_streamers(Uuid::new_v4(), RecordingFileType::SessionRecordingLog)
+                .await
+        );
     }
 
     #[test]
