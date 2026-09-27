@@ -281,7 +281,6 @@ pub(crate) async fn task_handler(
         SubCommandArgs::Task {
             jet_tk: request.jet_tk,
             jet_aid: request.jet_aid,
-            jet_task_reuse: request.jet_task_reuse,
         },
     )
     .await
@@ -415,6 +414,4 @@ pub(crate) struct TaskRequest {
     common: CommonRequest,
     jet_tk: TaskKind,
     jet_aid: Option<Uuid>,
-    #[serde(default)]
-    jet_task_reuse: bool,
 }
