@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// AI settings used by an &#x60;ai-log&#x60; task.
+    /// AI settings used by an &#x60;ai-log&#x60; task: the body of &#x60;POST /jet/tasks&#x60; for a TASK token of kind &#x60;ai-log&#x60;.
     /// </summary>
     [DataContract(Name = "AiLogParams")]
     public partial class AiLogParams : IValidatableObject
@@ -47,13 +47,19 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AiLogParams" /> class.
         /// </summary>
-        /// <param name="apiKey">Required by every provider; kept in memory for this task only..</param>
+        /// <param name="apiKey">Kept in memory for this task only. (required).</param>
         /// <param name="baseUrl">Overrides the provider default; required for &#x60;openai-compatible&#x60;..</param>
         /// <param name="maxOutputTokens">Upper bound of tokens in each AI answer..</param>
         /// <param name="model">Model identifier, passed to the provider as is. (required).</param>
         /// <param name="provider">provider (required).</param>
         public AiLogParams(string apiKey = default(string), string baseUrl = default(string), int? maxOutputTokens = default(int?), string model = default(string), AiProvider provider = default(AiProvider))
         {
+            // to ensure "apiKey" is required (not null)
+            if (apiKey == null)
+            {
+                throw new ArgumentNullException("apiKey is a required property for AiLogParams and cannot be null");
+            }
+            this.ApiKey = apiKey;
             // to ensure "model" is required (not null)
             if (model == null)
             {
@@ -61,16 +67,15 @@ namespace Devolutions.Gateway.Client.Model
             }
             this.Model = model;
             this.Provider = provider;
-            this.ApiKey = apiKey;
             this.BaseUrl = baseUrl;
             this.MaxOutputTokens = maxOutputTokens;
         }
 
         /// <summary>
-        /// Required by every provider; kept in memory for this task only.
+        /// Kept in memory for this task only.
         /// </summary>
-        /// <value>Required by every provider; kept in memory for this task only.</value>
-        [DataMember(Name = "apiKey", EmitDefaultValue = true)]
+        /// <value>Kept in memory for this task only.</value>
+        [DataMember(Name = "apiKey", IsRequired = true, EmitDefaultValue = true)]
         public string ApiKey { get; set; }
 
         /// <summary>

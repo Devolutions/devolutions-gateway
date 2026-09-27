@@ -906,16 +906,16 @@ paths:
       summary: Starts a background task.
       description: |-
         The task kind and its target come from the TASK token.
-        The request body holds the kind-specific parameters: `AiLogParams` for `ai-log`.
+        The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.
 
         This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
       operationId: StartTask
       requestBody:
-        description: Kind-specific task parameters
+        description: Kind-specific task parameters, such as `AiLogParams` for `ai-log`
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AiLogParams'
+              type: object
         required: true
       responses:
         '202':
@@ -942,6 +942,10 @@ paths:
                 $ref: '#/components/schemas/TaskErrorResponse'
         '500':
           description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
       security:
       - task_token: []
   /jet/tasks/{id}:
@@ -977,6 +981,16 @@ paths:
           description: Insufficient permissions
         '404':
           description: No task with this ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
       security:
       - scope_token:
         - gateway.tasks.read
@@ -1486,15 +1500,15 @@ components:
       - unresponsive
     AiLogParams:
       type: object
-      description: AI settings used by an `ai-log` task.
+      description: 'AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.'
       required:
       - provider
       - model
+      - apiKey
       properties:
         apiKey:
           type: string
-          description: Required by every provider; kept in memory for this task only.
-          nullable: true
+          description: Kept in memory for this task only.
         baseUrl:
           type: string
           description: Overrides the provider default; required for `openai-compatible`.
@@ -2519,17 +2533,26 @@ components:
 
             Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
           nullable: true
+    TaskErrorCode:
+      type: string
+      description: Stable code telling a client why a task request failed; safe to show.
+      enum:
+      - invalid_params
+      - missing_model
+      - missing_api_key
+      - missing_base_url
+      - invalid_ai_settings
+      - recording_active
+      - task_not_found
+      - internal
     TaskErrorResponse:
       type: object
-      description: Why a task was not started.
+      description: Why a task request failed.
       required:
       - error
       properties:
         error:
-          type: string
-          description: |-
-            Stable error code, such as `invalid_params`, `missing_model`, `missing_api_key`, `missing_base_url`,
-            `invalid_ai_settings` or `recording_active`.
+          $ref: '#/components/schemas/TaskErrorCode'
     TaskInfo:
       type: object
       description: |-

@@ -83,6 +83,7 @@ model/setUpdateScheduleRequest.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
 model/targetConnectionOptions.ts
+model/taskErrorCode.ts
 model/taskErrorResponse.ts
 model/taskInfo.ts
 model/taskState.ts

@@ -7,15 +7,16 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { TaskErrorCode } from './taskErrorCode';
 
 
 /**
- * Why a task was not started.
+ * Why a task request failed.
  */
 export interface TaskErrorResponse { 
-    /**
-     * Stable error code, such as `invalid_params`, `missing_model`, `missing_api_key`, `missing_base_url`, `invalid_ai_settings` or `recording_active`.
-     */
-    error: string;
+    error: TaskErrorCode;
 }
+export namespace TaskErrorResponse {
+}
+
 

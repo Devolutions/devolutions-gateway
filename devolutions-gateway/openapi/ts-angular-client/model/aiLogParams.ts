@@ -11,13 +11,13 @@ import { AiProvider } from './aiProvider';
 
 
 /**
- * AI settings used by an `ai-log` task.
+ * AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.
  */
 export interface AiLogParams { 
     /**
-     * Required by every provider; kept in memory for this task only.
+     * Kept in memory for this task only.
      */
-    apiKey?: string | null;
+    apiKey: string;
     /**
      * Overrides the provider default; required for `openai-compatible`.
      */

@@ -243,6 +243,7 @@ Class | Method | HTTP request | Description
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
  - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
+ - [Model.TaskErrorCode](docs/TaskErrorCode.md)
  - [Model.TaskErrorResponse](docs/TaskErrorResponse.md)
  - [Model.TaskInfo](docs/TaskInfo.md)
  - [Model.TaskState](docs/TaskState.md)
