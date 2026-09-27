@@ -5,7 +5,7 @@ use secrecy::SecretString;
 use url::Url;
 use uuid::Uuid;
 
-use super::{EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, StartError, TaskCtx, TaskError, TaskKind};
+use super::{EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, TaskCtx, TaskError, TaskErrorCode, TaskKind};
 use crate::DgwState;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ pub struct AiLogTarget {
     pub session_id: Uuid,
 }
 
-/// AI settings used by an `ai-log` task.
+/// AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,9 +22,9 @@ pub struct AiLogParams {
     pub provider: AiProvider,
     /// Model identifier, passed to the provider as is.
     pub model: String,
-    /// Required by every provider; kept in memory for this task only.
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
-    pub api_key: Option<SecretString>,
+    /// Kept in memory for this task only.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub api_key: SecretString,
     /// Overrides the provider default; required for `openai-compatible`.
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub base_url: Option<Url>,
@@ -94,8 +94,8 @@ impl TaskKind for AiLogTask {
             return Err(TaskError::Permanent(SECRETS_LOST_ERROR.to_owned()));
         };
 
-        let _client = build_client(&ctx.params, Some(api_key), &ctx.state)
-            .map_err(|error| TaskError::Permanent(error.message()))?;
+        let _client =
+            build_client(&ctx.params, api_key, &ctx.state).map_err(|error| TaskError::Permanent(error.message()))?;
 
         Err(TaskError::Permanent("ai-log task not implemented yet".to_owned()))
     }
@@ -109,9 +109,9 @@ impl EphemeralTask for AiLogTask {
         target: &AiLogTarget,
         request: AiLogParams,
         state: &DgwState,
-    ) -> Result<(AiLogSettings, SecretString), StartError> {
+    ) -> Result<(AiLogSettings, SecretString), TaskErrorCode> {
         if state.recordings.active_recordings.contains(target.session_id) {
-            return Err(StartError::TargetBusy("recording_active"));
+            return Err(TaskErrorCode::RecordingActive);
         }
 
         let AiLogParams {
@@ -129,19 +129,17 @@ impl EphemeralTask for AiLogTask {
             max_output_tokens,
         };
 
-        build_client(&settings, api_key.as_ref(), state).map_err(|error| match error {
+        build_client(&settings, &api_key, state).map_err(|error| match error {
             ClientError::Build(error) => {
                 let code = build_error_code(&error);
-                warn!(%error, code, "Invalid AI settings");
-                StartError::InvalidParams(code)
+                debug!(%error, ?code, "Invalid AI settings");
+                code
             }
             ClientError::HttpClient(error) => {
                 error!(%error, "Failed to build the HTTP client for the AI provider");
-                StartError::Internal
+                TaskErrorCode::Internal
             }
         })?;
-
-        let api_key = api_key.ok_or(StartError::InvalidParams("missing_api_key"))?;
 
         Ok((settings, api_key))
     }
@@ -161,18 +159,13 @@ impl ClientError {
     }
 }
 
-fn build_client(
-    settings: &AiLogSettings,
-    api_key: Option<&SecretString>,
-    state: &DgwState,
-) -> Result<AiClient, ClientError> {
+fn build_client(settings: &AiLogSettings, api_key: &SecretString, state: &DgwState) -> Result<AiClient, ClientError> {
     let provider = Provider::from(settings.provider);
 
-    let mut builder = AiClient::builder().provider(provider).model(settings.model.clone());
-
-    if let Some(api_key) = api_key {
-        builder = builder.api_key(api_key.clone());
-    }
+    let mut builder = AiClient::builder()
+        .provider(provider)
+        .model(settings.model.clone())
+        .api_key(api_key.clone());
 
     let endpoint = settings.base_url.clone().or_else(|| provider.default_base_url());
 
@@ -194,12 +187,12 @@ fn build_client(
     builder.build().map_err(ClientError::Build)
 }
 
-fn build_error_code(error: &BuildError) -> &'static str {
+fn build_error_code(error: &BuildError) -> TaskErrorCode {
     match error {
-        BuildError::MissingModel => "missing_model",
-        BuildError::MissingApiKey(_) => "missing_api_key",
-        BuildError::MissingBaseUrl(_) => "missing_base_url",
-        _ => "invalid_ai_settings",
+        BuildError::MissingModel => TaskErrorCode::MissingModel,
+        BuildError::MissingApiKey(_) => TaskErrorCode::MissingApiKey,
+        BuildError::MissingBaseUrl(_) => TaskErrorCode::MissingBaseUrl,
+        _ => TaskErrorCode::InvalidAiSettings,
     }
 }
 
@@ -254,7 +247,7 @@ mod tests {
 
         let error = AiLogTask::prepare(&target, params(), &state).expect_err("session is busy");
 
-        assert_eq!(error, StartError::TargetBusy("recording_active"));
+        assert_eq!(error, TaskErrorCode::RecordingActive);
     }
 
     #[tokio::test]
@@ -277,14 +270,14 @@ mod tests {
 
     #[test]
     fn build_errors_map_to_stable_codes() {
-        assert_eq!(build_error_code(&BuildError::MissingModel), "missing_model");
+        assert_eq!(build_error_code(&BuildError::MissingModel), TaskErrorCode::MissingModel);
         assert_eq!(
             build_error_code(&BuildError::MissingApiKey(Provider::OpenAi)),
-            "missing_api_key"
+            TaskErrorCode::MissingApiKey
         );
         assert_eq!(
             build_error_code(&BuildError::MissingBaseUrl(Provider::OpenAiCompatible)),
-            "missing_base_url"
+            TaskErrorCode::MissingBaseUrl
         );
     }
 

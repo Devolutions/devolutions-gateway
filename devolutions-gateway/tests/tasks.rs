@@ -12,8 +12,7 @@ use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
 use base64::Engine as _;
-use devolutions_gateway::job_queue::{JobQueueCtx, JobQueueTask, JobRunnerTask};
-use devolutions_gateway::tasks::{SECRETS_LOST_ERROR, TaskService};
+use devolutions_gateway::tasks::{SECRETS_LOST_ERROR, TaskRunnerTask, TaskService};
 use devolutions_gateway::{DgwState, MockHandles};
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, Task as _};
 use http_body_util::BodyExt as _;
@@ -24,22 +23,27 @@ use uuid::Uuid;
 
 const API_KEY: &str = "sk-task-api-test-secret";
 
-const CONFIG: &str = r#"{
-    "ProvisionerPublicKeyData": {
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
-    },
-    "Listeners": [
-        {
-            "InternalUrl": "http://*:7171",
-            "ExternalUrl": "https://*:7171"
+/// Gateway configuration keeping the task database in `dir`, so a later start on the same `dir` acts as a restart.
+fn config(dir: &Path, enable_unstable: bool) -> String {
+    json!({
+        "ProvisionerPublicKeyData": {
+            "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        },
+        "Listeners": [
+            {
+                "InternalUrl": "http://*:7171",
+                "ExternalUrl": "https://*:7171"
+            }
+        ],
+        "Proxy": { "Mode": "Off" },
+        "ProvisionerTasksDatabase": tasks_db(dir),
+        "__debug__": {
+            "disable_token_validation": true,
+            "enable_unstable": enable_unstable
         }
-    ],
-    "Proxy": { "Mode": "Off" },
-    "__debug__": {
-        "disable_token_validation": true,
-        "enable_unstable": true
-    }
-}"#;
+    })
+    .to_string()
+}
 
 struct Gateway {
     app: Router,
@@ -55,8 +59,12 @@ enum Jobs {
 }
 
 impl Gateway {
-    /// Starts a Gateway whose task and job databases live in `dir`, so a later start acts as a restart.
-    async fn start(config: &str, dir: &Path, jobs: Jobs) -> anyhow::Result<Self> {
+    /// Starts a Gateway with the task system enabled, keeping the task database in `dir`.
+    async fn start(dir: &Path, jobs: Jobs) -> anyhow::Result<Self> {
+        Self::start_with_config(&config(dir, true), jobs).await
+    }
+
+    async fn start_with_config(config: &str, jobs: Jobs) -> anyhow::Result<Self> {
         let (mut state, handles) = DgwState::mock(config)?;
         let MockHandles {
             session_manager_rx,
@@ -70,21 +78,15 @@ impl Gateway {
         // The auth middleware asks the session manager about any token carrying `jet_aid`; nothing answers in the mock.
         drop(session_manager_rx);
 
-        state.tasks = TaskService::open(tasks_db(dir).to_str().unwrap()).await?;
-
-        let job_queue_ctx = JobQueueCtx::init(&job_queue_db(dir)).await?;
-        state.tasks.reconcile(&job_queue_ctx).await?;
-        state.job_queue_handle = job_queue_ctx.job_queue_handle.clone();
+        state.tasks = TaskService::open_if_enabled(&state.conf_handle.get_conf()).await?;
 
         let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
         let mut job_tasks = Vec::new();
 
-        if jobs == Jobs::Run {
-            let runner = JobRunnerTask::new(&job_queue_ctx, state.clone());
-            job_tasks.push(ChildTask::spawn(runner.run(shutdown_signal.clone())));
+        if let (Some(tasks), Jobs::Run) = (state.tasks.clone(), jobs) {
+            let runner = TaskRunnerTask::new(tasks, state.clone());
+            job_tasks.push(ChildTask::spawn(runner.run(shutdown_signal)));
         }
-
-        job_tasks.push(ChildTask::spawn(JobQueueTask::new(job_queue_ctx).run(shutdown_signal)));
 
         let app = devolutions_gateway::make_http_service(state)
             .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
@@ -116,12 +118,9 @@ fn tasks_db(dir: &Path) -> PathBuf {
     dir.join("provisioner_tasks.db")
 }
 
-fn job_queue_db(dir: &Path) -> PathBuf {
-    dir.join("job_queue.db")
-}
-
+/// Jobs in the task job queue, which lives in the task database.
 async fn queued_job_count(dir: &Path) -> u64 {
-    let conn = job_queue_libsql::libsql::Builder::new_local(job_queue_db(dir))
+    let conn = job_queue_libsql::libsql::Builder::new_local(tasks_db(dir))
         .build()
         .await
         .unwrap()
@@ -150,7 +149,7 @@ async fn wait_for_queued_jobs(dir: &Path, expected: u64) {
     .expect("job queue reaches the expected size");
 }
 
-/// Every file of both databases, WAL included, since SQLite may not have checkpointed yet.
+/// Every file of the task database, WAL included, since SQLite may not have checkpointed yet.
 fn database_bytes(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     std::fs::read_dir(dir)
         .unwrap()
@@ -167,9 +166,8 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
     haystack.windows(needle.len()).any(|window| window == needle.as_bytes())
 }
 
-fn assert_databases_hold_settings_but_not_the_key(dir: &Path) {
+fn assert_database_holds_settings_but_not_the_key(dir: &Path) {
     let files = database_bytes(dir);
-    assert!(files.iter().any(|(path, _)| path.ends_with("job_queue.db")));
     assert!(files.iter().any(|(path, _)| path.ends_with("provisioner_tasks.db")));
 
     let all = files
@@ -312,7 +310,7 @@ fn capture_logs() -> (CapturedLogs, impl Sized) {
 #[tokio::test]
 async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
     let started = start_task(&app).await;
@@ -336,7 +334,7 @@ async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
 #[tokio::test]
 async fn start_requires_a_task_token() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
     let (status, _) = send(&app, start_request(None, &ai_params())).await;
@@ -349,7 +347,7 @@ async fn start_requires_a_task_token() {
 #[tokio::test]
 async fn status_requires_the_tasks_read_scope() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
     let id = start_task(&app).await["id"].as_str().unwrap().parse::<Uuid>().unwrap();
 
@@ -369,26 +367,34 @@ async fn status_requires_the_tasks_read_scope() {
 #[tokio::test]
 async fn unknown_task_is_not_found() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
-    let (status, _) = send(
+    let (status, body) = send(
         &app,
         status_request(Some(&scope_token("gateway.tasks.read")), Uuid::new_v4()),
     )
     .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap(),
+        json!({ "error": "task_not_found" })
+    );
 }
 
 #[tokio::test]
 async fn invalid_ai_settings_are_typed_bad_requests() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
     for (params, expected) in [
-        (json!({ "provider": "openai", "model": "gpt-test" }), "missing_api_key"),
+        (json!({ "provider": "openai", "model": "gpt-test" }), "invalid_params"),
+        (
+            json!({ "provider": "openai", "model": "gpt-test", "apiKey": "" }),
+            "missing_api_key",
+        ),
         (
             json!({ "provider": "openai", "model": " ", "apiKey": API_KEY }),
             "missing_model",
@@ -417,7 +423,7 @@ async fn invalid_ai_settings_are_typed_bad_requests() {
 async fn api_key_never_appears_in_responses_or_logs() {
     let (logs, _guard) = capture_logs();
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
     let started = start_task(&app).await;
@@ -428,7 +434,7 @@ async fn api_key_never_appears_in_responses_or_logs() {
     assert!(!finished.to_string().contains(API_KEY));
 
     // A key sent in the wrong field must not be echoed by the parameter error either.
-    let misplaced = json!({ "provider": "openai", "model": "gpt-test", "maxOutputTokens": API_KEY });
+    let misplaced = json!({ "provider": "openai", "model": "gpt-test", "apiKey": "sk", "maxOutputTokens": API_KEY });
     let (status, body) = send(&app, start_request(Some(&task_token()), &misplaced)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!body.contains(API_KEY));
@@ -439,10 +445,11 @@ async fn api_key_never_appears_in_responses_or_logs() {
 }
 
 #[tokio::test]
-async fn endpoints_are_hidden_when_unstable_is_disabled() {
-    let config = CONFIG.replace("\"enable_unstable\": true", "\"enable_unstable\": false");
+async fn stable_gateway_never_touches_the_task_database() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(&config, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start_with_config(&config(dir.path(), false), Jobs::Run)
+        .await
+        .unwrap();
     let app = gateway.app.clone();
 
     let (status, _) = send(&app, start_request(Some(&task_token()), &ai_params())).await;
@@ -454,12 +461,30 @@ async fn endpoints_are_hidden_when_unstable_is_disabled() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    gateway.stop().await;
+
+    assert!(
+        database_bytes(dir.path()).is_empty(),
+        "no task database file is created"
+    );
+}
+
+#[tokio::test]
+async fn unstable_gateway_opens_the_task_database_at_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+
+    assert!(tasks_db(dir.path()).exists());
+    assert_eq!(queued_job_count(dir.path()).await, 0);
+
+    gateway.stop().await;
 }
 
 #[tokio::test]
 async fn neither_database_ever_holds_the_api_key() {
     let dir = tempfile::tempdir().unwrap();
-    let gateway = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
 
     let started = start_task(&gateway.app).await;
     let id = started["id"].as_str().unwrap().parse::<Uuid>().unwrap();
@@ -468,22 +493,22 @@ async fn neither_database_ever_holds_the_api_key() {
 
     gateway.stop().await;
 
-    assert_databases_hold_settings_but_not_the_key(dir.path());
+    assert_database_holds_settings_but_not_the_key(dir.path());
 }
 
 #[tokio::test]
 async fn after_a_restart_the_ephemeral_task_fails_without_retry() {
     let dir = tempfile::tempdir().unwrap();
 
-    let before = Gateway::start(CONFIG, dir.path(), Jobs::QueueOnly).await.unwrap();
+    let before = Gateway::start(dir.path(), Jobs::QueueOnly).await.unwrap();
     let started = start_task(&before.app).await;
     let id = started["id"].as_str().unwrap().parse::<Uuid>().unwrap();
     wait_for_queued_jobs(dir.path(), 1).await;
     before.stop().await;
 
-    assert_databases_hold_settings_but_not_the_key(dir.path());
+    assert_database_holds_settings_but_not_the_key(dir.path());
 
-    let after = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let after = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let finished = wait_until_finished(&after.app, id).await;
 
     assert_eq!(
@@ -499,14 +524,14 @@ async fn after_a_restart_the_ephemeral_task_fails_without_retry() {
     wait_for_queued_jobs(dir.path(), 0).await;
     after.stop().await;
 
-    assert_databases_hold_settings_but_not_the_key(dir.path());
+    assert_database_holds_settings_but_not_the_key(dir.path());
 }
 
 #[tokio::test]
 async fn task_records_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
 
-    let before = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let before = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let id = start_task(&before.app).await["id"]
         .as_str()
         .unwrap()
@@ -515,7 +540,7 @@ async fn task_records_survive_a_restart() {
     let finished = wait_until_finished(&before.app, id).await;
     before.stop().await;
 
-    let after = Gateway::start(CONFIG, dir.path(), Jobs::Run).await.unwrap();
+    let after = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let (status, body) = send(&after.app, status_request(Some(&scope_token("gateway.tasks.read")), id)).await;
 
     assert_eq!(status, StatusCode::OK);

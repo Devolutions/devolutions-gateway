@@ -113,6 +113,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tasks::TaskInfo,
         crate::api::tasks::TaskState,
         crate::api::tasks::TaskErrorResponse,
+        crate::tasks::TaskErrorCode,
         crate::tasks::ai_log::AiLogParams,
         crate::tasks::ai_log::AiProvider,
         crate::tasks::ai_log::AiLogSubstate,

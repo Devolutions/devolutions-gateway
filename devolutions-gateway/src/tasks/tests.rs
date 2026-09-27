@@ -55,20 +55,60 @@ impl<const N: u32> TaskKind for Scripted<N> {
 }
 
 impl<const N: u32> DurableTask for Scripted<N> {
-    fn prepare(_: &(), _: &Outcome, _: &DgwState) -> Result<(), StartError> {
+    fn prepare(_: &(), _: &Outcome, _: &DgwState) -> Result<(), TaskErrorCode> {
+        Ok(())
+    }
+}
+
+/// Durable test task that succeeds after making the task records unwritable.
+struct LosesStore;
+
+impl TaskKind for LosesStore {
+    const KIND: &'static str = "loses-store";
+    const RETRY: RetryPolicy = RetryPolicy::JOB_QUEUE;
+
+    /// Path of the task database.
+    type Target = String;
+    type Params = ();
+    type Substate = Step;
+    type Output = u32;
+
+    async fn run(ctx: TaskCtx<Self>) -> Result<u32, TaskError> {
+        let conn = libsql::Builder::new_local(ctx.target.as_str())
+            .build()
+            .await
+            .expect("database")
+            .connect()
+            .expect("connection");
+
+        conn.execute("ALTER TABLE task RENAME TO task_gone", ())
+            .await
+            .expect("rename");
+
+        Ok(42)
+    }
+}
+
+impl DurableTask for LosesStore {
+    fn prepare(_: &String, _: &(), _: &DgwState) -> Result<(), TaskErrorCode> {
         Ok(())
     }
 }
 
 struct Harness {
     state: DgwState,
-    handles: MockHandles,
+    tasks: TaskService,
+    _handles: MockHandles,
     _dir: tempfile::TempDir,
     db_path: String,
 }
 
 impl Harness {
     async fn new() -> Self {
+        Self::with_timeout(TASK_TIMEOUT).await
+    }
+
+    async fn with_timeout(timeout: Duration) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let db_path = dir
             .path()
@@ -77,56 +117,72 @@ impl Harness {
             .expect("UTF-8")
             .to_owned();
 
-        let (mut state, handles) = DgwState::mock(CONFIG).expect("mock state");
-        state.tasks = TaskService::open(&db_path).await.expect("task service");
+        let (state, handles) = DgwState::mock(CONFIG).expect("mock state");
+        let tasks = TaskService::open(&db_path, timeout).await.expect("task service");
 
         Self {
             state,
-            handles,
+            tasks,
+            _handles: handles,
             _dir: dir,
             db_path,
         }
     }
 
-    fn tasks(&self) -> &TaskService {
-        &self.state.tasks
+    /// Reads back the job of a task from the task job queue.
+    async fn queued_job(&self, id: Uuid) -> TaskJob {
+        let json = self
+            .tasks
+            .inner
+            .queue
+            .job_defs(TaskJob::NAME)
+            .await
+            .expect("job definitions")
+            .into_iter()
+            .find(|json| serde_json::from_str::<TaskJobDef>(json).is_ok_and(|def| def.task_id == id))
+            .expect("queued job");
+
+        TaskJob::read_json(&json, self.tasks.clone(), self.state.clone()).expect("valid job")
     }
 
-    /// Takes the job queued by the last started task, as the job queue would read it back.
-    async fn queued_job(&mut self) -> TaskJob {
-        let message = self.handles.job_queue_rx.recv().await.expect("queued job");
-        assert_eq!(message.job.name(), TaskJob::NAME);
-        let json = message.job.write_json().expect("job JSON");
-        TaskJob::read_json(&json, self.state.clone()).expect("valid job")
-    }
-
-    async fn start_scripted<const N: u32>(&mut self, outcome: Outcome) -> TaskJob {
+    async fn start_scripted<const N: u32>(&self, outcome: Outcome) -> TaskJob {
         let body = serde_json::to_vec(&outcome).expect("JSON");
-        let state = self.state.clone();
 
-        self.tasks()
-            .start_durable::<Scripted<N>>((), &body, Uuid::new_v4(), &state)
+        let snapshot = self
+            .tasks
+            .start_durable::<Scripted<N>>((), &body, Uuid::new_v4(), &self.state)
             .await
             .expect("task starts");
 
-        self.queued_job().await
+        self.queued_job(snapshot.id).await
     }
 
     async fn run_scripted<const N: u32>(&self, job: &TaskJob) -> anyhow::Result<()> {
-        self.tasks()
+        self.tasks
             .execute_durable::<Scripted<N>>(job.def.clone(), &self.state)
             .await
     }
 
+    async fn start_ai_log(&self) -> TaskSnapshot {
+        let body = serde_json::json!({ "provider": "openai", "model": "gpt-test", "apiKey": API_KEY }).to_string();
+        let target = AiLogTarget {
+            session_id: Uuid::new_v4(),
+        };
+
+        self.tasks
+            .start_ephemeral::<AiLogTask>(target, body.as_bytes(), Uuid::new_v4(), &self.state)
+            .await
+            .expect("task starts")
+    }
+
     async fn record(&self, id: Uuid) -> TaskRecord {
-        let store = self.tasks().store().await.expect("store");
-        store.get(id).await.expect("read").expect("record exists")
+        self.tasks.store().get(id).await.expect("read").expect("record exists")
     }
 }
 
 #[tokio::test]
 async fn success_stores_the_result() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<5>(Outcome::Succeed).await;
 
     let record = harness.record(job.def.task_id).await;
@@ -143,7 +199,7 @@ async fn success_stores_the_result() {
 
 #[tokio::test]
 async fn transient_error_asks_the_job_queue_for_a_retry() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<3>(Outcome::Transient).await;
     let id = job.def.task_id;
 
@@ -172,7 +228,7 @@ async fn transient_error_asks_the_job_queue_for_a_retry() {
 
 #[tokio::test]
 async fn retry_policy_is_capped_by_the_job_queue() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<100>(Outcome::Transient).await;
 
     let mut retried = 0;
@@ -180,13 +236,13 @@ async fn retry_policy_is_capped_by_the_job_queue() {
         retried += 1;
     }
 
-    assert_eq!(retried, JOB_MAX_ATTEMPTS - 1);
+    assert_eq!(retried, TASK_MAX_ATTEMPTS - 1);
     assert_eq!(harness.record(job.def.task_id).await.state, TaskState::Failed);
 }
 
 #[tokio::test]
 async fn permanent_error_fails_without_retry() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<5>(Outcome::Permanent).await;
 
     harness.run_scripted::<5>(&job).await.expect("no retry");
@@ -200,7 +256,7 @@ async fn permanent_error_fails_without_retry() {
 
 #[tokio::test]
 async fn finished_task_is_not_run_again() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<5>(Outcome::Succeed).await;
 
     harness.run_scripted::<5>(&job).await.expect("first run");
@@ -211,9 +267,7 @@ async fn finished_task_is_not_run_again() {
 
 #[tokio::test]
 async fn timeout_and_panic_are_permanent_failures() {
-    let mut harness = Harness::new().await;
-    let store = LibSqlProvisionerTaskStore::open(&harness.db_path).await.expect("store");
-    harness.state.tasks = TaskService::with_limits(OnceCell::new_with(Some(store)), 1, Duration::from_millis(20));
+    let harness = Harness::with_timeout(Duration::from_millis(20)).await;
 
     for (outcome, error) in [(Outcome::Hang, "task timed out"), (Outcome::Panic, "task panicked")] {
         let job = harness.start_scripted::<5>(outcome).await;
@@ -227,30 +281,17 @@ async fn timeout_and_panic_are_permanent_failures() {
 
 #[tokio::test]
 async fn ephemeral_task_fails_without_retry_after_a_restart() {
-    let mut harness = Harness::new().await;
-    let body = serde_json::json!({ "provider": "openai", "model": "gpt-test", "apiKey": API_KEY }).to_string();
-    let state = harness.state.clone();
+    let harness = Harness::new().await;
+    let snapshot = harness.start_ai_log().await;
 
-    let snapshot = harness
-        .tasks()
-        .start_ephemeral::<AiLogTask>(
-            AiLogTarget {
-                session_id: Uuid::new_v4(),
-            },
-            body.as_bytes(),
-            Uuid::new_v4(),
-            &state,
-        )
-        .await
-        .expect("task starts");
-
-    let message = harness.handles.job_queue_rx.recv().await.expect("queued job");
-    let json = message.job.write_json().expect("job JSON");
+    let json = harness.queued_job(snapshot.id).await.write_json().expect("job JSON");
     assert!(!json.contains(API_KEY), "{json}");
 
     // A restart keeps the database but loses the secrets held in memory.
-    harness.state.tasks = TaskService::open(&harness.db_path).await.expect("task service");
-    let mut job = TaskJob::read_json(&json, harness.state.clone()).expect("valid job");
+    let restarted = TaskService::open(&harness.db_path, TASK_TIMEOUT)
+        .await
+        .expect("task service");
+    let mut job = TaskJob::read_json(&json, restarted, harness.state.clone()).expect("valid job");
 
     job.run().await.expect("no retry");
 
@@ -262,29 +303,15 @@ async fn ephemeral_task_fails_without_retry_after_a_restart() {
 
 #[tokio::test]
 async fn secrets_are_dropped_when_the_task_finishes() {
-    let mut harness = Harness::new().await;
-    let body = serde_json::json!({ "provider": "openai", "model": "gpt-test", "apiKey": API_KEY }).to_string();
-    let state = harness.state.clone();
+    let harness = Harness::new().await;
+    let snapshot = harness.start_ai_log().await;
 
-    let snapshot = harness
-        .tasks()
-        .start_ephemeral::<AiLogTask>(
-            AiLogTarget {
-                session_id: Uuid::new_v4(),
-            },
-            body.as_bytes(),
-            Uuid::new_v4(),
-            &state,
-        )
-        .await
-        .expect("task starts");
+    assert!(harness.tasks.inner.secrets.lock().contains_key(&snapshot.id));
 
-    assert!(harness.tasks().inner.secrets.lock().contains_key(&snapshot.id));
-
-    let mut job = harness.queued_job().await;
+    let mut job = harness.queued_job(snapshot.id).await;
     job.run().await.expect("no retry");
 
-    assert!(harness.tasks().inner.secrets.lock().is_empty());
+    assert!(harness.tasks.inner.secrets.lock().is_empty());
 
     let record = harness.record(snapshot.id).await;
     assert_eq!(record.state, TaskState::Failed);
@@ -293,15 +320,33 @@ async fn secrets_are_dropped_when_the_task_finishes() {
 }
 
 #[tokio::test]
+async fn success_is_not_run_again_when_its_record_cannot_be_written() {
+    let harness = Harness::new().await;
+
+    let snapshot = harness
+        .tasks
+        .start_durable::<LosesStore>(harness.db_path.clone(), b"null", Uuid::new_v4(), &harness.state)
+        .await
+        .expect("task starts");
+    let job = harness.queued_job(snapshot.id).await;
+
+    harness
+        .tasks
+        .execute_durable::<LosesStore>(job.def.clone(), &harness.state)
+        .await
+        .expect("a succeeded run is not retried");
+}
+
+#[tokio::test]
 async fn reconcile_fails_unfinished_tasks_without_a_job() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
 
     let queued = harness.start_scripted::<5>(Outcome::Succeed).await;
     let lost = harness.start_scripted::<5>(Outcome::Succeed).await;
     let running_lost = harness.start_scripted::<5>(Outcome::Succeed).await;
     let finished = harness.start_scripted::<5>(Outcome::Succeed).await;
 
-    let store = harness.tasks().store().await.expect("store");
+    let store = harness.tasks.store();
     store
         .start_attempt(running_lost.def.task_id, "null")
         .await
@@ -309,7 +354,7 @@ async fn reconcile_fails_unfinished_tasks_without_a_job() {
     harness.run_scripted::<5>(&finished).await.expect("run");
 
     let defs = vec![queued.write_json().expect("JSON"), "not a task job".to_owned()];
-    harness.tasks().reconcile_with_job_defs(&defs).await.expect("reconcile");
+    harness.tasks.reconcile_with_job_defs(&defs).await.expect("reconcile");
 
     assert_eq!(harness.record(queued.def.task_id).await.state, TaskState::NotStarted);
     assert_eq!(harness.record(finished.def.task_id).await.state, TaskState::Success);
@@ -323,22 +368,22 @@ async fn reconcile_fails_unfinished_tasks_without_a_job() {
 
 #[tokio::test]
 async fn snapshot_reflects_the_record() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let job = harness.start_scripted::<5>(Outcome::Succeed).await;
     let id = job.def.task_id;
 
-    let snapshot = harness.tasks().get(id).await.expect("read").expect("exists");
+    let snapshot = harness.tasks.get(id).await.expect("read").expect("exists");
     assert_eq!(snapshot.kind, "scripted");
     assert_eq!(snapshot.status, TaskStatus::NotStarted);
 
-    let store = harness.tasks().store().await.expect("store");
+    let store = harness.tasks.store();
     store.start_attempt(id, r#"{"step":1}"#).await.expect("start");
     assert_eq!(
-        harness.tasks().get(id).await.expect("read").expect("exists").status,
+        harness.tasks.get(id).await.expect("read").expect("exists").status,
         TaskStatus::Running {
             substate: serde_json::json!({ "step": 1 })
         }
     );
 
-    assert!(harness.tasks().get(Uuid::new_v4()).await.expect("read").is_none());
+    assert!(harness.tasks.get(Uuid::new_v4()).await.expect("read").is_none());
 }
