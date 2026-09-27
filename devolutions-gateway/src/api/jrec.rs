@@ -36,7 +36,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
-/// Maximum files in a session ZIP (`recording.json` + clips).
+/// Maximum files in a session ZIP (`recording.json` + every Artifact listed, files and logs).
 ///
 /// Reconnect windows only mint a small number of clips per session in practice;
 /// this bound blocks pathological manifests without rejecting normal multi-clip packages.
@@ -660,21 +660,21 @@ fn recording_file_content_type(path: &Utf8Path) -> &'static str {
 
 /// Immutable package membership for one download attempt.
 ///
-/// `manifest_bytes` are the exact `recording.json` contents used to derive `clip_names`,
-/// so the archived manifest cannot drift from the clips included in the ZIP.
+/// `manifest_bytes` are the exact `recording.json` contents used to derive `artifact_names`,
+/// so the archived manifest cannot drift from the Artifacts included in the ZIP.
 #[derive(Debug, Clone)]
 struct RecordingZipPlan {
     manifest_bytes: Vec<u8>,
-    clip_names: Vec<String>,
+    artifact_names: Vec<String>,
 }
 
 impl RecordingZipPlan {
     fn entry_count(&self) -> usize {
-        1 /* recording.json */ + self.clip_names.len()
+        1 /* recording.json */ + self.artifact_names.len()
     }
 }
 
-/// Snapshots `recording.json` and the clip files it references at call time.
+/// Snapshots `recording.json` and every Artifact it lists (files and logs) at call time.
 async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<RecordingZipPlan, HttpError> {
     let manifest_path = recording_dir.join("recording.json");
     let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|error| {
@@ -697,7 +697,7 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut clip_names = Vec::with_capacity(manifest.files.len() + manifest.logs.len());
+    let mut artifact_names = Vec::with_capacity(manifest.files.len() + manifest.logs.len());
     for file in manifest.files.into_iter().chain(manifest.logs) {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
@@ -709,7 +709,7 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
 
         let path = recording_dir.join(&file.file_name);
         if path.is_file() {
-            clip_names.push(file.file_name);
+            artifact_names.push(file.file_name);
         } else {
             warn!(
                 file_name = %file.file_name,
@@ -721,7 +721,7 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
 
     Ok(RecordingZipPlan {
         manifest_bytes,
-        clip_names,
+        artifact_names,
     })
 }
 
@@ -757,7 +757,7 @@ impl RecordingZipLimitKind {
 /// instead of a multi-gigabyte transfer that may time out or pressure the host.
 async fn enforce_recording_zip_limits(recording_dir: &Utf8Path, plan: &RecordingZipPlan) -> Result<(), HttpError> {
     let mut total_bytes = u64::try_from(plan.manifest_bytes.len()).unwrap_or(u64::MAX);
-    for file_name in &plan.clip_names {
+    for file_name in &plan.artifact_names {
         let path = recording_dir.join(file_name);
         let metadata = tokio::fs::metadata(&path).await.map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
@@ -867,7 +867,7 @@ fn build_recording_zip_archive(
         zip.write_all(&plan.manifest_bytes)
             .context("write recording.json ZIP entry")?;
 
-        for file_name in &plan.clip_names {
+        for file_name in &plan.artifact_names {
             if cancel.load(Ordering::Relaxed) {
                 return Err(anyhow::Error::new(RecordingZipCancelled));
             }
@@ -1095,7 +1095,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
         assert_eq!(plan.manifest_bytes, manifest_bytes);
         assert_eq!(
-            plan.clip_names,
+            plan.artifact_names,
             vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()]
         );
     }
@@ -1130,7 +1130,7 @@ mod tests {
         let plan = snapshot_recording_zip_plan(&dir_path)
             .await
             .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
-        assert_eq!(plan.clip_names, ["recording-0.webm", "log-0.slog", "log-1.slog"]);
+        assert_eq!(plan.artifact_names, ["recording-0.webm", "log-0.slog", "log-1.slog"]);
     }
 
     #[tokio::test]
@@ -1304,7 +1304,7 @@ mod tests {
 
         let plan = RecordingZipPlan {
             manifest_bytes: b"{}".to_vec(),
-            clip_names: vec!["missing-clip.webm".to_owned()],
+            artifact_names: vec!["missing-clip.webm".to_owned()],
         };
         let (_shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let error = recording_zip_body(dir_path, plan, Uuid::nil(), shutdown_signal)
@@ -1340,16 +1340,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
-        let mut clip_names = Vec::with_capacity(MAX_RECORDING_ZIP_FILES);
+        let mut artifact_names = Vec::with_capacity(MAX_RECORDING_ZIP_FILES);
         for index in 0..MAX_RECORDING_ZIP_FILES {
             let name = format!("f-{index}.bin");
             tokio::fs::write(dir_path.join(&name), b"x").await.expect("write file");
-            clip_names.push(name);
+            artifact_names.push(name);
         }
 
         let plan = RecordingZipPlan {
             manifest_bytes: b"{}".to_vec(),
-            clip_names,
+            artifact_names,
         };
         let error = enforce_recording_zip_limits(&dir_path, &plan)
             .await
