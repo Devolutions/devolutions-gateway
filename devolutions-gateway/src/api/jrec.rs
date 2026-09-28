@@ -30,7 +30,7 @@ use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushOutcome, RecordingMessageSender};
+use crate::recording::{PushMaterial, PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -64,7 +64,31 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
-    file_type: RecordingFileType,
+    file_type: Option<RecordingFileType>,
+    material_type: Option<MaterialType>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum MaterialType {
+    Recording,
+    Log,
+}
+
+impl JrecPushQueryParam {
+    fn material(&self) -> Result<PushMaterial, HttpError> {
+        match (self.material_type, self.file_type) {
+            // A missing material type means recording, as it did before log material existed.
+            (None | Some(MaterialType::Recording), Some(file_type)) => Ok(PushMaterial::Recording(file_type)),
+            (None | Some(MaterialType::Recording), None) => {
+                Err(HttpError::bad_request().msg("fileType is required for recording material"))
+            }
+            (Some(MaterialType::Log), None) => Ok(PushMaterial::Log),
+            (Some(MaterialType::Log), Some(_)) => {
+                Err(HttpError::bad_request().msg("fileType is not allowed for log material"))
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -90,6 +114,8 @@ async fn jrec_push(
     if claims.jet_rop != RecordingOperation::Push {
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
+
+    let material = query.material()?;
 
     let conf = conf_handle.get_conf();
 
@@ -137,7 +163,7 @@ async fn jrec_push(
             recordings,
             shutdown_signal,
             claims,
-            query.file_type,
+            material,
             session_id,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -153,7 +179,7 @@ async fn handle_jrec_push(
     recordings: RecordingMessageSender,
     shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
-    file_type: RecordingFileType,
+    material: PushMaterial,
     session_id: Uuid,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -168,7 +194,7 @@ async fn handle_jrec_push(
         .client_stream(stream)
         .recordings(recordings)
         .claims(claims)
-        .file_type(file_type)
+        .material(material)
         .session_id(session_id)
         .shutdown_signal(shutdown_signal)
         .build()
@@ -1030,6 +1056,40 @@ mod tests {
     use zip::ZipArchive;
 
     use super::*;
+
+    #[test]
+    fn push_material_from_query() {
+        let material = |query: serde_json::Value| {
+            serde_json::from_value::<JrecPushQueryParam>(query)
+                .expect("query")
+                .material()
+                .map_err(|error| error.code)
+        };
+
+        let webm = Ok(PushMaterial::Recording(RecordingFileType::WebM));
+        let slog = Ok(PushMaterial::Recording(RecordingFileType::SessionRecordingLog));
+        assert_eq!(material(serde_json::json!({ "fileType": "webm" })), webm);
+        assert_eq!(material(serde_json::json!({ "fileType": "slog" })), slog);
+        assert_eq!(
+            material(serde_json::json!({ "fileType": "webm", "materialType": "recording" })),
+            webm
+        );
+        assert_eq!(
+            material(serde_json::json!({ "materialType": "log" })),
+            Ok(PushMaterial::Log)
+        );
+
+        let bad_request = Err(StatusCode::BAD_REQUEST);
+        assert_eq!(material(serde_json::json!({})), bad_request);
+        assert_eq!(
+            material(serde_json::json!({ "materialType": "recording" })),
+            bad_request
+        );
+        assert_eq!(
+            material(serde_json::json!({ "fileType": "slog", "materialType": "log" })),
+            bad_request
+        );
+    }
 
     #[test]
     fn rejects_unsafe_recording_file_names() {
