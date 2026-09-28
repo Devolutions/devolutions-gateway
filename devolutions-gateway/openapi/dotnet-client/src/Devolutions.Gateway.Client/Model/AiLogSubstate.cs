@@ -21,6 +21,7 @@ using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
+using JsonSubTypes;
 using System.ComponentModel.DataAnnotations;
 using FileParameter = Devolutions.Gateway.Client.Client.FileParameter;
 using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConverter;
@@ -47,6 +48,18 @@ namespace Devolutions.Gateway.Client.Model
             this.ActualInstance = actualInstance ?? throw new ArgumentException("Invalid instance found. Must not be null.");
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AiLogSubstate" /> class
+        /// with the <see cref="AiLogSubstateOneOf1" /> class
+        /// </summary>
+        /// <param name="actualInstance">An instance of AiLogSubstateOneOf1.</param>
+        public AiLogSubstate(AiLogSubstateOneOf1 actualInstance)
+        {
+            this.IsNullable = false;
+            this.SchemaType= "oneOf";
+            this.ActualInstance = actualInstance ?? throw new ArgumentException("Invalid instance found. Must not be null.");
+        }
+
 
         private Object _actualInstance;
 
@@ -65,9 +78,13 @@ namespace Devolutions.Gateway.Client.Model
                 {
                     this._actualInstance = value;
                 }
+                else if (value.GetType() == typeof(AiLogSubstateOneOf1) || value is AiLogSubstateOneOf1)
+                {
+                    this._actualInstance = value;
+                }
                 else
                 {
-                    throw new ArgumentException("Invalid instance found. Must be the following types: AiLogSubstateOneOf");
+                    throw new ArgumentException("Invalid instance found. Must be the following types: AiLogSubstateOneOf, AiLogSubstateOneOf1");
                 }
             }
         }
@@ -80,6 +97,16 @@ namespace Devolutions.Gateway.Client.Model
         public AiLogSubstateOneOf GetAiLogSubstateOneOf()
         {
             return (AiLogSubstateOneOf)this.ActualInstance;
+        }
+
+        /// <summary>
+        /// Get the actual instance of `AiLogSubstateOneOf1`. If the actual instance is not `AiLogSubstateOneOf1`,
+        /// the InvalidClassException will be thrown
+        /// </summary>
+        /// <returns>An instance of AiLogSubstateOneOf1</returns>
+        public AiLogSubstateOneOf1 GetAiLogSubstateOneOf1()
+        {
+            return (AiLogSubstateOneOf1)this.ActualInstance;
         }
 
         /// <summary>
@@ -138,6 +165,26 @@ namespace Devolutions.Gateway.Client.Model
             {
                 // deserialization failed, try the next one
                 System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into AiLogSubstateOneOf: {1}", jsonString, exception.ToString()));
+            }
+
+            try
+            {
+                // if it does not contains "AdditionalProperties", use SerializerSettings to deserialize
+                if (typeof(AiLogSubstateOneOf1).GetProperty("AdditionalProperties") == null)
+                {
+                    newAiLogSubstate = new AiLogSubstate(JsonConvert.DeserializeObject<AiLogSubstateOneOf1>(jsonString, AiLogSubstate.SerializerSettings));
+                }
+                else
+                {
+                    newAiLogSubstate = new AiLogSubstate(JsonConvert.DeserializeObject<AiLogSubstateOneOf1>(jsonString, AiLogSubstate.AdditionalPropertiesSerializerSettings));
+                }
+                matchedTypes.Add("AiLogSubstateOneOf1");
+                match++;
+            }
+            catch (Exception exception)
+            {
+                // deserialization failed, try the next one
+                System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into AiLogSubstateOneOf1: {1}", jsonString, exception.ToString()));
             }
 
             if (match == 0)

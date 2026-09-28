@@ -191,6 +191,7 @@ Class | Method | HTTP request | Description
  - [Model.AiLogParams](docs/AiLogParams.md)
  - [Model.AiLogSubstate](docs/AiLogSubstate.md)
  - [Model.AiLogSubstateOneOf](docs/AiLogSubstateOneOf.md)
+ - [Model.AiLogSubstateOneOf1](docs/AiLogSubstateOneOf1.md)
  - [Model.AiProvider](docs/AiProvider.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)

@@ -12,6 +12,7 @@ docs/AgentStatus.md
 docs/AiLogParams.md
 docs/AiLogSubstate.md
 docs/AiLogSubstateOneOf.md
+docs/AiLogSubstateOneOf1.md
 docs/AiProvider.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
@@ -130,6 +131,7 @@ src/Devolutions.Gateway.Client/Model/AgentStatus.cs
 src/Devolutions.Gateway.Client/Model/AiLogParams.cs
 src/Devolutions.Gateway.Client/Model/AiLogSubstate.cs
 src/Devolutions.Gateway.Client/Model/AiLogSubstateOneOf.cs
+src/Devolutions.Gateway.Client/Model/AiLogSubstateOneOf1.cs
 src/Devolutions.Gateway.Client/Model/AiProvider.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs

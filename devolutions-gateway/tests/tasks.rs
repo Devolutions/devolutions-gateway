@@ -12,6 +12,7 @@ use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
 use base64::Engine as _;
+use devolutions_gateway::recording::RecordingManagerTask;
 use devolutions_gateway::tasks::{SECRETS_LOST_ERROR, TaskRunnerTask, TaskService};
 use devolutions_gateway::{DgwState, MockHandles};
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, Task as _};
@@ -37,6 +38,7 @@ fn config(dir: &Path, enable_unstable: bool) -> String {
         ],
         "Proxy": { "Mode": "Off" },
         "ProvisionerTasksDatabase": tasks_db(dir),
+        "RecordingPath": dir.join("recordings"),
         "__debug__": {
             "disable_token_validation": true,
             "enable_unstable": enable_unstable
@@ -78,6 +80,13 @@ impl Gateway {
         // The auth middleware asks the session manager about any token carrying `jet_aid`; nothing answers in the mock.
         drop(session_manager_rx);
 
+        let recording_manager = RecordingManagerTask::new(
+            recording_manager_rx,
+            state.conf_handle.get_conf().recording_path.clone(),
+            state.sessions.clone(),
+            state.job_queue_handle.clone(),
+        );
+
         state.tasks = TaskService::open_if_enabled(&state.conf_handle.get_conf()).await?;
 
         let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -85,8 +94,10 @@ impl Gateway {
 
         if let (Some(tasks), Jobs::Run) = (state.tasks.clone(), jobs) {
             let runner = TaskRunnerTask::new(tasks, state.clone());
-            job_tasks.push(ChildTask::spawn(runner.run(shutdown_signal)));
+            job_tasks.push(ChildTask::spawn(runner.run(shutdown_signal.clone())));
         }
+
+        job_tasks.push(ChildTask::spawn(recording_manager.run(shutdown_signal)));
 
         let app = devolutions_gateway::make_http_service(state)
             .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
@@ -95,13 +106,7 @@ impl Gateway {
             app,
             shutdown_handle,
             job_tasks,
-            _mock_handles: Box::new((
-                recording_manager_rx,
-                subscriber_rx,
-                job_queue_rx,
-                traffic_audit_rx,
-                mock_shutdown_handle,
-            )),
+            _mock_handles: Box::new((subscriber_rx, job_queue_rx, traffic_audit_rx, mock_shutdown_handle)),
         })
     }
 
@@ -194,11 +199,15 @@ fn now() -> i64 {
 }
 
 fn task_token() -> String {
+    session_task_token(Uuid::new_v4())
+}
+
+fn session_task_token(session_id: Uuid) -> String {
     unsigned_jws(
         "TASK",
         &json!({
             "jet_tk": "ai-log",
-            "jet_aid": Uuid::new_v4(),
+            "jet_aid": session_id,
             "nbf": now(),
             "exp": now() + 600,
             "jti": Uuid::new_v4(),
@@ -308,7 +317,7 @@ fn capture_logs() -> (CapturedLogs, impl Sized) {
 }
 
 #[tokio::test]
-async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
+async fn ai_log_task_without_recording_fails() {
     let dir = tempfile::tempdir().unwrap();
     let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
@@ -326,7 +335,7 @@ async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
             "id": id,
             "kind": "ai-log",
             "state": "failed",
-            "error": "ai-log task not implemented yet",
+            "error": "session has no recording",
         })
     );
 }
@@ -547,4 +556,269 @@ async fn task_records_survive_a_restart() {
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), finished);
 
     after.stop().await;
+}
+
+const SESSION_START: i64 = 1_787_255_035;
+
+const CAST: &str = r#"{"version": 2, "width": 80, "height": 24}
+[0.5,"o","user@host:~$ "]
+[1.5,"o","whoami\r\n"]
+[1.6,"o","user\r\n"]
+"#;
+
+const AI_ANSWER: &str =
+    r#"{"offsetSeconds":0.5,"description":"Checked the current user","parameters":{"Command":"whoami"}}"#;
+
+/// Writes a finished session to the recording folder of the Gateway working in `dir`.
+fn write_session(dir: &Path, files: &[(&str, &str)]) -> (Uuid, PathBuf) {
+    let session_id = Uuid::new_v4();
+    let session_dir = dir.join("recordings").join(session_id.to_string());
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let manifest_files = files
+        .iter()
+        .map(|(name, _)| json!({ "fileName": name, "startTime": SESSION_START, "duration": 10 }))
+        .collect::<Vec<_>>();
+
+    let manifest = json!({
+        "sessionId": session_id,
+        "startTime": SESSION_START,
+        "duration": 10,
+        "files": manifest_files,
+    });
+    std::fs::write(session_dir.join("recording.json"), manifest.to_string()).unwrap();
+
+    for (name, contents) in files {
+        std::fs::write(session_dir.join(name), contents).unwrap();
+    }
+
+    (session_id, session_dir)
+}
+
+fn read_manifest(session_dir: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(session_dir.join("recording.json")).unwrap()).unwrap()
+}
+
+/// A mock OpenAI-compatible provider that answers every request with the same action and keeps the request bodies.
+async fn spawn_ai_provider() -> (String, Arc<Mutex<Vec<Value>>>) {
+    spawn_truncating_ai_provider(|_| false).await
+}
+
+/// Like [`spawn_ai_provider`], but answers as cut at the token limit when `truncated` says so for the request body.
+async fn spawn_truncating_ai_provider(
+    truncated: impl Fn(&str) -> bool + Clone + Send + Sync + 'static,
+) -> (String, Arc<Mutex<Vec<Value>>>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+
+    let app = Router::new().fallback(axum::routing::post({
+        let requests = Arc::clone(&requests);
+        move |body: String| {
+            let requests = Arc::clone(&requests);
+            let finish_reason = if truncated(&body) { "length" } else { "stop" };
+            async move {
+                requests
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_str::<Value>(&body).unwrap());
+                axum::Json(json!({
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-test",
+                    "choices": [{
+                        "index": 0,
+                        "message": { "role": "assistant", "content": AI_ANSWER },
+                        "finish_reason": finish_reason
+                    }],
+                    "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+                }))
+            }
+        }
+    }));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    (format!("http://{addr}/v1/"), requests)
+}
+
+async fn run_ai_log(app: &Router, session_id: Uuid, base_url: &str) -> Value {
+    let params = json!({
+        "provider": "openai-compatible",
+        "model": "gpt-test",
+        "apiKey": API_KEY,
+        "baseUrl": base_url,
+    });
+
+    let (status, body) = send(app, start_request(Some(&session_task_token(session_id)), &params)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let id = serde_json::from_str::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+
+    wait_until_finished(app, id).await
+}
+
+#[tokio::test]
+async fn ai_log_task_appends_a_generated_log_to_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session_id, session_dir) = write_session(dir.path(), &[("recording-0.cast", CAST)]);
+    let files_before = read_manifest(&session_dir)["files"].clone();
+    let (base_url, requests) = spawn_ai_provider().await;
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+
+    let first = run_ai_log(&gateway.app, session_id, &base_url).await;
+    assert_eq!(first["state"], "success", "{first}");
+    assert_eq!(first["result"], json!({ "fileName": "ai-analysis-0.slog" }));
+
+    let requests_so_far = requests.lock().unwrap().clone();
+    assert_eq!(requests_so_far.len(), 1);
+    let sent = requests_so_far[0].to_string();
+    assert!(sent.contains(r"[0.5] user@host:~$ whoami\n[1.6] user\n"), "{sent}");
+
+    let expected = [
+        r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-1"}"#,
+        r#"{"timestamp":"2026-08-20T19:43:55.500Z","seq":1,"event":"session.action","description":"Checked the current user","parameters":{"Command":"whoami"}}"#,
+        r#"{"timestamp":"2026-08-20T19:44:05.000Z","seq":2,"event":"session.end","description":"Session ended"}"#,
+    ]
+    .map(|line| format!("{line}\n"))
+    .concat();
+    assert_eq!(
+        std::fs::read_to_string(session_dir.join("ai-analysis-0.slog")).unwrap(),
+        expected
+    );
+
+    let manifest = read_manifest(&session_dir);
+    assert_eq!(
+        manifest["artifacts"],
+        json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
+    );
+    assert_eq!(manifest["files"], files_before);
+
+    let second = run_ai_log(&gateway.app, session_id, &base_url).await;
+    assert_eq!(
+        second["result"],
+        json!({ "fileName": "ai-analysis-1.slog" }),
+        "{second}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(session_dir.join("ai-analysis-1.slog")).unwrap(),
+        expected
+    );
+
+    let manifest = read_manifest(&session_dir);
+    assert_eq!(
+        manifest["artifacts"],
+        json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }, { "fileName": "ai-analysis-1.slog" }] })
+    );
+    assert_eq!(manifest["files"], files_before);
+
+    wait_for_queued_jobs(dir.path(), 0).await;
+    gateway.stop().await;
+
+    assert_database_holds_settings_but_not_the_key(dir.path());
+    assert_no_file_holds_the_key(dir.path());
+    assert_workspaces_are_gone(dir.path());
+}
+
+fn assert_no_file_holds_the_key(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            assert_no_file_holds_the_key(&path);
+        } else {
+            assert!(!contains(&std::fs::read(&path).unwrap(), API_KEY), "{}", path.display());
+        }
+    }
+}
+
+fn assert_workspaces_are_gone(dir: &Path) {
+    let workspaces = dir.join("recordings").join(devolutions_gateway::tasks::WORKSPACES_DIR);
+    let left = std::fs::read_dir(&workspaces).map_or(0, |entries| entries.count());
+    assert_eq!(left, 0, "{}", workspaces.display());
+}
+
+/// A finished session whose transcript is `lines` lines of about 100 bytes, marked `line <n>`.
+fn write_long_session(dir: &Path, lines: usize) -> (Uuid, PathBuf) {
+    let mut cast = String::from("{\"version\": 2}\n");
+    for line in 0..lines {
+        cast.push_str(&format!("[{line}.0,\"o\",\"line {line} {}\\r\\n\"]\n", "x".repeat(80)));
+    }
+
+    write_session(dir, &[("recording-0.cast", &cast)])
+}
+
+#[tokio::test]
+async fn ai_log_task_splits_a_chunk_whose_answer_is_truncated() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session_id, session_dir) = write_long_session(dir.path(), 60);
+    let (base_url, requests) =
+        spawn_truncating_ai_provider(|body| body.contains("] line 0 ") && body.contains("] line 59 ")).await;
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+
+    let finished = run_ai_log(&gateway.app, session_id, &base_url).await;
+    assert_eq!(finished["state"], "success", "{finished}");
+
+    let requests = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 3, "the whole chunk, then its two halves");
+    assert!(requests[1].contains("] line 0 ") && !requests[1].contains("] line 59 "));
+    assert!(!requests[2].contains("] line 0 ") && requests[2].contains("] line 59 "));
+
+    let log = std::fs::read_to_string(session_dir.join("ai-analysis-0.slog")).unwrap();
+    assert_eq!(log.lines().filter(|line| line.contains("session.action")).count(), 2);
+
+    wait_for_queued_jobs(dir.path(), 0).await;
+    gateway.stop().await;
+    assert_workspaces_are_gone(dir.path());
+}
+
+#[tokio::test]
+async fn ai_log_task_fails_when_even_a_short_part_is_truncated() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session_id, session_dir) = write_long_session(dir.path(), 60);
+    let (base_url, requests) = spawn_truncating_ai_provider(|_| true).await;
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+
+    let finished = run_ai_log(&gateway.app, session_id, &base_url).await;
+
+    assert_eq!(finished["state"], "failed");
+    assert_eq!(finished["error"], devolutions_gateway::tasks::ai_log::TRUNCATED_ERROR);
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        3,
+        "6 KB, then 3 KB, then 1.5 KB, below the split floor"
+    );
+    assert!(read_manifest(&session_dir).get("artifacts").is_none());
+
+    wait_for_queued_jobs(dir.path(), 0).await;
+    gateway.stop().await;
+    assert_workspaces_are_gone(dir.path());
+}
+
+#[tokio::test]
+async fn ai_log_task_fails_for_a_video_only_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session_id, session_dir) = write_session(dir.path(), &[("recording-0.webm", "not a video")]);
+    let (base_url, requests) = spawn_ai_provider().await;
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+
+    let finished = run_ai_log(&gateway.app, session_id, &base_url).await;
+
+    assert_eq!(finished["state"], "failed");
+    assert_eq!(finished["error"], "unsupported recording type: webm");
+    assert!(requests.lock().unwrap().is_empty());
+    assert!(read_manifest(&session_dir).get("artifacts").is_none());
+
+    // A permanent failure is not retried.
+    wait_for_queued_jobs(dir.path(), 0).await;
+    gateway.stop().await;
 }
