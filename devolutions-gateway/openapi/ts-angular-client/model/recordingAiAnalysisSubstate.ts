@@ -7,6 +7,7 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { RecordingAiAnalysisSubstateOneOf1 } from './recordingAiAnalysisSubstateOneOf1';
 import { RecordingAiAnalysisSubstateOneOf } from './recordingAiAnalysisSubstateOneOf';
 
 
@@ -18,5 +19,5 @@ import { RecordingAiAnalysisSubstateOneOf } from './recordingAiAnalysisSubstateO
  * Progress of a running `recording.ai-analysis` task.
  * @export
  */
-export type RecordingAiAnalysisSubstate = RecordingAiAnalysisSubstateOneOf;
+export type RecordingAiAnalysisSubstate = RecordingAiAnalysisSubstateOneOf | RecordingAiAnalysisSubstateOneOf1;
 

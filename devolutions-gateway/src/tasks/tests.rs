@@ -1,19 +1,26 @@
+use axum::http::StatusCode;
+use camino::Utf8Path;
 use job_queue::Job as _;
 use provisioner_task_store_libsql::TaskState;
 
 use super::recording_ai_analysis::RecordingAiAnalysisTask;
 use super::*;
 use crate::MockHandles;
+use crate::recording::RecordingManagerTask;
 
 const API_KEY: &str = "sk-task-unit-test-secret";
 
-const CONFIG: &str = r#"{
-    "ProvisionerPublicKeyData": {
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
-    },
-    "Listeners": [{ "InternalUrl": "http://*:7171", "ExternalUrl": "https://*:7171" }],
-    "Proxy": { "Mode": "Off" }
-}"#;
+fn config(recording_path: &Utf8Path) -> String {
+    serde_json::json!({
+        "ProvisionerPublicKeyData": {
+            "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
+        },
+        "Listeners": [{ "InternalUrl": "http://*:7171", "ExternalUrl": "https://*:7171" }],
+        "Proxy": { "Mode": "Off" },
+        "RecordingPath": recording_path,
+    })
+    .to_string()
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum Outcome {
@@ -104,9 +111,10 @@ impl DurableTask for LosesStore {
 struct Harness {
     state: DgwState,
     tasks: TaskService,
-    _handles: MockHandles,
+    _handles: Box<dyn Send>,
     _dir: tempfile::TempDir,
     db_path: String,
+    recording_path: Utf8PathBuf,
 }
 
 impl Harness {
@@ -123,16 +131,56 @@ impl Harness {
             .expect("UTF-8")
             .to_owned();
 
-        let (state, handles) = DgwState::mock(CONFIG).expect("mock state");
-        let tasks = TaskService::open(&db_path, timeout).await.expect("task service");
+        let recording_path = Utf8PathBuf::from_path_buf(dir.path().join("recordings")).expect("UTF-8");
+
+        let (state, handles) = DgwState::mock(&config(&recording_path)).expect("mock state");
+        let MockHandles {
+            session_manager_rx,
+            recording_manager_rx,
+            subscriber_rx,
+            job_queue_rx,
+            traffic_audit_rx,
+            shutdown_handle,
+        } = handles;
+
+        let recording_manager = RecordingManagerTask::new(
+            recording_manager_rx,
+            recording_path.clone(),
+            state.sessions.clone(),
+            state.job_queue_handle.clone(),
+        );
+        let (recording_shutdown_handle, recording_shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        tokio::spawn(recording_manager.run(recording_shutdown_signal));
+
+        let tasks = TaskService::open(&db_path, recording_path.join(WORKSPACES_DIR), timeout)
+            .await
+            .expect("task service");
 
         Self {
             state,
             tasks,
-            _handles: handles,
+            _handles: Box::new((
+                session_manager_rx,
+                subscriber_rx,
+                job_queue_rx,
+                traffic_audit_rx,
+                shutdown_handle,
+                recording_shutdown_handle,
+            )),
             _dir: dir,
             db_path,
+            recording_path,
         }
+    }
+
+    async fn reopen(&self) -> TaskService {
+        TaskService::open(&self.db_path, self.recording_path.join(WORKSPACES_DIR), TASK_TIMEOUT)
+            .await
+            .expect("task service")
+    }
+
+    fn workspace(&self, id: Uuid) -> Utf8PathBuf {
+        self.recording_path.join(WORKSPACES_DIR).join(id.to_string())
     }
 
     /// Rebuilds the job of a task from its record, as the job queue stores the same definition.
@@ -169,18 +217,47 @@ impl Harness {
     }
 
     async fn start_recording_ai_analysis(&self) -> TaskSnapshot {
-        let payload = serde_json::from_value(serde_json::json!({
-            "session_id": Uuid::new_v4(),
-            "provider": "openai",
-            "model": "gpt-test",
-        }))
-        .expect("valid payload");
+        let settings = serde_json::json!({ "provider": "openai", "model": "gpt-test" });
+        self.start_recording_ai_analysis_with(Uuid::new_v4(), settings).await
+    }
+
+    /// Starts a `recording.ai-analysis` task with the API key, and with `settings` as the rest of its token payload.
+    async fn start_recording_ai_analysis_with(
+        &self,
+        session_id: Uuid,
+        mut settings: serde_json::Value,
+    ) -> TaskSnapshot {
+        settings["session_id"] = serde_json::json!(session_id);
+        let payload = serde_json::from_value(settings).expect("valid payload");
         let body = serde_json::json!({ "apiKey": API_KEY }).to_string();
 
         self.tasks
             .start_ephemeral::<RecordingAiAnalysisTask>(&self.state, payload, body.as_bytes(), Uuid::new_v4())
             .await
             .expect("task starts")
+    }
+
+    /// Writes a finished session whose terminal output is `lines` lines of about 100 bytes each.
+    fn write_long_session(&self, lines: usize) -> Uuid {
+        let session_id = Uuid::new_v4();
+        let dir = self.recording_path.join(session_id.to_string());
+        std::fs::create_dir_all(&dir).expect("session dir");
+
+        let manifest = serde_json::json!({
+            "sessionId": session_id,
+            "startTime": 1_787_255_035,
+            "duration": lines,
+            "files": [{ "fileName": "recording-0.cast", "startTime": 1_787_255_035, "duration": lines }],
+        });
+        std::fs::write(dir.join("recording.json"), manifest.to_string()).expect("manifest");
+
+        let mut cast = String::from("{\"version\": 2}\n");
+        for line in 0..lines {
+            cast.push_str(&format!("[{line}.0,\"o\",\"line {line} {}\\r\\n\"]\n", "x".repeat(80)));
+        }
+        std::fs::write(dir.join("recording-0.cast"), cast).expect("cast");
+
+        session_id
     }
 
     async fn record(&self, id: Uuid) -> TaskRecord {
@@ -296,9 +373,7 @@ async fn ephemeral_task_fails_without_retry_after_a_restart() {
     assert!(!json.contains(API_KEY), "{json}");
 
     // A restart keeps the database but loses the secrets held in memory.
-    let restarted = TaskService::open(&harness.db_path, TASK_TIMEOUT)
-        .await
-        .expect("task service");
+    let restarted = harness.reopen().await;
     let mut job = TaskJob::read_json(&json, restarted, harness.state.clone()).expect("valid job");
 
     job.run().await.expect("no retry");
@@ -323,10 +398,7 @@ async fn secrets_are_dropped_when_the_task_finishes() {
 
     let record = harness.record(snapshot.id).await;
     assert_eq!(record.state, TaskState::Failed);
-    assert_eq!(
-        record.error.as_deref(),
-        Some("recording.ai-analysis task not implemented yet")
-    );
+    assert_eq!(record.error.as_deref(), Some("session has no recording"));
     assert!(!record.params.contains(API_KEY), "{}", record.params);
 }
 
@@ -376,9 +448,7 @@ async fn restart_fails_unfinished_ephemeral_tasks_only() {
     harness.run_scripted::<5>(&finished).await.expect("run");
 
     // A restart keeps the database but loses the secrets held in memory.
-    TaskService::open(&harness.db_path, TASK_TIMEOUT)
-        .await
-        .expect("task service");
+    harness.reopen().await;
 
     for id in [ephemeral.id, running_ephemeral.id] {
         let record = harness.record(id).await;
@@ -410,4 +480,180 @@ async fn snapshot_reflects_the_record() {
     );
 
     assert!(harness.tasks.get(Uuid::new_v4()).await.expect("read").is_none());
+}
+
+/// A mock OpenAI-compatible provider: `status` picks the answer of the n-th request, 0 being a valid answer.
+async fn spawn_ai_provider(
+    status: impl Fn(usize) -> u16 + Send + Sync + 'static,
+) -> (serde_json::Value, Arc<Mutex<Vec<String>>>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let status = Arc::new(status);
+
+    let app = axum::Router::new().fallback(axum::routing::post({
+        let requests = Arc::clone(&requests);
+        move |body: String| {
+            let requests = Arc::clone(&requests);
+            let status = Arc::clone(&status);
+            async move {
+                let index = {
+                    let mut requests = requests.lock();
+                    requests.push(body);
+                    requests.len() - 1
+                };
+
+                let answer = serde_json::json!({
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-test",
+                    "choices": [{
+                        "index": 0,
+                        "message": { "role": "assistant", "content": format!("{{\"offsetSeconds\":{index},\"description\":\"Step {index}\"}}") },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+                });
+
+                match status(index) {
+                    0 => (StatusCode::OK, axum::Json(answer)),
+                    code => (
+                        StatusCode::from_u16(code).expect("valid status"),
+                        axum::Json(serde_json::json!({ "error": { "message": "scripted failure" } })),
+                    ),
+                }
+            }
+        }
+    }));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+
+    let settings = serde_json::json!({
+        "provider": "openai-compatible",
+        "model": "gpt-test",
+        "base_url": format!("http://{addr}/v1/"),
+    });
+
+    (settings, requests)
+}
+
+fn first_line(path: &Utf8Path) -> String {
+    std::fs::read_to_string(path)
+        .expect("chunk")
+        .lines()
+        .next()
+        .expect("line")
+        .to_owned()
+}
+
+#[tokio::test]
+async fn recording_ai_analysis_retry_resumes_at_the_first_chunk_without_a_checkpoint() {
+    let harness = Harness::new().await;
+    // About 1 MB of transcript: three chunks.
+    let session_id = harness.write_long_session(10_000);
+    let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
+    let snapshot = harness.start_recording_ai_analysis_with(session_id, settings).await;
+    let workspace = harness.workspace(snapshot.id);
+    let mut job = harness.queued_job(snapshot.id).await;
+
+    assert!(job.run().await.is_err(), "a provider outage is retried");
+
+    assert_eq!(harness.record(snapshot.id).await.state, TaskState::NotStarted);
+    assert!(workspace.starts_with(&harness.recording_path));
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("chunks.done")).expect("chunks"),
+        "3"
+    );
+    assert!(workspace.join("chunk-0000.actions.jsonl").exists());
+    assert!(!workspace.join("chunk-0001.actions.jsonl").exists());
+    let chunk_starts = (0..3)
+        .map(|index| first_line(&workspace.join(format!("chunk-{index:04}.txt"))))
+        .collect::<Vec<_>>();
+    assert_eq!(requests.lock().len(), 2);
+
+    job.run().await.expect("second attempt succeeds");
+
+    let record = harness.record(snapshot.id).await;
+    assert_eq!(record.state, TaskState::Success, "{:?}", record.error);
+    assert_eq!(record.attempts, 2);
+
+    let requests = requests.lock().clone();
+    assert_eq!(requests.len(), 4, "only chunks 1 and 2 are sent again");
+    for (request, chunk) in requests.iter().zip([0, 1, 1, 2]) {
+        assert!(request.contains(&chunk_starts[chunk]), "request for chunk {chunk}");
+    }
+
+    let log = std::fs::read_to_string(
+        harness
+            .recording_path
+            .join(session_id.to_string())
+            .join("ai-analysis-0.slog"),
+    )
+    .expect("log");
+    let descriptions = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON")["description"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        descriptions,
+        ["Session started", "Step 0", "Step 2", "Step 3", "Session ended"].map(serde_json::Value::from)
+    );
+
+    assert!(!workspace.exists(), "the workspace is deleted on success");
+}
+
+#[tokio::test]
+async fn recording_ai_analysis_workspace_is_deleted_when_the_task_fails() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_long_session(10);
+    let (settings, requests) = spawn_ai_provider(|_| 401).await;
+    let snapshot = harness.start_recording_ai_analysis_with(session_id, settings).await;
+
+    harness.queued_job(snapshot.id).await.run().await.expect("no retry");
+
+    let record = harness.record(snapshot.id).await;
+    assert_eq!(record.state, TaskState::Failed);
+    assert_eq!(requests.lock().len(), 1);
+    assert!(!harness.workspace(snapshot.id).exists());
+    assert!(
+        !harness
+            .recording_path
+            .join(WORKSPACES_DIR)
+            .read_dir()
+            .expect("workspaces")
+            .any(|_| true)
+    );
+}
+
+#[tokio::test]
+async fn stale_workspaces_are_removed_at_startup() {
+    let harness = Harness::new().await;
+    let unfinished = harness.start_scripted::<5>(Outcome::Succeed).await;
+    let lost_ephemeral = harness.start_recording_ai_analysis().await;
+    let finished = harness.start_scripted::<5>(Outcome::Succeed).await;
+    harness.run_scripted::<5>(&finished).await.expect("run");
+
+    let workspaces = harness.recording_path.join(WORKSPACES_DIR);
+    for name in [
+        unfinished.def.task_id.to_string(),
+        lost_ephemeral.id.to_string(),
+        finished.def.task_id.to_string(),
+        Uuid::new_v4().to_string(),
+        "not-a-task".to_owned(),
+    ] {
+        std::fs::create_dir_all(workspaces.join(&name)).expect("workspace");
+        std::fs::write(workspaces.join(&name).join("chunk-0000.txt"), "[0.0] x\n").expect("chunk");
+    }
+    std::fs::write(workspaces.join("stray-file"), "x").expect("file");
+
+    // The restart fails the ephemeral task first, so only the durable task still owns its workspace.
+    harness.reopen().await;
+
+    let left = workspaces
+        .read_dir()
+        .expect("workspaces")
+        .map(|entry| entry.expect("entry").file_name().into_string().expect("UTF-8"))
+        .collect::<Vec<_>>();
+    assert_eq!(left, [unfinished.def.task_id.to_string()]);
 }

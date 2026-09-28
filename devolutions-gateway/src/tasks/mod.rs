@@ -9,6 +9,8 @@
 //! tasks never take a slot from the other Gateway jobs, and other jobs never delay a task.
 //! The job definition holds only the persisted, non-secret parameters, so a [`DurableTask`] resumes after a restart.
 //! The secrets of an [`EphemeralTask`] stay in memory only: when Gateway restarts, the task fails at startup instead.
+//! A task may keep intermediate files in its workspace, under the recording folder so it gets the same access rules;
+//! the workspace is kept across attempts and deleted when the task finishes.
 //!
 //! The task system is unstable: it starts only when `__debug__.enable_unstable` is set.
 
@@ -17,13 +19,14 @@ pub mod recording_ai_analysis;
 
 use core::marker::PhantomData;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
+use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use job_queue::{DynJob, DynJobQueue, JobQueue as _, JobReader, RunnerWaker};
 use job_queue_libsql::{LibSqlJobQueue, libsql};
@@ -47,6 +50,9 @@ pub const TASK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const TASK_MAX_ATTEMPTS: u32 = 5;
 
 pub const SECRETS_LOST_ERROR: &str = "gateway restarted, API key no longer available";
+
+/// Folder of the task workspaces, in the recording folder.
+pub const WORKSPACES_DIR: &str = ".provisioner-tasks";
 
 /// Why a run of a task failed; the message is stored in the task record and returned by the API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +198,8 @@ pub struct TaskCtx<K: TaskKind> {
     pub params: K::Params,
     pub state: DgwState,
     pub progress: Progress<K::Substate>,
+    /// Folder of files kept across attempts; not created until the task needs it.
+    pub workspace: Utf8PathBuf,
     secrets: Option<Arc<dyn Any + Send + Sync>>,
 }
 
@@ -225,6 +233,7 @@ struct TaskServiceInner {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
     secrets: Mutex<SecretsMap>,
+    workspaces: Utf8PathBuf,
     timeout: Duration,
 }
 
@@ -243,13 +252,17 @@ impl TaskService {
             return Ok(None);
         }
 
-        Self::open(conf.provisioner_tasks_database.as_str(), TASK_TIMEOUT)
-            .await
-            .map(Some)
+        Self::open(
+            conf.provisioner_tasks_database.as_str(),
+            conf.recording_path.join(WORKSPACES_DIR),
+            TASK_TIMEOUT,
+        )
+        .await
+        .map(Some)
     }
 
-    /// Opens the database at `path`, then fails every unfinished task whose job is gone.
-    async fn open(path: &str, timeout: Duration) -> anyhow::Result<Self> {
+    /// Opens the database at `path`, fails every unfinished task whose job is gone, then deletes stale workspaces.
+    async fn open(path: &str, workspaces: Utf8PathBuf, timeout: Duration) -> anyhow::Result<Self> {
         let conn = libsql::Builder::new_local(path)
             .build()
             .await
@@ -293,6 +306,7 @@ impl TaskService {
                 notify_runner,
                 runner_waker,
                 secrets: Mutex::new(HashMap::new()),
+                workspaces,
                 timeout,
             }),
         };
@@ -302,7 +316,43 @@ impl TaskService {
             .await
             .context("failed to fail the unfinished ephemeral tasks")?;
 
+        service
+            .remove_stale_workspaces()
+            .await
+            .context("failed to remove the stale task workspaces")?;
+
         Ok(service)
+    }
+
+    fn workspace(&self, id: Uuid) -> Utf8PathBuf {
+        self.inner.workspaces.join(id.to_string())
+    }
+
+    /// Deletes every workspace that no unfinished task owns.
+    async fn remove_stale_workspaces(&self) -> anyhow::Result<()> {
+        let mut entries = match tokio::fs::read_dir(&self.inner.workspaces).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let unfinished = self.store().unfinished().await?.into_iter().collect::<HashSet<_>>();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let owned = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| Uuid::parse_str(name).ok())
+                .is_some_and(|id| unfinished.contains(&id));
+
+            if !owned {
+                let path = entry.path();
+                info!(path = %path.display(), "Removing a stale task workspace");
+                remove_all(&path).await;
+            }
+        }
+
+        Ok(())
     }
 
     fn store(&self) -> &LibSqlProvisionerTaskStore {
@@ -475,7 +525,7 @@ impl TaskService {
 
         let Some(attempt) = store.start_attempt(id, &substate).await? else {
             debug!(task.id = %id, task.kind = K::KIND, "Background task is already finished");
-            self.forget_secrets(id);
+            self.finish(id).await;
             return Ok(());
         };
 
@@ -492,6 +542,7 @@ impl TaskService {
                 tasks: self.clone(),
                 _substate: PhantomData,
             },
+            workspace: self.workspace(id),
             secrets,
         };
 
@@ -520,21 +571,41 @@ impl TaskService {
             }
         }
 
-        self.forget_secrets(id);
+        self.finish(id).await;
 
         Ok(())
     }
 
     async fn fail(&self, id: Uuid, error: &str) {
-        self.forget_secrets(id);
+        self.finish(id).await;
 
         if let Err(store_error) = self.store().fail(id, error).await {
             error!(task.id = %id, error = format!("{store_error:#}"), "Failed to record the task failure");
         }
     }
 
+    /// Drops what a task keeps only until it finishes: its secrets and its workspace.
+    async fn finish(&self, id: Uuid) {
+        self.forget_secrets(id);
+        remove_all(self.workspace(id).as_std_path()).await;
+    }
+
     fn forget_secrets(&self, id: Uuid) {
         self.inner.secrets.lock().remove(&id);
+    }
+}
+
+async fn remove_all(path: &std::path::Path) {
+    let removed = if path.is_dir() {
+        tokio::fs::remove_dir_all(path).await
+    } else {
+        tokio::fs::remove_file(path).await
+    };
+
+    match removed {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => warn!(path = %path.display(), %error, "Failed to remove a task workspace"),
     }
 }
 

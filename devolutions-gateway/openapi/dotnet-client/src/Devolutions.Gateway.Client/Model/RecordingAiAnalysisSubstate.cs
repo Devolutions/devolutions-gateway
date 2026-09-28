@@ -21,6 +21,7 @@ using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
+using JsonSubTypes;
 using System.ComponentModel.DataAnnotations;
 using FileParameter = Devolutions.Gateway.Client.Client.FileParameter;
 using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConverter;
@@ -47,6 +48,18 @@ namespace Devolutions.Gateway.Client.Model
             this.ActualInstance = actualInstance ?? throw new ArgumentException("Invalid instance found. Must not be null.");
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingAiAnalysisSubstate" /> class
+        /// with the <see cref="RecordingAiAnalysisSubstateOneOf1" /> class
+        /// </summary>
+        /// <param name="actualInstance">An instance of RecordingAiAnalysisSubstateOneOf1.</param>
+        public RecordingAiAnalysisSubstate(RecordingAiAnalysisSubstateOneOf1 actualInstance)
+        {
+            this.IsNullable = false;
+            this.SchemaType= "oneOf";
+            this.ActualInstance = actualInstance ?? throw new ArgumentException("Invalid instance found. Must not be null.");
+        }
+
 
         private Object _actualInstance;
 
@@ -65,9 +78,13 @@ namespace Devolutions.Gateway.Client.Model
                 {
                     this._actualInstance = value;
                 }
+                else if (value.GetType() == typeof(RecordingAiAnalysisSubstateOneOf1) || value is RecordingAiAnalysisSubstateOneOf1)
+                {
+                    this._actualInstance = value;
+                }
                 else
                 {
-                    throw new ArgumentException("Invalid instance found. Must be the following types: RecordingAiAnalysisSubstateOneOf");
+                    throw new ArgumentException("Invalid instance found. Must be the following types: RecordingAiAnalysisSubstateOneOf, RecordingAiAnalysisSubstateOneOf1");
                 }
             }
         }
@@ -80,6 +97,16 @@ namespace Devolutions.Gateway.Client.Model
         public RecordingAiAnalysisSubstateOneOf GetRecordingAiAnalysisSubstateOneOf()
         {
             return (RecordingAiAnalysisSubstateOneOf)this.ActualInstance;
+        }
+
+        /// <summary>
+        /// Get the actual instance of `RecordingAiAnalysisSubstateOneOf1`. If the actual instance is not `RecordingAiAnalysisSubstateOneOf1`,
+        /// the InvalidClassException will be thrown
+        /// </summary>
+        /// <returns>An instance of RecordingAiAnalysisSubstateOneOf1</returns>
+        public RecordingAiAnalysisSubstateOneOf1 GetRecordingAiAnalysisSubstateOneOf1()
+        {
+            return (RecordingAiAnalysisSubstateOneOf1)this.ActualInstance;
         }
 
         /// <summary>
@@ -138,6 +165,26 @@ namespace Devolutions.Gateway.Client.Model
             {
                 // deserialization failed, try the next one
                 System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into RecordingAiAnalysisSubstateOneOf: {1}", jsonString, exception.ToString()));
+            }
+
+            try
+            {
+                // if it does not contains "AdditionalProperties", use SerializerSettings to deserialize
+                if (typeof(RecordingAiAnalysisSubstateOneOf1).GetProperty("AdditionalProperties") == null)
+                {
+                    newRecordingAiAnalysisSubstate = new RecordingAiAnalysisSubstate(JsonConvert.DeserializeObject<RecordingAiAnalysisSubstateOneOf1>(jsonString, RecordingAiAnalysisSubstate.SerializerSettings));
+                }
+                else
+                {
+                    newRecordingAiAnalysisSubstate = new RecordingAiAnalysisSubstate(JsonConvert.DeserializeObject<RecordingAiAnalysisSubstateOneOf1>(jsonString, RecordingAiAnalysisSubstate.AdditionalPropertiesSerializerSettings));
+                }
+                matchedTypes.Add("RecordingAiAnalysisSubstateOneOf1");
+                match++;
+            }
+            catch (Exception exception)
+            {
+                // deserialization failed, try the next one
+                System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into RecordingAiAnalysisSubstateOneOf1: {1}", jsonString, exception.ToString()));
             }
 
             if (match == 0)

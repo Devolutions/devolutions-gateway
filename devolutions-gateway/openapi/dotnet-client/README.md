@@ -232,6 +232,7 @@ Class | Method | HTTP request | Description
  - [Model.RecordingAiAnalysisCredentials](docs/RecordingAiAnalysisCredentials.md)
  - [Model.RecordingAiAnalysisSubstate](docs/RecordingAiAnalysisSubstate.md)
  - [Model.RecordingAiAnalysisSubstateOneOf](docs/RecordingAiAnalysisSubstateOneOf.md)
+ - [Model.RecordingAiAnalysisSubstateOneOf1](docs/RecordingAiAnalysisSubstateOneOf1.md)
  - [Model.ScanOriginDto](docs/ScanOriginDto.md)
  - [Model.ScanResultSourceDto](docs/ScanResultSourceDto.md)
  - [Model.SessionInfo](docs/SessionInfo.md)

@@ -62,6 +62,7 @@ docs/PubKeyFormat.md
 docs/RecordingAiAnalysisCredentials.md
 docs/RecordingAiAnalysisSubstate.md
 docs/RecordingAiAnalysisSubstateOneOf.md
+docs/RecordingAiAnalysisSubstateOneOf1.md
 docs/ScanOriginDto.md
 docs/ScanResultSourceDto.md
 docs/SessionInfo.md
@@ -170,6 +171,7 @@ src/Devolutions.Gateway.Client/Model/PubKeyFormat.cs
 src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisCredentials.cs
 src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisSubstate.cs
 src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisSubstateOneOf.cs
+src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisSubstateOneOf1.cs
 src/Devolutions.Gateway.Client/Model/ScanOriginDto.cs
 src/Devolutions.Gateway.Client/Model/ScanResultSourceDto.cs
 src/Devolutions.Gateway.Client/Model/SessionInfo.cs

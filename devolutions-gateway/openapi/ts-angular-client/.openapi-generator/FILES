@@ -72,6 +72,7 @@ model/pubKeyFormat.ts
 model/recordingAiAnalysisCredentials.ts
 model/recordingAiAnalysisSubstate.ts
 model/recordingAiAnalysisSubstateOneOf.ts
+model/recordingAiAnalysisSubstateOneOf1.ts
 model/scanOriginDto.ts
 model/scanResultSourceDto.ts
 model/sessionInfo.ts

@@ -2312,7 +2312,26 @@ components:
             type: string
             enum:
             - preparing
+      - type: object
+        description: Transcript chunks sent to the AI provider so far, out of `total`.
+        required:
+        - done
+        - total
+        - step
+        properties:
+          done:
+            type: integer
+            minimum: 0
+          step:
+            type: string
+            enum:
+            - describing
+          total:
+            type: integer
+            minimum: 0
       description: Progress of a running `recording.ai-analysis` task.
+      discriminator:
+        propertyName: step
     ScanOriginDto:
       type: string
       enum:

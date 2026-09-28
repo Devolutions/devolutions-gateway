@@ -49,6 +49,7 @@ export * from './pubKeyFormat';
 export * from './recordingAiAnalysisCredentials';
 export * from './recordingAiAnalysisSubstate';
 export * from './recordingAiAnalysisSubstateOneOf';
+export * from './recordingAiAnalysisSubstateOneOf1';
 export * from './scanOriginDto';
 export * from './scanResultSourceDto';
 export * from './sessionInfo';

@@ -5467,7 +5467,21 @@ Progress of a running &#x60;recording.ai-analysis&#x60; task.
 | 
 |  <<String>>  
 | 
-|  _Enum:_ preparing,  
+|  _Enum:_ describing,  
+
+| done
+| X
+| 
+|   Integer  
+| 
+|     
+
+| total
+| X
+| 
+|   Integer  
+| 
+|     
 
 |===
 
@@ -5490,6 +5504,42 @@ Progress of a running &#x60;recording.ai-analysis&#x60; task.
 |  <<String>>  
 | 
 |  _Enum:_ preparing,  
+
+|===
+
+
+
+[#RecordingAiAnalysisSubstateOneOf1]
+=== _RecordingAiAnalysisSubstateOneOf1_ 
+
+Transcript chunks sent to the AI provider so far, out of &#x60;total&#x60;.
+
+
+[.fields-RecordingAiAnalysisSubstateOneOf1]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| done
+| X
+| 
+|   Integer  
+| 
+|     
+
+| step
+| X
+| 
+|  <<String>>  
+| 
+|  _Enum:_ describing,  
+
+| total
+| X
+| 
+|   Integer  
+| 
+|     
 
 |===
 
