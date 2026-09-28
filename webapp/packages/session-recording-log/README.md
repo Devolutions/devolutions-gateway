@@ -75,7 +75,7 @@ Public API:
 - `isSessionRecordingLogFileName(fileName)`
 - `classifyFileName(fileName)`
 - `isSafeFileName(fileName)`
-- `getArtifacts(manifest)`
+- `getFileArtifacts(manifest)`
 - `getRecordingViewers(manifest)`
 - `SessionRecordingKind`
 
@@ -108,14 +108,15 @@ A Gateway recording folder holds a `recording.json` manifest that lists its file
 | artifact | One file plus its kind (`RecordingArtifact`) | 6 |
 | viewer | The window that shows a recording: a player for media, the log viewer for `.slog` | 2 |
 
-`getArtifacts(manifest)` turns a Gateway `recording.json` into one `RecordingArtifact` per file, in manifest order.
+`getFileArtifacts(manifest)` turns each entry in a Gateway `recording.json` `files` array into one `RecordingArtifact`, in manifest order.
+It reads only `files`.
 A `null` or `undefined` manifest returns `[]`.
 File names are dropped before classification unless they use only ASCII letters, digits, `.`, `_`, and `-`, contain no `..`, and aren't just `.`, because a manifest name ends up in a token-bearing pull URL.
 
 ```ts
-import { getArtifacts, SessionRecordingKind } from '@devolutions/session-recording-log';
+import { getFileArtifacts, SessionRecordingKind } from '@devolutions/session-recording-log';
 
-const artifacts = getArtifacts(manifest);
+const artifacts = getFileArtifacts(manifest);
 const logs = artifacts.filter((artifact) => artifact.kind === SessionRecordingKind.Log);
 ```
 
@@ -146,7 +147,7 @@ const { media, log, unknownCount } = getRecordingViewers(manifest);
 | Field | Contents |
 | --- | --- |
 | `media` | `{ kind, files, duration }` for video or terminal files, or `undefined` |
-| `log` | `{ files, duration }` for `.slog` files, or `undefined` |
+| `log` | `{ artifacts, duration }` for `.slog` files, or `undefined`; each entry is a `RecordingArtifact` |
 | `unknownCount` | Files not returned: unknown kinds, plus media files that differ from the first media file's kind |
 
 Files keep manifest order.

@@ -6,7 +6,7 @@ export type {
 } from './manifest';
 export {
   classifyFileName,
-  getArtifacts,
+  getFileArtifacts,
   getRecordingViewers,
   isSafeFileName,
   isSessionRecordingLogFileName,

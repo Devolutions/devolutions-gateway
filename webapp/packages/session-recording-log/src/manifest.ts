@@ -82,10 +82,11 @@ export function isSafeFileName(fileName: string | null | undefined): boolean {
 }
 
 /**
- * Mirrors C# `GatewayRecordingManifest.GetArtifacts()`: every manifest file in manifest order, with
- * its kind resolved. Unsafe file names are dropped before classification, as they are in C#.
+ * Mirrors C# `GatewayRecordingManifest.GetArtifacts()`: every entry in `manifest.files`, in manifest
+ * order, with its kind resolved. Reads only `files`. Unsafe file names are dropped before
+ * classification, as they are in C#.
  */
-export function getArtifacts(manifest: GatewayRecordingManifest | null | undefined): RecordingArtifact[] {
+export function getFileArtifacts(manifest: GatewayRecordingManifest | null | undefined): RecordingArtifact[] {
   const artifacts: RecordingArtifact[] = [];
 
   for (const file of manifest?.files ?? []) {
@@ -110,7 +111,7 @@ export function getArtifacts(manifest: GatewayRecordingManifest | null | undefin
  */
 export interface RecordingViewers {
   media?: { kind: 'video' | 'terminal'; files: GatewayRecordingManifestFile[]; duration: number };
-  log?: { files: GatewayRecordingManifestFile[]; duration: number };
+  log?: { artifacts: RecordingArtifact[]; duration: number };
   unknownCount: number;
 }
 
@@ -129,12 +130,13 @@ export function getRecordingViewers(manifest: GatewayRecordingManifest | null | 
   let log: RecordingViewers['log'];
   let unknownCount = 0;
 
-  for (const { kind, ...file } of getArtifacts(manifest)) {
+  for (const artifact of getFileArtifacts(manifest)) {
+    const { kind, ...file } = artifact;
     const fileDuration = file.duration !== undefined && file.duration > 0 ? file.duration : 0;
 
     if (kind === SessionRecordingKind.Log) {
-      log ??= { files: [], duration: 0 };
-      log.files.push(file);
+      log ??= { artifacts: [], duration: 0 };
+      log.artifacts.push(artifact);
       log.duration += fileDuration;
     } else if (kind === SessionRecordingKind.Video || kind === SessionRecordingKind.Terminal) {
       media ??= { kind, files: [], duration: 0 };

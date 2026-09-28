@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyFileName,
   type GatewayRecordingManifest,
-  getArtifacts,
+  getFileArtifacts,
   getRecordingViewers,
   isSafeFileName,
   SessionRecordingKind,
@@ -60,7 +60,7 @@ describe('isSafeFileName', () => {
   });
 });
 
-describe('getArtifacts', () => {
+describe('getFileArtifacts', () => {
   it('reads the Gateway manifest shape', () => {
     const manifest = JSON.parse(`{
       "sessionId": "0c3f24a1-49a5-46e3-8ba0-a97dd9d7dc12",
@@ -72,7 +72,7 @@ describe('getArtifacts', () => {
       ]
     }`) as GatewayRecordingManifest;
 
-    const artifacts = getArtifacts(manifest);
+    const artifacts = getFileArtifacts(manifest);
 
     expect(artifacts).toHaveLength(2);
     expect(artifacts[0]?.kind).toBe(SessionRecordingKind.Video);
@@ -81,15 +81,15 @@ describe('getArtifacts', () => {
   });
 
   it.each(unsafeFileNames)('drops %j', (fileName) => {
-    expect(getArtifacts({ files: [{ fileName }] })).toEqual([]);
+    expect(getFileArtifacts({ files: [{ fileName }] })).toEqual([]);
   });
 
   it('drops non-string file names without throwing', () => {
-    expect(getArtifacts({ files: [{ fileName: 5 as unknown as string }] })).toEqual([]);
+    expect(getFileArtifacts({ files: [{ fileName: 5 as unknown as string }] })).toEqual([]);
   });
 
   it('preserves manifest order', () => {
-    const artifacts = getArtifacts({
+    const artifacts = getFileArtifacts({
       files: [
         { fileName: 'recording-0.webm' },
         { fileName: 'recording-1.slog' },
@@ -113,16 +113,16 @@ describe('getArtifacts', () => {
   });
 
   it('keeps unknown artifacts rather than dropping them', () => {
-    const artifacts = getArtifacts({ files: [{ fileName: 'recording-0.bin' }] });
+    const artifacts = getFileArtifacts({ files: [{ fileName: 'recording-0.bin' }] });
 
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]?.kind).toBe(SessionRecordingKind.Unknown);
   });
 
   it('returns an empty list for a missing or empty manifest', () => {
-    expect(getArtifacts(undefined)).toEqual([]);
-    expect(getArtifacts(null)).toEqual([]);
-    expect(getArtifacts({ files: [] })).toEqual([]);
+    expect(getFileArtifacts(undefined)).toEqual([]);
+    expect(getFileArtifacts(null)).toEqual([]);
+    expect(getFileArtifacts({ files: [] })).toEqual([]);
   });
 });
 
@@ -148,12 +148,12 @@ describe('getRecordingViewers', () => {
       'recording-4.webm',
     ]);
     expect(viewers.media?.duration).toBe(150);
-    expect(viewers.log?.files.map((file) => file.fileName)).toEqual(['recording-0.slog']);
+    expect(viewers.log?.artifacts.map((artifact) => artifact.fileName)).toEqual(['recording-0.slog']);
     expect(viewers.log?.duration).toBe(150);
     expect(viewers.unknownCount).toBe(0);
   });
 
-  it('returns files without their kind', () => {
+  it('returns media files without their kind', () => {
     const viewers = getRecordingViewers({ files: [{ fileName: 'recording-0.cast', startTime: 5, duration: 7 }] });
 
     expect(viewers.media).toEqual({
@@ -163,11 +163,20 @@ describe('getRecordingViewers', () => {
     });
   });
 
+  it('returns log artifacts with their kind', () => {
+    const viewers = getRecordingViewers({ files: [{ fileName: 'recording-0.slog', startTime: 5, duration: 7 }] });
+
+    expect(viewers.log).toEqual({
+      artifacts: [{ fileName: 'recording-0.slog', kind: SessionRecordingKind.Log, startTime: 5, duration: 7 }],
+      duration: 7,
+    });
+  });
+
   it('offers only a log viewer for a log-only recording', () => {
     const viewers = getRecordingViewers({ files: [{ fileName: 'recording-0.slog' }] });
 
     expect(viewers.media).toBeUndefined();
-    expect(viewers.log?.files).toHaveLength(1);
+    expect(viewers.log?.artifacts).toHaveLength(1);
   });
 
   it('groups several log files into one log viewer and sums their durations', () => {
@@ -179,7 +188,10 @@ describe('getRecordingViewers', () => {
       ],
     });
 
-    expect(viewers.log?.files.map((file) => file.fileName)).toEqual(['recording-0.slog', 'recording-2.slog']);
+    expect(viewers.log?.artifacts.map((artifact) => artifact.fileName)).toEqual([
+      'recording-0.slog',
+      'recording-2.slog',
+    ]);
     expect(viewers.log?.duration).toBe(90);
   });
 
@@ -208,7 +220,7 @@ describe('getRecordingViewers', () => {
       files: [{ fileName: '../recording-0.slog' }, { fileName: 'recording-1.slog' }],
     });
 
-    expect(viewers.log?.files.map((file) => file.fileName)).toEqual(['recording-1.slog']);
+    expect(viewers.log?.artifacts.map((artifact) => artifact.fileName)).toEqual(['recording-1.slog']);
     expect(viewers.unknownCount).toBe(0);
   });
 
