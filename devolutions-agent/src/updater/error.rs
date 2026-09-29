@@ -30,8 +30,11 @@ pub(crate) enum UpdaterError {
     MsiUninstall { product: Product, product_code: Uuid },
     #[error("ACL string `{acl}` is invalid")]
     AclString { acl: String },
-    #[error("failed to set permissions for file: `{file_path}`")]
-    SetFilePermissions { file_path: Utf8PathBuf },
+    #[error("failed to set permissions for file `{file_path}`: {source}")]
+    SetFilePermissions {
+        file_path: Utf8PathBuf,
+        source: windows::core::Error,
+    },
     #[error(
         "could not find required file in productinfo.json for product `{product}` (arch: {arch}, type: {file_type})"
     )]
@@ -58,6 +61,10 @@ pub(crate) enum UpdaterError {
     QueryServiceState { product: Product, source: anyhow::Error },
     #[error("failed to start service for `{product}`")]
     StartService { product: Product, source: anyhow::Error },
+    #[error(
+        "`{product}` service account `{account}` logs on with a password that an unattended upgrade cannot supply; update manually with P.SERVICEPASSWORD or switch to a passwordless account"
+    )]
+    ServiceAccountRequiresPassword { product: Product, account: String },
     #[error("agent updater shim not found at expected path: `{path}`")]
     AgentUpdaterShimNotFound { path: Utf8PathBuf },
     #[error("failed to launch agent updater shim")]
