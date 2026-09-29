@@ -1,4 +1,6 @@
-use super::should_refresh_update_status;
+//! Compiled as Devolutions Agent unit tests via `#[path]`, not as part of the `testsuite` crate.
+
+use crate::updater::should_refresh_update_status;
 
 #[test]
 fn gateway_failure_with_agent_success_refreshes_status() {
