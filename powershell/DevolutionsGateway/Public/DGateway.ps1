@@ -1263,12 +1263,40 @@ function Get-DGatewayPackage {
 }
 
 function Install-DGatewayPackage {
+    <#
+    .SYNOPSIS
+    Downloads and installs (or upgrades) the Devolutions Gateway package.
+
+    .PARAMETER ServiceAccount
+    Windows only. The account the Gateway service logs on as, in 'DOMAIN\Name' or '.\Name' form,
+    such as a group managed service account ('CONTOSO\gateway$') or the virtual account
+    'NT SERVICE\DevolutionsGateway'. Defaults to the account of the existing service on upgrade,
+    and to 'NT AUTHORITY\NetworkService' on a first install.
+
+    .PARAMETER ServiceCredential
+    Windows only. Credential of a service account that logs on with a password. The user name is
+    used as the service account when -ServiceAccount is not specified. Passwordless accounts
+    (NETWORK SERVICE, virtual accounts, managed service accounts) do not need it.
+    Required again for a major upgrade under a password-based account.
+    If ServiceAccount is also supplied, it must match the credential user name.
+    The password is visible in the installer process command line; avoid logging that command line.
+    #>
     [CmdletBinding()]
     param(
         [string] $RequiredVersion,
         [switch] $Quiet,
-        [switch] $Force
+        [switch] $Force,
+        [string] $ServiceAccount,
+        [PSCredential] $ServiceCredential
     )
+
+    if (($ServiceAccount -or $ServiceCredential) -and -not $IsWindows) {
+        throw 'ServiceAccount and ServiceCredential are supported only on Windows'
+    }
+
+    if ($ServiceAccount -and $ServiceCredential -and $ServiceAccount -ine $ServiceCredential.UserName) {
+        throw 'ServiceAccount must match ServiceCredential.UserName; omit ServiceAccount to use the credential user name'
+    }
 
     $Version = Get-DGatewayVersion 'PSModule'
 
@@ -1312,7 +1340,25 @@ function Install-DGatewayPackage {
             '/log', "`"$InstallLogFile`""
         )
 
-        Start-Process 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow
+        if ($ServiceCredential -and -Not $ServiceAccount) {
+            $ServiceAccount = $ServiceCredential.UserName
+        }
+
+        if ($ServiceAccount) {
+            $MsiArgs += ConvertTo-DGatewayMsiProperty -Name 'P.SERVICEACCOUNT' -Value $ServiceAccount
+        }
+
+        if ($ServiceCredential) {
+            # Hidden MSI properties do not protect process command lines or the Debug=7 logging policy.
+            $MsiArgs += ConvertTo-DGatewayMsiProperty -Name 'P.SERVICEPASSWORD' -Value $ServiceCredential.GetNetworkCredential().Password
+        }
+
+        $Process = Start-Process 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow -PassThru
+        if ($Process.ExitCode -eq 3010) {
+            Write-Warning 'Devolutions Gateway installation requires a restart'
+        } elseif ($Process.ExitCode -ne 0) {
+            throw "Devolutions Gateway installation failed (MSI exit code $($Process.ExitCode)). Log: $InstallLogFile"
+        }
 
         Remove-Item -Path $InstallLogFile -Force -ErrorAction SilentlyContinue
     } elseif ($IsMacOS) {

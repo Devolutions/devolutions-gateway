@@ -67,6 +67,8 @@ sysevent-syslog.path = "../crates/sysevent-syslog"
 
 [target.'cfg(windows)'.dev-dependencies]
 sysevent-winevent.path = "../crates/sysevent-winevent"
+win-api-wrappers.path = "../crates/win-api-wrappers"
+windows = { version = "0.61", features = ["Win32_Security_Authentication_Identity"] }
 
 [lints]
 workspace = true

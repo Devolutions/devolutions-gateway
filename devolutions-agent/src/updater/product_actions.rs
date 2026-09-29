@@ -1,8 +1,7 @@
 use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
 
+use crate::updater::service_account::{GATEWAY_SERVICE_NAME, GatewayServiceAccount};
 use crate::updater::{Product, UpdaterError};
-
-const GATEWAY_SERVICE_NAME: &str = "DevolutionsGateway";
 
 // Hub Service installs up to 3 separate Windows services (depending on selected features)
 // Service Name -> MSI Feature mapping for ADDLOCAL parameter:
@@ -17,6 +16,11 @@ const HUB_SERVICE_NAMES: &[&str] = &[
 
 /// Additional actions that need to be performed during product update process
 pub(crate) trait ProductUpdateActions {
+    /// Verify that the product can be updated unattended at all. Runs before anything is downloaded.
+    fn check_update_supported(&self) -> Result<(), UpdaterError> {
+        Ok(())
+    }
+
     fn pre_update(&mut self) -> Result<(), UpdaterError>;
     fn get_msiexec_install_params(&self) -> Vec<String>;
     fn post_update(&mut self) -> Result<(), UpdaterError>;
@@ -35,12 +39,14 @@ struct ServiceState {
 struct ServiceUpdateActions {
     product: Product,
     service_states: Vec<ServiceState>,
+    gateway_account: Option<String>,
 }
 
 impl ServiceUpdateActions {
     fn new_single_service(product: Product, service_name: &'static str) -> Self {
         Self {
             product,
+            gateway_account: None,
             service_states: vec![ServiceState {
                 name: service_name,
                 exists: false,
@@ -53,6 +59,7 @@ impl ServiceUpdateActions {
     fn new_multi_service(product: Product, service_names: &'static [&'static str]) -> Self {
         Self {
             product,
+            gateway_account: None,
             service_states: service_names
                 .iter()
                 .map(|&name| ServiceState {
@@ -66,6 +73,12 @@ impl ServiceUpdateActions {
     }
 
     fn pre_update_impl(&mut self) -> anyhow::Result<()> {
+        if self.product == Product::Gateway {
+            let account = GatewayServiceAccount::query()?
+                .ok_or_else(|| anyhow::anyhow!("Gateway service disappeared before update"))?;
+            anyhow::ensure!(account.is_passwordless(), "Gateway account now requires a password");
+            self.gateway_account = Some(account.name);
+        }
         info!("Querying service states for {}", self.product);
         let service_manager = ServiceManager::open_read()?;
 
@@ -139,6 +152,31 @@ impl ServiceUpdateActions {
 }
 
 impl ProductUpdateActions for ServiceUpdateActions {
+    fn check_update_supported(&self) -> Result<(), UpdaterError> {
+        if self.product != Product::Gateway {
+            return Ok(());
+        }
+
+        // The Gateway MSI recreates the service on upgrade and preserves the existing account,
+        // but it cannot recover a password from the service control manager. The installer
+        // fails safe in that case; detect it up front instead of downloading the package.
+        match GatewayServiceAccount::query() {
+            Ok(Some(account)) if !account.is_passwordless() => Err(UpdaterError::ServiceAccountRequiresPassword {
+                product: self.product,
+                account: account.name,
+            }),
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(UpdaterError::QueryServiceState {
+                product: self.product,
+                source: anyhow::anyhow!("Gateway service is missing; repair it with an explicit service account"),
+            }),
+            Err(source) => Err(UpdaterError::QueryServiceState {
+                product: self.product,
+                source,
+            }),
+        }
+    }
+
     fn pre_update(&mut self) -> Result<(), UpdaterError> {
         self.pre_update_impl()
             .map_err(|source| UpdaterError::QueryServiceState {
@@ -153,11 +191,16 @@ impl ProductUpdateActions for ServiceUpdateActions {
 
         match self.product {
             Product::Gateway => {
+                let mut parameters = Vec::new();
+                if let Some(account) = &self.gateway_account {
+                    parameters.push(format!("P.SERVICEACCOUNT=\"{}\"", account.replace('"', "\"\"")));
+                }
                 // Gateway installer supports P.SERVICESTART property
                 if self.service_states.len() == 1 && self.service_states[0].startup_was_automatic {
                     info!("Adjusting MSIEXEC parameters for Gateway service startup mode");
-                    return vec!["P.SERVICESTART=Automatic".to_owned()];
+                    parameters.push("P.SERVICESTART=Automatic".to_owned());
                 }
+                return parameters;
             }
             Product::HubService => {
                 // Hub Service installer requires ADDLOCAL parameter to specify which services to install.

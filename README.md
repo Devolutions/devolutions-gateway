@@ -45,6 +45,8 @@ This path may be overridden using the `DGATEWAY_CONFIG_PATH` environment variabl
 
 A default template with minimal options is generated at this location on startup if the file doesn't exist yet.
 
+For Windows service identities, permissions, current-release workarounds, and the transition to installer-managed accounts, see the [Windows service-account guide](docs/WINDOWS-SERVICE-ACCOUNTS.md).
+
 Stable options are:
 
 - **Id** (_UUID_): This Gateway's UUID.

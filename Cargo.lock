@@ -7656,6 +7656,8 @@ dependencies = [
  "tokio-util",
  "typed-builder",
  "uuid",
+ "win-api-wrappers",
+ "windows 0.61.3",
 ]
 
 [[package]]
