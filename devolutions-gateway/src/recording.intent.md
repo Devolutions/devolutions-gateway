@@ -1,15 +1,13 @@
-# Background
-Recording in Gateway has always been simple.
-The source pushes a stream into Gateway, and Gateway persists it to disk.
-Now we would like to add a new feature, AI and machine generated logs to improve searchability.
+# Recording
+Gateway recording is a continuous stream of bytes pushed from the client who pocesses the valid recording token.
+The url is `/jet/jrec/push/{sessionId}?fileType={fileType}`.
+We expect the `fileType` to be one of the following file types: `webm`, `cast`, `trp` and `slog`, which must be specified.
+When connection is established with request of recordings for the session, if recording is not enabled within a short period of time, the connection will be closed with indication of violation of the recording policy.
 
 
-# Logs 
-Recording manifest should now have a new field called `logs`. 
-We define material as a file that is pushed to Gateway.
-We will have two material types, `recording` and `log`.
-To keep everything backward compatible, we will accept `materialType` as a query parameter, and when it is null, we will treat the stream as a recording.
-If `materialType` is `recording`, the `fileType` param must be present, we currently have four file types, `webm`, `cast`, `trp` and `slog`. That is right, `slog` can be both a recording file type and the log itself. This is intentional to keep backward compatibility.
-`fileType` is mandatory for `recording`, and rejected for `log`.
-The content of the log and the recording is transparent to Gateway unless it is streamed, see the `streaming` crates.
-The client doesn't own the naming of log and recording files, Gateway does with number-based naming.
+# Artifacts
+Artifacts are files that are not recordings, currently only have `ai-analysis` with combination to `slog` file type.
+We reuse the same url but with one extra query parameter, `/jet/jrec/push/{sessionId}?fileType={fileType}&kind={kind}`, where the `kind`, if not specified, we treat it as recordings.
+Artifacts can be pushed without any recordings started.
+Pushing artifacts should not trigger any recording policy as recordings.
+Session shadowing does not support artifacts. 
