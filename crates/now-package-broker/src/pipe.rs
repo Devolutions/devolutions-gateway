@@ -42,13 +42,16 @@ const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 /// request would each pin a connection slot indefinitely and could exhaust the pool.
 const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// How long shutdown waits for the connections that are still serving a request.
+/// How long shutdown waits for the connections that are still serving a request, then for the
+/// aborted ones to actually stop.
 ///
 /// Serving a connection can record a policy audit event, and the caller drains the audit queue as
 /// soon as this function returns, so nothing may still be running by then. A healthy exchange
 /// completes in milliseconds, and each connection is already bounded by `CONNECTION_DEADLINE`, so
 /// this only has to cover the tail of a request already in progress; connections still stuck at
-/// the end of it are aborted rather than allowed to hold the shutdown.
+/// the end of it are aborted rather than allowed to hold the shutdown. The same budget then bounds
+/// the wait for those aborts to take effect, so a connection stuck in synchronous work costs the
+/// queue one grace period instead of keeping it from ever being drained.
 const CONNECTION_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Start the named pipe server and accept connections until shutdown.
@@ -167,14 +170,23 @@ async fn drain_after_accept_loop(
 /// Wait for the connection tasks to finish, then abort the ones that outlive the grace.
 ///
 /// Serving a connection can record policy audit events, so the caller drains the audit queue as
-/// soon as this returns and no connection may outlive it.
+/// soon as this returns. Waiting is bounded on both sides: a task inside synchronous work, such as
+/// authenticating a client or reading the policy storage, never reaches a cancellation point, so
+/// the settle after the abort cannot be left unbounded either. Draining the queue after
+/// interrupting one such connection is worth far more than losing every event of it, and the agent
+/// gives the whole shutdown a fixed budget before it stops the runtime.
 async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace: std::time::Duration) {
     let drained = tokio::time::timeout(grace, async { while connections.join_next().await.is_some() {} }).await;
 
     if drained.is_err() {
         warn!("Aborted named pipe connections still serving at shutdown");
         connections.abort_all();
-        while connections.join_next().await.is_some() {}
+
+        let settled = tokio::time::timeout(grace, async { while connections.join_next().await.is_some() {} }).await;
+
+        if settled.is_err() {
+            error!("Named pipe connections are still running blocking work; their policy audit events may be lost");
+        }
     }
 }
 
@@ -260,6 +272,9 @@ mod tests {
 
     use super::*;
 
+    /// Blocking work a connection can be stuck in that aborting it cannot interrupt.
+    const NON_ABORTABLE_CONNECTION_WORK: Duration = Duration::from_secs(1);
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn timed_out_capture_keeps_its_permit_until_blocking_work_finishes() {
         let permits = Arc::new(Semaphore::new(1));
@@ -341,6 +356,31 @@ mod tests {
         );
         assert!(dropped.load(Ordering::SeqCst), "the connection task must be aborted");
         assert!(connections.is_empty(), "no connection task may outlive shutdown");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn shutdown_gives_up_on_a_connection_stuck_in_blocking_work() {
+        // A connection inside synchronous work, such as authenticating a client or reading the
+        // policy storage, never reaches a cancellation point, so aborting it does not stop it.
+        // The wait still has to return, because the caller drains the audit queue right after.
+        let mut connections = JoinSet::new();
+        connections.spawn(async {
+            tokio::task::block_in_place(|| std::thread::sleep(NON_ABORTABLE_CONNECTION_WORK));
+        });
+
+        let started = Instant::now();
+        wait_for_connections(&mut connections, Duration::from_millis(200)).await;
+
+        // Returning with the task still in the set is the regression: an unbounded settle only
+        // returns once every connection has finished.
+        assert!(
+            !connections.is_empty(),
+            "the wait must not be held by a connection that cannot be aborted"
+        );
+        assert!(
+            started.elapsed() < NON_ABORTABLE_CONNECTION_WORK,
+            "the wait must return long before the blocking work is over"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
