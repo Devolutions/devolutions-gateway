@@ -36,7 +36,7 @@ pub(crate) struct JrecArtifact {
 }
 
 /// Kind of a non-recording artifact, used as its key in the manifest `artifacts` object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     AiAnalysis,
 }
