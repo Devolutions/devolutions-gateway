@@ -49,8 +49,7 @@ const MAX_RECORDING_ZIP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
-        .route("/push/{id}", get(jrec_push_recording))
-        .route("/push/{id}/logs", get(jrec_push_log))
+        .route("/push/{id}", get(jrec_push))
         .route("/delete/{id}", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
@@ -66,6 +65,25 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
+    category: Option<PushCategory>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum PushCategory {
+    Recording,
+    Log,
+}
+
+impl JrecPushQueryParam {
+    fn material(&self) -> Result<PushMaterial, HttpError> {
+        match (self.category, self.file_type) {
+            // A missing category means recording, as it did before logs existed.
+            (None | Some(PushCategory::Recording), file_type) => Ok(PushMaterial::Recording(file_type)),
+            (Some(PushCategory::Log), RecordingFileType::SessionRecordingLog) => Ok(PushMaterial::Log),
+            (Some(PushCategory::Log), _) => Err(HttpError::bad_request().msg("only slog files can be pushed as logs")),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -75,44 +93,24 @@ pub(crate) struct JrecListQueryParam {
     active: bool,
 }
 
-async fn jrec_push_recording(
-    State(state): State<DgwState>,
+async fn jrec_push(
+    State(DgwState {
+        shutdown_signal,
+        recordings,
+        conf_handle,
+        ..
+    }): State<DgwState>,
     JrecToken(claims): JrecToken,
     Query(query): Query<JrecPushQueryParam>,
     extract::Path(session_id): extract::Path<Uuid>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
-    let material = PushMaterial::Recording(query.file_type);
-    jrec_push(state, claims, material, session_id, source_addr, ws).await
-}
-
-async fn jrec_push_log(
-    State(state): State<DgwState>,
-    JrecToken(claims): JrecToken,
-    extract::Path(session_id): extract::Path<Uuid>,
-    ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
-    ws: WebSocketUpgrade,
-) -> Result<Response, HttpError> {
-    jrec_push(state, claims, PushMaterial::Log, session_id, source_addr, ws).await
-}
-
-async fn jrec_push(
-    DgwState {
-        shutdown_signal,
-        recordings,
-        conf_handle,
-        ..
-    }: DgwState,
-    claims: JrecTokenClaims,
-    material: PushMaterial,
-    session_id: Uuid,
-    source_addr: SocketAddr,
-    ws: WebSocketUpgrade,
-) -> Result<Response, HttpError> {
     if claims.jet_rop != RecordingOperation::Push {
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
+
+    let material = query.material()?;
 
     let conf = conf_handle.get_conf();
 
@@ -1055,15 +1053,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recording_push_requires_a_file_type() {
-        let file_type =
-            |query: serde_json::Value| serde_json::from_value::<JrecPushQueryParam>(query).map(|query| query.file_type);
+    fn push_material_from_query() {
+        let material = |query: serde_json::Value| {
+            serde_json::from_value::<JrecPushQueryParam>(query)
+                .expect("query")
+                .material()
+                .map_err(|error| error.code)
+        };
 
+        let slog_recording = Ok(PushMaterial::Recording(RecordingFileType::SessionRecordingLog));
+        assert_eq!(material(serde_json::json!({ "fileType": "slog" })), slog_recording);
         assert_eq!(
-            file_type(serde_json::json!({ "fileType": "slog" })).expect("slog"),
-            RecordingFileType::SessionRecordingLog
+            material(serde_json::json!({ "fileType": "slog", "category": "recording" })),
+            slog_recording
         );
-        assert!(file_type(serde_json::json!({})).is_err());
+        assert_eq!(
+            material(serde_json::json!({ "fileType": "slog", "category": "log" })),
+            Ok(PushMaterial::Log)
+        );
+        assert_eq!(
+            material(serde_json::json!({ "fileType": "webm", "category": "log" })),
+            Err(StatusCode::BAD_REQUEST)
+        );
+        assert!(serde_json::from_value::<JrecPushQueryParam>(serde_json::json!({ "category": "log" })).is_err());
     }
 
     #[test]
