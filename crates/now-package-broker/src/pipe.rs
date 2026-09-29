@@ -53,12 +53,26 @@ const CONNECTION_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from
 
 /// Start the named pipe server and accept connections until shutdown.
 pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
+    // Serving a connection can record policy audit events, and the caller drains the audit queue as
+    // soon as this function returns, so no connection may outlive it. The accept loop runs in its
+    // own function, so that every one of its exit paths, including a failure to create the next
+    // pipe instance, reaches the drain below instead of returning straight out.
+    let mut connections = tokio::task::JoinSet::new();
+    let result = accept_connections(&state, &shutdown, &mut connections).await;
+
+    drain_after_accept_loop(&mut connections, CONNECTION_SHUTDOWN_GRACE, result).await
+}
+
+/// Accept connections until `shutdown` is cancelled or the next pipe instance cannot be created.
+async fn accept_connections(
+    state: &Arc<BrokerState>,
+    shutdown: &CancellationToken,
+    connections: &mut tokio::task::JoinSet<()>,
+) -> anyhow::Result<()> {
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
     let connection_permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
-    // Serving a connection can record policy audit events, so shutdown has to wait for these.
-    let mut connections = tokio::task::JoinSet::new();
 
     let mut first_instance = true;
     loop {
@@ -83,7 +97,7 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
             result = server.connect() => {
                 match result {
                     Ok(()) => {
-                        let state = Arc::clone(&state);
+                        let state = Arc::clone(state);
                         connections.spawn(async move {
                             let serve = async move {
                                 // Keep blocking unauthenticated capture off the accept loop and
@@ -131,9 +145,23 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
 
     info!("Pipe server shutting down");
 
-    wait_for_connections(&mut connections, CONNECTION_SHUTDOWN_GRACE).await;
-
     Ok(())
+}
+
+/// Drain the connections the accept loop spawned, then report what the loop returned.
+///
+/// Serving a connection can record policy audit events, and the caller drains the audit queue as
+/// soon as `run_pipe_server` returns, so no accepted connection may outlive it. An accept loop that
+/// fails after accepting one has to wait for that connection too, rather than let the `?` on the
+/// failing call drop the set and run an audit recorder destructor after the queue was drained.
+async fn drain_after_accept_loop(
+    connections: &mut tokio::task::JoinSet<()>,
+    grace: std::time::Duration,
+    loop_result: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    wait_for_connections(connections, grace).await;
+
+    loop_result
 }
 
 /// Wait for the connection tasks to finish, then abort the ones that outlive the grace.
@@ -313,6 +341,37 @@ mod tests {
         );
         assert!(dropped.load(Ordering::SeqCst), "the connection task must be aborted");
         assert!(connections.is_empty(), "no connection task may outlive shutdown");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_accept_loop_failure_waits_for_the_connections_it_accepted() {
+        // Mirrors `create_pipe_instance` failing after a connection was accepted: the error may
+        // reach the caller only once no connection can still record an audit event.
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut connections = JoinSet::new();
+        connections.spawn({
+            let dropped = Arc::clone(&dropped);
+            async move {
+                let _flag = DropFlag(dropped);
+                std::future::pending::<()>().await;
+            }
+        });
+
+        let started = Instant::now();
+        let result = drain_after_accept_loop(
+            &mut connections,
+            Duration::from_millis(200),
+            Err(anyhow::anyhow!("failed to create the next pipe instance")),
+        )
+        .await;
+
+        assert!(result.is_err(), "the accept loop failure is still reported");
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "the accepted connections have to settle first"
+        );
+        assert!(dropped.load(Ordering::SeqCst), "the connection task must be aborted");
+        assert!(connections.is_empty(), "no connection task may outlive the accept loop");
     }
 
     #[tokio::test]
