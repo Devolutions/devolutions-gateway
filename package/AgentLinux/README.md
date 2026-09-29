@@ -23,6 +23,8 @@ docker run --rm `
   devolutions/devolutions-agent:latest
 ```
 
+For HTTPS, set `PSU_SERVER_URL` to an `https://` URL and trust the PSU server certificate in the container's system certificate store.
+
 | Environment variable | Default |
 | --- | --- |
 | `PSU_SERVER_URL` | Empty |
