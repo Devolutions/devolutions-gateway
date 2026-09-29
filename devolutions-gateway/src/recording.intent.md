@@ -7,7 +7,4 @@ When connection is established with request of recordings for the session, if re
 
 # Artifacts
 Artifacts are files that are not recordings, currently only have `ai-analysis` with combination to `slog` file type.
-We reuse the same url but with one extra query parameter, `/jet/jrec/push/{sessionId}?fileType={fileType}&kind={kind}`, where the `kind`, if not specified, we treat it as recordings.
-Artifacts can be pushed without any recordings started.
-Pushing artifacts should not trigger any recording policy as recordings.
-Session shadowing does not support artifacts. 
+Currently, we do not have an api endpoint to push artifacts, but we will have one in the future.
