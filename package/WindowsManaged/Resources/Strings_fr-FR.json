@@ -813,7 +813,7 @@
           },
           {
             "id": "PrivateKeyPermissionWillBeGranted",
-            "text": "Le compte Network Service n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis."
+            "text": "Le compte {0} n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis."
           },
           {
             "id": "ValidationProducedWarnings",

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Security.Principal;
 namespace DevolutionsGateway.Resources
 {
     internal static class Includes
@@ -26,27 +27,34 @@ namespace DevolutionsGateway.Resources
         internal static string INFO_URL = "https://server.devolutions.net";
 
         /// <summary>
-        /// SDDL string representing desired %programdata%\devolutions\gateway ACL
+        /// SDDL template for the desired %programdata%\devolutions\gateway ACL. `{0}` is the SID of the service account.
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`
         /// </summary>
         /// <remarks>
             /// Local System (SY)	Full Access (FA)
             /// Local Service (LS)	Read, Execute
-            /// Network Service (NS)	Read, Execute, Write, Delete Subfolders and Files
+            /// Service account	Read, Execute, Write, Delete Subfolders and Files
             /// Administrators (BA)	Full Access (FA)
             /// Users (BU)	Read, Execute
         /// </remarks>
-        internal static string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301ff;;;NS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301ff;;;{0})(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
+        /// <summary>
+        /// SDDL template for the desired %programdata%\devolutions\gateway\users.txt ACL. `{0}` is the SID of the service account.
+        /// </summary>
         /// <remarks>
         /// Owner  : NT AUTHORITY\SYSTEM
         /// Group  : NT AUTHORITY\SYSTEM
         /// Access :
             /// Local System (SY)	Full Access (FA)
             /// Local Service (LS)	Read, Execute, Modify (Write)
-            /// Network Service (NS)	Read, Execute, Modify (Write)
+            /// Service account	Read, Execute, Modify (Write)
             /// Administrators (BA)	Full Access (FA)
         /// </remarks>
-        internal static string USERS_FILE_SDDL = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;0x1201bf;;;NS)(A;;FA;;;BA)";
+        private const string USERS_FILE_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;0x1201bf;;;{0})(A;;FA;;;BA)";
+
+        internal static string ProgramDataSddl(SecurityIdentifier serviceAccount) => string.Format(PROGRAM_DATA_SDDL_TEMPLATE, serviceAccount.Value);
+
+        internal static string UsersFileSddl(SecurityIdentifier serviceAccount) => string.Format(USERS_FILE_SDDL_TEMPLATE, serviceAccount.Value);
     }
 }

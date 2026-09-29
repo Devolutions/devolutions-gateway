@@ -26,7 +26,7 @@ internal class Service : IDisposable
             service = new Service(serviceManager, name, desiredAccess, logger);
             return true;
         }
-        catch
+        catch (Win32Exception error) when (error.NativeErrorCode == 1060)
         {
             return false;
         }
@@ -43,8 +43,9 @@ internal class Service : IDisposable
 
         if (this.hService == IntPtr.Zero)
         {
-            logger.Log($"failed to open service {name} with desired access {desiredAccess} (error: {Marshal.GetLastWin32Error()})");
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+            int error = Marshal.GetLastWin32Error();
+            this.logger.Log($"failed to open service {name} with desired access {desiredAccess} (error: {error})");
+            throw new Win32Exception(error);
         }
     }
 
@@ -61,6 +62,30 @@ internal class Service : IDisposable
 
     public ServiceStartMode GetStartupType()
     {
+        using Buffer buffer = QueryConfig();
+
+        WinAPI.QUERY_SERVICE_CONFIG serviceConfig = Marshal.PtrToStructure<WinAPI.QUERY_SERVICE_CONFIG>(buffer);
+        logger.Log($"service {name} has start type: {serviceConfig.dwStartType}");
+        return (ServiceStartMode)serviceConfig.dwStartType;
+    }
+
+    /// <summary>
+    /// The account the service logs on as, e.g. "NT AUTHORITY\NetworkService" or "DOMAIN\name$"
+    /// </summary>
+    public string GetAccountName()
+    {
+        using Buffer buffer = QueryConfig();
+
+        WinAPI.QUERY_SERVICE_CONFIG serviceConfig = Marshal.PtrToStructure<WinAPI.QUERY_SERVICE_CONFIG>(buffer);
+        string accountName = serviceConfig.lpServiceStartName == IntPtr.Zero
+            ? string.Empty
+            : Marshal.PtrToStringUni(serviceConfig.lpServiceStartName);
+        logger.Log($"service {name} logs on as: {accountName}");
+        return accountName;
+    }
+
+    private Buffer QueryConfig()
+    {
         uint bytesNeeded = 0;
         const int errorInsufficientBuffer = 122;
 
@@ -73,17 +98,17 @@ internal class Service : IDisposable
             }
         }
 
-        using Buffer buffer = new((int)bytesNeeded);
+        Buffer buffer = new((int)bytesNeeded);
 
         if (!WinAPI.QueryServiceConfig(this.Handle, buffer, bytesNeeded, ref bytesNeeded))
         {
-            logger.Log($"QueryServiceConfig failed (error: {Marshal.GetLastWin32Error()})");
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+            int error = Marshal.GetLastWin32Error();
+            buffer.Dispose();
+            logger.Log($"QueryServiceConfig failed (error: {error})");
+            throw new Win32Exception(error);
         }
 
-        WinAPI.QUERY_SERVICE_CONFIG serviceConfig = Marshal.PtrToStructure<WinAPI.QUERY_SERVICE_CONFIG>(buffer);
-        logger.Log($"service {name} has start type: {serviceConfig.dwStartType}");
-        return (ServiceStartMode)serviceConfig.dwStartType;
+        return buffer;
     }
 
     public void SetStartupType(ServiceStartMode startMode)
