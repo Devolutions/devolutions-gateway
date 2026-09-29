@@ -30,7 +30,7 @@ use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushMaterial, PushOutcome, RecordingMessageSender};
+use crate::recording::{PushCategory, PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -65,23 +65,25 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
-    category: Option<PushCategory>,
+    category: Option<CategoryParam>,
 }
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
-enum PushCategory {
+enum CategoryParam {
     Recording,
     Log,
 }
 
 impl JrecPushQueryParam {
-    fn material(&self) -> Result<PushMaterial, HttpError> {
+    fn category(&self) -> Result<PushCategory, HttpError> {
         match (self.category, self.file_type) {
             // A missing category means recording, as it did before logs existed.
-            (None | Some(PushCategory::Recording), file_type) => Ok(PushMaterial::Recording(file_type)),
-            (Some(PushCategory::Log), RecordingFileType::SessionRecordingLog) => Ok(PushMaterial::Log),
-            (Some(PushCategory::Log), _) => Err(HttpError::bad_request().msg("only slog files can be pushed as logs")),
+            (None | Some(CategoryParam::Recording), file_type) => Ok(PushCategory::Recording(file_type)),
+            (Some(CategoryParam::Log), RecordingFileType::SessionRecordingLog) => {
+                Ok(PushCategory::Log(RecordingFileType::SessionRecordingLog))
+            }
+            (Some(CategoryParam::Log), _) => Err(HttpError::bad_request().msg("only slog files can be pushed as logs")),
         }
     }
 }
@@ -110,7 +112,7 @@ async fn jrec_push(
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
 
-    let material = query.material()?;
+    let category = query.category()?;
 
     let conf = conf_handle.get_conf();
 
@@ -158,7 +160,7 @@ async fn jrec_push(
             recordings,
             shutdown_signal,
             claims,
-            material,
+            category,
             session_id,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -174,7 +176,7 @@ async fn handle_jrec_push(
     recordings: RecordingMessageSender,
     shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
-    material: PushMaterial,
+    category: PushCategory,
     session_id: Uuid,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -189,7 +191,7 @@ async fn handle_jrec_push(
         .client_stream(stream)
         .recordings(recordings)
         .claims(claims)
-        .material(material)
+        .category(category)
         .session_id(session_id)
         .shutdown_signal(shutdown_signal)
         .build()
@@ -1053,26 +1055,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_material_from_query() {
-        let material = |query: serde_json::Value| {
+    fn push_category_from_query() {
+        let category = |query: serde_json::Value| {
             serde_json::from_value::<JrecPushQueryParam>(query)
                 .expect("query")
-                .material()
+                .category()
                 .map_err(|error| error.code)
         };
 
-        let slog_recording = Ok(PushMaterial::Recording(RecordingFileType::SessionRecordingLog));
-        assert_eq!(material(serde_json::json!({ "fileType": "slog" })), slog_recording);
+        let slog_recording = Ok(PushCategory::Recording(RecordingFileType::SessionRecordingLog));
+        assert_eq!(category(serde_json::json!({ "fileType": "slog" })), slog_recording);
         assert_eq!(
-            material(serde_json::json!({ "fileType": "slog", "category": "recording" })),
+            category(serde_json::json!({ "fileType": "slog", "category": "recording" })),
             slog_recording
         );
         assert_eq!(
-            material(serde_json::json!({ "fileType": "slog", "category": "log" })),
-            Ok(PushMaterial::Log)
+            category(serde_json::json!({ "fileType": "slog", "category": "log" })),
+            Ok(PushCategory::Log(RecordingFileType::SessionRecordingLog))
         );
         assert_eq!(
-            material(serde_json::json!({ "fileType": "webm", "category": "log" })),
+            category(serde_json::json!({ "fileType": "webm", "category": "log" })),
             Err(StatusCode::BAD_REQUEST)
         );
         assert!(serde_json::from_value::<JrecPushQueryParam>(serde_json::json!({ "category": "log" })).is_err());

@@ -81,10 +81,10 @@ pub enum PushOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushMaterial {
+pub enum PushCategory {
     Recording(RecordingFileType),
     /// Opaque to Gateway: stored as-is, whatever its content.
-    Log,
+    Log(RecordingFileType),
 }
 
 #[derive(TypedBuilder)]
@@ -92,7 +92,7 @@ pub struct ClientPush<S> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
-    material: PushMaterial,
+    category: PushCategory,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
 }
@@ -106,7 +106,7 @@ where
             recordings,
             claims,
             mut client_stream,
-            material,
+            category,
             session_id,
             mut shutdown_signal,
         } = self;
@@ -122,7 +122,7 @@ where
             }
         };
 
-        let (recording_file, artifact) = match recordings.connect(session_id, material, disconnected_ttl).await {
+        let (recording_file, artifact) = match recordings.connect(session_id, category, disconnected_ttl).await {
             Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -272,7 +272,7 @@ struct OnGoingRecording {
 enum RecordingManagerMessage {
     Connect {
         id: Uuid,
-        material: PushMaterial,
+        category: PushCategory,
         disconnected_ttl: Duration,
         channel: oneshot::Sender<(Utf8PathBuf, CurrentArtifact)>,
     },
@@ -305,13 +305,13 @@ impl fmt::Debug for RecordingManagerMessage {
         match self {
             RecordingManagerMessage::Connect {
                 id,
-                material,
+                category,
                 disconnected_ttl,
                 channel: _,
             } => f
                 .debug_struct("Connect")
                 .field("id", id)
-                .field("material", material)
+                .field("category", category)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
@@ -348,14 +348,14 @@ impl RecordingMessageSender {
     async fn connect(
         &self,
         id: Uuid,
-        material: PushMaterial,
+        category: PushCategory,
         disconnected_ttl: Duration,
     ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
                 id,
-                material,
+                category,
                 disconnected_ttl,
                 channel: tx,
             })
@@ -532,7 +532,7 @@ impl RecordingManagerTask {
     async fn handle_connect(
         &mut self,
         id: Uuid,
-        material: PushMaterial,
+        category: PushCategory,
         disconnected_ttl: Duration,
     ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
@@ -568,8 +568,8 @@ impl RecordingManagerTask {
             }
         };
 
-        let (file_name, artifact) = match material {
-            PushMaterial::Recording(file_type) => {
+        let (file_name, artifact) = match category {
+            PushCategory::Recording(file_type) => {
                 let idx = manifest.files.len();
                 let file_name = format!("recording-{idx}.{}", file_type.extension());
                 manifest.files.push(JrecFile {
@@ -579,9 +579,9 @@ impl RecordingManagerTask {
                 });
                 (file_name, CurrentArtifact::Recording(idx))
             }
-            PushMaterial::Log => {
+            PushCategory::Log(file_type) => {
                 let idx = manifest.logs.len();
-                let file_name = format!("log-{idx}.slog");
+                let file_name = format!("log-{idx}.{}", file_type.extension());
                 manifest.logs.push(JrecLog {
                     file_name: file_name.clone(),
                 });
@@ -820,8 +820,8 @@ async fn recording_manager_task(
                 debug!(?msg, "Received message");
 
                 match msg {
-                    RecordingManagerMessage::Connect { id, material, disconnected_ttl, channel  } => {
-                        match manager.handle_connect(id, material, disconnected_ttl).await {
+                    RecordingManagerMessage::Connect { id, category, disconnected_ttl, channel  } => {
+                        match manager.handle_connect(id, category, disconnected_ttl).await {
                             Ok(connected) => {
                                 let _ = channel.send(connected);
                             }
@@ -1001,8 +1001,9 @@ mod tests {
 
     use super::*;
 
-    const WEBM: PushMaterial = PushMaterial::Recording(RecordingFileType::WebM);
-    const SLOG_RECORDING: PushMaterial = PushMaterial::Recording(RecordingFileType::SessionRecordingLog);
+    const WEBM: PushCategory = PushCategory::Recording(RecordingFileType::WebM);
+    const SLOG_RECORDING: PushCategory = PushCategory::Recording(RecordingFileType::SessionRecordingLog);
+    const SLOG_LOG: PushCategory = PushCategory::Log(RecordingFileType::SessionRecordingLog);
 
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
@@ -1062,16 +1063,16 @@ mod tests {
                 .expect("parse manifest")
         }
 
-        async fn connect(&self, id: Uuid, material: PushMaterial) -> String {
+        async fn connect(&self, id: Uuid, category: PushCategory) -> String {
             let (path, _) = self
                 .sender
-                .connect(id, material, Duration::ZERO)
+                .connect(id, category, Duration::ZERO)
                 .await
                 .expect("connect");
             path.file_name().expect("file name").to_owned()
         }
 
-        async fn client_push_wakes_streamers(&self, id: Uuid, material: PushMaterial) -> bool {
+        async fn client_push_wakes_streamers(&self, id: Uuid, category: PushCategory) -> bool {
             let claims = serde_json::from_value(json!({
                 "jet_aid": id,
                 "jet_rop": "push",
@@ -1086,7 +1087,7 @@ mod tests {
                     .recordings(self.sender.clone())
                     .claims(claims)
                     .client_stream(server)
-                    .material(material)
+                    .category(category)
                     .session_id(id)
                     .shutdown_signal(shutdown_signal)
                     .build()
@@ -1122,8 +1123,8 @@ mod tests {
             self.sender.get_count().await.expect("sync with manager");
         }
 
-        async fn push(&self, id: Uuid, material: PushMaterial) -> String {
-            let file_name = self.connect(id, material).await;
+        async fn push(&self, id: Uuid, category: PushCategory) -> String {
+            let file_name = self.connect(id, category).await;
             self.disconnect(id).await;
             file_name
         }
@@ -1146,13 +1147,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn log_material_goes_to_logs() {
+    async fn log_category_goes_to_logs() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
         harness.push(id, WEBM).await;
-        let first_log = harness.push(id, PushMaterial::Log).await;
-        let second_log = harness.push(id, PushMaterial::Log).await;
+        let first_log = harness.push(id, SLOG_LOG).await;
+        let second_log = harness.push(id, SLOG_LOG).await;
 
         assert_eq!(first_log, "log-0.slog");
         assert_eq!(second_log, "log-1.slog");
@@ -1171,7 +1172,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let log = harness.push(id, PushMaterial::Log).await;
+        let log = harness.push(id, SLOG_LOG).await;
 
         assert_eq!(log, "log-0.slog");
         let manifest = harness.read_manifest(id);
@@ -1187,7 +1188,7 @@ mod tests {
         let id = Uuid::new_v4();
         harness.write_manifest(id, MASTER_MANIFEST);
 
-        harness.push(id, PushMaterial::Log).await;
+        harness.push(id, SLOG_LOG).await;
 
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["duration"], 5);
@@ -1199,7 +1200,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
-        harness.push(id, PushMaterial::Log).await;
+        harness.push(id, SLOG_LOG).await;
 
         let file_name = harness.connect(id, WEBM).await;
         assert_eq!(file_name, "recording-1.webm");
@@ -1229,7 +1230,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
-        harness.connect(id, PushMaterial::Log).await;
+        harness.connect(id, SLOG_LOG).await;
 
         let files = harness.sender.list_files(id).await.expect("list files");
 
@@ -1242,7 +1243,7 @@ mod tests {
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
 
-        assert!(!harness.client_push_wakes_streamers(id, PushMaterial::Log).await);
+        assert!(!harness.client_push_wakes_streamers(id, SLOG_LOG).await);
     }
 
     #[tokio::test]
