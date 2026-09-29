@@ -355,7 +355,15 @@ The forthcoming wrapper handles MSI quoting and surfaces failures, but it still 
 The password is hidden from ordinary MSI logs, **not** from process command lines or Windows Installer's `Debug=7` logging policy.
 Keep diagnostics appropriately protected.
 
-The forthcoming installer grants the selected identity access to the standard data directory, default user database, and configured system-store certificate key.
+The forthcoming installer grants the selected identity access to the standard data directory and default user database.
+It adjusts system-certificate key permissions only when `TlsCertificateStoreLocation` is explicitly `LocalMachine`.
+An omitted or `null` location means `CurrentUser` at runtime, not `LocalMachine` or the installer's SYSTEM profile.
+When the existing service and selected account resolve to the same SID and no reconfiguration is requested, setup leaves retained `CurrentUser` or `CurrentService` configuration and private-key ACLs unchanged and unmanaged.
+It logs that it skips certificate discovery, permission grants, and runtime access verification; this does not establish certificate or runtime availability.
+If the identity changes, the service is missing, or reconfiguration is requested, setup rejects retained non-machine-store configuration before modifying the installation.
+Setup also aborts if configuration approved for retention changes or is removed after validation.
+Migrate to explicit `LocalMachine` or external certificate/key files first.
+New wizard selections of `CurrentUser` are rejected because the interactive administrator's profile is not the service's profile.
 External/custom resources still need your permissions.
 Review old manual grants deliberately; the installer does not remove every earlier account grant or service-logon right.
 Do not remove permissions still required by another service or deployment.
