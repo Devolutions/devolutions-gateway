@@ -432,7 +432,10 @@ internal class Program
         {
             AttributesDefinition = "Type=string",
             Win64 = win64,
-            RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
+            // Uninstall removes this value through the ordinary component lifecycle. Do not use
+            // createAndRemoveOnUninstall: it deletes the whole source key, including values
+            // written by an administrator or another installer.
+            RegistryKeyAction = RegistryKeyAction.create,
         };
 
     private static void Project_UnhandledException(ExceptionEventArgs e)

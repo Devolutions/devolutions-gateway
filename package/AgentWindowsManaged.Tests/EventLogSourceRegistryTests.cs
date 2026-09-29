@@ -41,9 +41,10 @@ public sealed class EventLogSourceRegistryTests
         Assert.Equal("[INSTALLDIR]DevolutionsAgent.exe", value.Value);
         // 64-bit readers only see the source if the value lands in the matching registry view.
         Assert.Equal(win64, value.Win64);
-        // Registered on install and removed on uninstall, without clobbering a source that an
-        // administrator or another product owns.
-        Assert.Equal(RegistryKeyAction.createAndRemoveOnUninstall, value.RegistryKeyAction);
+        // Registered on install and removed on uninstall through the component lifecycle, which
+        // leaves the source key itself alone. createAndRemoveOnUninstall would delete the whole key
+        // on uninstall, including anything an administrator or another installer put there.
+        Assert.Equal(RegistryKeyAction.create, value.RegistryKeyAction);
         Assert.False(value.ForceCreateOnInstall);
         Assert.False(value.ForceDeleteOnUninstall);
         // EventMessageFile has to be REG_SZ, since a REG_MULTI_SZ value is not read as a path.
