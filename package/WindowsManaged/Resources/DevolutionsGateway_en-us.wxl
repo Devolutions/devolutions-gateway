@@ -46,7 +46,6 @@
                 <String Id="SearchButton">Search</String>
                 <String Id="ValidateButton">Validate</String>
                 <String Id="ViewButton">View</String>
-                <String Id="ViewErrorsButton">View configuration issues</String>
                 <String Id="ViewLogButton">View Log</String>
                     <!-- propertyGroups -->
                 <String Id="Group_AgentTunnel">Agent Tunnel</String>
