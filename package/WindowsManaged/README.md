@@ -78,6 +78,67 @@ byte[] pickyBytes = e.Session.GetEmbeddedData("DevolutionsPicky.dll");
 System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "DevolutionsPicky.dll"),pickyBytes);
 ```
 
+## Command line properties
+
+Public properties can be passed to `msiexec` to drive unattended installs and upgrades, for example:
+
+```powershell
+msiexec /i DevolutionsGateway.msi /qn REBOOT=ReallySuppress P.SERVICEACCOUNT="CONTOSO\gateway$"
+```
+
+### Service account
+
+For the current-release manual procedure, maintenance limitations, diagnostics, and migration to this interface, see the [Windows service-account guide][service-account-guide].
+
+By default the service runs as `NT AUTHORITY\NetworkService`.
+Use these properties or `Install-DGatewayPackage -ServiceAccount` to select another account; there is no account-selection dialog.
+
+| Property | Description |
+| --- | --- |
+| `P.SERVICEACCOUNT` | The account the service logs on as, in `DOMAIN\Name` or `.\Name` form. On upgrade, defaults to the account of the existing service. |
+| `P.SERVICEPASSWORD` | Required for password-based accounts on first install and major upgrade. Hidden from normal MSI logs, but not from the process command line or Windows Installer's `Debug=7` logging policy. |
+
+Supported accounts:
+
+- `NT AUTHORITY\NetworkService` (default), passwordless.
+- `NT SERVICE\DevolutionsGateway`, the virtual account of the service, passwordless.
+- Standalone and group managed service accounts (`DOMAIN\Name$`), passwordless, installed on this host and able to retrieve their managed password.
+- Regular local or domain user accounts, which require `P.SERVICEPASSWORD`.
+
+`LocalSystem` and `NT AUTHORITY\LocalService` are rejected.
+
+The installer grants the account the *Log on as a service* right and read/write access to `%ProgramData%\Devolutions\Gateway`.
+It also grants access to the configured system-store certificate's private key, including when an upgrade preserves the configuration.
+An explicit deny policy still takes precedence.
+Configure access to externally stored keys, custom user databases, logs, recordings, and remote resources separately.
+Changing the service account does not revoke earlier grants on shared certificate keys or remove previously assigned logon rights.
+
+Upgrades preserve the existing account unless another is specified.
+The existing MSI upgrade sequence recreates the service: password-based accounts therefore require the password again, supplied directly or through `Install-DGatewayPackage -ServiceCredential`.
+Missing or invalid credentials fail validation before the existing installation is removed.
+If Windows policy prevents the network-logon credential check, setup fails rather than removing a working installation with unchecked credentials.
+The installer never extracts or stores the old service password for reuse.
+Supplying credentials to the new MSI does not guarantee that an older MSI can restore its service credentials during rollback; retain the credentials and a recovery procedure before upgrading.
+
+Repair preserves the account and password of an existing service.
+Account or password changes during repair are rejected rather than changing permissions without changing the service.
+If the service is missing, provide the account explicitly and its password when required.
+
+Devolutions Agent updates Gateway only under NETWORK SERVICE, the Gateway virtual account, or a verified managed service account.
+Password-based accounts require manual upgrades.
+Use an Agent version that supports custom Gateway accounts; older Agents grant update-channel write access only to NETWORK SERVICE.
+After an external account change, the Agent refreshes those permissions on its periodic status check, normally every five minutes.
+The existing Agent downgrade mechanism remains an uninstall followed by installation; direct MSI downgrades remain blocked.
+Older target installers may not recognize custom-account properties.
+The Agent's `update_status.json` records update failures in `Products.Gateway.LastUpdateError`; this field is not exposed by the current Gateway update HTTP response and is reset when the Agent restarts.
+
+The former installer configuration-access report has been removed.
+Verify actual service startup, TLS access, and configured data paths after deployment; installer success alone is not a runtime health check.
+See the [automated Windows installer lab][installer-lab] for repeatable scenarios.
+
+[installer-lab]: ../../testsuite/tests/windows-installer/README.md
+[service-account-guide]: ../../docs/WINDOWS-SERVICE-ACCOUNTS.md
+
 ## Compatibility
 
 The custom UI targets .NET Framework 4.5.1; which is available out-of-the-box on Windows. The provides compatiblity with Windows 8.1 and Windows Server 2012 R2, but it's an additional download on Windows 8 / Windows Server 2012.
