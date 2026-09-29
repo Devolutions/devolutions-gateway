@@ -7,11 +7,13 @@ use sysevent::Entry;
 const GATEWAY_CATALOG: &str = "devolutions-gateway/devolutions-gateway.mc";
 const AGENT_CATALOG: &str = "devolutions-agent/devolutions-agent.mc";
 
-/// A declared code set and the single catalog that must hold exactly its codes.
+/// A declared code set, the single catalog that must hold exactly its codes, and every builder of
+/// those codes paired with the entry it produces.
 struct DeclaredCodeSet {
     codes_crate: &'static str,
     codes: &'static [(&'static str, u32)],
     catalog: &'static str,
+    events: fn() -> Vec<(u32, Entry)>,
 }
 
 /// The Gateway and the Agent own separate code tables, so each catalog holds the codes of its own
@@ -22,11 +24,13 @@ const DECLARED_CODE_SETS: &[DeclaredCodeSet] = &[
         codes_crate: "sysevent-codes",
         codes: sysevent_codes::DECLARED_CODES,
         catalog: GATEWAY_CATALOG,
+        events: gateway_events,
     },
     DeclaredCodeSet {
         codes_crate: "agent-sysevent-codes",
         codes: agent_sysevent_codes::DECLARED_CODES,
         catalog: AGENT_CATALOG,
+        events: agent_events,
     },
 ];
 
@@ -37,6 +41,7 @@ fn every_catalog_defines_exactly_its_declared_codes() {
             codes_crate,
             codes,
             catalog,
+            ..
         } = declared;
         assert!(!codes.is_empty(), "{codes_crate} declares no event code");
 
@@ -133,46 +138,179 @@ fn every_catalog_message_terminates_each_translation() {
 }
 
 #[test]
-fn agent_messages_insert_the_message_then_every_field() {
-    let path = catalog_path(AGENT_CATALOG);
-    let catalog = read(&path);
+fn every_code_builder_inserts_the_message_then_every_field() {
+    for declared in DECLARED_CODE_SETS {
+        let DeclaredCodeSet {
+            codes_crate,
+            codes,
+            catalog,
+            events,
+        } = declared;
+        let path = catalog_path(catalog);
+        let catalog = read(&path);
 
-    let events = agent_events();
-    let mut covered: Vec<u32> = events.iter().map(|(code, _)| *code).collect();
-    covered.sort_unstable();
-    let mut declared: Vec<u32> = agent_sysevent_codes::DECLARED_CODES
-        .iter()
-        .map(|(_, code)| *code)
-        .collect();
-    declared.sort_unstable();
-    assert_eq!(
-        covered, declared,
-        "every declared Agent code needs a builder here, so its insertion strings stay checked"
-    );
-
-    for (code, entry) in events {
+        let events = events();
+        let mut covered: Vec<u32> = events.iter().map(|(code, _)| *code).collect();
+        covered.sort_unstable();
+        let mut declared_codes: Vec<u32> = codes.iter().map(|(_, code)| *code).collect();
+        declared_codes.sort_unstable();
         assert_eq!(
-            entry.event_code,
-            Some(code),
-            "the builder for MessageId={code} must declare that event code"
+            covered, declared_codes,
+            "every {codes_crate} code needs a builder here, so its insertion strings stay checked"
         );
 
-        // The Windows Event Log sink passes the message text as the first insertion string, then
-        // one string per field, so a message needs exactly one insertion per field plus one.
-        let count = u32::try_from(entry.fields.len() + 1).expect("the entry has few fields");
-        let expected: Vec<u32> = (1..=count).collect();
-
-        let messages = catalog_messages(&catalog, code);
-        assert_eq!(messages.len(), 3, "{}: MessageId={code} translations", path.display());
-        for message in messages {
+        for (code, entry) in events {
             assert_eq!(
-                insertions(message),
-                expected,
-                "{}: MessageId={code} must use %1 as the message and %2..%{count} as its fields: {message}",
-                path.display()
+                entry.event_code,
+                Some(code),
+                "the builder for MessageId={code} must declare that event code"
             );
+
+            // The Windows Event Log sink passes the message text as the first insertion string, then
+            // one string per field, so a message needs exactly one insertion per field plus one.
+            let count = u32::try_from(entry.fields.len() + 1).expect("the entry has few fields");
+            let expected: Vec<u32> = (1..=count).collect();
+
+            let messages = catalog_messages(&catalog, code);
+            assert_eq!(messages.len(), 3, "{}: MessageId={code} translations", path.display());
+            for message in messages {
+                assert_eq!(
+                    insertions(message),
+                    expected,
+                    "{}: MessageId={code} must use %1 as the message and %2..%{count} as its fields: {message}",
+                    path.display()
+                );
+            }
         }
     }
+}
+
+/// Every declared Gateway event, each paired with the entry its builder produces.
+fn gateway_events() -> Vec<(u32, Entry)> {
+    let path = Path::new("C:\\ProgramData\\Devolutions\\Gateway\\gateway.json");
+
+    let mut events = vec![
+        (
+            sysevent_codes::SERVICE_STARTED,
+            sysevent_codes::service_started("2026.3.0"),
+        ),
+        (
+            sysevent_codes::SERVICE_STOPPING,
+            sysevent_codes::service_stopping("received stop control code"),
+        ),
+        (
+            sysevent_codes::CONFIG_INVALID,
+            sysevent_codes::config_invalid("invalid config", path),
+        ),
+        (
+            sysevent_codes::START_FAILED,
+            sysevent_codes::start_failed("failed to bind", "service_start"),
+        ),
+        (
+            sysevent_codes::BOOT_STACKTRACE_WRITTEN,
+            sysevent_codes::boot_stacktrace_written(path),
+        ),
+        (
+            sysevent_codes::LISTENER_STARTED,
+            sysevent_codes::listener_started("127.0.0.1:7171", "tcp"),
+        ),
+        (
+            sysevent_codes::LISTENER_BIND_FAILED,
+            sysevent_codes::listener_bind_failed("127.0.0.1:7171", "address in use"),
+        ),
+        (
+            sysevent_codes::LISTENER_STOPPED,
+            sysevent_codes::listener_stopped("127.0.0.1:7171", "shutdown"),
+        ),
+        (sysevent_codes::TLS_CONFIGURED, sysevent_codes::tls_configured("file")),
+        (
+            sysevent_codes::TLS_VERIFY_STRICT_DISABLED,
+            sysevent_codes::tls_verify_strict_disabled("compat"),
+        ),
+        (
+            sysevent_codes::TLS_CERTIFICATE_REJECTED,
+            sysevent_codes::tls_certificate_rejected("CN=gateway", "missing_san"),
+        ),
+        (
+            sysevent_codes::SYSTEM_CERT_SELECTED,
+            sysevent_codes::system_cert_selected("<thumbprint>", "CN=gateway"),
+        ),
+        (
+            sysevent_codes::TLS_KEY_LOAD_FAILED,
+            sysevent_codes::tls_key_load_failed(path, "permission denied"),
+        ),
+        (
+            sysevent_codes::TLS_CERTIFICATE_NAME_MISMATCH,
+            sysevent_codes::tls_certificate_name_mismatch("gateway.example.com", "CN=gateway"),
+        ),
+        (
+            sysevent_codes::TLS_NO_SUITABLE_CERTIFICATE,
+            sysevent_codes::tls_no_suitable_certificate("no usable certificate", "expired"),
+        ),
+        (
+            sysevent_codes::SESSION_OPENED,
+            sysevent_codes::session_opened("RDP", "10.0.0.1", "srv01", "token_id"),
+        ),
+        (
+            sysevent_codes::SESSION_CLOSED,
+            sysevent_codes::session_closed(1000, 1024, 2048, "ok"),
+        ),
+        (
+            sysevent_codes::TOKEN_PROVISIONED,
+            sysevent_codes::token_provisioned("token_id"),
+        ),
+        (
+            sysevent_codes::TOKEN_REUSED,
+            sysevent_codes::token_reused("token_id", 1),
+        ),
+        (
+            sysevent_codes::TOKEN_REUSE_LIMIT_EXCEEDED,
+            sysevent_codes::token_reuse_limit_exceeded("token_id", 2),
+        ),
+        (
+            sysevent_codes::RECORDING_STARTED,
+            sysevent_codes::recording_started("C:\\recordings"),
+        ),
+        (
+            sysevent_codes::RECORDING_STOPPED,
+            sysevent_codes::recording_stopped(1024, 1),
+        ),
+        (
+            sysevent_codes::RECORDING_ERROR,
+            sysevent_codes::recording_error(path, "no space left"),
+        ),
+        (
+            sysevent_codes::JWT_REJECTED,
+            sysevent_codes::jwt_rejected("expired", "the token expired"),
+        ),
+        (
+            sysevent_codes::JWT_ANOMALY,
+            sysevent_codes::jwt_anomaly("issuer", "audience", "kid", "clock_skew", "detail"),
+        ),
+        (
+            sysevent_codes::AUTHORIZATION_DENIED,
+            sysevent_codes::authorization_denied("subject", "action", "resource", "rule"),
+        ),
+        (
+            sysevent_codes::AUTH_SUMMARY,
+            sysevent_codes::auth_summary(60, 10, 2, 1, "{}"),
+        ),
+        (
+            sysevent_codes::RECORDING_STORAGE_LOW,
+            sysevent_codes::recording_storage_low(1024, 4096),
+        ),
+        (
+            sysevent_codes::DEBUG_OPTIONS_ENABLED,
+            sysevent_codes::debug_options_enabled("verbose"),
+        ),
+        (
+            sysevent_codes::XMF_NOT_FOUND,
+            sysevent_codes::xmf_not_found(path, "not found"),
+        ),
+    ];
+
+    events.sort_unstable_by_key(|(code, _)| *code);
+    events
 }
 
 /// Every declared Agent event, each paired with the entry its builder produces.
