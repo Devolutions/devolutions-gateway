@@ -25,8 +25,6 @@ namespace DevolutionsGateway.Resources
 
         internal static string INFO_URL = "https://server.devolutions.net";
 
-        internal static string ERROR_REPORT_FILENAME = "ConfigErrors.html";
-
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\gateway ACL
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`

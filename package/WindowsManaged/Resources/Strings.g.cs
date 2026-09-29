@@ -177,10 +177,6 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string ViewLogButton = "ViewLogButton";		
 		/// <summary>
-		/// View configuration issues
-		/// </summary>
-		public const string ViewErrorsButton = "ViewErrorsButton";		
-		/// <summary>
 		/// Validate
 		/// </summary>
 		public const string ValidateButton = "ValidateButton";		
