@@ -20,7 +20,7 @@ use typed_builder::TypedBuilder;
 use uuid::Uuid;
 use video_streamer::SignalWriter;
 
-use crate::artifacts::{ArtifactKind, JrecArtifact, JrecArtifacts, UnsupportedArtifactFileType};
+use crate::artifacts::{ArtifactKind, JrecArtifact, JrecArtifacts};
 use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
@@ -74,30 +74,12 @@ pub enum PushOutcome {
     StorageFull,
 }
 
-/// Where a push is stored. Artifacts are opaque to Gateway: stored as-is, whatever their content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushTarget {
-    Recording(RecordingFileType),
-    Artifact(ArtifactKind),
-}
-
-impl PushTarget {
-    /// Without a kind the stream is a recording, as it was before artifacts existed.
-    pub fn new(file_type: RecordingFileType, kind: Option<ArtifactKind>) -> Result<Self, UnsupportedArtifactFileType> {
-        match kind {
-            None => Ok(Self::Recording(file_type)),
-            Some(kind) if kind.file_type() == file_type => Ok(Self::Artifact(kind)),
-            Some(kind) => Err(UnsupportedArtifactFileType { kind }),
-        }
-    }
-}
-
 #[derive(TypedBuilder)]
 pub struct ClientPush<S> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
-    target: PushTarget,
+    file_type: RecordingFileType,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
 }
@@ -111,7 +93,7 @@ where
             recordings,
             claims,
             mut client_stream,
-            target,
+            file_type,
             session_id,
             mut shutdown_signal,
         } = self;
@@ -127,14 +109,7 @@ where
             }
         };
 
-        let is_recording = matches!(target, PushTarget::Recording(_));
-
-        let recording_file = match target {
-            PushTarget::Recording(file_type) => recordings.connect(session_id, file_type, disconnected_ttl).await,
-            PushTarget::Artifact(kind) => recordings.add_artifact(session_id, kind).await,
-        };
-
-        let recording_file = match recording_file {
+        let recording_file = match recordings.connect(session_id, file_type, disconnected_ttl).await {
             Ok(recording_file) => recording_file,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -172,9 +147,7 @@ where
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    if is_recording {
-                                        recordings.new_chunk_appended(session_id)?;
-                                    }
+                                    recordings.new_chunk_appended(session_id)?;
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -211,9 +184,7 @@ where
 
         info!(?res, "Recording finished");
 
-        if is_recording {
-            recordings.disconnect(session_id).await.context("disconnect")?;
-        }
+        recordings.disconnect(session_id).await.context("disconnect")?;
 
         res
     }
@@ -284,7 +255,8 @@ enum RecordingManagerMessage {
     AddArtifact {
         id: Uuid,
         kind: ArtifactKind,
-        channel: oneshot::Sender<Utf8PathBuf>,
+        source: Utf8PathBuf,
+        channel: oneshot::Sender<anyhow::Result<String>>,
     },
     Disconnect {
         id: Uuid,
@@ -324,10 +296,16 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("file_type", file_type)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::AddArtifact { id, kind, channel: _ } => f
+            RecordingManagerMessage::AddArtifact {
+                id,
+                kind,
+                source,
+                channel: _,
+            } => f
                 .debug_struct("AddArtifact")
                 .field("id", id)
                 .field("kind", kind)
+                .field("source", source)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
@@ -381,14 +359,20 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    async fn add_artifact(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<Utf8PathBuf> {
+    /// Moves `source` into the session folder as the next artifact of `kind`, and returns its file name.
+    pub async fn add_artifact(&self, id: Uuid, kind: ArtifactKind, source: Utf8PathBuf) -> anyhow::Result<String> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::AddArtifact { id, kind, channel: tx })
+            .send(RecordingManagerMessage::AddArtifact {
+                id,
+                kind,
+                source,
+                channel: tx,
+            })
             .await
             .ok()
             .context("couldn't send AddArtifact message")?;
-        rx.await.context("couldn't receive artifact file path")
+        rx.await.context("couldn't receive AddArtifact result")?
     }
 
     async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
@@ -579,7 +563,7 @@ impl RecordingManagerTask {
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-            // An artifact push may have created the manifest before any recording.
+            // An artifact may have created the manifest before any recording.
             if existing_manifest.files.is_empty() {
                 existing_manifest.start_time = start_time;
             }
@@ -681,7 +665,7 @@ impl RecordingManagerTask {
 
         ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
 
-        // Re-read from disk: an artifact push may have added entries since this recording connected.
+        // Re-read from disk: an artifact may have been added since this recording connected.
         let mut manifest = JrecManifest::read_from_file(&ongoing.manifest_path)
             .with_context(|| format!("read manifest at {}", ongoing.manifest_path))?;
 
@@ -730,7 +714,7 @@ impl RecordingManagerTask {
         Ok(())
     }
 
-    async fn handle_add_artifact(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<Utf8PathBuf> {
+    async fn handle_add_artifact(&self, id: Uuid, kind: ArtifactKind, source: Utf8PathBuf) -> anyhow::Result<String> {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
@@ -753,6 +737,13 @@ impl RecordingManagerTask {
 
         let artifacts = manifest.artifacts.of_kind_mut(kind);
         let file_name = format!("{}-{}.{}", kind.as_str(), artifacts.len(), kind.file_type().extension());
+
+        // The file is in place before the manifest lists it, so readers never see a dangling entry.
+        let artifact_path = recording_path.join(&file_name);
+        fs::rename(&source, &artifact_path)
+            .await
+            .with_context(|| format!("move {source} to {artifact_path}"))?;
+
         artifacts.push(JrecArtifact {
             file_name: file_name.clone(),
         });
@@ -761,7 +752,7 @@ impl RecordingManagerTask {
             .save_to_file(&manifest_path)
             .context("write manifest to disk")?;
 
-        Ok(recording_path.join(file_name))
+        Ok(file_name)
     }
 
     fn handle_remove(&mut self, id: Uuid) {
@@ -891,13 +882,8 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::AddArtifact { id, kind, channel } => {
-                        match manager.handle_add_artifact(id, kind).await {
-                            Ok(artifact_file) => {
-                                let _ = channel.send(artifact_file);
-                            }
-                            Err(e) => error!(error = format!("{e:#}"), "handle_add_artifact"),
-                        }
+                    RecordingManagerMessage::AddArtifact { id, kind, source, channel } => {
+                        let _ = channel.send(manager.handle_add_artifact(id, kind, source).await);
                     },
                     RecordingManagerMessage::Disconnect { id } => {
                         if let Err(e) = manager.handle_disconnect(id).await {
@@ -1086,12 +1072,12 @@ mod tests {
   ]
 }"#;
 
-    const WEBM: PushTarget = PushTarget::Recording(RecordingFileType::WebM);
-    const SLOG_RECORDING: PushTarget = PushTarget::Recording(RecordingFileType::SessionRecordingLog);
-    const AI_ANALYSIS: PushTarget = PushTarget::Artifact(ArtifactKind::AiAnalysis);
+    const WEBM: RecordingFileType = RecordingFileType::WebM;
+    const SLOG: RecordingFileType = RecordingFileType::SessionRecordingLog;
+    const AI_ANALYSIS: ArtifactKind = ArtifactKind::AiAnalysis;
 
     struct Harness {
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
         recordings_path: Utf8PathBuf,
         sender: RecordingMessageSender,
         _shutdown_handle: ShutdownHandle,
@@ -1100,7 +1086,7 @@ mod tests {
     impl Harness {
         fn start() -> Self {
             let dir = tempfile::tempdir().expect("temp dir");
-            let recordings_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+            let recordings_path = Utf8PathBuf::from_path_buf(dir.path().join("recordings")).expect("utf8 path");
             let (sender, receiver) = recording_message_channel();
             // No session runs through this Gateway, as when it is used solely as a recording server.
             let (session_manager_handle, _) = crate::session::session_manager_channel();
@@ -1115,7 +1101,7 @@ mod tests {
             tokio::spawn(recording_manager_task(task, shutdown_signal));
 
             Self {
-                _dir: dir,
+                dir,
                 recordings_path,
                 sender,
                 _shutdown_handle: shutdown_handle,
@@ -1136,15 +1122,12 @@ mod tests {
                 .expect("parse manifest")
         }
 
-        async fn try_connect(&self, id: Uuid, target: PushTarget) -> anyhow::Result<Utf8PathBuf> {
-            match target {
-                PushTarget::Recording(file_type) => self.sender.connect(id, file_type, Duration::from_secs(60)).await,
-                PushTarget::Artifact(kind) => self.sender.add_artifact(id, kind).await,
-            }
+        async fn try_connect(&self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<Utf8PathBuf> {
+            self.sender.connect(id, file_type, Duration::from_secs(60)).await
         }
 
-        async fn connect(&self, id: Uuid, target: PushTarget) -> String {
-            let path = self.try_connect(id, target).await.expect("connect");
+        async fn connect(&self, id: Uuid, file_type: RecordingFileType) -> String {
+            let path = self.try_connect(id, file_type).await.expect("connect");
             path.file_name().expect("file name").to_owned()
         }
 
@@ -1154,44 +1137,24 @@ mod tests {
             self.sender.get_count().await.expect("sync with manager");
         }
 
-        async fn push(&self, id: Uuid, target: PushTarget) -> String {
-            let file_name = self.connect(id, target).await;
-            if matches!(target, PushTarget::Recording(_)) {
-                self.disconnect(id).await;
-            }
+        async fn push(&self, id: Uuid, file_type: RecordingFileType) -> String {
+            let file_name = self.connect(id, file_type).await;
+            self.disconnect(id).await;
             file_name
         }
 
-        fn start_client_push(
-            &self,
-            id: Uuid,
-            target: PushTarget,
-        ) -> (
-            io::DuplexStream,
-            tokio::task::JoinHandle<anyhow::Result<PushOutcome>>,
-            ShutdownHandle,
-        ) {
-            let claims = serde_json::from_value(json!({
-                "jet_aid": id,
-                "jet_rop": "push",
-                "exp": i64::MAX,
-                "jti": Uuid::new_v4(),
-            }))
-            .expect("claims");
-            let (client, server) = io::duplex(1024);
-            let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
-            let push = tokio::spawn(
-                ClientPush::builder()
-                    .recordings(self.sender.clone())
-                    .claims(claims)
-                    .client_stream(server)
-                    .target(target)
-                    .session_id(id)
-                    .shutdown_signal(shutdown_signal)
-                    .build()
-                    .run(),
-            );
-            (client, push, shutdown_handle)
+        async fn add_artifact(&self, id: Uuid, content: &str) -> String {
+            let source =
+                Utf8PathBuf::from_path_buf(self.dir.path().join(Uuid::new_v4().to_string())).expect("utf8 path");
+            std::fs::write(&source, content).expect("write artifact source");
+            self.sender
+                .add_artifact(id, AI_ANALYSIS, source)
+                .await
+                .expect("add artifact")
+        }
+
+        fn read_file(&self, id: Uuid, file_name: &str) -> String {
+            std::fs::read_to_string(self.recordings_path.join(id.to_string()).join(file_name)).expect("read file")
         }
     }
 
@@ -1200,9 +1163,9 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let first = harness.push(id, SLOG_RECORDING).await;
+        let first = harness.push(id, SLOG).await;
         harness.push(id, WEBM).await;
-        let third = harness.push(id, SLOG_RECORDING).await;
+        let third = harness.push(id, SLOG).await;
 
         assert_eq!(first, "recording-0.slog");
         assert_eq!(third, "recording-2.slog");
@@ -1217,11 +1180,13 @@ mod tests {
         let id = Uuid::new_v4();
 
         harness.push(id, WEBM).await;
-        let first_artifact = harness.push(id, AI_ANALYSIS).await;
-        let second_artifact = harness.push(id, AI_ANALYSIS).await;
+        let first_artifact = harness.add_artifact(id, "first").await;
+        let second_artifact = harness.add_artifact(id, "second").await;
 
         assert_eq!(first_artifact, "ai-analysis-0.slog");
         assert_eq!(second_artifact, "ai-analysis-1.slog");
+        assert_eq!(harness.read_file(id, &first_artifact), "first");
+        assert_eq!(harness.read_file(id, &second_artifact), "second");
         let manifest = harness.read_manifest(id);
         let files = manifest["files"].as_array().expect("files");
         assert_eq!(files.len(), 1);
@@ -1237,7 +1202,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let artifact = harness.push(id, AI_ANALYSIS).await;
+        let artifact = harness.add_artifact(id, "analysis").await;
 
         assert_eq!(artifact, "ai-analysis-0.slog");
         let manifest = harness.read_manifest(id);
@@ -1256,12 +1221,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn artifact_push_keeps_recording_timing() {
+    async fn artifact_keeps_recording_timing() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.write_manifest(id, MASTER_MANIFEST);
 
-        harness.push(id, AI_ANALYSIS).await;
+        harness.add_artifact(id, "analysis").await;
 
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["startTime"], 1);
@@ -1273,15 +1238,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recording_and_artifacts_at_the_same_time_keep_each_others_entries() {
+    async fn artifact_added_during_a_recording_survives_its_disconnect() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         let expected_artifacts =
             json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }, { "fileName": "ai-analysis-1.slog" }] });
 
         harness.connect(id, WEBM).await;
-        harness.connect(id, AI_ANALYSIS).await;
-        harness.connect(id, AI_ANALYSIS).await;
+        harness.add_artifact(id, "first").await;
+        harness.add_artifact(id, "second").await;
         assert!(harness.try_connect(id, WEBM).await.is_err());
 
         harness.disconnect(id).await;
@@ -1306,7 +1271,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.connect(id, WEBM).await;
-        harness.connect(id, AI_ANALYSIS).await;
+        harness.add_artifact(id, "analysis").await;
 
         let files = harness.sender.list_files(id).await.expect("list files");
 
@@ -1315,12 +1280,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn artifact_push_stays_out_of_the_recording_lifecycle() {
+    async fn artifact_stays_out_of_the_recording_lifecycle() {
         let harness = Harness::start();
         let artifact_only = Uuid::new_v4();
         let recorded = Uuid::new_v4();
 
-        harness.connect(artifact_only, AI_ANALYSIS).await;
+        harness.add_artifact(artifact_only, "analysis").await;
         assert!(
             harness
                 .sender
@@ -1333,62 +1298,13 @@ mod tests {
         assert_eq!(harness.sender.get_count().await.expect("count"), 0);
 
         harness.push(recorded, WEBM).await;
-        harness.push(recorded, AI_ANALYSIS).await;
+        harness.add_artifact(recorded, "analysis").await;
         assert!(matches!(
             harness.sender.get_state(recorded).await.expect("get state"),
             Some(OnGoingRecordingState::LastSeen { .. })
         ));
         assert!(harness.sender.active_recordings.contains(recorded));
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
-    }
-
-    #[tokio::test]
-    async fn artifact_chunks_do_not_wake_streamers() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        let (tx, mut woken) = oneshot::channel();
-        harness.sender.add_new_chunk_listener(id, tx);
-
-        let (mut client, push, _shutdown_handle) = harness.start_client_push(id, AI_ANALYSIS);
-        client.write_all(b"chunk").await.expect("write chunk");
-        drop(client);
-        push.await.expect("join push").expect("push");
-
-        let artifact_path = harness.recordings_path.join(id.to_string()).join("ai-analysis-0.slog");
-        assert_eq!(std::fs::read(artifact_path).expect("read artifact"), b"chunk");
-        assert_eq!(woken.try_recv(), Err(oneshot::error::TryRecvError::Empty));
-    }
-
-    #[tokio::test]
-    async fn slog_recording_chunks_wake_streamers() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        let (tx, mut woken) = oneshot::channel();
-        harness.sender.add_new_chunk_listener(id, tx);
-
-        let (mut client, push, _shutdown_handle) = harness.start_client_push(id, SLOG_RECORDING);
-
-        // The push flushes, and so signals, whenever it runs out of input.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                client.write_all(b"chunk").await.expect("write chunk");
-                tokio::select! {
-                    _ = &mut woken => break,
-                    () = tokio::time::sleep(Duration::from_millis(20)) => {}
-                }
-            }
-        })
-        .await
-        .expect("streamers woken");
-
-        drop(client);
-        push.await.expect("join push").expect("push");
-    }
-
-    #[test]
-    fn ai_analysis_must_be_slog() {
-        let error = PushTarget::new(RecordingFileType::WebM, Some(ArtifactKind::AiAnalysis)).expect_err("webm");
-        assert_eq!(error.to_string(), "ai-analysis artifacts must be slog files");
     }
 
     #[test]

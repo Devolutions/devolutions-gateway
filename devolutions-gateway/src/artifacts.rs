@@ -36,8 +36,7 @@ pub(crate) struct JrecArtifact {
 }
 
 /// Kind of a non-recording artifact, used as its key in the manifest `artifacts` object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ArtifactKind {
     AiAnalysis,
 }
@@ -56,22 +55,20 @@ impl ArtifactKind {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{} artifacts must be {} files", kind.as_str(), kind.file_type().extension())]
-pub struct UnsupportedArtifactFileType {
-    pub(crate) kind: ArtifactKind,
-}
-
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     #[test]
-    fn artifact_kind_names_match_their_serde_names() {
+    fn manifest_key_is_the_kind_name() {
         let kind = ArtifactKind::AiAnalysis;
-        let parsed: ArtifactKind = serde_json::from_value(json!(kind.as_str())).expect("parse kind");
-        assert_eq!(parsed, kind);
+        let mut artifacts = JrecArtifacts::default();
+        artifacts.of_kind_mut(kind).push(JrecArtifact {
+            file_name: "file".to_owned(),
+        });
+
+        let json = serde_json::to_value(&artifacts).expect("serialize artifacts");
+        let keys: Vec<_> = json.as_object().expect("object").keys().collect();
+        assert_eq!(keys, [kind.as_str()]);
     }
 }

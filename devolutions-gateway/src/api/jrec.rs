@@ -28,10 +28,10 @@ use zip::write::SimpleFileOptions;
 
 use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
-use crate::artifacts::{ArtifactKind, JrecArtifacts};
+use crate::artifacts::JrecArtifacts;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushOutcome, PushTarget, RecordingMessageSender};
+use crate::recording::{PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -66,7 +66,6 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
-    kind: Option<ArtifactKind>,
 }
 
 #[derive(Deserialize)]
@@ -92,8 +91,6 @@ async fn jrec_push(
     if claims.jet_rop != RecordingOperation::Push {
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
-
-    let target = PushTarget::new(query.file_type, query.kind).map_err(HttpError::bad_request().err())?;
 
     let conf = conf_handle.get_conf();
 
@@ -141,7 +138,7 @@ async fn jrec_push(
             recordings,
             shutdown_signal,
             claims,
-            target,
+            query.file_type,
             session_id,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -157,7 +154,7 @@ async fn handle_jrec_push(
     recordings: RecordingMessageSender,
     shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
-    target: PushTarget,
+    file_type: RecordingFileType,
     session_id: Uuid,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -172,7 +169,7 @@ async fn handle_jrec_push(
         .client_stream(stream)
         .recordings(recordings)
         .claims(claims)
-        .target(target)
+        .file_type(file_type)
         .session_id(session_id)
         .shutdown_signal(shutdown_signal)
         .build()
@@ -1028,19 +1025,6 @@ mod tests {
     use zip::ZipArchive;
 
     use super::*;
-
-    #[test]
-    fn push_query_requires_a_file_type_and_a_known_kind() {
-        let parse = |query: serde_json::Value| serde_json::from_value::<JrecPushQueryParam>(query);
-
-        let recording = parse(serde_json::json!({ "fileType": "slog" })).expect("recording");
-        assert_eq!(recording.kind, None);
-        let artifact = parse(serde_json::json!({ "fileType": "slog", "kind": "ai-analysis" })).expect("artifact");
-        assert_eq!(artifact.kind, Some(ArtifactKind::AiAnalysis));
-
-        assert!(parse(serde_json::json!({ "kind": "ai-analysis" })).is_err());
-        assert!(parse(serde_json::json!({ "fileType": "slog", "kind": "unknown" })).is_err());
-    }
 
     #[test]
     fn rejects_unsafe_recording_file_names() {
