@@ -1929,6 +1929,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "devolutions-gateway-ai"
+version = "0.0.0"
+dependencies = [
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "devolutions-gateway-generators"
 version = "0.0.0"
 dependencies = [
@@ -7632,9 +7645,11 @@ dependencies = [
  "agent-tunnel-proto",
  "anyhow",
  "assert_cmd",
+ "axum 0.8.9",
  "base64 0.23.1",
  "camino",
  "devolutions-gateway",
+ "devolutions-gateway-ai",
  "devolutions-gateway-task",
  "dynosaur",
  "escargot",
@@ -7648,6 +7663,7 @@ dependencies = [
  "network-scanner",
  "network-scanner-proto",
  "nonempty",
+ "parking_lot",
  "picky",
  "proxy-socks",
  "quinn",
@@ -7670,6 +7686,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "typed-builder",
+ "url",
  "uuid",
  "win-api-wrappers",
  "windows 0.61.3",

@@ -4,6 +4,7 @@
 
 mod agent_tunnel;
 mod cli;
+mod gateway_ai;
 mod mcp_proxy;
 mod network_scanner;
 #[cfg(windows)]
