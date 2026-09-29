@@ -146,7 +146,7 @@ The former installer configuration-access report has been removed.
 Verify actual service startup, TLS access, and configured data paths after deployment; installer success alone is not a runtime health check.
 See the [automated Windows installer lab][installer-lab] for repeatable scenarios.
 
-[installer-lab]: ../../testsuite/tests/windows-installer/README.md
+[installer-lab]: ../WindowsManaged.Tests/README.md
 [service-account-guide]: ../../docs/WINDOWS-SERVICE-ACCOUNTS.md
 
 ## Compatibility
