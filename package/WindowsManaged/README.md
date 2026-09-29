@@ -80,7 +80,9 @@ System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExec
 
 ## Command line properties
 
-Public properties can be passed to `msiexec` to drive unattended installs and upgrades, for example:
+Public properties can be passed to `msiexec` to drive unattended installs and upgrades.
+**The service-account example and properties below are forthcoming and are not available in Gateway 2026.3.0.**
+For that release, use the [manual service-account procedure][service-account-guide].
 
 ```powershell
 msiexec /i DevolutionsGateway.msi /qn REBOOT=ReallySuppress P.SERVICEACCOUNT="CONTOSO\gateway$"
