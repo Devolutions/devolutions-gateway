@@ -280,30 +280,6 @@ pub fn session_manager_channel() -> (SessionMessageSender, SessionMessageReceive
     mpsc::channel(64).pipe(|(tx, rx)| (SessionMessageSender(tx), SessionMessageReceiver(rx)))
 }
 
-/// A session manager that knows no session and reports every kill request, in order.
-#[cfg(test)]
-pub(crate) fn spawn_fake_session_manager() -> (SessionMessageSender, mpsc::UnboundedReceiver<Uuid>) {
-    let (handle, SessionMessageReceiver(mut rx)) = session_manager_channel();
-    let (kills_tx, kills_rx) = mpsc::unbounded_channel();
-
-    tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                SessionManagerMessage::GetInfo { channel, .. } => {
-                    let _ = channel.send(None);
-                }
-                SessionManagerMessage::Kill { id, channel } => {
-                    let _ = kills_tx.send(id);
-                    let _ = channel.send(KillResult::NotFound);
-                }
-                _ => {}
-            }
-        }
-    });
-
-    (handle, kills_rx)
-}
-
 struct WithTtlInfo {
     deadline: tokio::time::Instant,
     session_id: Uuid,
@@ -634,9 +610,11 @@ impl Task for EnsureRecordingPolicyTask {
 
         let is_recording = self
             .recording_manager_handle
-            .is_recording(self.session_id)
+            .get_state(self.session_id)
             .await
-            .unwrap_or(false);
+            .ok()
+            .flatten()
+            .is_some();
 
         if is_recording {
             let _ = self

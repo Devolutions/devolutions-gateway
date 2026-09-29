@@ -1005,16 +1005,9 @@ async fn shadow_recording(
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
-    let recording_files = match recordings.list_files(id).await {
-        Ok(Some(recording_files)) => recording_files,
-        Ok(None) => {
-            debug!(%id, "Shadow recording rejected: no recording is being pushed");
-            return close_with_error(ws, StreamerCloseCode::StreamingEnded);
-        }
-        Err(_) => {
-            warn!(%id, "Shadow recording rejected: failed to list recording files");
-            return close_with_error(ws, StreamerCloseCode::InternalError);
-        }
+    let Ok(recording_files) = recordings.list_files(id).await else {
+        warn!(%id, "Shadow recording rejected: failed to list recording files");
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     let Some(recording_path) = recording_files.last() else {
@@ -1041,7 +1034,6 @@ mod tests {
     use zip::ZipArchive;
 
     use super::*;
-    use crate::recording::PushKind;
 
     #[test]
     fn push_target_from_query() {
@@ -1049,17 +1041,16 @@ mod tests {
             serde_json::from_value::<JrecPushQueryParam>(query)
                 .expect("query")
                 .target()
-                .map(PushTarget::kind)
                 .map_err(|error| error.code)
         };
 
         assert_eq!(
             target(serde_json::json!({ "fileType": "slog" })),
-            Ok(PushKind::Recording)
+            Ok(PushTarget::Recording(RecordingFileType::SessionRecordingLog))
         );
         assert_eq!(
             target(serde_json::json!({ "fileType": "slog", "kind": "ai-analysis" })),
-            Ok(PushKind::Artifact(ArtifactKind::AiAnalysis))
+            Ok(PushTarget::Artifact(ArtifactKind::AiAnalysis))
         );
         assert_eq!(
             target(serde_json::json!({ "fileType": "webm", "kind": "ai-analysis" })),
