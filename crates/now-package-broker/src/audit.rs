@@ -22,7 +22,22 @@ const MAX_POLICY_ID_BYTES: usize = 256;
 #[cfg(all(not(test), not(debug_assertions)))]
 const EVENT_LOG_QUEUE_CAPACITY: usize = 256;
 
-static RECORDER: std::sync::LazyLock<Arc<dyn AuditRecorder>> = std::sync::LazyLock::new(default_recorder);
+static RECORDER: std::sync::OnceLock<Arc<dyn AuditRecorder>> = std::sync::OnceLock::new();
+
+/// The process-wide recorder, started on the first policy audit event.
+fn recorder() -> &'static Arc<dyn AuditRecorder> {
+    RECORDER.get_or_init(default_recorder)
+}
+
+/// Stops accepting policy audit events and waits for the ones already accepted to reach the sink.
+///
+/// The recorder lives in a process-lifetime static, so its worker is otherwise killed with whatever
+/// it is still holding when the process exits.
+pub(crate) fn drain() {
+    if let Some(recorder) = RECORDER.get() {
+        recorder.drain();
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DenialReason {
@@ -76,6 +91,9 @@ impl FailureReason {
 
 trait AuditRecorder: Send + Sync {
     fn record(&self, entry: Entry);
+
+    /// Stops accepting entries and waits for the accepted ones to be emitted.
+    fn drain(&self) {}
 }
 
 fn default_recorder() -> Arc<dyn AuditRecorder> {
@@ -111,29 +129,64 @@ impl AuditRecorder for TracingRecorder {
 
 #[cfg(all(not(test), not(debug_assertions)))]
 struct SystemRecorder {
-    sender: std::sync::mpsc::SyncSender<sysevent::Entry>,
+    queue: parking_lot::Mutex<EventLogQueue>,
     dropped: AtomicU64,
+}
+
+/// The queue and the worker thread that moves accepted entries to the Windows Event Log.
+#[cfg(all(not(test), not(debug_assertions)))]
+struct EventLogQueue {
+    /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
+    sender: Option<std::sync::mpsc::SyncSender<Entry>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(all(not(test), not(debug_assertions)))]
+impl EventLogQueue {
+    fn start() -> std::io::Result<Self> {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_LOG_QUEUE_CAPACITY);
+        let worker = std::thread::Builder::new()
+            .name("policy-audit-event-log".to_owned())
+            .spawn(move || event_log_worker(&receiver))?;
+
+        Ok(Self {
+            sender: Some(sender),
+            worker: Some(worker),
+        })
+    }
+
+    fn drain(&mut self) {
+        // Dropping the sender ends the worker's iteration as soon as the queue is empty.
+        self.sender = None;
+        let Some(worker) = self.worker.take() else {
+            return;
+        };
+        if worker.join().is_err() {
+            tracing::warn!("The Windows Event Log policy audit worker panicked");
+        }
+    }
 }
 
 #[cfg(all(not(test), not(debug_assertions)))]
 impl SystemRecorder {
     fn new() -> std::io::Result<Self> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_LOG_QUEUE_CAPACITY);
-        std::thread::Builder::new()
-            .name("policy-audit-event-log".to_owned())
-            .spawn(move || event_log_worker(&receiver))
-            .map(|_| Self {
-                sender,
-                dropped: AtomicU64::new(0),
-            })
+        Ok(Self {
+            queue: parking_lot::Mutex::new(EventLogQueue::start()?),
+            dropped: AtomicU64::new(0),
+        })
     }
 }
 
 #[cfg(all(not(test), not(debug_assertions)))]
 impl AuditRecorder for SystemRecorder {
-    fn record(&self, entry: sysevent::Entry) {
+    fn record(&self, entry: Entry) {
         trace_entry(&entry);
-        if let Err(error) = self.sender.try_send(entry) {
+        let error = match self.queue.lock().sender.as_ref() {
+            Some(sender) => sender.try_send(entry).err(),
+            // The queue is closed after the broker drained it, so nothing can be emitted anymore.
+            None => Some(std::sync::mpsc::TrySendError::Disconnected(entry)),
+        };
+        if let Some(error) = error {
             let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped.is_power_of_two() {
                 tracing::warn!(
@@ -146,6 +199,11 @@ impl AuditRecorder for SystemRecorder {
                 );
             }
         }
+    }
+
+    fn drain(&self) {
+        // The lock keeps a concurrent `record` from queueing an entry the closed queue would drop.
+        self.queue.lock().drain();
     }
 }
 
@@ -164,7 +222,7 @@ fn trace_entry(entry: &Entry) {
 }
 
 #[cfg(all(not(test), not(debug_assertions)))]
-fn event_log_worker(receiver: &std::sync::mpsc::Receiver<sysevent::Entry>) {
+fn event_log_worker(receiver: &std::sync::mpsc::Receiver<Entry>) {
     let sink: Arc<dyn SystemEventSink> = match sysevent_winevent::WinEvent::new("Devolutions Agent") {
         Ok(event_log) => Arc::new(event_log),
         Err(error) => {
@@ -206,7 +264,7 @@ pub(crate) struct WriteAudit(Arc<WriteAuditState>);
 
 impl WriteAudit {
     pub(crate) fn begin(actor_sid: &Sid, actor_exe: &Path, path: &Path) -> Self {
-        Self::begin_with_recorder(actor_sid, actor_exe, path, Arc::clone(&RECORDER))
+        Self::begin_with_recorder(actor_sid, actor_exe, path, Arc::clone(recorder()))
     }
 
     fn begin_with_recorder(actor_sid: &Sid, actor_exe: &Path, path: &Path, recorder: Arc<dyn AuditRecorder>) -> Self {
@@ -351,7 +409,7 @@ impl WriteAuditState {
 }
 
 pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u32) {
-    RECORDER.record(policy_events::policy_external_change_applied(
+    recorder().record(policy_events::policy_external_change_applied(
         bounded_path(path),
         bounded(new_id.to_owned(), MAX_POLICY_ID_BYTES),
         new_revision,
@@ -364,7 +422,7 @@ pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState
         PolicyManagementState::Missing => "missing",
         PolicyManagementState::Invalid => "invalid",
     };
-    RECORDER.record(policy_events::policy_external_change_rejected(
+    recorder().record(policy_events::policy_external_change_rejected(
         bounded_path(path),
         reason,
     ));

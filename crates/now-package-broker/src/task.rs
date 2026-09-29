@@ -84,7 +84,7 @@ impl Task for BrokerTask {
             Ok(Err(failure)) => fail_closed(&state.policy_store, failure).await,
             Err(_) => fail_closed(&state.policy_store, WatcherFailure::TaskTerminated).await,
         }
-        tokio::spawn(monitor_watcher_task(
+        let monitor_handle = tokio::spawn(monitor_watcher_task(
             Arc::clone(&state.policy_store),
             shutdown.clone(),
             watcher_handle,
@@ -102,11 +102,15 @@ impl Task for BrokerTask {
         info!("package broker received shutdown signal");
         shutdown.cancel();
 
-        // Wait for the server task to finish.
-        match server_handle.await {
+        // Wait for the writers of policy audit events to stop, so the drain below is complete.
+        let result = match server_handle.await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(error).context("broker pipe server error"),
             Err(error) => Err(error).context("broker server task panicked"),
-        }
+        };
+        let _ = monitor_handle.await;
+        crate::audit::drain();
+
+        result
     }
 }
