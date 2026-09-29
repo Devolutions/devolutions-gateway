@@ -13,11 +13,15 @@ public sealed class EventLogSourceRegistryTests
     // Log source, so this test pins that declaration against regression.
     //
     // The broker's audit sink writes under the source name "Devolutions Agent" (WinEvent::new in
-    // now-package-broker/src/audit.rs). Windows resolves that source to the messages compiled into
-    // DevolutionsAgent.exe only from a registry source key named exactly after the runtime source
-    // name, with EventMessageFile pointing at the executable carrying the message table. A
-    // regression here fails nothing at build time: the sink degrades to a no-op on initialization
-    // failure and only logs a tracing error, so the release build would silently lose those events.
+    // now-package-broker/src/audit.rs), which only calls RegisterEventSourceW. That call succeeds
+    // without a registry source key, so the event still reaches the Application log; what the key
+    // provides is the message template. Without a source key named exactly after the runtime source
+    // name, with EventMessageFile pointing at the executable carrying the message table, Windows
+    // cannot resolve the template and the entry shows the raw event id and its insertion strings
+    // instead of the description compiled into DevolutionsAgent.exe.
+    //
+    // Nothing fails at build time when the declaration regresses, so this test is what keeps it in
+    // step with the runtime source name.
     //
     // This asserts the declared value only. It does not build or install an MSI, so it does not
     // validate the WiX pipeline or the [INSTALLDIR] substitution.
@@ -39,7 +43,9 @@ public sealed class EventLogSourceRegistryTests
         Assert.Equal(@"SYSTEM\CurrentControlSet\Services\EventLog\Application\Devolutions Agent", value.Key);
         Assert.Equal("EventMessageFile", value.Name);
         Assert.Equal("[INSTALLDIR]DevolutionsAgent.exe", value.Value);
-        // 64-bit readers only see the source if the value lands in the matching registry view.
+        // Pins the architecture flag the installer passes to the MSI component. HKLM\SYSTEM is
+        // shared between the WOW64 registry views, so this is not what makes a 64-bit reader see
+        // the source.
         Assert.Equal(win64, value.Win64);
         // Registered on install and removed on uninstall through the component lifecycle, which
         // leaves the source key itself alone. createAndRemoveOnUninstall would delete the whole key
