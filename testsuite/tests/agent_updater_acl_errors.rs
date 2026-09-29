@@ -1,7 +1,10 @@
+//! Compiled as Devolutions Agent unit tests via `#[path]`, not as part of the `testsuite` crate.
+
 use camino::Utf8PathBuf;
 use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 
-use super::{UpdaterError, set_file_dacl, update_json_dacl};
+use crate::updater::UpdaterError;
+use crate::updater::security::{set_file_dacl, update_json_dacl};
 
 #[test]
 fn permission_errors_preserve_the_path_and_windows_cause() {
