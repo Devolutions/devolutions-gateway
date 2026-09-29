@@ -270,7 +270,6 @@ pub enum OnGoingRecordingState {
 struct OnGoingRecording {
     state: OnGoingRecordingState,
     manifest_path: Utf8PathBuf,
-    file_index: usize,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
 }
@@ -571,7 +570,7 @@ impl RecordingManagerTask {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        let (file_index, recording_file) = if recording_path.exists() {
+        let recording_file = if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
 
             let mut existing_manifest =
@@ -598,7 +597,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("override existing manifest")?;
 
-            (next_file_idx, recording_file)
+            recording_file
         } else {
             debug!(path = %recording_path, "Create recording directory");
 
@@ -628,7 +627,7 @@ impl RecordingManagerTask {
                 .save_to_file(&manifest_path)
                 .context("write initial manifest to disk")?;
 
-            (0, recording_file)
+            recording_file
         };
 
         let active_recording_count = self.rx.active_recordings.insert(id);
@@ -651,7 +650,6 @@ impl RecordingManagerTask {
             OnGoingRecording {
                 state: OnGoingRecordingState::Connected,
                 manifest_path,
-                file_index,
                 session_must_be_recorded,
                 disconnected_ttl,
             },
@@ -683,14 +681,11 @@ impl RecordingManagerTask {
 
         ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
 
-        // Artifact pushes may have added entries since the recording started; a cached copy would drop them.
+        // Re-read from disk: an artifact push may have added entries since this recording connected.
         let mut manifest = JrecManifest::read_from_file(&ongoing.manifest_path)
             .with_context(|| format!("read manifest at {}", ongoing.manifest_path))?;
 
-        let current_file = manifest
-            .files
-            .get_mut(ongoing.file_index)
-            .with_context(|| format!("no recording file at index {} (this is a bug)", ongoing.file_index))?;
+        let current_file = manifest.files.last_mut().context("no recording file (this is a bug)")?;
         current_file.duration = end_time - current_file.start_time;
 
         manifest.duration = end_time - manifest.start_time;
