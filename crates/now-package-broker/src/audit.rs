@@ -19,8 +19,22 @@ const INTENT: &str = "PUT /v1/policy";
 const MAX_SID_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 1024;
 const MAX_POLICY_ID_BYTES: usize = 256;
-#[cfg(all(not(test), not(debug_assertions)))]
-const EVENT_LOG_QUEUE_CAPACITY: usize = 256;
+/// Capacity of the queue holding attempts and denials.
+///
+/// The write attempt is recorded before the pipe client is authenticated, so a client that never
+/// authenticates can produce this class at will. It is the class that yields when the sink
+/// saturates.
+#[cfg(any(test, not(debug_assertions)))]
+const EVENT_LOG_ADMISSION_QUEUE_CAPACITY: usize = 256;
+
+/// Capacity of the queue holding terminal outcomes and external changes, reserved on top of the
+/// admission capacity.
+///
+/// Only authenticated policy writes, which the policy store serializes, and the policy store's own
+/// observation of external changes produce this class, so a request flood cannot reach it. Keeping
+/// the capacity separate rather than sharing it is what makes the reservation hold.
+#[cfg(any(test, not(debug_assertions)))]
+const EVENT_LOG_OUTCOME_QUEUE_CAPACITY: usize = 64;
 
 static RECORDER: std::sync::OnceLock<Arc<dyn AuditRecorder>> = std::sync::OnceLock::new();
 
@@ -89,8 +103,31 @@ impl FailureReason {
     }
 }
 
+/// Which queue of the Event Log worker an audit entry is routed to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryClass {
+    /// A write attempt or a denial. Recorded from unauthenticated requests, so it may be dropped
+    /// when the sink saturates.
+    Admission,
+    /// The terminal outcome of a policy write, or the observation of an external change. Never
+    /// dropped while the reserved capacity lasts.
+    Outcome,
+}
+
+impl EntryClass {
+    #[cfg(all(not(test), not(debug_assertions)))]
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Admission => "admission",
+            Self::Outcome => "outcome",
+        }
+    }
+}
+
 trait AuditRecorder: Send + Sync {
-    fn record(&self, entry: Entry);
+    /// Records one entry of `class`. Only [`EntryClass::Admission`] entries may be dropped, and only
+    /// when the queue for their class is full.
+    fn record(&self, entry: Entry, class: EntryClass);
 
     /// Stops accepting entries and waits for the accepted ones to be emitted.
     fn drain(&self) {}
@@ -122,7 +159,7 @@ struct TracingRecorder;
 
 #[cfg(not(test))]
 impl AuditRecorder for TracingRecorder {
-    fn record(&self, entry: Entry) {
+    fn record(&self, entry: Entry, _: EntryClass) {
         trace_entry(&entry);
     }
 }
@@ -133,31 +170,52 @@ struct SystemRecorder {
     dropped: AtomicU64,
 }
 
-/// The queue and the worker thread that moves accepted entries to the Windows Event Log.
-#[cfg(all(not(test), not(debug_assertions)))]
+/// The queues and the worker thread that moves accepted entries to the Windows Event Log.
+///
+/// Admission entries and terminal outcomes have separate bounded queues, so a flood of admission
+/// entries cannot consume the capacity reserved for outcomes.
+#[cfg(any(test, not(debug_assertions)))]
 struct EventLogQueue {
     /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
-    sender: Option<std::sync::mpsc::SyncSender<Entry>>,
+    admission: Option<std::sync::mpsc::SyncSender<Entry>>,
+    /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
+    outcome: Option<std::sync::mpsc::SyncSender<Entry>>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(all(not(test), not(debug_assertions)))]
+#[cfg(any(test, not(debug_assertions)))]
 impl EventLogQueue {
-    fn start() -> std::io::Result<Self> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_LOG_QUEUE_CAPACITY);
+    fn start(emit: impl FnMut(Entry) + Send + 'static) -> std::io::Result<Self> {
+        let (admission, admission_rx) = std::sync::mpsc::sync_channel(EVENT_LOG_ADMISSION_QUEUE_CAPACITY);
+        let (outcome, outcome_rx) = std::sync::mpsc::sync_channel(EVENT_LOG_OUTCOME_QUEUE_CAPACITY);
         let worker = std::thread::Builder::new()
             .name("policy-audit-event-log".to_owned())
-            .spawn(move || event_log_worker(&receiver))?;
+            .spawn(move || event_log_worker(&admission_rx, &outcome_rx, emit))?;
 
         Ok(Self {
-            sender: Some(sender),
+            admission: Some(admission),
+            outcome: Some(outcome),
             worker: Some(worker),
         })
     }
 
+    /// Queues one entry, unless the queue for its class is full or closed.
+    fn record(&self, entry: Entry, class: EntryClass) -> Result<(), std::sync::mpsc::TrySendError<Entry>> {
+        let sender = match class {
+            EntryClass::Admission => self.admission.as_ref(),
+            EntryClass::Outcome => self.outcome.as_ref(),
+        };
+        match sender {
+            Some(sender) => sender.try_send(entry),
+            // The queue is closed after the broker drained it, so nothing can be emitted anymore.
+            None => Err(std::sync::mpsc::TrySendError::Disconnected(entry)),
+        }
+    }
+
     fn drain(&mut self) {
-        // Dropping the sender ends the worker's iteration as soon as the queue is empty.
-        self.sender = None;
+        // Dropping the senders ends the worker's iteration as soon as the queues are empty.
+        self.admission = None;
+        self.outcome = None;
         let Some(worker) = self.worker.take() else {
             return;
         };
@@ -171,7 +229,7 @@ impl EventLogQueue {
 impl SystemRecorder {
     fn new() -> std::io::Result<Self> {
         Ok(Self {
-            queue: parking_lot::Mutex::new(EventLogQueue::start()?),
+            queue: parking_lot::Mutex::new(EventLogQueue::start(event_log_emitter())?),
             dropped: AtomicU64::new(0),
         })
     }
@@ -179,18 +237,15 @@ impl SystemRecorder {
 
 #[cfg(all(not(test), not(debug_assertions)))]
 impl AuditRecorder for SystemRecorder {
-    fn record(&self, entry: Entry) {
+    fn record(&self, entry: Entry, class: EntryClass) {
         trace_entry(&entry);
-        let error = match self.queue.lock().sender.as_ref() {
-            Some(sender) => sender.try_send(entry).err(),
-            // The queue is closed after the broker drained it, so nothing can be emitted anymore.
-            None => Some(std::sync::mpsc::TrySendError::Disconnected(entry)),
-        };
+        let error = self.queue.lock().record(entry, class).err();
         if let Some(error) = error {
             let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped.is_power_of_two() {
                 tracing::warn!(
                     dropped,
+                    class = class.as_str(),
                     error = %match error {
                         std::sync::mpsc::TrySendError::Full(_) => "queue_full",
                         std::sync::mpsc::TrySendError::Disconnected(_) => "worker_disconnected",
@@ -221,8 +276,9 @@ fn trace_entry(entry: &Entry) {
     }
 }
 
+/// The Windows Event Log sink, wrapped in the closure the worker thread owns.
 #[cfg(all(not(test), not(debug_assertions)))]
-fn event_log_worker(receiver: &std::sync::mpsc::Receiver<Entry>) {
+fn event_log_emitter() -> impl FnMut(Entry) + Send + 'static {
     let sink: Arc<dyn SystemEventSink> = match sysevent_winevent::WinEvent::new("Devolutions Agent") {
         Ok(event_log) => Arc::new(event_log),
         Err(error) => {
@@ -230,9 +286,50 @@ fn event_log_worker(receiver: &std::sync::mpsc::Receiver<Entry>) {
             Arc::new(sysevent::NoopSink)
         }
     };
-    for entry in receiver {
+    move |entry| {
         if let Err(error) = sink.emit(entry) {
             tracing::warn!(%error, "Failed to emit policy audit event to the Windows Event Log");
+        }
+    }
+}
+
+/// Emits entries until both queues are closed, draining terminal outcomes before admission entries
+/// so that a saturated admission queue cannot delay or drop an outcome.
+#[cfg(any(test, not(debug_assertions)))]
+fn event_log_worker(
+    admission: &std::sync::mpsc::Receiver<Entry>,
+    outcome: &std::sync::mpsc::Receiver<Entry>,
+    mut emit: impl FnMut(Entry),
+) {
+    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+
+    // Bounded wait, so a queued outcome is emitted even when no admission entry arrives.
+    let poll_interval = std::time::Duration::from_millis(50);
+    loop {
+        match outcome.try_recv() {
+            Ok(entry) => {
+                emit(entry);
+                continue;
+            }
+            Err(TryRecvError::Empty) => {}
+            // No outcome can arrive anymore, so the admission queue holds everything that is left.
+            Err(TryRecvError::Disconnected) => {
+                for entry in admission.iter() {
+                    emit(entry);
+                }
+                return;
+            }
+        }
+        match admission.recv_timeout(poll_interval) {
+            Ok(entry) => emit(entry),
+            Err(RecvTimeoutError::Timeout) => {}
+            // Admission is closed, so the outcome queue holds everything that is left.
+            Err(RecvTimeoutError::Disconnected) => {
+                for entry in outcome.iter() {
+                    emit(entry);
+                }
+                return;
+            }
         }
     }
 }
@@ -248,13 +345,16 @@ struct WriteAuditState {
 impl Drop for WriteAuditState {
     fn drop(&mut self) {
         if !self.terminal_recorded.swap(true, Ordering::AcqRel) {
-            self.record(policy_events::policy_write_denied(
-                &self.actor_sid,
-                &self.actor_exe,
-                INTENT,
-                &self.path,
-                DenialReason::RequestRejected.as_str(),
-            ));
+            self.record(
+                policy_events::policy_write_denied(
+                    &self.actor_sid,
+                    &self.actor_exe,
+                    INTENT,
+                    &self.path,
+                    DenialReason::RequestRejected.as_str(),
+                ),
+                EntryClass::Admission,
+            );
         }
     }
 }
@@ -275,12 +375,10 @@ impl WriteAudit {
             terminal_recorded: AtomicBool::new(false),
             recorder,
         });
-        state.record(policy_events::policy_write_attempted(
-            &state.actor_sid,
-            &state.actor_exe,
-            INTENT,
-            &state.path,
-        ));
+        state.record(
+            policy_events::policy_write_attempted(&state.actor_sid, &state.actor_exe, INTENT, &state.path),
+            EntryClass::Admission,
+        );
         Self(state)
     }
 
@@ -390,6 +488,7 @@ impl WriteAudit {
         });
     }
 
+    /// Records the terminal outcome, which the reserved queue shields from admission flooding.
     fn finish(&self, entry: impl FnOnce(&WriteAuditState) -> Entry) {
         if self
             .0
@@ -397,23 +496,26 @@ impl WriteAudit {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            self.0.record(entry(&self.0));
+            self.0.record(entry(&self.0), EntryClass::Outcome);
         }
     }
 }
 
 impl WriteAuditState {
-    fn record(&self, entry: Entry) {
-        self.recorder.record(entry);
+    fn record(&self, entry: Entry, class: EntryClass) {
+        self.recorder.record(entry, class);
     }
 }
 
 pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u32) {
-    recorder().record(policy_events::policy_external_change_applied(
-        bounded_path(path),
-        bounded(new_id.to_owned(), MAX_POLICY_ID_BYTES),
-        new_revision,
-    ));
+    recorder().record(
+        policy_events::policy_external_change_applied(
+            bounded_path(path),
+            bounded(new_id.to_owned(), MAX_POLICY_ID_BYTES),
+            new_revision,
+        ),
+        EntryClass::Outcome,
+    );
 }
 
 pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState) {
@@ -422,10 +524,10 @@ pub(crate) fn external_change_rejected(path: &Path, state: PolicyManagementState
         PolicyManagementState::Missing => "missing",
         PolicyManagementState::Invalid => "invalid",
     };
-    recorder().record(policy_events::policy_external_change_rejected(
-        bounded_path(path),
-        reason,
-    ));
+    recorder().record(
+        policy_events::policy_external_change_rejected(bounded_path(path), reason),
+        EntryClass::Outcome,
+    );
 }
 
 fn bounded(mut value: String, max_bytes: usize) -> String {
@@ -478,7 +580,7 @@ pub(crate) mod tests {
     pub(crate) struct TestRecorder;
 
     impl AuditRecorder for TestRecorder {
-        fn record(&self, entry: Entry) {
+        fn record(&self, entry: Entry, _: EntryClass) {
             EVENTS.with(|events| events.borrow_mut().push(entry));
         }
     }
@@ -497,7 +599,7 @@ pub(crate) mod tests {
     }
 
     impl AuditRecorder for Recorder {
-        fn record(&self, entry: Entry) {
+        fn record(&self, entry: Entry, _: EntryClass) {
             self.0.lock().push(entry);
         }
     }
@@ -526,7 +628,7 @@ pub(crate) mod tests {
     struct NoopRecorder;
 
     impl AuditRecorder for NoopRecorder {
-        fn record(&self, _: Entry) {}
+        fn record(&self, _: Entry, _: EntryClass) {}
     }
 
     fn test_audit() -> (WriteAudit, Arc<Recorder>) {
@@ -567,6 +669,57 @@ pub(crate) mod tests {
                 .fields
                 .iter()
                 .any(|(name, value)| name == "reason" && value == "request_rejected")
+        );
+    }
+
+    #[test]
+    fn terminal_outcomes_are_reserved_against_an_admission_flood() {
+        // A worker that cannot make progress leaves the admission queue in its saturated state.
+        let open = Arc::new(AtomicBool::new(false));
+        let release = Arc::clone(&open);
+        let (emitted, received) = std::sync::mpsc::channel();
+        let mut queue = EventLogQueue::start(move |entry| {
+            while !release.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let _ = emitted.send(entry);
+        })
+        .expect("the audit worker starts");
+
+        let admission =
+            || Entry::new("Policy management write attempted").event_code(policy_events::POLICY_WRITE_ATTEMPTED);
+        let outcome =
+            Entry::new("Policy management change succeeded").event_code(policy_events::POLICY_CHANGE_SUCCEEDED);
+
+        let mut admitted = 0;
+        let mut refused = 0;
+        for _ in 0..EVENT_LOG_ADMISSION_QUEUE_CAPACITY + 8 {
+            if queue.record(admission(), EntryClass::Admission).is_ok() {
+                admitted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(admitted >= EVENT_LOG_ADMISSION_QUEUE_CAPACITY);
+        assert!(refused > 0, "the flood must saturate the admission queue");
+
+        // The outcome is still accepted, because its own queue is reserved.
+        queue
+            .record(outcome, EntryClass::Outcome)
+            .expect("a terminal outcome is accepted while admission entries are refused");
+
+        open.store(true, Ordering::Release);
+        queue.drain();
+
+        // Every admitted entry reached the sink, plus the outcome that the flood could not displace.
+        let codes = received.iter().map(|entry| entry.event_code).collect::<Vec<_>>();
+        assert_eq!(codes.len(), admitted + 1);
+        assert_eq!(
+            codes
+                .iter()
+                .filter(|code| **code == Some(policy_events::POLICY_CHANGE_SUCCEEDED))
+                .count(),
+            1
         );
     }
 
