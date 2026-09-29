@@ -193,7 +193,7 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="EnterTextToSearch">Enter text to search</String>
                 <String Id="NoCertificateSelected">No selection</String>
                 <String Id="NoUsableCertificateFoundInFile">No usable certificate was found in the file.</String>
-                <String Id="PrivateKeyPermissionWillBeGranted">The Network Service account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">The {0} account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.</String>
                 <String Id="Search">Search</String>
                 <String Id="SearchForACertificateToUse">Search for a certificate to use</String>
                 <String Id="SearchResultPlural">{0} results</String>

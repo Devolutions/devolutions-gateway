@@ -33,9 +33,7 @@ namespace DevolutionsGateway.Helpers
                 {
                     Length = (uint)Marshal.SizeOf<WinAPI.LSA_OBJECT_ATTRIBUTES>(),
                 };
-                WinAPI.LSA_UNICODE_STRING systemName = new();
-
-                uint status = WinAPI.LsaOpenPolicy(ref systemName, ref attributes,
+                uint status = WinAPI.LsaOpenPolicy(IntPtr.Zero, ref attributes,
                     WinAPI.POLICY_LOOKUP_NAMES | WinAPI.POLICY_CREATE_ACCOUNT, out policy);
 
                 ThrowIfFailed(status, nameof(WinAPI.LsaOpenPolicy));

@@ -350,7 +350,7 @@ internal static class WinAPI
 
     [DllImport("advapi32", SetLastError = true)]
     internal static extern uint LsaOpenPolicy(
-        ref LSA_UNICODE_STRING SystemName,
+        IntPtr SystemName,
         ref LSA_OBJECT_ATTRIBUTES ObjectAttributes,
         uint DesiredAccess,
         out IntPtr PolicyHandle);
