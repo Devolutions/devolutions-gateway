@@ -115,3 +115,14 @@ Invoke-Pester -Container $container
 
 The installer assembly above is the compiled packaging executable, not the Gateway service binary.
 Use a new PowerShell process for each assembly version because .NET cannot unload an assembly from that process.
+
+The Rust `service_accounts` tests run account-lookup checks, including unknown names ending in `$`, and read-only service-configuration checks in normal Windows CI.
+The two managed-account classification checks are ignored by default because `NetIsServiceAccount` queries the local Netlogon store, which may be unavailable on standalone runners.
+Run them explicitly on a configured account-lab host with Netlogon already running, as an ordinary user whose account name does not end in `$`:
+
+```powershell
+cargo test --locked -p testsuite --test integration_tests service_accounts:: -- --ignored
+```
+
+These checks do not start services or configure domain membership.
+An API error still fails an explicitly requested check; it is never treated as an unmanaged account.
