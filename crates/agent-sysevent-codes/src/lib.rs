@@ -59,15 +59,12 @@ pub fn boot_stacktrace_written(path: &Path) -> Entry {
         .field("path", path.display())
 }
 
-// 6000-6099 **User Sessions, Updater & PEDM**
+// 6000-6009 **User Sessions**
 
 /// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
 pub const USER_SESSION_PROCESS_STARTED: u32 = 6000;
 /// Exit code; who triggered.
 pub const USER_SESSION_PROCESS_TERMINATED: u32 = 6001;
-pub const UPDATER_TASK_ENABLED: u32 = 6010;
-pub const UPDATER_ERROR: u32 = 6011;
-pub const PEDM_ENABLED: u32 = 6020;
 
 pub fn user_session_process_started(session_id: u32, kind: impl ToString, exe: impl ToString) -> Entry {
     Entry::new("User session process started")
@@ -87,6 +84,11 @@ pub fn user_session_process_terminated(session_id: u32, exit_code: i32, by: impl
         .field("by", by) // "user","service","timeout"
 }
 
+// 6010-6019 **Updater**
+
+pub const UPDATER_TASK_ENABLED: u32 = 6010;
+pub const UPDATER_ERROR: u32 = 6011;
+
 pub fn updater_task_enabled() -> Entry {
     Entry::new("Updater task enabled")
         .event_code(UPDATER_TASK_ENABLED)
@@ -100,6 +102,10 @@ pub fn updater_error(step: impl ToString, error: impl std::fmt::Display) -> Entr
         .field("step", step) // "download","verify","apply","rollback"
         .field("error_chain", format!("{error:#}"))
 }
+
+// 6020-6029 **PEDM**
+
+pub const PEDM_ENABLED: u32 = 6020;
 
 pub fn pedm_enabled() -> Entry {
     Entry::new("PEDM enabled")

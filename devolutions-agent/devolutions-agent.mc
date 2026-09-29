@@ -85,7 +85,7 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
-; 6000-6099 User Sessions, Updater & PEDM
+; 6000-6009 User Sessions
 
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
@@ -111,6 +111,8 @@ Language=German
 Benutzersitzungsprozess beendet. Kontext=%1 SessionId=%2 ExitCode=%3 Durch=%4
 .
 
+; 6010-6019 Updater
+
 MessageId=6010
 SymbolicName=UPDATER_TASK_ENABLED
 Language=English
@@ -134,6 +136,8 @@ Erreur de mise à jour. Contexte=%1 Étape=%2 Erreur=%3
 Language=German
 Update-Fehler. Kontext=%1 Schritt=%2 Fehler=%3
 .
+
+; 6020-6029 PEDM
 
 MessageId=6020
 SymbolicName=PEDM_ENABLED
