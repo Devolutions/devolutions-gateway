@@ -610,11 +610,9 @@ impl Task for EnsureRecordingPolicyTask {
 
         let is_recording = self
             .recording_manager_handle
-            .get_state(self.session_id)
+            .is_recording(self.session_id)
             .await
-            .ok()
-            .flatten()
-            .is_some();
+            .unwrap_or(false);
 
         if is_recording {
             let _ = self

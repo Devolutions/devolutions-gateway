@@ -300,6 +300,10 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
     },
+    IsRecording {
+        id: Uuid,
+        channel: oneshot::Sender<bool>,
+    },
     ListFiles {
         id: Uuid,
         channel: oneshot::Sender<Option<Vec<Utf8PathBuf>>>,
@@ -334,6 +338,9 @@ impl fmt::Debug for RecordingManagerMessage {
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
+            }
+            RecordingManagerMessage::IsRecording { id, channel: _ } => {
+                f.debug_struct("IsRecording").field("id", id).finish_non_exhaustive()
             }
             RecordingManagerMessage::GetCount { channel: _ } => f.debug_struct("GetCount").finish_non_exhaustive(),
             RecordingManagerMessage::UpdateRecordingPolicy {
@@ -399,6 +406,17 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send GetState message")?;
         rx.await.context("couldn't receive recording state")
+    }
+
+    /// Returns whether a Recording, not an artifact, is being pushed for this session.
+    pub async fn is_recording(&self, id: Uuid) -> anyhow::Result<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::IsRecording { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send IsRecording message")?;
+        rx.await.context("couldn't receive whether a recording is ongoing")
     }
 
     pub async fn get_count(&self) -> anyhow::Result<usize> {
@@ -626,7 +644,9 @@ impl RecordingManagerTask {
             .ok()
             .flatten()
             .map(|info| info.recording_policy)
-            .unwrap_or(false);
+            .unwrap_or(false)
+            // An artifact is not the session recording, so its end must not count against the recording policy.
+            && matches!(artifact, CurrentArtifact::Recording(_));
 
         self.ongoing_recordings.insert(
             id,
@@ -869,6 +889,13 @@ async fn recording_manager_task(
                     RecordingManagerMessage::GetState { id, channel } => {
                         let response = manager.ongoing_recordings.get(&id).map(|ongoing| ongoing.state.clone());
                         let _ = channel.send(response);
+                    }
+                    RecordingManagerMessage::IsRecording { id, channel } => {
+                        let is_recording = manager
+                            .ongoing_recordings
+                            .get(&id)
+                            .is_some_and(|ongoing| matches!(ongoing.artifact, CurrentArtifact::Recording(_)));
+                        let _ = channel.send(is_recording);
                     }
                     RecordingManagerMessage::GetCount { channel } => {
                         let _ = channel.send(manager.ongoing_recordings.len());
@@ -1286,6 +1313,20 @@ mod tests {
         let role = ArtifactRole::AiAnalysis;
         let parsed: ArtifactRole = serde_json::from_value(json!(role.as_str())).expect("parse role");
         assert_eq!(parsed, role);
+    }
+
+    #[tokio::test]
+    async fn only_a_recording_push_counts_as_recording() {
+        let harness = Harness::start();
+        let artifact_only = Uuid::new_v4();
+        let recorded = Uuid::new_v4();
+
+        harness.connect(artifact_only, AI_ANALYSIS).await;
+        harness.connect(recorded, WEBM).await;
+
+        assert!(!harness.sender.is_recording(artifact_only).await.expect("is recording"));
+        assert!(harness.sender.is_recording(recorded).await.expect("is recording"));
+        assert!(!harness.sender.is_recording(Uuid::new_v4()).await.expect("is recording"));
     }
 
     #[tokio::test]

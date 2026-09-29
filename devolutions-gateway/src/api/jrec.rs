@@ -66,13 +66,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
-    artifact: Option<ArtifactRole>,
+    kind: Option<ArtifactRole>,
 }
 
 impl JrecPushQueryParam {
     fn target(&self) -> Result<PushTarget, HttpError> {
-        match (self.artifact, self.file_type) {
-            // Without an artifact role the stream is a recording, as it was before artifacts existed.
+        match (self.kind, self.file_type) {
+            // Without a kind the stream is a recording, as it was before artifacts existed.
             (None, file_type) => Ok(PushTarget::Recording(file_type)),
             (Some(role @ ArtifactRole::AiAnalysis), file_type @ RecordingFileType::SessionRecordingLog) => {
                 Ok(PushTarget::Artifact(role, file_type))
@@ -1069,20 +1069,20 @@ mod tests {
             Ok(PushTarget::Recording(RecordingFileType::SessionRecordingLog))
         );
         assert_eq!(
-            target(serde_json::json!({ "fileType": "slog", "artifact": "ai-analysis" })),
+            target(serde_json::json!({ "fileType": "slog", "kind": "ai-analysis" })),
             Ok(PushTarget::Artifact(
                 ArtifactRole::AiAnalysis,
                 RecordingFileType::SessionRecordingLog
             ))
         );
         assert_eq!(
-            target(serde_json::json!({ "fileType": "webm", "artifact": "ai-analysis" })),
+            target(serde_json::json!({ "fileType": "webm", "kind": "ai-analysis" })),
             Err(StatusCode::BAD_REQUEST)
         );
 
         let parse = |query: serde_json::Value| serde_json::from_value::<JrecPushQueryParam>(query);
-        assert!(parse(serde_json::json!({ "artifact": "ai-analysis" })).is_err());
-        assert!(parse(serde_json::json!({ "fileType": "slog", "artifact": "unknown" })).is_err());
+        assert!(parse(serde_json::json!({ "kind": "ai-analysis" })).is_err());
+        assert!(parse(serde_json::json!({ "fileType": "slog", "kind": "unknown" })).is_err());
     }
 
     #[test]
