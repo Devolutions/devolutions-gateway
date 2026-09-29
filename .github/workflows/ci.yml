@@ -787,8 +787,8 @@ jobs:
 
   devolutions-gateway-merge:
     name: devolutions gateway merge artifacts
-    # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
-    if: ${{ always() }}
+    # Keep fork builds eligible when the webapp job is skipped, but never merge partial Gateway artifacts.
+    if: ${{ always() && needs.devolutions-gateway.result == 'success' }}
     needs: [preflight, devolutions-gateway]
     runs-on: ubuntu-latest
 
