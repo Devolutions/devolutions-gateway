@@ -7623,6 +7623,7 @@ dependencies = [
 name = "testsuite"
 version = "0.0.0"
 dependencies = [
+ "agent-sysevent-codes",
  "agent-tunnel",
  "agent-tunnel-libsql",
  "agent-tunnel-proto",
@@ -7656,6 +7657,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysevent",
+ "sysevent-codes",
  "sysevent-syslog",
  "sysevent-winevent",
  "tempfile",

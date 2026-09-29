@@ -121,3 +121,18 @@ pub fn policy_external_change_rejected(path: impl AsRef<Path>, reason: impl ToSt
         .field("path", path.as_ref().display())
         .field("reason", reason)
 }
+
+/// Every declared Agent event code, paired with its symbolic name.
+///
+/// The Agent Windows message catalog is checked against this inventory, so a new event code has to
+/// be registered here in addition to `devolutions-agent.mc`.
+pub static DECLARED_CODES: &[(&str, u32)] = &[
+    ("POLICY_WRITE_ATTEMPTED", POLICY_WRITE_ATTEMPTED),
+    ("POLICY_WRITE_DENIED", POLICY_WRITE_DENIED),
+    ("POLICY_CREATE_FAILED", POLICY_CREATE_FAILED),
+    ("POLICY_CREATE_SUCCEEDED", POLICY_CREATE_SUCCEEDED),
+    ("POLICY_CHANGE_FAILED", POLICY_CHANGE_FAILED),
+    ("POLICY_CHANGE_SUCCEEDED", POLICY_CHANGE_SUCCEEDED),
+    ("POLICY_EXTERNAL_CHANGE_APPLIED", POLICY_EXTERNAL_CHANGE_APPLIED),
+    ("POLICY_EXTERNAL_CHANGE_REJECTED", POLICY_EXTERNAL_CHANGE_REJECTED),
+];
