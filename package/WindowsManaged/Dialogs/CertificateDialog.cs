@@ -89,7 +89,20 @@ public partial class CertificateDialog : GatewayDialog
                 return false;
             }
 
-            outcome = ValidateSystemCertificate(out messages);
+            GatewayServiceAccount serviceAccount;
+            try
+            {
+                CertificateStorePermissions.ValidateSelection(this.cmbStoreLocation.Selected<StoreLocation>());
+                serviceAccount = this.ConfiguredServiceAccount;
+            }
+            catch (Exception error) when (error is InvalidOperationException || error is System.ComponentModel.Win32Exception)
+            {
+                this.Runtime.Session.Log(error.Message);
+                ShowValidationError(error.Message);
+                return false;
+            }
+
+            outcome = ValidateSystemCertificate(serviceAccount, out messages);
         }
 
         switch (outcome)
@@ -456,26 +469,20 @@ public partial class CertificateDialog : GatewayDialog
         }
     }
 
-    /// <summary>
-    /// The account the service will log on as, from the `P.SERVICEACCOUNT` property (NETWORK SERVICE by default)
-    /// </summary>
     private GatewayServiceAccount ConfiguredServiceAccount
     {
         get
         {
             GatewayProperties properties = new(this.Runtime.Session);
 
-            return GatewayServiceAccount.TryResolve(properties.ServiceAccount, Includes.SERVICE_NAME, out GatewayServiceAccount account, out _)
-                ? account
-                : GatewayServiceAccount.NetworkService;
+            return GatewayServiceAccount.ResolveConfigured(properties.ServiceAccount, Includes.SERVICE_NAME);
         }
     }
 
-    private ValidationOutcome ValidateSystemCertificate(out string[] errors)
+    private ValidationOutcome ValidateSystemCertificate(GatewayServiceAccount serviceAccount, out string[] errors)
     {
         bool valid = this.SelectedCertificate.Verify();
         CertificateIssues issues = CertificateChain.CheckCertificate(this.SelectedCertificate);
-        GatewayServiceAccount serviceAccount = this.ConfiguredServiceAccount;
         bool keyRead = PrivateKeyPermissions.HasReadPermission(this.SelectedCertificate, serviceAccount.Sid);
 
         if (valid && issues == CertificateIssues.None)
@@ -506,7 +513,7 @@ public partial class CertificateDialog : GatewayDialog
 
         if (!keyRead)
         {
-            messages.Add(I18n(Strings.PrivateKeyPermissionWillBeGranted));
+            messages.Add(string.Format(I18n(Strings.PrivateKeyPermissionWillBeGranted), serviceAccount.Name));
         }
 
         errors = messages.ToArray();

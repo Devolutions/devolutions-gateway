@@ -29,7 +29,6 @@ using WixSharp;
 using static DevolutionsGateway.Actions.WinAPI;
 using File = System.IO.File;
 using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
-using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
 
 namespace DevolutionsGateway.Actions
 {
@@ -622,27 +621,17 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                using ServiceManager sm = new(WinAPI.SC_MANAGER_CONNECT, LogDelegate.WithSession(session));
-
-                if (!Service.TryOpen(sm, Includes.SERVICE_NAME, WinAPI.SERVICE_QUERY_CONFIG, out Service service, LogDelegate.WithSession(session)))
+                string accountName = GatewayServiceAccount.QueryExistingAccount(Includes.SERVICE_NAME, LogDelegate.WithSession(session));
+                if (accountName == null)
                 {
                     session.Log("no existing service found; the service account defaults to NETWORK SERVICE");
                     return ActionResult.Success;
                 }
 
-                using (service)
+                session.Set(GatewayProperties.existingServiceAccount, accountName);
+                if (string.IsNullOrWhiteSpace(session.Get(GatewayProperties.serviceAccount)))
                 {
-                    string accountName = service.GetAccountName();
-                    if (string.IsNullOrWhiteSpace(accountName))
-                    {
-                        throw new InvalidOperationException("the existing service has no logon account");
-                    }
-
-                    session.Set(GatewayProperties.existingServiceAccount, accountName);
-                    if (string.IsNullOrWhiteSpace(session.Get(GatewayProperties.serviceAccount)))
-                    {
-                        session.Set(GatewayProperties.serviceAccount, accountName);
-                    }
+                    session.Set(GatewayProperties.serviceAccount, accountName);
                 }
             }
             catch (Exception e)
@@ -733,6 +722,35 @@ namespace DevolutionsGateway.Actions
             {
                 session.Log($"ignoring the password supplied for the passwordless account {account.Name}");
                 session.Set(GatewayProperties.servicePassword, string.Empty);
+            }
+
+            try
+            {
+                bool configuring = session.Get(GatewayProperties.configureGateway) &&
+                    (!maintenance || !string.IsNullOrEmpty(session["REINSTALL"]));
+                if (configuring &&
+                    !session.Get(GatewayProperties.configureNgrok) &&
+                    session.Get(GatewayProperties.httpListenerScheme) == Constants.HttpsProtocol &&
+                    !(session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateCertificate)) &&
+                    session.Get(GatewayProperties.certificateMode) == Constants.CertificateMode.System)
+                {
+                    CertificateStorePermissions.ValidateSelection(session.Get(GatewayProperties.certificateLocation));
+                }
+
+                string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
+                string preservedHash = File.Exists(configPath)
+                    ? CertificateStorePermissions.ValidateExisting(
+                        JObject.Parse(File.ReadAllText(configPath)), account.Sid, existingAccount, configuring)
+                    : string.Empty;
+                session.Set(GatewayProperties.preservedCertificateConfigHash, preservedHash);
+                if (!string.IsNullOrEmpty(preservedHash))
+                {
+                    session.Log("retaining manually managed certificate-store configuration for the same service identity; certificate availability and private-key permissions are not verified");
+                }
+            }
+            catch (Exception e)
+            {
+                return Fail($"The certificate-store configuration cannot be used by this installation: {e.Message}");
             }
 
             return ActionResult.Success;
@@ -928,19 +946,28 @@ namespace DevolutionsGateway.Actions
                 string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
                 if (!File.Exists(configPath))
                 {
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties.preservedCertificateConfigHash)))
+                    {
+                        throw new InvalidOperationException("the retained certificate-store configuration was removed after validation");
+                    }
                     session.Log("no existing configuration; no certificate permissions to update");
                     return ActionResult.Success;
                 }
 
                 JObject config = JObject.Parse(File.ReadAllText(configPath));
+                if (CertificateStorePermissions.PreserveExisting(config, session.Get(GatewayProperties.preservedCertificateConfigHash)))
+                {
+                    session.Log("leaving retained CurrentUser/CurrentService configuration and private-key ACLs unmanaged; no certificate lookup, permission grant, or verification was performed");
+                    return ActionResult.Success;
+                }
                 if (!string.Equals((string)config["TlsCertificateSource"], "System", StringComparison.OrdinalIgnoreCase))
                 {
                     return ActionResult.Success;
                 }
 
                 string subjectName = (string)config["TlsCertificateSubjectName"];
-                StoreName storeName = (StoreName)Enum.Parse(typeof(StoreName), (string)config["TlsCertificateStoreName"] ?? "My", true);
-                StoreLocation location = (StoreLocation)Enum.Parse(typeof(StoreLocation), (string)config["TlsCertificateStoreLocation"] ?? "LocalMachine", true);
+                string storeName = (string)config["TlsCertificateStoreName"] ?? "My";
+                StoreLocation location = StoreLocation.LocalMachine;
                 bool strictMode = (bool?)config["TlsVerifyStrict"] ?? false;
                 if (string.IsNullOrWhiteSpace(subjectName))
                 {

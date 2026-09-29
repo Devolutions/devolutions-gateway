@@ -432,6 +432,7 @@ internal static class GatewayActions
         UsesProperties = UseProperties(new IWixProperty[]
         {
             GatewayProperties.serviceAccountSid,
+            GatewayProperties.preservedCertificateConfigHash,
         }),
     };
 

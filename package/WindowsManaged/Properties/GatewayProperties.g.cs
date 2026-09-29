@@ -998,6 +998,35 @@ namespace DevolutionsGateway.Properties
             }
         }
 
+ 
+        internal static readonly WixProperty<String> preservedCertificateConfigHash = new()
+        {
+            Id = "P.PreservedCertificateConfigHash",
+            Default = "",
+            Name = "PreservedCertificateConfigHash",
+            Secure = false,
+            Hidden = true,
+            Public = false,
+            Encode = false,
+        };
+
+        public String PreservedCertificateConfigHash
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(preservedCertificateConfigHash.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(preservedCertificateConfigHash, value); 
+                }
+            }
+        }
+
+ 
         internal static readonly WixProperty<String> tcpListenerHost = new()
         {
             Id = "P.TCPLISTENERHOST",
@@ -1706,6 +1735,9 @@ namespace DevolutionsGateway.Properties
             servicePassword,
             serviceAccountSid,
             existingServiceAccount,
+ 
+ 
+            preservedCertificateConfigHash,
  
  
             tcpListenerHost,
