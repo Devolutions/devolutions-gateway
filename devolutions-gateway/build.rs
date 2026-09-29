@@ -94,9 +94,13 @@ END"#,
         use std::path::PathBuf;
         use std::process::Command;
 
-        // --- gate: only release and production profiles --------------------
+        // --- gate: mirror the runtime sink, `cfg(not(debug_assertions))` ----
+        // Cargo only ever reports "release" or "debug" here: every profile inheriting the release
+        // profile (release, production, profiling) reports "release". No profile overrides
+        // `debug-assertions`, so this selects exactly the builds where the runtime uses the Windows
+        // Event Log sink, and those builds need the embedded catalog.
         let profile = env::var("PROFILE").unwrap_or_default();
-        if !matches!(profile.as_str(), "release" | "production") {
+        if profile != "release" {
             return;
         }
 
