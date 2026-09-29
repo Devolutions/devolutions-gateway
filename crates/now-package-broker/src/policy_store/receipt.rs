@@ -412,7 +412,7 @@ mod tests {
         assert_ne!(management.store_token, old_token);
         assert!(store.active_policy().is_none());
     }
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn readiness_reloads_each_disk_state_after_provisional_load() {
         for (disk_policy, invalid, expected, expected_event) in [
             (

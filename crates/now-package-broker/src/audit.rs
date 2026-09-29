@@ -39,17 +39,18 @@ const EVENT_LOG_ADMISSION_BUDGET: usize = 256;
 #[cfg(any(test, not(debug_assertions)))]
 const EVENT_LOG_QUEUE_CAPACITY: usize = EVENT_LOG_ADMISSION_BUDGET + EVENT_LOG_OUTCOME_RESERVE;
 
-/// How long the shutdown waits for the accepted entries to reach the Event Log sink.
+/// How long the shutdown waits for the accepted entries to reach the Event Log sink, and for the
+/// worker to stop after the queue is closed.
 ///
 /// The worker is a plain thread, so a sink that stopped making progress would otherwise hold the
 /// shutdown until the agent stops the process. Entries still queued when this expires stay in the
 /// queue, and the worker keeps emitting them for as long as the process lives.
 #[cfg(any(test, not(debug_assertions)))]
-const EVENT_LOG_FLUSH_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+const EVENT_LOG_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// How often flushing re-checks the queue, which the worker empties without signalling completion.
+/// How often a bounded shutdown wait re-checks what it is waiting for.
 #[cfg(any(test, not(debug_assertions)))]
-const EVENT_LOG_FLUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+const EVENT_LOG_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
 static RECORDER: std::sync::OnceLock<Arc<dyn AuditRecorder>> = std::sync::OnceLock::new();
 
@@ -330,11 +331,27 @@ impl EventLogQueue {
     }
 
     fn drain(&mut self) {
+        self.drain_with_grace(EVENT_LOG_SHUTDOWN_GRACE);
+    }
+
+    /// Closes the queue and waits, at most for `grace`, for the worker to emit what is left.
+    ///
+    /// Dropping the sender ends the worker's iteration as soon as the queue is empty, so waiting for
+    /// it is normally bounded by the sink. A sink that stopped making progress would hold the
+    /// shutdown until the agent stops the process instead, so the worker is detached once the grace
+    /// expires: it owns nothing the process needs to release.
+    fn drain_with_grace(&mut self, grace: std::time::Duration) {
         // Dropping the sender ends the worker's iteration as soon as the queue is empty.
         self.sender = None;
         let Some(worker) = self.worker.take() else {
             return;
         };
+        if !wait_until(|| worker.is_finished(), grace) {
+            tracing::warn!(
+                "The Windows Event Log policy audit worker is still emitting after the queue was closed; the agent is stopping without waiting for it"
+            );
+            return;
+        }
         if worker.join().is_err() {
             tracing::warn!("The Windows Event Log policy audit worker panicked");
         }
@@ -377,7 +394,7 @@ impl AuditRecorder for SystemRecorder {
         // The pending count is read outside the lock, so a connection that is finishing its policy
         // write can still record its terminal event while the worker catches up.
         let pending = Arc::clone(&self.queue.lock().pending);
-        wait_for_emission(&pending, EVENT_LOG_FLUSH_GRACE);
+        wait_for_emission(&pending, EVENT_LOG_SHUTDOWN_GRACE);
     }
 }
 
@@ -432,27 +449,34 @@ fn event_log_worker(
     }
 }
 
+/// Waits, at most for `grace`, until `settled` reports completion, and returns whether it did.
+///
+/// The queue worker is a plain thread without a completion signal, so its progress is polled. A
+/// sink that stopped making progress would otherwise hold the shutdown indefinitely.
+#[cfg(any(test, not(debug_assertions)))]
+fn wait_until(settled: impl Fn() -> bool, grace: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + grace;
+    while !settled() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(EVENT_LOG_POLL_INTERVAL);
+    }
+    true
+}
+
 /// Waits, at most for `grace`, until every accepted entry has been emitted.
 ///
-/// The worker empties the queue without signalling completion, so this polls the count it
+/// The worker empties the queue without signalling completion, so this checks the count it
 /// decrements. A sink that stopped making progress would otherwise hold the shutdown
 /// indefinitely, so giving up is logged rather than waited out.
 #[cfg(any(test, not(debug_assertions)))]
 fn wait_for_emission(pending: &AtomicUsize, grace: std::time::Duration) {
-    let deadline = std::time::Instant::now() + grace;
-    loop {
-        let queued = pending.load(Ordering::Acquire);
-        if queued == 0 {
-            return;
-        }
-        if std::time::Instant::now() >= deadline {
-            tracing::warn!(
-                queued,
-                "Windows Event Log policy audit entries are still pending; the agent is stopping without waiting for them"
-            );
-            return;
-        }
-        std::thread::sleep(EVENT_LOG_FLUSH_POLL_INTERVAL);
+    if !wait_until(|| pending.load(Ordering::Acquire) == 0, grace) {
+        tracing::warn!(
+            queued = pending.load(Ordering::Acquire),
+            "Windows Event Log policy audit entries are still pending; the agent is stopping without waiting for them"
+        );
     }
 }
 
@@ -1075,7 +1099,7 @@ pub(crate) mod tests {
                 EntryClass::Admission,
             )
             .expect("the attempt is accepted");
-        wait_for_emission(&queue.pending, EVENT_LOG_FLUSH_GRACE);
+        wait_for_emission(&queue.pending, EVENT_LOG_SHUTDOWN_GRACE);
         assert_eq!(
             queue.pending.load(Ordering::Acquire),
             0,
@@ -1118,5 +1142,41 @@ pub(crate) mod tests {
         let flushed = std::time::Instant::now();
         wait_for_emission(&pending, std::time::Duration::from_secs(5));
         assert!(flushed.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn closing_the_queue_gives_up_on_a_sink_that_stopped_making_progress() {
+        let open = Arc::new(AtomicBool::new(false));
+        let release = Arc::clone(&open);
+        let entered = Arc::new(AtomicBool::new(false));
+        let sink_entered = Arc::clone(&entered);
+        let mut queue = EventLogQueue::start(move |_| {
+            sink_entered.store(true, Ordering::Release);
+            while !release.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        })
+        .expect("the audit worker starts");
+
+        queue
+            .record(
+                Entry::new("Policy management write attempted").event_code(policy_events::POLICY_WRITE_ATTEMPTED),
+                EntryClass::Admission,
+            )
+            .expect("the attempt is accepted");
+        while !entered.load(Ordering::Acquire) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        let closing = std::time::Instant::now();
+        queue.drain_with_grace(std::time::Duration::from_millis(50));
+        assert!(
+            closing.elapsed() < std::time::Duration::from_secs(2),
+            "closing the queue does not wait for a sink that stopped making progress"
+        );
+
+        // The detached worker holds nothing the process needs, so releasing the sink lets it emit the
+        // entry it took and then exit.
+        open.store(true, Ordering::Release);
     }
 }
