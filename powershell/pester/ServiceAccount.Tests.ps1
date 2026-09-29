@@ -50,23 +50,6 @@ Describe 'Gateway installer results' -Skip:($PSEdition -ne 'Desktop' -and -not $
         }
     }
 
-    Describe 'Gateway service accounts on non-Windows platforms' -Skip:($PSEdition -eq 'Desktop' -or $IsWindows) {
-        BeforeEach {
-            Mock Start-Process {}
-        }
-
-        It 'rejects service accounts before launching the installer' {
-            { Install-DGatewayPackage -ServiceAccount '.\test' } | Should -Throw '*supported only on Windows*'
-            Should -Invoke Start-Process -Times 0
-        }
-
-        It 'rejects credentials before launching the installer' {
-            $credential = [pscredential]::new('.\test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
-            { Install-DGatewayPackage -ServiceCredential $credential } | Should -Throw '*supported only on Windows*'
-            Should -Invoke Start-Process -Times 0
-        }
-    }
-
     It 'passes credentials through the MSI escaping helper' {
         $credential = [pscredential]::new('.\test', (ConvertTo-SecureString 'a"b\$;' -AsPlainText -Force))
         Install-DGatewayPackage -RequiredVersion $script:version -ServiceCredential $credential
@@ -95,5 +78,22 @@ Describe 'Gateway installer results' -Skip:($PSEdition -ne 'Desktop' -and -not $
         Install-DGatewayPackage -RequiredVersion $script:version
         Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like '*requires a restart*' }
         Should -Invoke Start-Process -Times 1 -ParameterFilter { $ArgumentList -contains '/norestart' }
+    }
+}
+
+Describe 'Gateway service accounts on non-Windows platforms' -Skip:($PSEdition -eq 'Desktop' -or $IsWindows) {
+    BeforeEach {
+        Mock Start-Process {}
+    }
+
+    It 'rejects service accounts before launching the installer' {
+        { Install-DGatewayPackage -ServiceAccount '.\test' } | Should -Throw '*supported only on Windows*'
+        Should -Invoke Start-Process -Times 0
+    }
+
+    It 'rejects credentials before launching the installer' {
+        $credential = [pscredential]::new('.\test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+        { Install-DGatewayPackage -ServiceCredential $credential } | Should -Throw '*supported only on Windows*'
+        Should -Invoke Start-Process -Times 0
     }
 }
