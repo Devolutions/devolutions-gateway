@@ -1,6 +1,6 @@
 use core::fmt;
 use std::cmp;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::path::Path;
 use std::pin::pin;
 use std::sync::Arc;
@@ -42,15 +42,32 @@ struct JrecManifest {
     start_time: i64,
     duration: i64,
     files: Vec<JrecFile>,
-    /// Append-only, like `files`: artifact names and `CurrentArtifact` indices are derived from positions.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    logs: Vec<JrecLog>,
+    /// Non-recording artifacts grouped by role. Each list is append-only, like `files`: names and
+    /// `CurrentArtifact` indices are derived from positions. Keys stay strings so roles written by a
+    /// newer Gateway survive a rewrite.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    artifacts: BTreeMap<String, Vec<JrecArtifact>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecLog {
+struct JrecArtifact {
     file_name: String,
+}
+
+/// Role of a non-recording artifact, used as its key in the manifest `artifacts` object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactRole {
+    AiAnalysis,
+}
+
+impl ArtifactRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ArtifactRole::AiAnalysis => "ai-analysis",
+        }
+    }
 }
 
 impl JrecManifest {
@@ -84,7 +101,7 @@ pub enum PushOutcome {
 pub enum PushCategory {
     Recording(RecordingFileType),
     /// Opaque to Gateway: stored as-is, whatever its content.
-    Log(RecordingFileType),
+    Artifact(ArtifactRole, RecordingFileType),
 }
 
 #[derive(TypedBuilder)]
@@ -256,7 +273,7 @@ pub enum OnGoingRecordingState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CurrentArtifact {
     Recording(usize),
-    Log(usize),
+    Artifact(ArtifactRole, usize),
 }
 
 #[derive(Debug, Clone)]
@@ -564,7 +581,7 @@ impl RecordingManagerTask {
                 start_time,
                 duration: 0,
                 files: Vec::new(),
-                logs: Vec::new(),
+                artifacts: BTreeMap::new(),
             }
         };
 
@@ -579,13 +596,14 @@ impl RecordingManagerTask {
                 });
                 (file_name, CurrentArtifact::Recording(idx))
             }
-            PushCategory::Log(file_type) => {
-                let idx = manifest.logs.len();
-                let file_name = format!("log-{idx}.{}", file_type.extension());
-                manifest.logs.push(JrecLog {
+            PushCategory::Artifact(role, file_type) => {
+                let artifacts = manifest.artifacts.entry(role.as_str().to_owned()).or_default();
+                let idx = artifacts.len();
+                let file_name = format!("{}-{idx}.{}", role.as_str(), file_type.extension());
+                artifacts.push(JrecArtifact {
                     file_name: file_name.clone(),
                 });
-                (file_name, CurrentArtifact::Log(idx))
+                (file_name, CurrentArtifact::Artifact(role, idx))
             }
         };
 
@@ -657,7 +675,7 @@ impl RecordingManagerTask {
 
                 &current_file.file_name
             }
-            CurrentArtifact::Log(idx) => &ongoing.manifest.logs[idx].file_name,
+            CurrentArtifact::Artifact(role, idx) => &ongoing.manifest.artifacts[role.as_str()][idx].file_name,
         };
 
         let recording_file_path = ongoing
@@ -875,7 +893,7 @@ async fn recording_manager_task(
                     },
                     RecordingManagerMessage::ListFiles { id, channel } => {
                         match manager.ongoing_recordings.get(&id) {
-                            Some(recording) if matches!(recording.artifact, CurrentArtifact::Log(_)) => {
+                            Some(recording) if matches!(recording.artifact, CurrentArtifact::Artifact(..)) => {
                                 let _ = channel.send(None);
                             }
                             Some(recording) => {
@@ -1003,7 +1021,8 @@ mod tests {
 
     const WEBM: PushCategory = PushCategory::Recording(RecordingFileType::WebM);
     const SLOG_RECORDING: PushCategory = PushCategory::Recording(RecordingFileType::SessionRecordingLog);
-    const SLOG_LOG: PushCategory = PushCategory::Log(RecordingFileType::SessionRecordingLog);
+    const AI_ANALYSIS: PushCategory =
+        PushCategory::Artifact(ArtifactRole::AiAnalysis, RecordingFileType::SessionRecordingLog);
 
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
@@ -1143,27 +1162,27 @@ mod tests {
         assert_eq!(third, "recording-2.slog");
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["files"][2]["fileName"], "recording-2.slog");
-        assert!(manifest.get("logs").is_none());
+        assert!(manifest.get("artifacts").is_none());
     }
 
     #[tokio::test]
-    async fn log_category_goes_to_logs() {
+    async fn ai_analysis_goes_to_artifacts() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
         harness.push(id, WEBM).await;
-        let first_log = harness.push(id, SLOG_LOG).await;
-        let second_log = harness.push(id, SLOG_LOG).await;
+        let first_log = harness.push(id, AI_ANALYSIS).await;
+        let second_log = harness.push(id, AI_ANALYSIS).await;
 
-        assert_eq!(first_log, "log-0.slog");
-        assert_eq!(second_log, "log-1.slog");
+        assert_eq!(first_log, "ai-analysis-0.slog");
+        assert_eq!(second_log, "ai-analysis-1.slog");
         let manifest = harness.read_manifest(id);
         let files = manifest["files"].as_array().expect("files");
         assert_eq!(files.len(), 1);
         assert_eq!(files[0]["fileName"], "recording-0.webm");
         assert_eq!(
-            manifest["logs"],
-            json!([{ "fileName": "log-0.slog" }, { "fileName": "log-1.slog" }])
+            manifest["artifacts"],
+            json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }, { "fileName": "ai-analysis-1.slog" }] })
         );
     }
 
@@ -1172,12 +1191,15 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let log = harness.push(id, SLOG_LOG).await;
+        let log = harness.push(id, AI_ANALYSIS).await;
 
-        assert_eq!(log, "log-0.slog");
+        assert_eq!(log, "ai-analysis-0.slog");
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["files"], json!([]));
-        assert_eq!(manifest["logs"], json!([{ "fileName": "log-0.slog" }]));
+        assert_eq!(
+            manifest["artifacts"],
+            json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
+        );
 
         assert_eq!(harness.push(id, WEBM).await, "recording-0.webm");
     }
@@ -1188,7 +1210,7 @@ mod tests {
         let id = Uuid::new_v4();
         harness.write_manifest(id, MASTER_MANIFEST);
 
-        harness.push(id, SLOG_LOG).await;
+        harness.push(id, AI_ANALYSIS).await;
 
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["duration"], 5);
@@ -1196,20 +1218,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recording_reconnect_keeps_logs() {
+    async fn recording_reconnect_keeps_artifacts() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
-        harness.push(id, SLOG_LOG).await;
+        harness.push(id, AI_ANALYSIS).await;
 
         let file_name = harness.connect(id, WEBM).await;
         assert_eq!(file_name, "recording-1.webm");
-        assert_eq!(harness.read_manifest(id)["logs"], json!([{ "fileName": "log-0.slog" }]));
+        assert_eq!(
+            harness.read_manifest(id)["artifacts"],
+            json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
+        );
 
         harness.disconnect(id).await;
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["files"][1]["fileName"], "recording-1.webm");
-        assert_eq!(manifest["logs"], json!([{ "fileName": "log-0.slog" }]));
+        assert_eq!(
+            manifest["artifacts"],
+            json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
+        );
     }
 
     #[tokio::test]
@@ -1230,7 +1258,7 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
-        harness.connect(id, SLOG_LOG).await;
+        harness.connect(id, AI_ANALYSIS).await;
 
         let files = harness.sender.list_files(id).await.expect("list files");
 
@@ -1243,7 +1271,7 @@ mod tests {
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
 
-        assert!(!harness.client_push_wakes_streamers(id, SLOG_LOG).await);
+        assert!(!harness.client_push_wakes_streamers(id, AI_ANALYSIS).await);
     }
 
     #[tokio::test]
@@ -1257,8 +1285,24 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn unknown_artifact_roles_survive_a_rewrite() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        let mut manifest: serde_json::Value = serde_json::from_str(MASTER_MANIFEST).expect("manifest");
+        manifest["artifacts"] = json!({ "future-role": [{ "fileName": "future-role-0.bin" }] });
+        harness.write_manifest(id, &manifest.to_string());
+
+        harness.push(id, WEBM).await;
+
+        assert_eq!(
+            harness.read_manifest(id)["artifacts"],
+            json!({ "future-role": [{ "fileName": "future-role-0.bin" }] })
+        );
+    }
+
     #[test]
-    fn manifest_without_logs_round_trips_byte_for_byte() {
+    fn manifest_without_artifacts_round_trips_byte_for_byte() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("recording.json");
         std::fs::write(&path, MASTER_MANIFEST).expect("write manifest");

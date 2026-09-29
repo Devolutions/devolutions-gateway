@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Seek as _, Write as _};
 use std::net::SocketAddr;
@@ -30,13 +31,13 @@ use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushCategory, PushOutcome, RecordingMessageSender};
+use crate::recording::{ArtifactRole, PushCategory, PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
-/// Maximum files in a session ZIP (`recording.json` + every Artifact listed, files and logs).
+/// Maximum files in a session ZIP (`recording.json` + every Artifact listed, files and artifacts).
 ///
 /// Reconnect windows only mint a small number of clips per session in practice;
 /// this bound blocks pathological manifests without rejecting normal multi-clip packages.
@@ -65,25 +66,20 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
-    category: Option<CategoryParam>,
-}
-
-#[derive(Deserialize, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-enum CategoryParam {
-    Recording,
-    Log,
+    artifact: Option<ArtifactRole>,
 }
 
 impl JrecPushQueryParam {
     fn category(&self) -> Result<PushCategory, HttpError> {
-        match (self.category, self.file_type) {
-            // A missing category means recording, as it did before logs existed.
-            (None | Some(CategoryParam::Recording), file_type) => Ok(PushCategory::Recording(file_type)),
-            (Some(CategoryParam::Log), RecordingFileType::SessionRecordingLog) => {
-                Ok(PushCategory::Log(RecordingFileType::SessionRecordingLog))
+        match (self.artifact, self.file_type) {
+            // Without an artifact role the stream is a recording, as it was before artifacts existed.
+            (None, file_type) => Ok(PushCategory::Recording(file_type)),
+            (Some(role @ ArtifactRole::AiAnalysis), file_type @ RecordingFileType::SessionRecordingLog) => {
+                Ok(PushCategory::Artifact(role, file_type))
             }
-            (Some(CategoryParam::Log), _) => Err(HttpError::bad_request().msg("only slog files can be pushed as logs")),
+            (Some(ArtifactRole::AiAnalysis), _) => {
+                Err(HttpError::bad_request().msg("ai-analysis artifacts must be slog files"))
+            }
         }
     }
 }
@@ -657,7 +653,7 @@ where
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
     #[serde(default)]
-    logs: Vec<RecordingZipManifestFile>,
+    artifacts: BTreeMap<String, Vec<RecordingZipManifestFile>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -697,7 +693,7 @@ impl RecordingZipPlan {
     }
 }
 
-/// Snapshots `recording.json` and every Artifact it lists (files and logs) at call time.
+/// Snapshots `recording.json` and every Artifact it lists (files and artifacts) at call time.
 async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<RecordingZipPlan, HttpError> {
     let manifest_path = recording_dir.join("recording.json");
     let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|error| {
@@ -720,8 +716,13 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut artifact_names = Vec::with_capacity(manifest.files.len() + manifest.logs.len());
-    for file in manifest.files.into_iter().chain(manifest.logs) {
+    let artifact_count = manifest.artifacts.values().map(Vec::len).sum::<usize>();
+    let mut artifact_names = Vec::with_capacity(manifest.files.len() + artifact_count);
+    for file in manifest
+        .files
+        .into_iter()
+        .chain(manifest.artifacts.into_values().flatten())
+    {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
                 file_name = %file.file_name,
@@ -1063,21 +1064,25 @@ mod tests {
                 .map_err(|error| error.code)
         };
 
-        let slog_recording = Ok(PushCategory::Recording(RecordingFileType::SessionRecordingLog));
-        assert_eq!(category(serde_json::json!({ "fileType": "slog" })), slog_recording);
         assert_eq!(
-            category(serde_json::json!({ "fileType": "slog", "category": "recording" })),
-            slog_recording
+            category(serde_json::json!({ "fileType": "slog" })),
+            Ok(PushCategory::Recording(RecordingFileType::SessionRecordingLog))
         );
         assert_eq!(
-            category(serde_json::json!({ "fileType": "slog", "category": "log" })),
-            Ok(PushCategory::Log(RecordingFileType::SessionRecordingLog))
+            category(serde_json::json!({ "fileType": "slog", "artifact": "ai-analysis" })),
+            Ok(PushCategory::Artifact(
+                ArtifactRole::AiAnalysis,
+                RecordingFileType::SessionRecordingLog
+            ))
         );
         assert_eq!(
-            category(serde_json::json!({ "fileType": "webm", "category": "log" })),
+            category(serde_json::json!({ "fileType": "webm", "artifact": "ai-analysis" })),
             Err(StatusCode::BAD_REQUEST)
         );
-        assert!(serde_json::from_value::<JrecPushQueryParam>(serde_json::json!({ "category": "log" })).is_err());
+
+        let parse = |query: serde_json::Value| serde_json::from_value::<JrecPushQueryParam>(query);
+        assert!(parse(serde_json::json!({ "artifact": "ai-analysis" })).is_err());
+        assert!(parse(serde_json::json!({ "fileType": "slog", "artifact": "unknown" })).is_err());
     }
 
     #[test]
@@ -1150,7 +1155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshots_manifest_logs_for_zip() {
+    async fn snapshots_manifest_artifacts_for_zip() {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
 
@@ -1161,16 +1166,18 @@ mod tests {
             "files": [
                 { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
             ],
-            "logs": [
-                { "fileName": "log-0.slog" },
-                { "fileName": "log-1.slog" }
-            ]
+            "artifacts": {
+                "ai-analysis": [
+                    { "fileName": "ai-analysis-0.slog" },
+                    { "fileName": "ai-analysis-1.slog" }
+                ]
+            }
         });
 
         tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
             .await
             .expect("write manifest");
-        for file_name in ["recording-0.webm", "log-0.slog", "log-1.slog"] {
+        for file_name in ["recording-0.webm", "ai-analysis-0.slog", "ai-analysis-1.slog"] {
             tokio::fs::write(dir_path.join(file_name), b"content")
                 .await
                 .expect("write artifact");
@@ -1179,7 +1186,10 @@ mod tests {
         let plan = snapshot_recording_zip_plan(&dir_path)
             .await
             .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
-        assert_eq!(plan.artifact_names, ["recording-0.webm", "log-0.slog", "log-1.slog"]);
+        assert_eq!(
+            plan.artifact_names,
+            ["recording-0.webm", "ai-analysis-0.slog", "ai-analysis-1.slog"]
+        );
     }
 
     #[tokio::test]
