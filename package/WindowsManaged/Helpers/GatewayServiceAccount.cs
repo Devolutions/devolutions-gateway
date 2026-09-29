@@ -63,6 +63,41 @@ namespace DevolutionsGateway.Helpers
             Kind = ServiceAccountKind.NetworkService,
         };
 
+        internal static string QueryExistingAccount(string serviceName, ILogger logger = null)
+        {
+            using ServiceManager manager = new(WinAPI.SC_MANAGER_CONNECT, logger);
+            if (!Service.TryOpen(manager, serviceName, WinAPI.SERVICE_QUERY_CONFIG, out Service service, logger))
+            {
+                return null;
+            }
+
+            using (service)
+            {
+                string name = service.GetAccountName();
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new InvalidOperationException("The existing service has no logon account.");
+                }
+
+                return name;
+            }
+        }
+
+        internal static GatewayServiceAccount ResolveConfigured(string name, string serviceName)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = QueryExistingAccount(serviceName);
+            }
+
+            if (!TryResolve(name, serviceName, out GatewayServiceAccount account, out string error))
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            return account;
+        }
+
         /// <summary>
         /// Resolve an account name (as given on the command line or read back from the service control manager)
         /// into a SID and classify it. An empty name resolves to NETWORK SERVICE.
