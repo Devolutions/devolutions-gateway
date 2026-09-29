@@ -592,6 +592,8 @@ jobs:
           name: devolutions-gateway-powershell
           path: powershell-staging
 
+  # Run Windows-only installer cases on native Windows PowerShell 5.1 and PowerShell 7.
+  # Keep artifact production in the Ubuntu job above to avoid duplicate shipping PowerShell artifacts.
   gateway-service-account-tests:
     name: Gateway service account tests [Windows]
     needs: [preflight]
