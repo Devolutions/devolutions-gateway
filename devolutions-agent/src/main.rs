@@ -50,6 +50,8 @@ use ceviche::controller::*;
 use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::enrollment::parse_enrollment_jwt;
+use devolutions_agent_shared::get_data_dir;
+use zeroize::Zeroizing;
 
 use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
@@ -206,6 +208,45 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
     })
 }
 
+fn read_identity_token<R: BufRead>(mut input: R) -> Result<Zeroizing<String>> {
+    let mut line = Zeroizing::new(String::new());
+    if input.read_line(&mut line).context("read enrollment token from stdin")? == 0 {
+        bail!("no enrollment token on stdin");
+    }
+    let token = Zeroizing::new(line.trim().to_owned());
+    if token.is_empty() {
+        bail!("enrollment token on stdin is empty");
+    }
+    Ok(token)
+}
+
+fn identity_enroll(mut args: impl Iterator<Item = String>) -> Result<()> {
+    let subcommand = args.next().context("missing identity subcommand")?;
+    if subcommand != "enroll" {
+        bail!("unknown identity subcommand");
+    }
+    let raw = Zeroizing::new(args.next().context("missing identity enrollment token")?);
+    if args.next().is_some() {
+        bail!("identity enroll accepts one token");
+    }
+    let raw = if raw.as_str() == "-" {
+        read_identity_token(io::stdin().lock())?
+    } else {
+        raw
+    };
+    let token = agent_identity::token::Token::parse(&raw)?;
+    let conf = ConfHandle::init()?.get_conf();
+    let grant_current_user = conf
+        .debug
+        .identity
+        .as_ref()
+        .and_then(|settings| settings.acl_grant_current_user)
+        .unwrap_or_default();
+    let path = agent_identity::pending::write(&get_data_dir(), &token, grant_current_user)?;
+    println!("{path}");
+    Ok(())
+}
+
 fn main() {
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
@@ -274,6 +315,12 @@ fn main() {
                     }
                 });
             }
+            "identity" => {
+                if let Err(error) = identity_enroll(env::args().skip(2)) {
+                    eprintln!("[ERROR] Agent Identity enrollment failed: {error:#}");
+                    std::process::exit(1);
+                }
+            }
             "up" => {
                 let args: Vec<String> = env::args().skip(2).collect();
                 let command = match parse_up_command_args(&args) {
@@ -327,6 +374,18 @@ mod tests {
     use base64::Engine as _;
 
     use super::*;
+
+    #[test]
+    fn stdin_identity_token_trims_whitespace_and_rejects_empty_input() {
+        assert_eq!(
+            read_identity_token(&b"  dvaet1.bag.secret \r\nsecond line\n"[..])
+                .expect("read one token")
+                .as_str(),
+            "dvaet1.bag.secret"
+        );
+        assert!(read_identity_token(&b""[..]).is_err());
+        assert!(read_identity_token(&b" \t\r\n"[..]).is_err());
+    }
 
     #[test]
     fn parse_up_command_args_accepts_advertise_routes() {

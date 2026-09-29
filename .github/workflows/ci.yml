@@ -202,6 +202,7 @@ jobs:
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         arch: [x64]
         os: [windows, linux]
@@ -1120,6 +1121,10 @@ jobs:
 
       - name: Tests
         run: dotnet test utils/dotnet/GatewayUtils.sln
+        shell: pwsh
+
+      - name: Build agent channel package
+        run: ./crates/agent-channel-proto/dotnet/build.ps1
         shell: pwsh
 
 

@@ -19,6 +19,8 @@ dev-skip-broker-signature = ["now-package-broker/dev-skip-broker-signature"]
 workspace = true
 
 [dependencies]
+agent-identity = { path = "../crates/agent-identity" }
+agent-identity-keys = { path = "../crates/agent-identity-keys" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto" }
 anyhow = "1"
 backoff = "0.4"
@@ -58,6 +60,7 @@ tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 x509-parser = "0.16"
 uuid = { version = "1.23", features = ["v4", "serde"] }
+zeroize = "1"
 
 [dependencies.ironrdp]
 version = "0.17"
