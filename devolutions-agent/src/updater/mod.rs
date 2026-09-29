@@ -418,9 +418,17 @@ async fn run_product_updates(
         }
     }
 
-    // If the agent was successfully updated a restart is imminent; status refreshes on next start.
-    (update_successful || status_needs_refresh) && !agent_updated
+    should_refresh_update_status(update_successful, status_needs_refresh, agent_updated)
 }
+
+fn should_refresh_update_status(update_successful: bool, status_needs_refresh: bool, agent_updated: bool) -> bool {
+    // An Agent restart refreshes versions, but failures still need publishing before shutdown.
+    status_needs_refresh || (update_successful && !agent_updated)
+}
+
+#[cfg(test)]
+#[path = "../../../testsuite/tests/agent_updater_status_refresh.rs"]
+mod status_refresh_tests;
 
 async fn update_product(
     conf: ConfHandle,
