@@ -85,7 +85,7 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
-; 6000-6099 Agent Integration
+; 6000-6099 User Sessions, Updater & PEDM
 
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
