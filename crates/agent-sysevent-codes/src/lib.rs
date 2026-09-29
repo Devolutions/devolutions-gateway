@@ -1,10 +1,8 @@
 //! Devolutions Agent Windows Event Log event definitions.
 //!
-//! This crate is the Agent's event code table. It is independent from the Gateway's
-//! (`sysevent-codes`): the two crates share no items, each product's catalog holds exactly the
-//! codes declared here, and a block may be reused by both products. Lifecycle and Agent
-//! Integration codes below are duplicated from the Gateway table on purpose, so the Agent never
-//! ships a message it cannot emit.
+//! This crate is the Agent's own event code table. The Agent's catalog holds exactly the codes
+//! declared here, so the Agent never ships a message it cannot emit. A numeric block may be
+//! shared, and a code this crate has in common with another product is declared here on purpose.
 
 use std::path::Path;
 
@@ -232,8 +230,8 @@ pub fn policy_external_change_rejected(path: impl AsRef<Path>, reason: impl ToSt
 /// Every declared Agent event code, paired with its symbolic name.
 ///
 /// `devolutions-agent.mc` is checked against this inventory, and the check is an exact match in
-/// both directions, so adding a code here means adding its messages to the catalog, and a
-/// Gateway-only code must never appear there.
+/// both directions, so adding a code here means adding its messages to the catalog, and a code
+/// this crate does not declare must never appear there.
 pub static DECLARED_CODES: &[(&str, u32)] = &[
     ("SERVICE_STARTED", SERVICE_STARTED),
     ("SERVICE_STOPPING", SERVICE_STOPPING),
