@@ -1,8 +1,7 @@
 //! Devolutions Agent Windows Event Log event definitions.
 //!
-//! This crate is the Agent's own event code table. The Agent's catalog holds exactly the codes
-//! declared here, so the Agent never ships a message it cannot emit. A numeric block may be
-//! shared, and a code this crate has in common with another product is declared here on purpose.
+//! The Agent message catalog holds exactly the codes declared here, so the Agent never ships a
+//! message it cannot emit.
 
 use std::path::Path;
 
