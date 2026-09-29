@@ -265,8 +265,10 @@ impl PolicyStore {
         if *monitoring != Monitoring::Initializing {
             return self.management_snapshot();
         }
+        // The watcher reports ready after the provisional load, so a policy that changed in between
+        // is an external change and must be audited as one.
         let (_, observation) = self.observe_storage(false);
-        let management = self.publish_observation(observation);
+        let management = self.publish_external_observation(observation);
         *monitoring = Monitoring::Available;
         management
     }

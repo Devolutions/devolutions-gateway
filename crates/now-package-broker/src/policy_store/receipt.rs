@@ -414,10 +414,25 @@ mod tests {
     }
     #[tokio::test]
     async fn readiness_reloads_each_disk_state_after_provisional_load() {
-        for (disk_policy, invalid, expected) in [
-            (Some(policy("changed", 2)), false, PolicyManagementState::Active),
-            (None, false, PolicyManagementState::Missing),
-            (None, true, PolicyManagementState::Invalid),
+        for (disk_policy, invalid, expected, expected_event) in [
+            (
+                Some(policy("changed", 2)),
+                false,
+                PolicyManagementState::Active,
+                Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED),
+            ),
+            (
+                None,
+                false,
+                PolicyManagementState::Missing,
+                Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED),
+            ),
+            (
+                None,
+                true,
+                PolicyManagementState::Invalid,
+                Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED),
+            ),
         ] {
             let storage = Arc::new(TestStorage::new(Some(policy("provisional", 1))));
             let store = PolicyStore::load_with_storage(
@@ -426,10 +441,26 @@ mod tests {
                 Monitoring::Initializing,
             );
             storage.set_disk_state(disk_policy, invalid, 3);
+            crate::audit::tests::take_events();
             assert_eq!(store.mark_monitoring_ready().await.state, expected);
             assert_eq!(
                 store.active_policy().is_some(),
                 expected == PolicyManagementState::Active
+            );
+            // A policy that changed before the watcher reported ready is an external change.
+            let events = crate::audit::tests::take_events();
+            assert_eq!(
+                events.iter().map(|entry| entry.event_code).collect::<Vec<_>>(),
+                [expected_event]
+            );
+            assert_eq!(
+                store.mark_monitoring_ready().await.state,
+                expected,
+                "a settled store keeps its state on a second readiness report"
+            );
+            assert!(
+                crate::audit::tests::take_events().is_empty(),
+                "readiness audits the observation once"
             );
         }
     }

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(all(not(test), not(debug_assertions)))]
 use std::sync::atomic::AtomicU64;
+#[cfg(any(test, not(debug_assertions)))]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use agent_sysevent_codes as policy_events;
@@ -19,22 +21,24 @@ const INTENT: &str = "PUT /v1/policy";
 const MAX_SID_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 1024;
 const MAX_POLICY_ID_BYTES: usize = 256;
-/// Capacity of the queue holding attempts and denials.
+/// Slots of the Event Log queue kept for terminal outcomes and external changes.
+///
+/// Only authenticated policy writes, which the policy store serializes, and the policy store's own
+/// observation of external changes produce this class, so a request flood cannot reach the reserve.
+#[cfg(any(test, not(debug_assertions)))]
+const EVENT_LOG_OUTCOME_RESERVE: usize = 64;
+
+/// Slots of the Event Log queue that write attempts and denials may occupy.
 ///
 /// The write attempt is recorded before the pipe client is authenticated, so a client that never
 /// authenticates can produce this class at will. It is the class that yields when the sink
 /// saturates.
 #[cfg(any(test, not(debug_assertions)))]
-const EVENT_LOG_ADMISSION_QUEUE_CAPACITY: usize = 256;
+const EVENT_LOG_ADMISSION_BUDGET: usize = 256;
 
-/// Capacity of the queue holding terminal outcomes and external changes, reserved on top of the
-/// admission capacity.
-///
-/// Only authenticated policy writes, which the policy store serializes, and the policy store's own
-/// observation of external changes produce this class, so a request flood cannot reach it. Keeping
-/// the capacity separate rather than sharing it is what makes the reservation hold.
+/// Capacity of the queue holding every policy audit entry waiting for the Event Log worker.
 #[cfg(any(test, not(debug_assertions)))]
-const EVENT_LOG_OUTCOME_QUEUE_CAPACITY: usize = 64;
+const EVENT_LOG_QUEUE_CAPACITY: usize = EVENT_LOG_ADMISSION_BUDGET + EVENT_LOG_OUTCOME_RESERVE;
 
 static RECORDER: std::sync::OnceLock<Arc<dyn AuditRecorder>> = std::sync::OnceLock::new();
 
@@ -103,7 +107,10 @@ impl FailureReason {
     }
 }
 
-/// Which queue of the Event Log worker an audit entry is routed to.
+/// Which class an audit entry belongs to.
+///
+/// Both classes share one queue, so entries reach the sink in the order they were recorded. The
+/// class only decides whether an entry may be refused to keep capacity for the other class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EntryClass {
     /// A write attempt or a denial. Recorded from unauthenticated requests, so it may be dropped
@@ -124,9 +131,29 @@ impl EntryClass {
     }
 }
 
+/// Why the Event Log queue refused an entry.
+#[cfg(any(test, not(debug_assertions)))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueueRefusal {
+    /// The queue, or the slots this class may occupy, is full.
+    Full,
+    /// The worker is gone, so nothing can reach the sink anymore.
+    Disconnected,
+}
+
+#[cfg(all(not(test), not(debug_assertions)))]
+impl QueueRefusal {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "queue_full",
+            Self::Disconnected => "worker_disconnected",
+        }
+    }
+}
+
 trait AuditRecorder: Send + Sync {
     /// Records one entry of `class`. Only [`EntryClass::Admission`] entries may be dropped, and only
-    /// when the queue for their class is full.
+    /// when their budget or the queue is full.
     fn record(&self, entry: Entry, class: EntryClass);
 
     /// Stops accepting entries and waits for the accepted ones to be emitted.
@@ -170,52 +197,69 @@ struct SystemRecorder {
     dropped: AtomicU64,
 }
 
-/// The queues and the worker thread that moves accepted entries to the Windows Event Log.
+/// The queue and the worker thread that move accepted entries to the Windows Event Log.
 ///
-/// Admission entries and terminal outcomes have separate bounded queues, so a flood of admission
-/// entries cannot consume the capacity reserved for outcomes.
+/// Every entry shares one bounded queue, so entries reach the sink in the order they were recorded
+/// and an accepted write's attempt precedes its terminal outcome. Write attempts and denials are
+/// refused once they occupy [`EVENT_LOG_ADMISSION_BUDGET`] slots, which keeps
+/// [`EVENT_LOG_OUTCOME_RESERVE`] slots available for outcomes and external changes.
 #[cfg(any(test, not(debug_assertions)))]
 struct EventLogQueue {
     /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
-    admission: Option<std::sync::mpsc::SyncSender<Entry>>,
-    /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
-    outcome: Option<std::sync::mpsc::SyncSender<Entry>>,
+    sender: Option<std::sync::mpsc::SyncSender<(Entry, EntryClass)>>,
+    /// Write attempts and denials still queued, shared with the worker that dequeues them.
+    admission_pending: Arc<AtomicUsize>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
 #[cfg(any(test, not(debug_assertions)))]
 impl EventLogQueue {
     fn start(emit: impl FnMut(Entry) + Send + 'static) -> std::io::Result<Self> {
-        let (admission, admission_rx) = std::sync::mpsc::sync_channel(EVENT_LOG_ADMISSION_QUEUE_CAPACITY);
-        let (outcome, outcome_rx) = std::sync::mpsc::sync_channel(EVENT_LOG_OUTCOME_QUEUE_CAPACITY);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_LOG_QUEUE_CAPACITY);
+        let admission_pending = Arc::new(AtomicUsize::new(0));
+        let queued = Arc::clone(&admission_pending);
         let worker = std::thread::Builder::new()
             .name("policy-audit-event-log".to_owned())
-            .spawn(move || event_log_worker(&admission_rx, &outcome_rx, emit))?;
+            .spawn(move || event_log_worker(&receiver, &queued, emit))?;
 
         Ok(Self {
-            admission: Some(admission),
-            outcome: Some(outcome),
+            sender: Some(sender),
+            admission_pending,
             worker: Some(worker),
         })
     }
 
-    /// Queues one entry, unless the queue for its class is full or closed.
-    fn record(&self, entry: Entry, class: EntryClass) -> Result<(), std::sync::mpsc::TrySendError<Entry>> {
-        let sender = match class {
-            EntryClass::Admission => self.admission.as_ref(),
-            EntryClass::Outcome => self.outcome.as_ref(),
+    /// Queues one entry, unless its class is over budget or the queue is full or closed.
+    fn record(&mut self, entry: Entry, class: EntryClass) -> Result<(), QueueRefusal> {
+        // The queue is closed after the broker drained it, so nothing can be emitted anymore.
+        let Some(sender) = self.sender.as_ref() else {
+            return Err(QueueRefusal::Disconnected);
         };
-        match sender {
-            Some(sender) => sender.try_send(entry),
-            // The queue is closed after the broker drained it, so nothing can be emitted anymore.
-            None => Err(std::sync::mpsc::TrySendError::Disconnected(entry)),
+        if class == EntryClass::Admission {
+            // Claim the slot before sending, so concurrent attempts cannot overdraw the budget.
+            if self.admission_pending.fetch_add(1, Ordering::Relaxed) >= EVENT_LOG_ADMISSION_BUDGET {
+                self.admission_pending.fetch_sub(1, Ordering::Relaxed);
+                return Err(QueueRefusal::Full);
+            }
+        }
+        match sender.try_send((entry, class)) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if class == EntryClass::Admission {
+                    // The entry never entered the queue, so its claimed slot is free again.
+                    self.admission_pending.fetch_sub(1, Ordering::Relaxed);
+                }
+                Err(match error {
+                    std::sync::mpsc::TrySendError::Full(_) => QueueRefusal::Full,
+                    std::sync::mpsc::TrySendError::Disconnected(_) => QueueRefusal::Disconnected,
+                })
+            }
         }
     }
 
     fn drain(&mut self) {
-        // Dropping the senders ends the worker's iteration as soon as the queues are empty.
-        self.admission = None;
-        self.outcome = None;
+        // Dropping the sender ends the worker's iteration as soon as the queue is empty.
+        self.sender = None;
         let Some(worker) = self.worker.take() else {
             return;
         };
@@ -239,17 +283,13 @@ impl SystemRecorder {
 impl AuditRecorder for SystemRecorder {
     fn record(&self, entry: Entry, class: EntryClass) {
         trace_entry(&entry);
-        let error = self.queue.lock().record(entry, class).err();
-        if let Some(error) = error {
+        if let Some(refusal) = self.queue.lock().record(entry, class).err() {
             let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped.is_power_of_two() {
                 tracing::warn!(
                     dropped,
                     class = class.as_str(),
-                    error = %match error {
-                        std::sync::mpsc::TrySendError::Full(_) => "queue_full",
-                        std::sync::mpsc::TrySendError::Disconnected(_) => "worker_disconnected",
-                    },
+                    error = refusal.as_str(),
                     "Dropped policy audit Windows Event Log entries"
                 );
             }
@@ -293,44 +333,19 @@ fn event_log_emitter() -> impl FnMut(Entry) + Send + 'static {
     }
 }
 
-/// Emits entries until both queues are closed, draining terminal outcomes before admission entries
-/// so that a saturated admission queue cannot delay or drop an outcome.
+/// Emits entries in the order they were recorded, until the queue is closed.
 #[cfg(any(test, not(debug_assertions)))]
 fn event_log_worker(
-    admission: &std::sync::mpsc::Receiver<Entry>,
-    outcome: &std::sync::mpsc::Receiver<Entry>,
+    receiver: &std::sync::mpsc::Receiver<(Entry, EntryClass)>,
+    admission_pending: &AtomicUsize,
     mut emit: impl FnMut(Entry),
 ) {
-    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
-
-    // Bounded wait, so a queued outcome is emitted even when no admission entry arrives.
-    let poll_interval = std::time::Duration::from_millis(50);
-    loop {
-        match outcome.try_recv() {
-            Ok(entry) => {
-                emit(entry);
-                continue;
-            }
-            Err(TryRecvError::Empty) => {}
-            // No outcome can arrive anymore, so the admission queue holds everything that is left.
-            Err(TryRecvError::Disconnected) => {
-                for entry in admission.iter() {
-                    emit(entry);
-                }
-                return;
-            }
+    while let Ok((entry, class)) = receiver.recv() {
+        if class == EntryClass::Admission {
+            // The entry left the queue, so its slot in the admission budget is free again.
+            admission_pending.fetch_sub(1, Ordering::Relaxed);
         }
-        match admission.recv_timeout(poll_interval) {
-            Ok(entry) => emit(entry),
-            Err(RecvTimeoutError::Timeout) => {}
-            // Admission is closed, so the outcome queue holds everything that is left.
-            Err(RecvTimeoutError::Disconnected) => {
-                for entry in outcome.iter() {
-                    emit(entry);
-                }
-                return;
-            }
-        }
+        emit(entry);
     }
 }
 
@@ -674,7 +689,7 @@ pub(crate) mod tests {
 
     #[test]
     fn terminal_outcomes_are_reserved_against_an_admission_flood() {
-        // A worker that cannot make progress leaves the admission queue in its saturated state.
+        // A worker that cannot make progress leaves the queue in its saturated state.
         let open = Arc::new(AtomicBool::new(false));
         let release = Arc::clone(&open);
         let (emitted, received) = std::sync::mpsc::channel();
@@ -693,23 +708,28 @@ pub(crate) mod tests {
 
         let mut admitted = 0;
         let mut refused = 0;
-        for _ in 0..EVENT_LOG_ADMISSION_QUEUE_CAPACITY + 8 {
+        for _ in 0..EVENT_LOG_ADMISSION_BUDGET + 8 {
             if queue.record(admission(), EntryClass::Admission).is_ok() {
                 admitted += 1;
             } else {
                 refused += 1;
             }
         }
-        assert!(admitted >= EVENT_LOG_ADMISSION_QUEUE_CAPACITY);
-        assert!(refused > 0, "the flood must saturate the admission queue");
+        assert!(admitted >= EVENT_LOG_ADMISSION_BUDGET);
+        assert!(refused > 0, "the flood must saturate the admission budget");
 
-        // The outcome is still accepted, because its own queue is reserved.
+        // The outcome is still accepted, because the outcome reserve is out of reach of the flood.
         queue
             .record(outcome, EntryClass::Outcome)
             .expect("a terminal outcome is accepted while admission entries are refused");
 
         open.store(true, Ordering::Release);
         queue.drain();
+        assert_eq!(
+            queue.admission_pending.load(Ordering::Relaxed),
+            0,
+            "every admitted entry released its slot in the admission budget"
+        );
 
         // Every admitted entry reached the sink, plus the outcome that the flood could not displace.
         let codes = received.iter().map(|entry| entry.event_code).collect::<Vec<_>>();
@@ -720,6 +740,62 @@ pub(crate) mod tests {
                 .filter(|code| **code == Some(policy_events::POLICY_CHANGE_SUCCEEDED))
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn an_accepted_attempt_precedes_its_terminal_outcome() {
+        // The worker blocks on the first entry it takes, so the attempt and its outcome are both
+        // queued while it cannot make progress, and the emitted order is the recorded order.
+        let busy = Arc::new(AtomicBool::new(false));
+        let open = Arc::new(AtomicBool::new(false));
+        let started = Arc::clone(&busy);
+        let release = Arc::clone(&open);
+        let (emitted, received) = std::sync::mpsc::channel();
+        let mut queue = EventLogQueue::start(move |entry| {
+            started.store(true, Ordering::Release);
+            while !release.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let _ = emitted.send(entry);
+        })
+        .expect("the audit worker starts");
+
+        queue
+            .record(
+                // The terminal outcome of a previous write, which the worker takes and emits first.
+                Entry::new("Policy management change failed").event_code(policy_events::POLICY_CHANGE_FAILED),
+                EntryClass::Outcome,
+            )
+            .expect("the blocking outcome is accepted");
+        while !busy.load(Ordering::Acquire) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        queue
+            .record(
+                Entry::new("Policy management write attempted").event_code(policy_events::POLICY_WRITE_ATTEMPTED),
+                EntryClass::Admission,
+            )
+            .expect("the attempt is accepted");
+        queue
+            .record(
+                Entry::new("Policy management change succeeded").event_code(policy_events::POLICY_CHANGE_SUCCEEDED),
+                EntryClass::Outcome,
+            )
+            .expect("the terminal outcome is accepted");
+
+        open.store(true, Ordering::Release);
+        queue.drain();
+
+        let codes = received.iter().map(|entry| entry.event_code).collect::<Vec<_>>();
+        assert_eq!(
+            codes,
+            [
+                Some(policy_events::POLICY_CHANGE_FAILED),
+                Some(policy_events::POLICY_WRITE_ATTEMPTED),
+                Some(policy_events::POLICY_CHANGE_SUCCEEDED)
+            ]
         );
     }
 
