@@ -426,10 +426,6 @@ fn should_refresh_update_status(update_successful: bool, status_needs_refresh: b
     status_needs_refresh || (update_successful && !agent_updated)
 }
 
-#[cfg(test)]
-#[path = "../../../testsuite/tests/agent_updater_status_refresh.rs"]
-mod status_refresh_tests;
-
 async fn update_product(
     conf: ConfHandle,
     product: Product,
@@ -1100,6 +1096,28 @@ fn next_poll_delay(now_since_midnight: u64, last_check_ago: Option<u64>, schedul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_failure_with_agent_success_refreshes_status() {
+        assert!(should_refresh_update_status(true, true, true));
+    }
+
+    #[test]
+    fn agent_only_success_defers_status_refresh() {
+        assert!(!should_refresh_update_status(true, false, true));
+    }
+
+    #[test]
+    fn ordinary_product_success_or_failure_refreshes_status() {
+        assert!(should_refresh_update_status(true, false, false));
+        assert!(should_refresh_update_status(false, true, false));
+        assert!(should_refresh_update_status(true, true, false));
+    }
+
+    #[test]
+    fn no_updates_do_not_refresh_status() {
+        assert!(!should_refresh_update_status(false, false, false));
+    }
 
     fn t(h: u64, m: u64) -> u64 {
         h * 3_600 + m * 60
