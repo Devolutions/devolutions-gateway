@@ -1,4 +1,4 @@
-//! Verifies that declared event codes and the Windows message catalogs stay aligned.
+//! Verifies that each product's declared event codes and Windows message catalog stay aligned.
 
 use std::path::{Path, PathBuf};
 
@@ -7,127 +7,149 @@ use sysevent::Entry;
 const GATEWAY_CATALOG: &str = "devolutions-gateway/devolutions-gateway.mc";
 const AGENT_CATALOG: &str = "devolutions-agent/devolutions-agent.mc";
 
-/// A declared code set, with the catalogs that must define each of its codes.
+/// A declared code set and the single catalog that must hold exactly its codes.
 struct DeclaredCodeSet {
     codes_crate: &'static str,
     codes: &'static [(&'static str, u32)],
-    catalogs: &'static [&'static str],
+    catalog: &'static str,
 }
 
+/// The Gateway and the Agent own separate code tables, so each catalog holds the codes of its own
+/// crate and nothing else. A code shared by both products is declared in both crates and appears in
+/// both catalogs.
 const DECLARED_CODE_SETS: &[DeclaredCodeSet] = &[
     DeclaredCodeSet {
         codes_crate: "sysevent-codes",
         codes: sysevent_codes::DECLARED_CODES,
-        catalogs: &[GATEWAY_CATALOG, AGENT_CATALOG],
+        catalog: GATEWAY_CATALOG,
     },
     DeclaredCodeSet {
         codes_crate: "agent-sysevent-codes",
         codes: agent_sysevent_codes::DECLARED_CODES,
-        catalogs: &[AGENT_CATALOG],
+        catalog: AGENT_CATALOG,
     },
 ];
 
 #[test]
-fn every_event_code_is_defined_once_in_every_catalog() {
+fn every_catalog_defines_exactly_its_declared_codes() {
     for declared in DECLARED_CODE_SETS {
         let DeclaredCodeSet {
             codes_crate,
             codes,
-            catalogs,
+            catalog,
         } = declared;
         assert!(!codes.is_empty(), "{codes_crate} declares no event code");
 
-        for catalog in *catalogs {
-            let path = catalog_path(catalog);
-            let content = read(&path);
+        let path = catalog_path(catalog);
+        let content = read(&path);
+        let defined = catalog_codes(&content, &path);
 
-            for (name, code) in *codes {
-                let expected_id = format!("MessageId={code}");
-                let expected_name = format!("SymbolicName={name}");
-                let positions: Vec<_> = content.match_indices(&expected_id).collect();
-                assert_eq!(
-                    positions.len(),
-                    1,
-                    "{codes_crate}: {}: expected one {expected_id}, found {}",
-                    path.display(),
-                    positions.len()
-                );
+        let declared_names: Vec<&str> = codes.iter().map(|(name, _)| *name).collect();
+        let defined_names: Vec<&str> = defined.iter().map(|(name, _)| name.as_str()).collect();
 
-                let after_id = &content[positions[0].0..];
-                let name_line = after_id.lines().nth(1).unwrap_or_default();
-                assert_eq!(
-                    name_line.trim(),
-                    expected_name,
-                    "{codes_crate}: {}: {expected_id} must be followed by {expected_name}",
-                    path.display()
-                );
-            }
-        }
+        let missing: Vec<&str> = declared_names
+            .iter()
+            .copied()
+            .filter(|name| !defined_names.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{codes_crate}: {} does not define {missing:?}",
+            path.display()
+        );
+
+        let unexpected: Vec<&str> = defined_names
+            .iter()
+            .copied()
+            .filter(|name| !declared_names.contains(name))
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "{} defines {unexpected:?}, which {codes_crate} does not declare; a catalog holds \
+             exactly the codes of its own product",
+            path.display()
+        );
+
+        assert_eq!(
+            defined_names.len(),
+            declared_names.len(),
+            "{} defines {} messages for {} declared {codes_crate} codes; each code needs exactly \
+             one message",
+            path.display(),
+            defined_names.len(),
+            declared_names.len()
+        );
     }
 }
 
 #[test]
 fn every_catalog_message_terminates_each_translation() {
     for declared in DECLARED_CODE_SETS {
-        let DeclaredCodeSet {
-            codes_crate,
-            codes,
-            catalogs,
-        } = declared;
+        let DeclaredCodeSet { catalog, .. } = declared;
+        let path = catalog_path(catalog);
+        let content = read(&path);
+        assert!(
+            content.starts_with('\u{feff}'),
+            "{}: mc.exe requires a UTF-8 BOM to avoid decoding translations as ANSI",
+            path.display()
+        );
 
-        for catalog in *catalogs {
-            let path = catalog_path(catalog);
-            let content = read(&path);
-            assert!(
-                content.starts_with('\u{feff}'),
-                "{}: mc.exe requires a UTF-8 BOM to avoid decoding translations as ANSI",
-                path.display()
-            );
-
-            for (name, code) in *codes {
-                let mut lines = message_block(&content, *code).lines();
-                let mut languages = Vec::new();
-                while let Some(line) = lines.next() {
-                    let Some(language) = line.strip_prefix("Language=") else {
-                        continue;
-                    };
-                    languages.push(language);
-                    let mut terminated = false;
-                    for text in lines.by_ref() {
-                        if text == "." {
-                            terminated = true;
-                            break;
-                        }
-                        assert!(
-                            !text.starts_with("Language="),
-                            "{}: MessageId={code} {language} lacks a message terminator",
-                            path.display()
-                        );
+        for (name, code) in catalog_codes(&content, &path) {
+            let mut lines = message_block(&content, code).lines();
+            let mut languages = Vec::new();
+            while let Some(line) = lines.next() {
+                let Some(language) = line.strip_prefix("Language=") else {
+                    continue;
+                };
+                languages.push(language);
+                let mut terminated = false;
+                for text in lines.by_ref() {
+                    if text == "." {
+                        terminated = true;
+                        break;
                     }
                     assert!(
-                        terminated,
+                        !text.starts_with("Language="),
                         "{}: MessageId={code} {language} lacks a message terminator",
                         path.display()
                     );
                 }
-                languages.sort_unstable();
-                assert_eq!(
-                    languages,
-                    ["English", "French", "German"],
-                    "{codes_crate}: {}: MessageId={code} {name} must define each translation once",
+                assert!(
+                    terminated,
+                    "{}: MessageId={code} {language} lacks a message terminator",
                     path.display()
                 );
             }
+            languages.sort_unstable();
+            assert_eq!(
+                languages,
+                ["English", "French", "German"],
+                "{}: MessageId={code} {name} must define each translation once",
+                path.display()
+            );
         }
     }
 }
 
 #[test]
-fn agent_policy_messages_insert_the_message_then_every_field() {
+fn agent_messages_insert_the_message_then_every_field() {
     let path = catalog_path(AGENT_CATALOG);
     let catalog = read(&path);
 
-    for (code, entry) in agent_policy_events() {
+    let events = agent_events();
+    let mut covered: Vec<u32> = events.iter().map(|(code, _)| *code).collect();
+    covered.sort_unstable();
+    let mut declared: Vec<u32> = agent_sysevent_codes::DECLARED_CODES
+        .iter()
+        .map(|(_, code)| *code)
+        .collect();
+    declared.sort_unstable();
+    assert_eq!(
+        covered, declared,
+        "every declared Agent code needs a builder here, so its insertion strings stay checked"
+    );
+
+    for (code, entry) in events {
         assert_eq!(
             entry.event_code,
             Some(code),
@@ -152,11 +174,48 @@ fn agent_policy_messages_insert_the_message_then_every_field() {
     }
 }
 
-/// The Agent policy events, each paired with the entry its builder produces.
-fn agent_policy_events() -> Vec<(u32, Entry)> {
+/// Every declared Agent event, each paired with the entry its builder produces.
+fn agent_events() -> Vec<(u32, Entry)> {
     let path = Path::new("C:\\ProgramData\\Devolutions\\Agent\\policy.json");
 
-    vec![
+    let mut events = vec![
+        (
+            agent_sysevent_codes::SERVICE_STARTED,
+            agent_sysevent_codes::service_started("2026.3.0"),
+        ),
+        (
+            agent_sysevent_codes::SERVICE_STOPPING,
+            agent_sysevent_codes::service_stopping("received stop control code"),
+        ),
+        (
+            agent_sysevent_codes::CONFIG_INVALID,
+            agent_sysevent_codes::config_invalid("invalid config", path),
+        ),
+        (
+            agent_sysevent_codes::START_FAILED,
+            agent_sysevent_codes::start_failed("failed to bind", "service_start"),
+        ),
+        (
+            agent_sysevent_codes::BOOT_STACKTRACE_WRITTEN,
+            agent_sysevent_codes::boot_stacktrace_written(path),
+        ),
+        (
+            agent_sysevent_codes::USER_SESSION_PROCESS_STARTED,
+            agent_sysevent_codes::user_session_process_started(1, "console", "DevolutionsSession.exe"),
+        ),
+        (
+            agent_sysevent_codes::USER_SESSION_PROCESS_TERMINATED,
+            agent_sysevent_codes::user_session_process_terminated(1, 0, "user"),
+        ),
+        (
+            agent_sysevent_codes::UPDATER_TASK_ENABLED,
+            agent_sysevent_codes::updater_task_enabled(),
+        ),
+        (
+            agent_sysevent_codes::UPDATER_ERROR,
+            agent_sysevent_codes::updater_error("download", "invalid signature"),
+        ),
+        (agent_sysevent_codes::PEDM_ENABLED, agent_sysevent_codes::pedm_enabled()),
         (
             agent_sysevent_codes::POLICY_WRITE_ATTEMPTED,
             agent_sysevent_codes::policy_write_attempted("S-1-5-18", "devolutions-agent.exe", "policy_write", path),
@@ -241,7 +300,10 @@ fn agent_policy_events() -> Vec<(u32, Entry)> {
             agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED,
             agent_sysevent_codes::policy_external_change_rejected(path, "invalid"),
         ),
-    ]
+    ];
+
+    events.sort_unstable_by_key(|(code, _)| *code);
+    events
 }
 
 fn read(path: &Path) -> String {
@@ -256,6 +318,36 @@ fn catalog_path(catalog: &str) -> PathBuf {
         .join(catalog)
 }
 
+/// Every message of a catalog, as its symbolic name and message id, in file order.
+fn catalog_codes(content: &str, path: &Path) -> Vec<(String, u32)> {
+    let mut codes = Vec::new();
+    let mut lines = content.lines();
+
+    while let Some(line) = lines.next() {
+        let Some(id) = line.strip_prefix("MessageId=") else {
+            continue;
+        };
+        let id = id.trim();
+        let name = lines
+            .next()
+            .unwrap_or_else(|| panic!("{}: MessageId={id} without a symbolic name", path.display()));
+        let name = name.strip_prefix("SymbolicName=").unwrap_or_else(|| {
+            panic!(
+                "{}: MessageId={id} must be followed by its SymbolicName, found {name:?}",
+                path.display()
+            )
+        });
+
+        codes.push((
+            name.trim().to_owned(),
+            id.parse()
+                .unwrap_or_else(|error| panic!("{}: MessageId={id} is not an event code: {error}", path.display())),
+        ));
+    }
+
+    codes
+}
+
 /// The message of each translation inside the `MessageId=<code>` block.
 fn catalog_messages(catalog: &str, code: u32) -> Vec<&str> {
     let mut messages = Vec::new();
@@ -268,12 +360,16 @@ fn catalog_messages(catalog: &str, code: u32) -> Vec<&str> {
     messages
 }
 
+/// The lines following `MessageId=<code>`, up to the next message. The trailing newline keeps a
+/// code from matching a longer code such as `800` against `8001`.
 fn message_block(content: &str, code: u32) -> &str {
-    let marker = format!("MessageId={code}");
-    let start = content.find(&marker).unwrap_or_else(|| panic!("missing {marker}"));
+    let marker = format!("MessageId={code}\n");
+    let start = content
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing MessageId={code}"));
     let after = &content[start + marker.len()..];
     let end = after.find("\nMessageId=").unwrap_or(after.len());
-    &content[start..start + marker.len() + end]
+    &after[..end]
 }
 
 /// Insertion indices (`%1`, `%2`, ...) referenced by a catalog message, in ascending order.

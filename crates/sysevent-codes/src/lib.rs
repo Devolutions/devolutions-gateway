@@ -320,54 +320,6 @@ pub fn auth_summary(
         .field("by_reason", by_reason_json)
 }
 
-// 6000-6099 **Agent Integration**
-
-/// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
-pub const USER_SESSION_PROCESS_STARTED: u32 = 6000;
-/// Exit code; who triggered.
-pub const USER_SESSION_PROCESS_TERMINATED: u32 = 6001;
-pub const UPDATER_TASK_ENABLED: u32 = 6010;
-pub const UPDATER_ERROR: u32 = 6011;
-pub const PEDM_ENABLED: u32 = 6020;
-
-pub fn user_session_process_started(session_id: u32, kind: impl ToString, exe: impl ToString) -> Entry {
-    Entry::new("User session process started")
-        .event_code(USER_SESSION_PROCESS_STARTED)
-        .severity(Severity::Info)
-        .field("session_id", session_id)
-        .field("kind", kind) // "console","remote"
-        .field("exe", exe)
-}
-
-pub fn user_session_process_terminated(session_id: u32, exit_code: i32, by: impl ToString) -> Entry {
-    Entry::new("User session process terminated")
-        .event_code(USER_SESSION_PROCESS_TERMINATED)
-        .severity(Severity::Info)
-        .field("session_id", session_id)
-        .field("exit_code", exit_code)
-        .field("by", by) // "user","service","timeout"
-}
-
-pub fn updater_task_enabled() -> Entry {
-    Entry::new("Updater task enabled")
-        .event_code(UPDATER_TASK_ENABLED)
-        .severity(Severity::Info)
-}
-
-pub fn updater_error(step: impl ToString, error: impl std::fmt::Display) -> Entry {
-    Entry::new("Updater error")
-        .event_code(UPDATER_ERROR)
-        .severity(Severity::Error)
-        .field("step", step) // "download","verify","apply","rollback"
-        .field("error_chain", format!("{error:#}"))
-}
-
-pub fn pedm_enabled() -> Entry {
-    Entry::new("PEDM enabled")
-        .event_code(PEDM_ENABLED)
-        .severity(Severity::Info)
-}
-
 // 7000-7099 **Health**
 
 pub const RECORDING_STORAGE_LOW: u32 = 7010; // (Warning): remaining_bytes, threshold_bytes
@@ -400,10 +352,11 @@ pub fn xmf_not_found(path: impl AsRef<Path>, error: impl std::fmt::Display) -> E
         .field("error_chain", format!("{error:#}"))
 }
 
-/// Every declared event code, paired with its symbolic name.
+/// Every declared Gateway event code, paired with its symbolic name.
 ///
-/// The Windows message catalogs are checked against this inventory, so a new event code has to be
-/// registered here in addition to `devolutions-gateway.mc` and `devolutions-agent.mc`.
+/// `devolutions-gateway.mc` is checked against this inventory, and the check is an exact match in
+/// both directions, so adding a code here means adding its messages to the catalog, and an
+/// Agent-only code must never appear there.
 pub static DECLARED_CODES: &[(&str, u32)] = &[
     ("SERVICE_STARTED", SERVICE_STARTED),
     ("SERVICE_STOPPING", SERVICE_STOPPING),
@@ -432,11 +385,6 @@ pub static DECLARED_CODES: &[(&str, u32)] = &[
     ("JWT_ANOMALY", JWT_ANOMALY),
     ("AUTHORIZATION_DENIED", AUTHORIZATION_DENIED),
     ("AUTH_SUMMARY", AUTH_SUMMARY),
-    ("USER_SESSION_PROCESS_STARTED", USER_SESSION_PROCESS_STARTED),
-    ("USER_SESSION_PROCESS_TERMINATED", USER_SESSION_PROCESS_TERMINATED),
-    ("UPDATER_TASK_ENABLED", UPDATER_TASK_ENABLED),
-    ("UPDATER_ERROR", UPDATER_ERROR),
-    ("PEDM_ENABLED", PEDM_ENABLED),
     ("RECORDING_STORAGE_LOW", RECORDING_STORAGE_LOW),
     ("DEBUG_OPTIONS_ENABLED", DEBUG_OPTIONS_ENABLED),
     ("XMF_NOT_FOUND", XMF_NOT_FOUND),

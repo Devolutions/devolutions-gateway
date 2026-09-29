@@ -1,8 +1,115 @@
-//! Devolutions Agent-specific Windows Event Log event definitions.
+//! Devolutions Agent Windows Event Log event definitions.
+//!
+//! This crate is the Agent's event code table. It is independent from the Gateway's
+//! (`sysevent-codes`): the two crates share no items, each product's catalog holds exactly the
+//! codes declared here, and a block may be reused by both products. Lifecycle and Agent
+//! Integration codes below are duplicated from the Gateway table on purpose, so the Agent never
+//! ships a message it cannot emit.
 
 use std::path::Path;
 
 use sysevent::{Entry, Severity};
+
+// 1000-1099 **Service/Lifecycle**
+
+/// Fired after the Agent service started.
+pub const SERVICE_STARTED: u32 = 1000;
+/// Graceful stop received.
+pub const SERVICE_STOPPING: u32 = 1001;
+/// Failed to init config.
+pub const CONFIG_INVALID: u32 = 1010;
+/// Top-level start failure (often transient).
+pub const START_FAILED: u32 = 1020;
+/// A boot crash trace was persisted.
+pub const BOOT_STACKTRACE_WRITTEN: u32 = 1030;
+
+pub fn service_started(version: impl ToString) -> Entry {
+    Entry::new("Service started")
+        .event_code(SERVICE_STARTED)
+        .severity(Severity::Info)
+        .field("version", version)
+}
+
+pub fn service_stopping(reason: impl ToString) -> Entry {
+    Entry::new("Service stopping")
+        .event_code(SERVICE_STOPPING)
+        .severity(Severity::Info)
+        .field("reason", reason)
+}
+
+pub fn config_invalid(error: impl std::fmt::Display, path: impl AsRef<Path>) -> Entry {
+    Entry::new("Configuration invalid")
+        .event_code(CONFIG_INVALID)
+        .severity(Severity::Critical)
+        .field("path", path.as_ref().display())
+        .field("error_chain", format!("{error:#}"))
+        .field("reason_code", "invalid_config")
+}
+
+pub fn start_failed(error: impl std::fmt::Display, cause: impl ToString) -> Entry {
+    Entry::new("Start failed")
+        .event_code(START_FAILED)
+        .severity(Severity::Error)
+        .field("cause", cause) // e.g. "bind", "dependency", "tls", "io"
+        .field("error_chain", format!("{error:#}"))
+}
+
+pub fn boot_stacktrace_written(path: &Path) -> Entry {
+    Entry::new("Boot stacktrace written")
+        .event_code(BOOT_STACKTRACE_WRITTEN)
+        .severity(Severity::Warning)
+        .field("path", path.display())
+}
+
+// 6000-6099 **Agent Integration**
+
+/// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
+pub const USER_SESSION_PROCESS_STARTED: u32 = 6000;
+/// Exit code; who triggered.
+pub const USER_SESSION_PROCESS_TERMINATED: u32 = 6001;
+pub const UPDATER_TASK_ENABLED: u32 = 6010;
+pub const UPDATER_ERROR: u32 = 6011;
+pub const PEDM_ENABLED: u32 = 6020;
+
+pub fn user_session_process_started(session_id: u32, kind: impl ToString, exe: impl ToString) -> Entry {
+    Entry::new("User session process started")
+        .event_code(USER_SESSION_PROCESS_STARTED)
+        .severity(Severity::Info)
+        .field("session_id", session_id)
+        .field("kind", kind) // "console","remote"
+        .field("exe", exe)
+}
+
+pub fn user_session_process_terminated(session_id: u32, exit_code: i32, by: impl ToString) -> Entry {
+    Entry::new("User session process terminated")
+        .event_code(USER_SESSION_PROCESS_TERMINATED)
+        .severity(Severity::Info)
+        .field("session_id", session_id)
+        .field("exit_code", exit_code)
+        .field("by", by) // "user","service","timeout"
+}
+
+pub fn updater_task_enabled() -> Entry {
+    Entry::new("Updater task enabled")
+        .event_code(UPDATER_TASK_ENABLED)
+        .severity(Severity::Info)
+}
+
+pub fn updater_error(step: impl ToString, error: impl std::fmt::Display) -> Entry {
+    Entry::new("Updater error")
+        .event_code(UPDATER_ERROR)
+        .severity(Severity::Error)
+        .field("step", step) // "download","verify","apply","rollback"
+        .field("error_chain", format!("{error:#}"))
+}
+
+pub fn pedm_enabled() -> Entry {
+    Entry::new("PEDM enabled")
+        .event_code(PEDM_ENABLED)
+        .severity(Severity::Info)
+}
+
+// 8000-8099 **Package Broker / Policy Management**
 
 pub const POLICY_WRITE_ATTEMPTED: u32 = 8000;
 pub const POLICY_WRITE_DENIED: u32 = 8001;
@@ -124,9 +231,20 @@ pub fn policy_external_change_rejected(path: impl AsRef<Path>, reason: impl ToSt
 
 /// Every declared Agent event code, paired with its symbolic name.
 ///
-/// The Agent Windows message catalog is checked against this inventory, so a new event code has to
-/// be registered here in addition to `devolutions-agent.mc`.
+/// `devolutions-agent.mc` is checked against this inventory, and the check is an exact match in
+/// both directions, so adding a code here means adding its messages to the catalog, and a
+/// Gateway-only code must never appear there.
 pub static DECLARED_CODES: &[(&str, u32)] = &[
+    ("SERVICE_STARTED", SERVICE_STARTED),
+    ("SERVICE_STOPPING", SERVICE_STOPPING),
+    ("CONFIG_INVALID", CONFIG_INVALID),
+    ("START_FAILED", START_FAILED),
+    ("BOOT_STACKTRACE_WRITTEN", BOOT_STACKTRACE_WRITTEN),
+    ("USER_SESSION_PROCESS_STARTED", USER_SESSION_PROCESS_STARTED),
+    ("USER_SESSION_PROCESS_TERMINATED", USER_SESSION_PROCESS_TERMINATED),
+    ("UPDATER_TASK_ENABLED", UPDATER_TASK_ENABLED),
+    ("UPDATER_ERROR", UPDATER_ERROR),
+    ("PEDM_ENABLED", PEDM_ENABLED),
     ("POLICY_WRITE_ATTEMPTED", POLICY_WRITE_ATTEMPTED),
     ("POLICY_WRITE_DENIED", POLICY_WRITE_DENIED),
     ("POLICY_CREATE_FAILED", POLICY_CREATE_FAILED),
