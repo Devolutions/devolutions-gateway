@@ -42,9 +42,8 @@ struct JrecManifest {
     start_time: i64,
     duration: i64,
     files: Vec<JrecFile>,
-    /// Non-recording artifacts grouped by role. Each list is append-only, like `files`: names and
-    /// `CurrentArtifact` indices are derived from positions. Keys stay strings so roles written by a
-    /// newer Gateway survive a rewrite.
+    /// Non-recording artifacts grouped by kind. Each list is append-only, like `files`: names are
+    /// derived from positions. Keys stay strings so kinds written by a newer Gateway survive a rewrite.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     artifacts: BTreeMap<String, Vec<JrecArtifact>>,
 }
@@ -55,17 +54,58 @@ struct JrecArtifact {
     file_name: String,
 }
 
-/// Role of a non-recording artifact, used as its key in the manifest `artifacts` object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// Kind of a non-recording artifact, used as its key in the manifest `artifacts` object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ArtifactRole {
+pub enum ArtifactKind {
     AiAnalysis,
 }
 
-impl ArtifactRole {
+impl ArtifactKind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            ArtifactRole::AiAnalysis => "ai-analysis",
+            ArtifactKind::AiAnalysis => "ai-analysis",
+        }
+    }
+
+    const fn file_type(self) -> RecordingFileType {
+        match self {
+            ArtifactKind::AiAnalysis => RecordingFileType::SessionRecordingLog,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PushKind {
+    Recording,
+    Artifact(ArtifactKind),
+}
+
+/// What a push of a given kind takes part in, decided once from the kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KindPolicy {
+    /// Counts as the session recording: `is_recording`, `active_recordings` and the kill when the
+    /// session must be recorded.
+    recording_policy: bool,
+    /// Data and end of stream wake `/shadow` streamers.
+    wakes_streamers: bool,
+    /// Writes the file and manifest durations.
+    tracks_duration: bool,
+}
+
+impl PushKind {
+    const fn policy(self) -> KindPolicy {
+        match self {
+            PushKind::Recording => KindPolicy {
+                recording_policy: true,
+                wakes_streamers: true,
+                tracks_duration: true,
+            },
+            PushKind::Artifact(_) => KindPolicy {
+                recording_policy: false,
+                wakes_streamers: false,
+                tracks_duration: false,
+            },
         }
     }
 }
@@ -97,11 +137,34 @@ pub enum PushOutcome {
     StorageFull,
 }
 
+/// Where a push is stored. Artifacts are opaque to Gateway: stored as-is, whatever their content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushTarget {
-    Recording(RecordingFileType),
-    /// Opaque to Gateway: stored as-is, whatever its content.
-    Artifact(ArtifactRole, RecordingFileType),
+pub struct PushTarget {
+    kind: PushKind,
+    file_type: RecordingFileType,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{} artifacts must be {} files", kind.as_str(), kind.file_type().extension())]
+pub struct UnsupportedArtifactFileType {
+    kind: ArtifactKind,
+}
+
+impl PushTarget {
+    /// Without a kind the stream is a recording, as it was before artifacts existed.
+    pub fn new(file_type: RecordingFileType, kind: Option<ArtifactKind>) -> Result<Self, UnsupportedArtifactFileType> {
+        let kind = match kind {
+            None => PushKind::Recording,
+            Some(kind) if kind.file_type() == file_type => PushKind::Artifact(kind),
+            Some(kind) => return Err(UnsupportedArtifactFileType { kind }),
+        };
+
+        Ok(Self { kind, file_type })
+    }
+
+    pub fn kind(self) -> PushKind {
+        self.kind
+    }
 }
 
 #[derive(TypedBuilder)]
@@ -139,7 +202,10 @@ where
             }
         };
 
-        let (recording_file, artifact) = match recordings.connect(session_id, target, disconnected_ttl).await {
+        let kind = target.kind();
+        let policy = kind.policy();
+
+        let recording_file = match recordings.connect(session_id, target, disconnected_ttl).await {
             Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -177,8 +243,7 @@ where
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    // Log data is not media, so it must not wake `/shadow` streamers.
-                                    if let CurrentArtifact::Recording(_) = artifact {
+                                    if policy.wakes_streamers {
                                         recordings.new_chunk_appended(session_id)?;
                                     }
                                 },
@@ -217,7 +282,7 @@ where
 
         info!(?res, "Recording finished");
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        recordings.disconnect(session_id, kind).await.context("disconnect")?;
 
         res
     }
@@ -270,20 +335,18 @@ pub enum OnGoingRecordingState {
     LastSeen { timestamp: i64 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CurrentArtifact {
-    Recording(usize),
-    Artifact(ArtifactRole, usize),
-}
-
+/// An ongoing push, one per (session, kind).
+///
+/// It holds no manifest copy: pushes of other kinds may update the manifest in the meantime.
 #[derive(Debug, Clone)]
-struct OnGoingRecording {
+struct OnGoingPush {
     state: OnGoingRecordingState,
-    manifest: JrecManifest,
     manifest_path: Utf8PathBuf,
+    file_path: Utf8PathBuf,
+    /// Position of the pushed file in its manifest list.
+    index: usize,
     session_must_be_recorded: bool,
     disconnected_ttl: Duration,
-    artifact: CurrentArtifact,
 }
 
 enum RecordingManagerMessage {
@@ -291,10 +354,11 @@ enum RecordingManagerMessage {
         id: Uuid,
         target: PushTarget,
         disconnected_ttl: Duration,
-        channel: oneshot::Sender<(Utf8PathBuf, CurrentArtifact)>,
+        channel: oneshot::Sender<Utf8PathBuf>,
     },
     Disconnect {
         id: Uuid,
+        kind: PushKind,
     },
     GetState {
         id: Uuid,
@@ -335,7 +399,11 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("target", target)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::Disconnect { id, kind } => f
+                .debug_struct("Disconnect")
+                .field("id", id)
+                .field("kind", kind)
+                .finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -369,12 +437,7 @@ pub struct RecordingMessageSender {
 }
 
 impl RecordingMessageSender {
-    async fn connect(
-        &self,
-        id: Uuid,
-        target: PushTarget,
-        disconnected_ttl: Duration,
-    ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
+    async fn connect(&self, id: Uuid, target: PushTarget, disconnected_ttl: Duration) -> anyhow::Result<Utf8PathBuf> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
@@ -390,9 +453,9 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn disconnect(&self, id: Uuid, kind: PushKind) -> anyhow::Result<()> {
         self.channel
-            .send(RecordingManagerMessage::Disconnect { id })
+            .send(RecordingManagerMessage::Disconnect { id, kind })
             .await
             .ok()
             .context("couldn't send Remove message")
@@ -472,7 +535,7 @@ impl RecordingMessageSender {
         Ok(rx.await?)
     }
 
-    /// Returns `None` when the ongoing push is a Log: there is no Recording to stream.
+    /// Returns `None` when no Recording is being pushed, even if an artifact is.
     pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Option<Vec<Utf8PathBuf>>> {
         let (tx, rx) = oneshot::channel();
         self.channel
@@ -512,11 +575,12 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 struct DisconnectedTtl {
     deadline: tokio::time::Instant,
     id: Uuid,
+    kind: PushKind,
 }
 
 impl PartialEq for DisconnectedTtl {
     fn eq(&self, other: &Self) -> bool {
-        self.deadline.eq(&other.deadline) && self.id.eq(&other.id)
+        self.deadline.eq(&other.deadline) && self.id.eq(&other.id) && self.kind.eq(&other.kind)
     }
 }
 
@@ -532,7 +596,7 @@ impl Ord for DisconnectedTtl {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match self.deadline.cmp(&other.deadline) {
             cmp::Ordering::Less => cmp::Ordering::Greater,
-            cmp::Ordering::Equal => self.id.cmp(&other.id),
+            cmp::Ordering::Equal => (self.id, self.kind).cmp(&(other.id, other.kind)),
             cmp::Ordering::Greater => cmp::Ordering::Less,
         }
     }
@@ -540,7 +604,7 @@ impl Ord for DisconnectedTtl {
 
 pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
-    ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
+    ongoing_recordings: HashMap<(Uuid, PushKind), OnGoingPush>,
     recording_end_notifier: HashMap<Uuid, Arc<Notify>>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
@@ -569,13 +633,16 @@ impl RecordingManagerTask {
         id: Uuid,
         target: PushTarget,
         disconnected_ttl: Duration,
-    ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
+    ) -> anyhow::Result<Utf8PathBuf> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
-        if let Some(ongoing) = self.ongoing_recordings.get(&id)
+        let kind = target.kind();
+        let policy = kind.policy();
+
+        if let Some(ongoing) = self.ongoing_recordings.get(&(id, kind))
             && matches!(ongoing.state, OnGoingRecordingState::Connected)
         {
-            anyhow::bail!("concurrent recording for the same session is not supported");
+            anyhow::bail!("concurrent push of the same kind for the same session is not supported");
         }
 
         let recording_path = self.recordings_path.join(id.to_string());
@@ -594,69 +661,78 @@ impl RecordingManagerTask {
                 .await
                 .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
+            // The session timing belongs to the recordings, so the first Recording push sets it.
             JrecManifest {
                 session_id: id,
-                start_time,
+                start_time: 0,
                 duration: 0,
                 files: Vec::new(),
                 artifacts: BTreeMap::new(),
             }
         };
 
-        let (file_name, artifact) = match target {
-            PushTarget::Recording(file_type) => {
-                let idx = manifest.files.len();
-                let file_name = format!("recording-{idx}.{}", file_type.extension());
+        let extension = target.file_type.extension();
+
+        let (file_name, index) = match kind {
+            PushKind::Recording => {
+                if manifest.files.is_empty() {
+                    manifest.start_time = start_time;
+                }
+
+                let index = manifest.files.len();
+                let file_name = format!("recording-{index}.{extension}");
                 manifest.files.push(JrecFile {
                     start_time,
                     duration: 0,
                     file_name: file_name.clone(),
                 });
-                (file_name, CurrentArtifact::Recording(idx))
+                (file_name, index)
             }
-            PushTarget::Artifact(role, file_type) => {
-                let artifacts = manifest.artifacts.entry(role.as_str().to_owned()).or_default();
-                let idx = artifacts.len();
-                let file_name = format!("{}-{idx}.{}", role.as_str(), file_type.extension());
+            PushKind::Artifact(artifact_kind) => {
+                let artifacts = manifest.artifacts.entry(artifact_kind.as_str().to_owned()).or_default();
+                let index = artifacts.len();
+                let file_name = format!("{}-{index}.{extension}", artifact_kind.as_str());
                 artifacts.push(JrecArtifact {
                     file_name: file_name.clone(),
                 });
-                (file_name, CurrentArtifact::Artifact(role, idx))
+                (file_name, index)
             }
         };
 
-        let recording_file = recording_path.join(&file_name);
+        let file_path = recording_path.join(&file_name);
 
         manifest
             .save_to_file(&manifest_path)
             .context("write manifest to disk")?;
 
-        let active_recording_count = self.rx.active_recordings.insert(id);
+        let active_recording_count = if policy.recording_policy {
+            self.rx.active_recordings.insert(id)
+        } else {
+            0
+        };
 
         // NOTE: the session associated to this recording is not always running through the Devolutions Gateway.
         // It is a normal situation when the Devolutions is used solely as a recording server.
         // In such cases, we can only assume there is no recording policy.
-        let session_must_be_recorded = self
-            .session_manager_handle
-            .get_session_info(id)
-            .await
-            .inspect_err(|error| error!(%error, session.id = %id, "Failed to retrieve session info"))
-            .ok()
-            .flatten()
-            .map(|info| info.recording_policy)
-            .unwrap_or(false)
-            // An artifact is not the session recording, so its end must not count against the recording policy.
-            && matches!(artifact, CurrentArtifact::Recording(_));
+        let session_must_be_recorded = policy.recording_policy
+            && self
+                .session_manager_handle
+                .get_session_info(id)
+                .await
+                .inspect_err(|error| error!(%error, session.id = %id, "Failed to retrieve session info"))
+                .ok()
+                .flatten()
+                .is_some_and(|info| info.recording_policy);
 
         self.ongoing_recordings.insert(
-            id,
-            OnGoingRecording {
+            (id, kind),
+            OnGoingPush {
                 state: OnGoingRecordingState::Connected,
-                manifest,
                 manifest_path,
+                file_path: file_path.clone(),
+                index,
                 session_must_be_recorded,
                 disconnected_ttl,
-                artifact,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -670,12 +746,14 @@ impl RecordingManagerTask {
             );
         }
 
-        Ok((recording_file, artifact))
+        Ok(file_path)
     }
 
-    async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
-            return Err(anyhow::anyhow!("unknown recording for ID {id}"));
+    async fn handle_disconnect(&mut self, id: Uuid, kind: PushKind) -> anyhow::Result<()> {
+        let policy = kind.policy();
+
+        let Some(ongoing) = self.ongoing_recordings.get_mut(&(id, kind)) else {
+            anyhow::bail!("unknown {kind:?} push for ID {id}");
         };
 
         if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
@@ -686,33 +764,32 @@ impl RecordingManagerTask {
 
         ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
 
-        let current_file_name = match ongoing.artifact {
-            CurrentArtifact::Recording(idx) => {
-                let current_file = &mut ongoing.manifest.files[idx];
-                current_file.duration = end_time - current_file.start_time;
+        if policy.tracks_duration {
+            debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
 
-                ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
+            let mut manifest = JrecManifest::read_from_file(&ongoing.manifest_path)
+                .with_context(|| format!("read manifest at {}", ongoing.manifest_path))?;
 
-                &current_file.file_name
-            }
-            CurrentArtifact::Artifact(role, idx) => &ongoing.manifest.artifacts[role.as_str()][idx].file_name,
-        };
+            let current_file = manifest.files.get_mut(ongoing.index).with_context(|| {
+                format!(
+                    "no file at index {} in manifest {}",
+                    ongoing.index, ongoing.manifest_path
+                )
+            })?;
+            current_file.duration = end_time - current_file.start_time;
 
-        let recording_file_path = ongoing
-            .manifest_path
-            .parent()
-            .expect("a parent")
-            .join(current_file_name);
+            manifest.duration = end_time - manifest.start_time;
 
-        debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
+            manifest
+                .save_to_file(&ongoing.manifest_path)
+                .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+        }
 
-        ongoing
-            .manifest
-            .save_to_file(&ongoing.manifest_path)
-            .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+        let recording_file_path = ongoing.file_path.clone();
 
-        // Notify all the streamers that recording has ended.
-        if let Some(notify) = self.recording_end_notifier.get(&id) {
+        if policy.wakes_streamers
+            && let Some(notify) = self.recording_end_notifier.get(&id)
+        {
             notify.notify_waiters();
         }
 
@@ -739,8 +816,10 @@ impl RecordingManagerTask {
         Ok(())
     }
 
-    fn handle_remove(&mut self, id: Uuid) {
-        if let Some(ongoing) = self.ongoing_recordings.get(&id) {
+    fn handle_remove(&mut self, id: Uuid, kind: PushKind) {
+        let policy = kind.policy();
+
+        if let Some(ongoing) = self.ongoing_recordings.get(&(id, kind)) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let disconnected_ttl_secs = i64::try_from(ongoing.disconnected_ttl.as_secs()).expect("TTL can’t be so big");
 
@@ -748,11 +827,14 @@ impl RecordingManagerTask {
                 // NOTE: Comparing with disconnected_ttl_secs - 1 just in case the sleep returns faster than expected.
                 // (I don’t know if this can actually happen in practice, but it’s better to be safe than sorry.)
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
-                    debug!(%id, "Mark recording as terminated");
-                    self.rx.active_recordings.remove(id);
+                    debug!(%id, ?kind, "Mark push as terminated");
+
+                    if policy.recording_policy {
+                        self.rx.active_recordings.remove(id);
+                    }
 
                     // Check the recording policy of the associated session and kill it if necessary.
-                    if ongoing.session_must_be_recorded {
+                    if policy.recording_policy && ongoing.session_must_be_recorded {
                         tokio::spawn({
                             let session_manager_handle = self.session_manager_handle.clone();
 
@@ -785,11 +867,14 @@ impl RecordingManagerTask {
                         });
                     }
 
-                    self.ongoing_recordings.remove(&id);
-                    self.recording_end_notifier.remove(&id);
+                    self.ongoing_recordings.remove(&(id, kind));
+
+                    if policy.wakes_streamers {
+                        self.recording_end_notifier.remove(&id);
+                    }
                 }
                 _ => {
-                    trace!(%id, "Recording should not be removed yet");
+                    trace!(%id, ?kind, "Push should not be removed yet");
                 }
             }
         }
@@ -797,7 +882,7 @@ impl RecordingManagerTask {
 
     fn subscribe(&mut self, id: Uuid) -> anyhow::Result<Arc<Notify>> {
         debug!(%id, "Subscribing to ongoing recording");
-        if !self.ongoing_recordings.contains_key(&id) {
+        if !self.ongoing_recordings.contains_key(&(id, PushKind::Recording)) {
             anyhow::bail!("unknown recording for ID {id}");
         }
 
@@ -808,6 +893,28 @@ impl RecordingManagerTask {
             self.recording_end_notifier.insert(id, Arc::clone(&notify));
             Ok(notify)
         }
+    }
+
+    fn list_recording_files(&self, id: Uuid) -> anyhow::Result<Option<Vec<Utf8PathBuf>>> {
+        let Some(recording) = self.ongoing_recordings.get(&(id, PushKind::Recording)) else {
+            return Ok(None);
+        };
+
+        let recordings_folder = recording
+            .manifest_path
+            .parent()
+            .context("manifest path has no parent")?;
+
+        let manifest = JrecManifest::read_from_file(&recording.manifest_path)
+            .with_context(|| format!("read manifest at {}", recording.manifest_path))?;
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| recordings_folder.join(&file.file_name))
+            .collect();
+
+        Ok(Some(files))
     }
 }
 
@@ -842,7 +949,7 @@ async fn recording_manager_task(
             () = &mut next_remove_sleep, if !disconnected.is_empty() => {
                 let to_remove = disconnected.pop().expect("we check for non-emptiness before entering this block");
 
-                manager.handle_remove(to_remove.id);
+                manager.handle_remove(to_remove.id, to_remove.kind);
 
                 // Re-arm the Sleep instance with the next deadline if required
                 if let Some(next) = disconnected.peek() {
@@ -866,18 +973,19 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(e) = manager.handle_disconnect(id).await {
+                    RecordingManagerMessage::Disconnect { id, kind } => {
+                        if let Err(e) = manager.handle_disconnect(id, kind).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
-                        if let Some(ongoing) = manager.ongoing_recordings.get(&id) {
+                        if let Some(ongoing) = manager.ongoing_recordings.get(&(id, kind)) {
                             let now = tokio::time::Instant::now();
                             let deadline = now + ongoing.disconnected_ttl;
 
                             disconnected.push(DisconnectedTtl {
                                 deadline,
                                 id,
+                                kind,
                             });
 
                             // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
@@ -887,21 +995,21 @@ async fn recording_manager_task(
                         }
                     }
                     RecordingManagerMessage::GetState { id, channel } => {
-                        let response = manager.ongoing_recordings.get(&id).map(|ongoing| ongoing.state.clone());
+                        let response = manager
+                            .ongoing_recordings
+                            .get(&(id, PushKind::Recording))
+                            .map(|ongoing| ongoing.state.clone());
                         let _ = channel.send(response);
                     }
                     RecordingManagerMessage::IsRecording { id, channel } => {
-                        let is_recording = manager
-                            .ongoing_recordings
-                            .get(&id)
-                            .is_some_and(|ongoing| matches!(ongoing.artifact, CurrentArtifact::Recording(_)));
+                        let is_recording = manager.ongoing_recordings.contains_key(&(id, PushKind::Recording));
                         let _ = channel.send(is_recording);
                     }
                     RecordingManagerMessage::GetCount { channel } => {
                         let _ = channel.send(manager.ongoing_recordings.len());
                     }
                     RecordingManagerMessage::UpdateRecordingPolicy { id, session_must_be_recorded } => {
-                        if let Some(ongoing) = manager.ongoing_recordings.get_mut(&id) {
+                        if let Some(ongoing) = manager.ongoing_recordings.get_mut(&(id, PushKind::Recording)) {
                             ongoing.session_must_be_recorded = session_must_be_recorded;
                             trace!(
                                 session.id = %id,
@@ -919,25 +1027,11 @@ async fn recording_manager_task(
                         }
                     },
                     RecordingManagerMessage::ListFiles { id, channel } => {
-                        match manager.ongoing_recordings.get(&id) {
-                            Some(recording) if matches!(recording.artifact, CurrentArtifact::Artifact(..)) => {
-                                let _ = channel.send(None);
+                        match manager.list_recording_files(id) {
+                            Ok(files) => {
+                                let _ = channel.send(files);
                             }
-                            Some(recording) => {
-                                let recordings_folder = recording.manifest_path.parent().expect("a parent");
-
-                                let files = recording
-                                    .manifest
-                                    .files
-                                    .iter()
-                                    .map(|file| recordings_folder.join(&file.file_name))
-                                    .collect();
-
-                                let _ = channel.send(Some(files));
-                            }
-                            None => {
-                                warn!(%id, "No recording found for provided ID");
-                            }
+                            Err(e) => error!(error = format!("{e:#}"), session.id = %id, "list recording files"),
                         }
                     }
                 }
@@ -968,11 +1062,11 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id).await {
+        if let RecordingManagerMessage::Disconnect { id, kind } = msg {
+            if let Err(e) = manager.handle_disconnect(id, kind).await {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
-            manager.ongoing_recordings.remove(&id);
+            manager.ongoing_recordings.remove(&(id, kind));
         }
     }
 
@@ -1046,10 +1140,7 @@ mod tests {
 
     use super::*;
 
-    const WEBM: PushTarget = PushTarget::Recording(RecordingFileType::WebM);
-    const SLOG_RECORDING: PushTarget = PushTarget::Recording(RecordingFileType::SessionRecordingLog);
-    const AI_ANALYSIS: PushTarget =
-        PushTarget::Artifact(ArtifactRole::AiAnalysis, RecordingFileType::SessionRecordingLog);
+    const AI_ANALYSIS_KIND: PushKind = PushKind::Artifact(ArtifactKind::AiAnalysis);
 
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
@@ -1064,10 +1155,23 @@ mod tests {
   ]
 }"#;
 
+    fn webm() -> PushTarget {
+        PushTarget::new(RecordingFileType::WebM, None).expect("webm recording")
+    }
+
+    fn slog_recording() -> PushTarget {
+        PushTarget::new(RecordingFileType::SessionRecordingLog, None).expect("slog recording")
+    }
+
+    fn ai_analysis() -> PushTarget {
+        PushTarget::new(RecordingFileType::SessionRecordingLog, Some(ArtifactKind::AiAnalysis)).expect("ai-analysis")
+    }
+
     struct Harness {
         _dir: tempfile::TempDir,
         recordings_path: Utf8PathBuf,
         sender: RecordingMessageSender,
+        kills: mpsc::UnboundedReceiver<Uuid>,
         _shutdown_handle: ShutdownHandle,
     }
 
@@ -1076,7 +1180,7 @@ mod tests {
             let dir = tempfile::tempdir().expect("temp dir");
             let recordings_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
             let (sender, receiver) = recording_message_channel();
-            let (session_manager_handle, _) = crate::session::session_manager_channel();
+            let (session_manager_handle, kills) = crate::session::spawn_fake_session_manager();
             let (job_queue_handle, _) = JobQueueHandle::new();
             let task = RecordingManagerTask::new(
                 receiver,
@@ -1091,6 +1195,7 @@ mod tests {
                 _dir: dir,
                 recordings_path,
                 sender,
+                kills,
                 _shutdown_handle: shutdown_handle,
             }
         }
@@ -1109,12 +1214,68 @@ mod tests {
                 .expect("parse manifest")
         }
 
-        async fn connect(&self, id: Uuid, target: PushTarget) -> String {
-            let (path, _) = self.sender.connect(id, target, Duration::ZERO).await.expect("connect");
+        async fn try_connect(&self, id: Uuid, target: PushTarget) -> anyhow::Result<Utf8PathBuf> {
+            self.sender.connect(id, target, Duration::ZERO).await
+        }
+
+        async fn connect_with_ttl(&self, id: Uuid, target: PushTarget, disconnected_ttl: Duration) -> String {
+            let path = self
+                .sender
+                .connect(id, target, disconnected_ttl)
+                .await
+                .expect("connect");
             path.file_name().expect("file name").to_owned()
         }
 
-        async fn client_push_wakes_streamers(&self, id: Uuid, target: PushTarget) -> bool {
+        async fn connect(&self, id: Uuid, target: PushTarget) -> String {
+            self.connect_with_ttl(id, target, Duration::ZERO).await
+        }
+
+        async fn disconnect(&self, id: Uuid, kind: PushKind) {
+            self.sender.disconnect(id, kind).await.expect("disconnect");
+            // Messages are processed in order, so this waits for the disconnect to be handled.
+            self.sender.get_count().await.expect("sync with manager");
+        }
+
+        async fn push(&self, id: Uuid, target: PushTarget) -> String {
+            let file_name = self.connect(id, target).await;
+            self.disconnect(id, target.kind()).await;
+            file_name
+        }
+
+        async fn must_be_recorded(&self, id: Uuid) {
+            self.sender
+                .update_recording_policy(id, true)
+                .await
+                .expect("update recording policy");
+        }
+
+        async fn wait_until_no_push(&self) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while self.sender.get_count().await.expect("count") != 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("expired pushes are removed");
+        }
+
+        async fn next_kill(&mut self) -> Uuid {
+            tokio::time::timeout(Duration::from_secs(5), self.kills.recv())
+                .await
+                .expect("a kill request")
+                .expect("session manager alive")
+        }
+
+        fn start_client_push(
+            &self,
+            id: Uuid,
+            target: PushTarget,
+        ) -> (
+            io::DuplexStream,
+            tokio::task::JoinHandle<anyhow::Result<PushOutcome>>,
+            ShutdownHandle,
+        ) {
             let claims = serde_json::from_value(json!({
                 "jet_aid": id,
                 "jet_rop": "push",
@@ -1122,7 +1283,7 @@ mod tests {
                 "jti": Uuid::new_v4(),
             }))
             .expect("claims");
-            let (mut client, server) = io::duplex(1024);
+            let (client, server) = io::duplex(1024);
             let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
             let push = tokio::spawn(
                 ClientPush::builder()
@@ -1135,40 +1296,7 @@ mod tests {
                     .build()
                     .run(),
             );
-
-            let (tx, mut woken) = oneshot::channel();
-            self.sender.add_new_chunk_listener(id, tx);
-
-            // The push flushes, and so signals, whenever it runs out of input.
-            let woke = tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
-                    client.write_all(b"chunk").await.expect("write chunk");
-                    tokio::select! {
-                        _ = &mut woken => break,
-                        () = tokio::time::sleep(Duration::from_millis(20)) => {}
-                    }
-                }
-            })
-            .await
-            .is_ok();
-
-            drop(client);
-            push.await.expect("join push").expect("push");
-            self.sender.get_count().await.expect("sync with manager");
-            drop(shutdown_handle);
-            woke
-        }
-
-        async fn disconnect(&self, id: Uuid) {
-            self.sender.disconnect(id).await.expect("disconnect");
-            // Messages are processed in order, so this waits for the disconnect to be handled.
-            self.sender.get_count().await.expect("sync with manager");
-        }
-
-        async fn push(&self, id: Uuid, target: PushTarget) -> String {
-            let file_name = self.connect(id, target).await;
-            self.disconnect(id).await;
-            file_name
+            (client, push, shutdown_handle)
         }
     }
 
@@ -1177,9 +1305,9 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let first = harness.push(id, SLOG_RECORDING).await;
-        harness.push(id, WEBM).await;
-        let third = harness.push(id, SLOG_RECORDING).await;
+        let first = harness.push(id, slog_recording()).await;
+        harness.push(id, webm()).await;
+        let third = harness.push(id, slog_recording()).await;
 
         assert_eq!(first, "recording-0.slog");
         assert_eq!(third, "recording-2.slog");
@@ -1193,12 +1321,12 @@ mod tests {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        harness.push(id, WEBM).await;
-        let first_log = harness.push(id, AI_ANALYSIS).await;
-        let second_log = harness.push(id, AI_ANALYSIS).await;
+        harness.push(id, webm()).await;
+        let first_artifact = harness.push(id, ai_analysis()).await;
+        let second_artifact = harness.push(id, ai_analysis()).await;
 
-        assert_eq!(first_log, "ai-analysis-0.slog");
-        assert_eq!(second_log, "ai-analysis-1.slog");
+        assert_eq!(first_artifact, "ai-analysis-0.slog");
+        assert_eq!(second_artifact, "ai-analysis-1.slog");
         let manifest = harness.read_manifest(id);
         let files = manifest["files"].as_array().expect("files");
         assert_eq!(files.len(), 1);
@@ -1210,51 +1338,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn log_before_any_recording() {
+    async fn artifact_first_leaves_session_timing_to_the_recording() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let log = harness.push(id, AI_ANALYSIS).await;
+        let artifact = harness.push(id, ai_analysis()).await;
 
-        assert_eq!(log, "ai-analysis-0.slog");
+        assert_eq!(artifact, "ai-analysis-0.slog");
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["files"], json!([]));
+        assert_eq!(manifest["startTime"], 0);
+        assert_eq!(manifest["duration"], 0);
         assert_eq!(
             manifest["artifacts"],
             json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
         );
 
-        assert_eq!(harness.push(id, WEBM).await, "recording-0.webm");
+        assert_eq!(harness.connect(id, webm()).await, "recording-0.webm");
+        let manifest = harness.read_manifest(id);
+        assert_ne!(manifest["startTime"], 0);
+        assert_eq!(manifest["startTime"], manifest["files"][0]["startTime"]);
     }
 
     #[tokio::test]
-    async fn log_push_keeps_recording_durations() {
+    async fn artifact_push_keeps_recording_timing() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness.write_manifest(id, MASTER_MANIFEST);
 
-        harness.push(id, AI_ANALYSIS).await;
+        harness.push(id, ai_analysis()).await;
 
         let manifest = harness.read_manifest(id);
+        assert_eq!(manifest["startTime"], 1);
         assert_eq!(manifest["duration"], 5);
         assert_eq!(manifest["files"][0]["duration"], 5);
+
+        harness.connect(id, webm()).await;
+        assert_eq!(harness.read_manifest(id)["startTime"], 1);
     }
 
     #[tokio::test]
     async fn recording_reconnect_keeps_artifacts() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
-        harness.push(id, WEBM).await;
-        harness.push(id, AI_ANALYSIS).await;
+        harness.push(id, webm()).await;
+        harness.push(id, ai_analysis()).await;
 
-        let file_name = harness.connect(id, WEBM).await;
+        let file_name = harness.connect(id, webm()).await;
         assert_eq!(file_name, "recording-1.webm");
         assert_eq!(
             harness.read_manifest(id)["artifacts"],
             json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
         );
 
-        harness.disconnect(id).await;
+        harness.disconnect(id, PushKind::Recording).await;
         let manifest = harness.read_manifest(id);
         assert_eq!(manifest["files"][1]["fileName"], "recording-1.webm");
         assert_eq!(
@@ -1267,7 +1404,7 @@ mod tests {
     async fn shadow_streams_ongoing_recording() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
-        harness.connect(id, WEBM).await;
+        harness.connect(id, webm()).await;
 
         let files = harness.sender.list_files(id).await.expect("list files");
 
@@ -1277,42 +1414,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shadow_refuses_while_only_a_log_is_pushed() {
+    async fn shadow_refuses_while_only_an_artifact_is_pushed() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
-        harness.push(id, WEBM).await;
-        harness.connect(id, AI_ANALYSIS).await;
+        harness.connect(id, ai_analysis()).await;
 
-        let files = harness.sender.list_files(id).await.expect("list files");
-
-        assert!(files.is_none());
+        assert!(harness.sender.list_files(id).await.expect("list files").is_none());
+        assert!(harness.sender.get_state(id).await.expect("get state").is_none());
+        assert!(!harness.sender.active_recordings.contains(id));
     }
 
     #[tokio::test]
-    async fn log_chunks_do_not_wake_streamers() {
+    async fn artifact_chunks_do_not_wake_streamers() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
-        harness.push(id, WEBM).await;
+        let (tx, mut woken) = oneshot::channel();
+        harness.sender.add_new_chunk_listener(id, tx);
 
-        assert!(!harness.client_push_wakes_streamers(id, AI_ANALYSIS).await);
+        let (mut client, push, _shutdown_handle) = harness.start_client_push(id, ai_analysis());
+        client.write_all(b"chunk").await.expect("write chunk");
+        drop(client);
+        push.await.expect("join push").expect("push");
+        harness.sender.get_count().await.expect("sync with manager");
+
+        let artifact_path = harness.recordings_path.join(id.to_string()).join("ai-analysis-0.slog");
+        assert_eq!(std::fs::read(artifact_path).expect("read artifact"), b"chunk");
+        assert_eq!(woken.try_recv(), Err(oneshot::error::TryRecvError::Empty));
     }
 
     #[tokio::test]
     async fn slog_recording_chunks_wake_streamers() {
         let harness = Harness::start();
+        let id = Uuid::new_v4();
+        let (tx, mut woken) = oneshot::channel();
+        harness.sender.add_new_chunk_listener(id, tx);
 
-        assert!(
-            harness
-                .client_push_wakes_streamers(Uuid::new_v4(), SLOG_RECORDING)
-                .await
+        let (mut client, push, _shutdown_handle) = harness.start_client_push(id, slog_recording());
+
+        // The push flushes, and so signals, whenever it runs out of input.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                client.write_all(b"chunk").await.expect("write chunk");
+                tokio::select! {
+                    _ = &mut woken => break,
+                    () = tokio::time::sleep(Duration::from_millis(20)) => {}
+                }
+            }
+        })
+        .await
+        .expect("streamers woken");
+
+        drop(client);
+        push.await.expect("join push").expect("push");
+    }
+
+    #[test]
+    fn only_the_recording_kind_takes_part_in_the_recording_policy() {
+        assert_eq!(
+            PushKind::Recording.policy(),
+            KindPolicy {
+                recording_policy: true,
+                wakes_streamers: true,
+                tracks_duration: true,
+            }
+        );
+        assert_eq!(
+            AI_ANALYSIS_KIND.policy(),
+            KindPolicy {
+                recording_policy: false,
+                wakes_streamers: false,
+                tracks_duration: false,
+            }
         );
     }
 
     #[test]
-    fn artifact_role_names_match_their_serde_names() {
-        let role = ArtifactRole::AiAnalysis;
-        let parsed: ArtifactRole = serde_json::from_value(json!(role.as_str())).expect("parse role");
-        assert_eq!(parsed, role);
+    fn ai_analysis_must_be_slog() {
+        let error = PushTarget::new(RecordingFileType::WebM, Some(ArtifactKind::AiAnalysis)).expect_err("webm");
+        assert_eq!(error.to_string(), "ai-analysis artifacts must be slog files");
+    }
+
+    #[test]
+    fn artifact_kind_names_match_their_serde_names() {
+        let kind = ArtifactKind::AiAnalysis;
+        let parsed: ArtifactKind = serde_json::from_value(json!(kind.as_str())).expect("parse kind");
+        assert_eq!(parsed, kind);
     }
 
     #[tokio::test]
@@ -1321,27 +1507,115 @@ mod tests {
         let artifact_only = Uuid::new_v4();
         let recorded = Uuid::new_v4();
 
-        harness.connect(artifact_only, AI_ANALYSIS).await;
-        harness.connect(recorded, WEBM).await;
+        harness.connect(artifact_only, ai_analysis()).await;
+        harness.connect(recorded, webm()).await;
+        harness.connect(recorded, ai_analysis()).await;
+        harness.disconnect(recorded, AI_ANALYSIS_KIND).await;
 
         assert!(!harness.sender.is_recording(artifact_only).await.expect("is recording"));
         assert!(harness.sender.is_recording(recorded).await.expect("is recording"));
         assert!(!harness.sender.is_recording(Uuid::new_v4()).await.expect("is recording"));
+        assert!(!harness.sender.active_recordings.contains(artifact_only));
+        assert!(harness.sender.active_recordings.contains(recorded));
     }
 
     #[tokio::test]
-    async fn unknown_artifact_roles_survive_a_rewrite() {
+    async fn artifact_push_does_not_disarm_the_recording_ttl_kill() {
+        let mut harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness.connect_with_ttl(id, webm(), Duration::from_secs(1)).await;
+        harness.must_be_recorded(id).await;
+        harness.disconnect(id, PushKind::Recording).await;
+
+        harness.push(id, ai_analysis()).await;
+
+        assert!(matches!(
+            harness.sender.get_state(id).await.expect("get state"),
+            Some(OnGoingRecordingState::LastSeen { .. })
+        ));
+        assert!(harness.sender.is_recording(id).await.expect("is recording"));
+        assert_eq!(harness.next_kill().await, id);
+    }
+
+    #[tokio::test]
+    async fn artifact_ttl_expiry_never_kills_the_session() {
+        let mut harness = Harness::start();
+        let artifact_only = Uuid::new_v4();
+        let recorded = Uuid::new_v4();
+
+        harness.connect(artifact_only, ai_analysis()).await;
+        harness.must_be_recorded(artifact_only).await;
+        harness.disconnect(artifact_only, AI_ANALYSIS_KIND).await;
+        harness.wait_until_no_push().await;
+
+        harness.connect(recorded, webm()).await;
+        harness.must_be_recorded(recorded).await;
+        harness.disconnect(recorded, PushKind::Recording).await;
+
+        // Kill requests reach the session manager in the order they were issued.
+        assert_eq!(harness.next_kill().await, recorded);
+    }
+
+    #[tokio::test]
+    async fn recording_and_artifact_push_at_the_same_time() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        harness.connect(id, webm()).await;
+        assert_eq!(harness.connect(id, ai_analysis()).await, "ai-analysis-0.slog");
+        assert!(harness.try_connect(id, webm()).await.is_err());
+        assert!(harness.try_connect(id, ai_analysis()).await.is_err());
+
+        harness.disconnect(id, AI_ANALYSIS_KIND).await;
+        assert!(matches!(
+            harness.sender.get_state(id).await.expect("get state"),
+            Some(OnGoingRecordingState::Connected)
+        ));
+
+        harness.disconnect(id, PushKind::Recording).await;
+        harness.connect(id, ai_analysis()).await;
+        assert_eq!(harness.connect(id, webm()).await, "recording-1.webm");
+    }
+
+    #[tokio::test]
+    async fn concurrent_pushes_keep_each_others_manifest_entries() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        let expected_artifacts = json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] });
+
+        harness.connect(id, webm()).await;
+        harness.connect(id, ai_analysis()).await;
+        harness.disconnect(id, PushKind::Recording).await;
+        assert_eq!(harness.read_manifest(id)["artifacts"], expected_artifacts);
+
+        harness.connect(id, webm()).await;
+        harness.disconnect(id, AI_ANALYSIS_KIND).await;
+        harness.disconnect(id, PushKind::Recording).await;
+
+        let manifest = harness.read_manifest(id);
+        let file_names: Vec<_> = manifest["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .map(|file| file["fileName"].clone())
+            .collect();
+        assert_eq!(file_names, [json!("recording-0.webm"), json!("recording-1.webm")]);
+        assert_eq!(manifest["artifacts"], expected_artifacts);
+    }
+
+    #[tokio::test]
+    async fn unknown_artifact_kinds_survive_a_rewrite() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         let mut manifest: serde_json::Value = serde_json::from_str(MASTER_MANIFEST).expect("manifest");
-        manifest["artifacts"] = json!({ "future-role": [{ "fileName": "future-role-0.bin" }] });
+        manifest["artifacts"] = json!({ "future-kind": [{ "fileName": "future-kind-0.bin" }] });
         harness.write_manifest(id, &manifest.to_string());
 
-        harness.push(id, WEBM).await;
+        harness.push(id, webm()).await;
 
         assert_eq!(
             harness.read_manifest(id)["artifacts"],
-            json!({ "future-role": [{ "fileName": "future-role-0.bin" }] })
+            json!({ "future-kind": [{ "fileName": "future-kind-0.bin" }] })
         );
     }
 

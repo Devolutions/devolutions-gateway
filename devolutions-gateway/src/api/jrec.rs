@@ -31,7 +31,7 @@ use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{ArtifactRole, PushOutcome, PushTarget, RecordingMessageSender};
+use crate::recording::{ArtifactKind, PushOutcome, PushTarget, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -66,21 +66,12 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
-    kind: Option<ArtifactRole>,
+    kind: Option<ArtifactKind>,
 }
 
 impl JrecPushQueryParam {
     fn target(&self) -> Result<PushTarget, HttpError> {
-        match (self.kind, self.file_type) {
-            // Without a kind the stream is a recording, as it was before artifacts existed.
-            (None, file_type) => Ok(PushTarget::Recording(file_type)),
-            (Some(role @ ArtifactRole::AiAnalysis), file_type @ RecordingFileType::SessionRecordingLog) => {
-                Ok(PushTarget::Artifact(role, file_type))
-            }
-            (Some(ArtifactRole::AiAnalysis), _) => {
-                Err(HttpError::bad_request().msg("ai-analysis artifacts must be slog files"))
-            }
-        }
+        PushTarget::new(self.file_type, self.kind).map_err(HttpError::bad_request().err())
     }
 }
 
@@ -1021,7 +1012,7 @@ async fn shadow_recording(
     let recording_files = match recordings.list_files(id).await {
         Ok(Some(recording_files)) => recording_files,
         Ok(None) => {
-            debug!(%id, "Shadow recording rejected: only a Log is being pushed");
+            debug!(%id, "Shadow recording rejected: no recording is being pushed");
             return close_with_error(ws, StreamerCloseCode::StreamingEnded);
         }
         Err(_) => {
@@ -1054,6 +1045,7 @@ mod tests {
     use zip::ZipArchive;
 
     use super::*;
+    use crate::recording::PushKind;
 
     #[test]
     fn push_target_from_query() {
@@ -1061,19 +1053,17 @@ mod tests {
             serde_json::from_value::<JrecPushQueryParam>(query)
                 .expect("query")
                 .target()
+                .map(PushTarget::kind)
                 .map_err(|error| error.code)
         };
 
         assert_eq!(
             target(serde_json::json!({ "fileType": "slog" })),
-            Ok(PushTarget::Recording(RecordingFileType::SessionRecordingLog))
+            Ok(PushKind::Recording)
         );
         assert_eq!(
             target(serde_json::json!({ "fileType": "slog", "kind": "ai-analysis" })),
-            Ok(PushTarget::Artifact(
-                ArtifactRole::AiAnalysis,
-                RecordingFileType::SessionRecordingLog
-            ))
+            Ok(PushKind::Artifact(ArtifactKind::AiAnalysis))
         );
         assert_eq!(
             target(serde_json::json!({ "fileType": "webm", "kind": "ai-analysis" })),
