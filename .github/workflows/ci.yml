@@ -593,13 +593,9 @@ jobs:
           path: powershell-staging
 
   gateway-service-account-tests:
-    name: Gateway service account tests [${{ matrix.shell }}]
+    name: Gateway service account tests [Windows]
     needs: [preflight]
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shell: [powershell, pwsh]
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -607,18 +603,31 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
-      - name: Install Pester
+      - name: Install Pester for Windows PowerShell
         run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
-        shell: ${{ matrix.shell }}
+        shell: powershell
 
-      - name: Run service account tests
+      - name: Run service account tests in Windows PowerShell
         run: |
           Import-Module Pester -RequiredVersion 5.6.0
           $result = Invoke-Pester powershell\pester\ServiceAccount.Tests.ps1 -PassThru
           if ($result.Result -ne 'Passed') {
             exit 1
           }
-        shell: ${{ matrix.shell }}
+        shell: powershell
+
+      - name: Install Pester for PowerShell 7
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        shell: pwsh
+
+      - name: Run service account tests in PowerShell 7
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $result = Invoke-Pester powershell\pester\ServiceAccount.Tests.ps1 -PassThru
+          if ($result.Result -ne 'Passed') {
+            exit 1
+          }
+        shell: pwsh
 
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
