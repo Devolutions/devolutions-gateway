@@ -11,14 +11,17 @@ Record reused payload versions separately from installer versions.
 Pester 5.7.1 or newer and Windows PowerShell 5.1 are required.
 AD scenarios also require the ActiveDirectory module and permissions to create the run-owned objects.
 
+The lab entry point is `package\WindowsManaged.Tests\Test-GatewayServiceAccounts.ps1`.
+Run the examples below from the repository root.
+
 ```powershell
 # Read-only discovery and prerequisite validation.
-.\ci\Test-GatewayServiceAccounts.ps1 `
+.\package\WindowsManaged.Tests\Test-GatewayServiceAccounts.ps1 `
     -Msi C:\lab\candidate-a.msi -NextMsi C:\lab\candidate-b.msi `
     -OutputDirectory C:\lab\results\run-01
 
 # Run only after reviewing the selected host and artifacts.
-.\ci\Test-GatewayServiceAccounts.ps1 `
+.\package\WindowsManaged.Tests\Test-GatewayServiceAccounts.ps1 `
     -Msi C:\lab\candidate-a.msi -NextMsi C:\lab\candidate-b.msi `
     -OutputDirectory C:\lab\results\run-01 `
     -AccountKinds NetworkService,Virtual,Local,LocalDollar,Domain,Smsa,Gmsa `
@@ -68,11 +71,11 @@ The generator copies the installer source and adds three deferred failure action
 Do not distribute the resulting MSI as a product installer.
 
 ```powershell
-.\testsuite\src\windows-installer\New-RollbackFixture.ps1 `
+.\package\WindowsManaged.Tests\src\New-RollbackFixture.ps1 `
     -OutputDirectory C:\lab\rollback-source
 
 # After building the copied source as rollback-fault.msi:
-.\ci\Test-GatewayServiceAccounts.ps1 `
+.\package\WindowsManaged.Tests\Test-GatewayServiceAccounts.ps1 `
     -Msi C:\lab\baseline.msi -NextMsi C:\lab\rollback-fault.msi `
     -OutputDirectory C:\lab\results\rollback-01 `
     -AccountKinds NetworkService,Local -TestRollback -RollbackAccountChanges -Execute
@@ -107,11 +110,11 @@ Run non-installing helper tests separately:
 
 ```powershell
 Invoke-Pester .\powershell\pester\ServiceAccount.Tests.ps1
-Invoke-Pester .\testsuite\tests\windows-installer\RollbackHelpers.Tests.ps1
-Invoke-Pester .\testsuite\tests\windows-installer\AgentHelpers.Tests.ps1
-.\testsuite\tests\gateway_installer_helpers.ps1 -InstallerAssembly 'C:\lab\DevolutionsGateway.exe'
+Invoke-Pester .\package\WindowsManaged.Tests\tests\RollbackHelpers.Tests.ps1
+Invoke-Pester .\package\WindowsManaged.Tests\tests\AgentHelpers.Tests.ps1
+.\package\WindowsManaged.Tests\Test-InstallerHelpers.ps1 -InstallerAssembly 'C:\lab\DevolutionsGateway.exe'
 $container = New-PesterContainer `
-    -Path .\testsuite\tests\windows-installer\InstallerHelpers.Tests.ps1 `
+    -Path .\package\WindowsManaged.Tests\tests\InstallerHelpers.Tests.ps1 `
     -Data @{ InstallerAssembly = 'C:\lab\DevolutionsGateway.exe' }
 Invoke-Pester -Container $container
 ```

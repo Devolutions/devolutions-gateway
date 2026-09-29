@@ -1,7 +1,7 @@
 param([hashtable] $Lab)
 
 BeforeAll {
-    Import-Module "$PSScriptRoot\..\..\src\windows-installer\GatewayLab.psm1" -Force
+    Import-Module "$PSScriptRoot\..\src\GatewayLab.psm1" -Force
 }
 
 Describe 'Gateway lifecycle under <Kind>' -ForEach @($Lab.Accounts | ForEach-Object {
