@@ -23,8 +23,9 @@ const MAX_PATH_BYTES: usize = 1024;
 const MAX_POLICY_ID_BYTES: usize = 256;
 /// Slots of the Event Log queue kept for terminal outcomes and external changes.
 ///
-/// Only authenticated policy writes, which the policy store serializes, and the policy store's own
-/// observation of external changes produce this class, so a request flood cannot reach the reserve.
+/// Only the outcome of an authenticated policy write, which the policy store serializes, and the
+/// policy store's own observation of an external change take these slots. Attempts and denials,
+/// which an unauthenticated client can produce at will, are refused before reaching them.
 #[cfg(any(test, not(debug_assertions)))]
 const EVENT_LOG_OUTCOME_RESERVE: usize = 64;
 
@@ -398,7 +399,9 @@ impl WriteAudit {
     }
 
     pub(crate) fn denied(&self, reason: DenialReason) {
-        self.finish(|state| {
+        // A denial is recorded before the pipe client authenticates, so an unauthenticated flood can
+        // produce it at will: it yields rather than consuming the capacity reserved for outcomes.
+        self.finish(EntryClass::Admission, |state| {
             policy_events::policy_write_denied(&state.actor_sid, &state.actor_exe, INTENT, &state.path, reason.as_str())
         });
     }
@@ -415,7 +418,7 @@ impl WriteAudit {
         } else {
             "failed"
         };
-        self.finish(|state| {
+        self.finish(EntryClass::Outcome, |state| {
             if operation == PolicyReplacementOperation::Create {
                 policy_events::policy_write_failed(
                     policy_events::POLICY_CREATE_FAILED,
@@ -468,7 +471,7 @@ impl WriteAudit {
         } else {
             "applied"
         };
-        self.finish(|state| {
+        self.finish(EntryClass::Outcome, |state| {
             if operation == PolicyReplacementOperation::Create {
                 policy_events::policy_write_succeeded(
                     policy_events::POLICY_CREATE_SUCCEEDED,
@@ -503,15 +506,18 @@ impl WriteAudit {
         });
     }
 
-    /// Records the terminal outcome, which the reserved queue shields from admission flooding.
-    fn finish(&self, entry: impl FnOnce(&WriteAuditState) -> Entry) {
+    /// Records the terminal event of `class`, which decides whether a request flood may drop it.
+    ///
+    /// A denial never reaches the policy store, so it yields like an attempt; the reserved capacity
+    /// is kept for the outcome of an authenticated write.
+    fn finish(&self, class: EntryClass, entry: impl FnOnce(&WriteAuditState) -> Entry) {
         if self
             .0
             .terminal_recorded
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            self.0.record(entry(&self.0), EntryClass::Outcome);
+            self.0.record(entry(&self.0), class);
         }
     }
 }
@@ -605,17 +611,21 @@ pub(crate) mod tests {
     }
 
     #[derive(Default)]
-    pub(crate) struct Recorder(parking_lot::Mutex<Vec<Entry>>);
+    pub(crate) struct Recorder(parking_lot::Mutex<Vec<(Entry, EntryClass)>>);
 
     impl Recorder {
         pub(crate) fn events(&self) -> Vec<Entry> {
-            self.0.lock().clone()
+            self.0.lock().iter().map(|(entry, _)| entry.clone()).collect()
+        }
+
+        fn classes(&self) -> Vec<EntryClass> {
+            self.0.lock().iter().map(|(_, class)| *class).collect()
         }
     }
 
     impl AuditRecorder for Recorder {
-        fn record(&self, entry: Entry, _: EntryClass) {
-            self.0.lock().push(entry);
+        fn record(&self, entry: Entry, class: EntryClass) {
+            self.0.lock().push((entry, class));
         }
     }
 
@@ -667,6 +677,23 @@ pub(crate) mod tests {
                 Some(policy_events::POLICY_WRITE_DENIED)
             ]
         );
+    }
+
+    #[test]
+    fn a_denial_yields_like_an_attempt_while_an_outcome_keeps_the_reserve() {
+        // A denial is reachable before the pipe client authenticates, so an unauthenticated flood
+        // must be unable to spend the capacity reserved for the outcome of an accepted write.
+        let (denied, recorder) = test_audit();
+        denied.denied(DenialReason::AuthenticationFailed);
+        assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Admission]);
+
+        let (abandoned, recorder) = test_audit();
+        drop(abandoned);
+        assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Admission]);
+
+        let (failed, recorder) = test_audit();
+        failed.failed(PolicyReplacementOperation::Update, FailureReason::InvalidPolicy);
+        assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Outcome]);
     }
 
     #[test]
