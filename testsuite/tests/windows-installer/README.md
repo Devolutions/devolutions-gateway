@@ -109,6 +109,7 @@ Run non-installing helper tests separately:
 Invoke-Pester .\powershell\pester\ServiceAccount.Tests.ps1
 Invoke-Pester .\testsuite\tests\windows-installer\RollbackHelpers.Tests.ps1
 Invoke-Pester .\testsuite\tests\windows-installer\AgentHelpers.Tests.ps1
+.\testsuite\tests\gateway_installer_helpers.ps1 -InstallerAssembly 'C:\lab\DevolutionsGateway.exe'
 $container = New-PesterContainer `
     -Path .\testsuite\tests\windows-installer\InstallerHelpers.Tests.ps1 `
     -Data @{ InstallerAssembly = 'C:\lab\DevolutionsGateway.exe' }
