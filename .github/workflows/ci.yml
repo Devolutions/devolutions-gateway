@@ -592,6 +592,34 @@ jobs:
           name: devolutions-gateway-powershell
           path: powershell-staging
 
+  gateway-service-account-tests:
+    name: Gateway service account tests [${{ matrix.shell }}]
+    needs: [preflight]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Install Pester
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        shell: ${{ matrix.shell }}
+
+      - name: Run service account tests
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $result = Invoke-Pester powershell\pester\ServiceAccount.Tests.ps1 -PassThru
+          if ($result.Result -ne 'Passed') {
+            exit 1
+          }
+        shell: ${{ matrix.shell }}
+
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     if: ${{ always() }}
@@ -1366,7 +1394,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:
