@@ -294,7 +294,11 @@ internal class Program
                         ServiceInstaller = new ServiceInstaller()
                         {
                             Type = SvcType.ownProcess,
-                            Account = "NT AUTHORITY\\NetworkService",
+                            // Resolved at install time by the ValidateServiceAccount action; see `P.SERVICEACCOUNT`
+                            Account = $"[{GatewayProperties.serviceAccount.Id}]",
+                            Password = $"[{GatewayProperties.servicePassword.Id}]",
+                            // Make the NT SERVICE\DevolutionsGateway virtual account usable
+                            ServiceSid = ServiceSid.unrestricted,
                             Interactive = false,
                             Vital = true,
                             Name = Includes.SERVICE_NAME,
