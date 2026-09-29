@@ -42,25 +42,37 @@ const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 /// request would each pin a connection slot indefinitely and could exhaust the pool.
 const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long shutdown waits for the connections that are still serving a request.
+///
+/// Serving a connection can record a policy audit event, and the caller drains the audit queue as
+/// soon as this function returns, so nothing may still be running by then. A healthy exchange
+/// completes in milliseconds, and each connection is already bounded by `CONNECTION_DEADLINE`, so
+/// this only has to cover the tail of a request already in progress; connections still stuck at
+/// the end of it are aborted rather than allowed to hold the shutdown.
+const CONNECTION_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Start the named pipe server and accept connections until shutdown.
 pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
     let connection_permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+    // Serving a connection can record policy audit events, so shutdown has to wait for these.
+    let mut connections = tokio::task::JoinSet::new();
 
     let mut first_instance = true;
     loop {
+        // Reap the connections that already finished, so completed tasks do not accumulate here
+        // for the lifetime of the process.
+        while connections.try_join_next().is_some() {}
+
         // Wait for a free connection slot before exposing a new pipe instance,
         // bounding the number of concurrently served connections.
         let permit = tokio::select! {
             permit = Arc::clone(&connection_permits).acquire_owned() => {
                 permit.expect("the semaphore is never closed")
             }
-            _ = shutdown.cancelled() => {
-                info!("Pipe server shutting down");
-                return Ok(());
-            }
+            _ = shutdown.cancelled() => break,
         };
 
         // Create a new pipe instance for each connection.
@@ -72,7 +84,7 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                 match result {
                     Ok(()) => {
                         let state = Arc::clone(&state);
-                        tokio::spawn(async move {
+                        connections.spawn(async move {
                             let serve = async move {
                                 // Keep blocking unauthenticated capture off the accept loop and
                                 // retain the connection slot until the work actually completes.
@@ -113,11 +125,28 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
                     }
                 }
             }
-            _ = shutdown.cancelled() => {
-                info!("Pipe server shutting down");
-                return Ok(());
-            }
+            _ = shutdown.cancelled() => break,
         }
+    }
+
+    info!("Pipe server shutting down");
+
+    wait_for_connections(&mut connections, CONNECTION_SHUTDOWN_GRACE).await;
+
+    Ok(())
+}
+
+/// Wait for the connection tasks to finish, then abort the ones that outlive the grace.
+///
+/// Serving a connection can record policy audit events, so the caller drains the audit queue as
+/// soon as this returns and no connection may outlive it.
+async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace: std::time::Duration) {
+    let drained = tokio::time::timeout(grace, async { while connections.join_next().await.is_some() {} }).await;
+
+    if drained.is_err() {
+        warn!("Aborted named pipe connections still serving at shutdown");
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
     }
 }
 
@@ -195,8 +224,11 @@ fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    use tokio::task::JoinSet;
 
     use super::*;
 
@@ -225,6 +257,62 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("detached capture did not release its permit after completing");
+    }
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_waits_for_the_connections_that_are_still_serving() {
+        let release = CancellationToken::new();
+        let mut connections = JoinSet::new();
+        connections.spawn({
+            let release = release.clone();
+            async move { release.cancelled().await }
+        });
+
+        let waited = tokio::spawn(async move {
+            wait_for_connections(&mut connections, Duration::from_secs(30)).await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !waited.is_finished(),
+            "the wait must last as long as a connection is being served"
+        );
+
+        release.cancel();
+        tokio::time::timeout(Duration::from_secs(5), waited)
+            .await
+            .expect("the wait completes once the connection is done")
+            .expect("the wait task does not panic");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_aborts_the_connections_that_outlive_the_grace() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut connections = JoinSet::new();
+        connections.spawn({
+            let dropped = Arc::clone(&dropped);
+            async move {
+                let _flag = DropFlag(dropped);
+                std::future::pending::<()>().await;
+            }
+        });
+
+        let started = Instant::now();
+        wait_for_connections(&mut connections, Duration::from_millis(200)).await;
+
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "the grace must elapse first"
+        );
+        assert!(dropped.load(Ordering::SeqCst), "the connection task must be aborted");
+        assert!(connections.is_empty(), "no connection task may outlive shutdown");
     }
 
     #[tokio::test]
