@@ -28,9 +28,10 @@ use zip::write::SimpleFileOptions;
 
 use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
+use crate::artifacts::{ArtifactKind, JrecArtifacts};
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{ArtifactKind, PushOutcome, PushTarget, RecordingMessageSender};
+use crate::recording::{PushOutcome, PushTarget, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -643,21 +644,7 @@ where
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
     #[serde(default)]
-    artifacts: RecordingZipManifestArtifacts,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct RecordingZipManifestArtifacts {
-    #[serde(default)]
-    ai_analysis: Vec<RecordingZipManifestFile>,
-}
-
-impl RecordingZipManifestArtifacts {
-    fn into_files(self) -> Vec<RecordingZipManifestFile> {
-        let Self { ai_analysis } = self;
-        ai_analysis
-    }
+    artifacts: JrecArtifacts,
 }
 
 #[derive(Debug, Deserialize)]
@@ -720,23 +707,23 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let artifacts = manifest.artifacts.into_files();
+    let artifacts = manifest.artifacts.into_file_names();
     let mut artifact_names = Vec::with_capacity(manifest.files.len() + artifacts.len());
-    for file in manifest.files.into_iter().chain(artifacts) {
-        if !is_safe_recording_file_name(&file.file_name) {
+    for file_name in manifest.files.into_iter().map(|file| file.file_name).chain(artifacts) {
+        if !is_safe_recording_file_name(&file_name) {
             warn!(
-                file_name = %file.file_name,
+                %file_name,
                 "Skipping unsafe recording file name from manifest"
             );
             continue;
         }
 
-        let path = recording_dir.join(&file.file_name);
+        let path = recording_dir.join(&file_name);
         if path.is_file() {
-            artifact_names.push(file.file_name);
+            artifact_names.push(file_name);
         } else {
             warn!(
-                file_name = %file.file_name,
+                %file_name,
                 path = %path,
                 "Skipping missing recording file listed in manifest"
             );

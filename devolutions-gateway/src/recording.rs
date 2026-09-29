@@ -20,6 +20,7 @@ use typed_builder::TypedBuilder;
 use uuid::Uuid;
 use video_streamer::SignalWriter;
 
+use crate::artifacts::{ArtifactKind, JrecArtifact, JrecArtifacts, UnsupportedArtifactFileType};
 use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
@@ -44,55 +45,6 @@ struct JrecManifest {
     files: Vec<JrecFile>,
     #[serde(default, skip_serializing_if = "JrecArtifacts::is_empty")]
     artifacts: JrecArtifacts,
-}
-
-/// Non-recording artifacts, one list per [`ArtifactKind`]. Each list is append-only, like `files`: names
-/// are derived from positions.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct JrecArtifacts {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    ai_analysis: Vec<JrecArtifact>,
-}
-
-impl JrecArtifacts {
-    fn is_empty(&self) -> bool {
-        let Self { ai_analysis } = self;
-        ai_analysis.is_empty()
-    }
-
-    fn of_kind_mut(&mut self, kind: ArtifactKind) -> &mut Vec<JrecArtifact> {
-        match kind {
-            ArtifactKind::AiAnalysis => &mut self.ai_analysis,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JrecArtifact {
-    file_name: String,
-}
-
-/// Kind of a non-recording artifact, used as its key in the manifest `artifacts` object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ArtifactKind {
-    AiAnalysis,
-}
-
-impl ArtifactKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            ArtifactKind::AiAnalysis => "ai-analysis",
-        }
-    }
-
-    const fn file_type(self) -> RecordingFileType {
-        match self {
-            ArtifactKind::AiAnalysis => RecordingFileType::SessionRecordingLog,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -162,12 +114,6 @@ pub enum PushOutcome {
 pub struct PushTarget {
     kind: PushKind,
     file_type: RecordingFileType,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("{} artifacts must be {} files", kind.as_str(), kind.file_type().extension())]
-pub struct UnsupportedArtifactFileType {
-    kind: ArtifactKind,
 }
 
 impl PushTarget {
@@ -1512,13 +1458,6 @@ mod tests {
     fn ai_analysis_must_be_slog() {
         let error = PushTarget::new(RecordingFileType::WebM, Some(ArtifactKind::AiAnalysis)).expect_err("webm");
         assert_eq!(error.to_string(), "ai-analysis artifacts must be slog files");
-    }
-
-    #[test]
-    fn artifact_kind_names_match_their_serde_names() {
-        let kind = ArtifactKind::AiAnalysis;
-        let parsed: ArtifactKind = serde_json::from_value(json!(kind.as_str())).expect("parse kind");
-        assert_eq!(parsed, kind);
     }
 
     #[tokio::test]
