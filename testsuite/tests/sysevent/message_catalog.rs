@@ -44,40 +44,41 @@ fn every_catalog_defines_exactly_its_declared_codes() {
         let content = read(&path);
         let defined = catalog_codes(&content, &path);
 
-        let declared_names: Vec<&str> = codes.iter().map(|(name, _)| *name).collect();
-        let defined_names: Vec<&str> = defined.iter().map(|(name, _)| name.as_str()).collect();
-
-        let missing: Vec<&str> = declared_names
-            .iter()
-            .copied()
-            .filter(|name| !defined_names.contains(name))
-            .collect();
+        // The code is the value the runtime passes to ReportEventW, so a name bound to the wrong
+        // number must fail here even though every declared name is present.
+        let mut disagreements: Vec<String> = Vec::new();
+        for (name, code) in codes.iter().copied() {
+            match defined.iter().find(|(defined_name, _)| defined_name.as_str() == name) {
+                None => disagreements.push(format!("{name} is missing")),
+                Some((_, defined_code)) if *defined_code == code => {}
+                Some((_, defined_code)) => disagreements.push(format!(
+                    "{name} is MessageId={defined_code}, but {codes_crate} declares {code}"
+                )),
+            }
+        }
+        for (name, code) in &defined {
+            if !codes.iter().any(|(declared_name, _)| *declared_name == name.as_str()) {
+                disagreements.push(format!(
+                    "{name} is MessageId={code}, which {codes_crate} does not declare; a catalog \
+                     holds exactly the codes of its own product"
+                ));
+            }
+        }
         assert!(
-            missing.is_empty(),
-            "{codes_crate}: {} does not define {missing:?}",
-            path.display()
-        );
-
-        let unexpected: Vec<&str> = defined_names
-            .iter()
-            .copied()
-            .filter(|name| !declared_names.contains(name))
-            .collect();
-        assert!(
-            unexpected.is_empty(),
-            "{} defines {unexpected:?}, which {codes_crate} does not declare; a catalog holds \
-             exactly the codes of its own product",
-            path.display()
+            disagreements.is_empty(),
+            "{} and {codes_crate} disagree: {}",
+            path.display(),
+            disagreements.join("; ")
         );
 
         assert_eq!(
-            defined_names.len(),
-            declared_names.len(),
-            "{} defines {} messages for {} declared {codes_crate} codes; each code needs exactly \
-             one message",
+            defined.len(),
+            codes.len(),
+            "{} declares {} messages for {} {codes_crate} codes; each code needs exactly one \
+             message",
             path.display(),
-            defined_names.len(),
-            declared_names.len()
+            defined.len(),
+            codes.len()
         );
     }
 }
@@ -360,16 +361,30 @@ fn catalog_messages(catalog: &str, code: u32) -> Vec<&str> {
     messages
 }
 
-/// The lines following `MessageId=<code>`, up to the next message. The trailing newline keeps a
-/// code from matching a longer code such as `800` against `8001`.
+/// The lines following `MessageId=<code>`, up to the next message. Each line is compared whole,
+/// which keeps a code from matching a longer code such as `800` against `8001`, and the line ending
+/// is trimmed so a catalog checked out with CRLF endings reads the same as one with LF.
 fn message_block(content: &str, code: u32) -> &str {
-    let marker = format!("MessageId={code}\n");
-    let start = content
-        .find(&marker)
-        .unwrap_or_else(|| panic!("missing MessageId={code}"));
-    let after = &content[start + marker.len()..];
-    let end = after.find("\nMessageId=").unwrap_or(after.len());
-    &after[..end]
+    let marker = format!("MessageId={code}");
+    let mut start = None;
+    let mut end = content.len();
+    let mut offset = 0;
+
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        if trimmed == marker.as_str() {
+            start = Some(offset + line.len());
+        } else if start.is_some() && trimmed.starts_with("MessageId=") {
+            end = offset;
+            break;
+        }
+        offset += line.len();
+    }
+
+    match start {
+        Some(start) => &content[start..end],
+        None => panic!("missing MessageId={code}"),
+    }
 }
 
 /// Insertion indices (`%1`, `%2`, ...) referenced by a catalog message, in ascending order.
