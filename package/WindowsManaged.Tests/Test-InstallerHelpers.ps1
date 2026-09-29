@@ -1,5 +1,5 @@
 param(
-    [string] $InstallerAssembly = "$PSScriptRoot\..\..\package\WindowsManaged\bin\Release\net471\DevolutionsGateway.exe"
+    [string] $InstallerAssembly = "$PSScriptRoot\..\WindowsManaged\bin\Release\net471\DevolutionsGateway.exe"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -162,7 +162,7 @@ try {
 
 foreach ($culture in @('en-us', 'fr-fr', 'de-de')) {
     [xml] $localization = [Text.Encoding]::UTF8.GetString(
-        [IO.File]::ReadAllBytes("$PSScriptRoot\..\..\package\WindowsManaged\Resources\DevolutionsGateway_$culture.wxl"))
+        [IO.File]::ReadAllBytes("$PSScriptRoot\..\WindowsManaged\Resources\DevolutionsGateway_$culture.wxl"))
     $template = @($localization.WixLocalization.String | Where-Object Id -eq 'PrivateKeyPermissionWillBeGranted')[0].InnerText
     $message = [string]::Format($template, 'EXAMPLE\GatewayUser')
     Assert-True ($message.Contains('EXAMPLE\GatewayUser') -and -not $message.Contains('{0}')) "$culture warning names the resolved identity"
