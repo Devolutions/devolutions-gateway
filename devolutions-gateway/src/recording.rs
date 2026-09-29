@@ -98,7 +98,7 @@ pub enum PushOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushCategory {
+pub enum PushTarget {
     Recording(RecordingFileType),
     /// Opaque to Gateway: stored as-is, whatever its content.
     Artifact(ArtifactRole, RecordingFileType),
@@ -109,7 +109,7 @@ pub struct ClientPush<S> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
-    category: PushCategory,
+    target: PushTarget,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
 }
@@ -123,7 +123,7 @@ where
             recordings,
             claims,
             mut client_stream,
-            category,
+            target,
             session_id,
             mut shutdown_signal,
         } = self;
@@ -139,7 +139,7 @@ where
             }
         };
 
-        let (recording_file, artifact) = match recordings.connect(session_id, category, disconnected_ttl).await {
+        let (recording_file, artifact) = match recordings.connect(session_id, target, disconnected_ttl).await {
             Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -289,7 +289,7 @@ struct OnGoingRecording {
 enum RecordingManagerMessage {
     Connect {
         id: Uuid,
-        category: PushCategory,
+        target: PushTarget,
         disconnected_ttl: Duration,
         channel: oneshot::Sender<(Utf8PathBuf, CurrentArtifact)>,
     },
@@ -322,13 +322,13 @@ impl fmt::Debug for RecordingManagerMessage {
         match self {
             RecordingManagerMessage::Connect {
                 id,
-                category,
+                target,
                 disconnected_ttl,
                 channel: _,
             } => f
                 .debug_struct("Connect")
                 .field("id", id)
-                .field("category", category)
+                .field("target", target)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
@@ -365,14 +365,14 @@ impl RecordingMessageSender {
     async fn connect(
         &self,
         id: Uuid,
-        category: PushCategory,
+        target: PushTarget,
         disconnected_ttl: Duration,
     ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
                 id,
-                category,
+                target,
                 disconnected_ttl,
                 channel: tx,
             })
@@ -549,7 +549,7 @@ impl RecordingManagerTask {
     async fn handle_connect(
         &mut self,
         id: Uuid,
-        category: PushCategory,
+        target: PushTarget,
         disconnected_ttl: Duration,
     ) -> anyhow::Result<(Utf8PathBuf, CurrentArtifact)> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
@@ -585,8 +585,8 @@ impl RecordingManagerTask {
             }
         };
 
-        let (file_name, artifact) = match category {
-            PushCategory::Recording(file_type) => {
+        let (file_name, artifact) = match target {
+            PushTarget::Recording(file_type) => {
                 let idx = manifest.files.len();
                 let file_name = format!("recording-{idx}.{}", file_type.extension());
                 manifest.files.push(JrecFile {
@@ -596,7 +596,7 @@ impl RecordingManagerTask {
                 });
                 (file_name, CurrentArtifact::Recording(idx))
             }
-            PushCategory::Artifact(role, file_type) => {
+            PushTarget::Artifact(role, file_type) => {
                 let artifacts = manifest.artifacts.entry(role.as_str().to_owned()).or_default();
                 let idx = artifacts.len();
                 let file_name = format!("{}-{idx}.{}", role.as_str(), file_type.extension());
@@ -838,8 +838,8 @@ async fn recording_manager_task(
                 debug!(?msg, "Received message");
 
                 match msg {
-                    RecordingManagerMessage::Connect { id, category, disconnected_ttl, channel  } => {
-                        match manager.handle_connect(id, category, disconnected_ttl).await {
+                    RecordingManagerMessage::Connect { id, target, disconnected_ttl, channel  } => {
+                        match manager.handle_connect(id, target, disconnected_ttl).await {
                             Ok(connected) => {
                                 let _ = channel.send(connected);
                             }
@@ -1019,10 +1019,10 @@ mod tests {
 
     use super::*;
 
-    const WEBM: PushCategory = PushCategory::Recording(RecordingFileType::WebM);
-    const SLOG_RECORDING: PushCategory = PushCategory::Recording(RecordingFileType::SessionRecordingLog);
-    const AI_ANALYSIS: PushCategory =
-        PushCategory::Artifact(ArtifactRole::AiAnalysis, RecordingFileType::SessionRecordingLog);
+    const WEBM: PushTarget = PushTarget::Recording(RecordingFileType::WebM);
+    const SLOG_RECORDING: PushTarget = PushTarget::Recording(RecordingFileType::SessionRecordingLog);
+    const AI_ANALYSIS: PushTarget =
+        PushTarget::Artifact(ArtifactRole::AiAnalysis, RecordingFileType::SessionRecordingLog);
 
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
@@ -1082,16 +1082,12 @@ mod tests {
                 .expect("parse manifest")
         }
 
-        async fn connect(&self, id: Uuid, category: PushCategory) -> String {
-            let (path, _) = self
-                .sender
-                .connect(id, category, Duration::ZERO)
-                .await
-                .expect("connect");
+        async fn connect(&self, id: Uuid, target: PushTarget) -> String {
+            let (path, _) = self.sender.connect(id, target, Duration::ZERO).await.expect("connect");
             path.file_name().expect("file name").to_owned()
         }
 
-        async fn client_push_wakes_streamers(&self, id: Uuid, category: PushCategory) -> bool {
+        async fn client_push_wakes_streamers(&self, id: Uuid, target: PushTarget) -> bool {
             let claims = serde_json::from_value(json!({
                 "jet_aid": id,
                 "jet_rop": "push",
@@ -1106,7 +1102,7 @@ mod tests {
                     .recordings(self.sender.clone())
                     .claims(claims)
                     .client_stream(server)
-                    .category(category)
+                    .target(target)
                     .session_id(id)
                     .shutdown_signal(shutdown_signal)
                     .build()
@@ -1142,8 +1138,8 @@ mod tests {
             self.sender.get_count().await.expect("sync with manager");
         }
 
-        async fn push(&self, id: Uuid, category: PushCategory) -> String {
-            let file_name = self.connect(id, category).await;
+        async fn push(&self, id: Uuid, target: PushTarget) -> String {
+            let file_name = self.connect(id, target).await;
             self.disconnect(id).await;
             file_name
         }
@@ -1283,6 +1279,13 @@ mod tests {
                 .client_push_wakes_streamers(Uuid::new_v4(), SLOG_RECORDING)
                 .await
         );
+    }
+
+    #[test]
+    fn artifact_role_names_match_their_serde_names() {
+        let role = ArtifactRole::AiAnalysis;
+        let parsed: ArtifactRole = serde_json::from_value(json!(role.as_str())).expect("parse role");
+        assert_eq!(parsed, role);
     }
 
     #[tokio::test]

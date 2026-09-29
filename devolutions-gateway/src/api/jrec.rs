@@ -31,7 +31,7 @@ use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{ArtifactRole, PushCategory, PushOutcome, RecordingMessageSender};
+use crate::recording::{ArtifactRole, PushOutcome, PushTarget, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -70,12 +70,12 @@ struct JrecPushQueryParam {
 }
 
 impl JrecPushQueryParam {
-    fn category(&self) -> Result<PushCategory, HttpError> {
+    fn target(&self) -> Result<PushTarget, HttpError> {
         match (self.artifact, self.file_type) {
             // Without an artifact role the stream is a recording, as it was before artifacts existed.
-            (None, file_type) => Ok(PushCategory::Recording(file_type)),
+            (None, file_type) => Ok(PushTarget::Recording(file_type)),
             (Some(role @ ArtifactRole::AiAnalysis), file_type @ RecordingFileType::SessionRecordingLog) => {
-                Ok(PushCategory::Artifact(role, file_type))
+                Ok(PushTarget::Artifact(role, file_type))
             }
             (Some(ArtifactRole::AiAnalysis), _) => {
                 Err(HttpError::bad_request().msg("ai-analysis artifacts must be slog files"))
@@ -108,7 +108,7 @@ async fn jrec_push(
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
 
-    let category = query.category()?;
+    let target = query.target()?;
 
     let conf = conf_handle.get_conf();
 
@@ -156,7 +156,7 @@ async fn jrec_push(
             recordings,
             shutdown_signal,
             claims,
-            category,
+            target,
             session_id,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -172,7 +172,7 @@ async fn handle_jrec_push(
     recordings: RecordingMessageSender,
     shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
-    category: PushCategory,
+    target: PushTarget,
     session_id: Uuid,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -187,7 +187,7 @@ async fn handle_jrec_push(
         .client_stream(stream)
         .recordings(recordings)
         .claims(claims)
-        .category(category)
+        .target(target)
         .session_id(session_id)
         .shutdown_signal(shutdown_signal)
         .build()
@@ -1056,27 +1056,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_category_from_query() {
-        let category = |query: serde_json::Value| {
+    fn push_target_from_query() {
+        let target = |query: serde_json::Value| {
             serde_json::from_value::<JrecPushQueryParam>(query)
                 .expect("query")
-                .category()
+                .target()
                 .map_err(|error| error.code)
         };
 
         assert_eq!(
-            category(serde_json::json!({ "fileType": "slog" })),
-            Ok(PushCategory::Recording(RecordingFileType::SessionRecordingLog))
+            target(serde_json::json!({ "fileType": "slog" })),
+            Ok(PushTarget::Recording(RecordingFileType::SessionRecordingLog))
         );
         assert_eq!(
-            category(serde_json::json!({ "fileType": "slog", "artifact": "ai-analysis" })),
-            Ok(PushCategory::Artifact(
+            target(serde_json::json!({ "fileType": "slog", "artifact": "ai-analysis" })),
+            Ok(PushTarget::Artifact(
                 ArtifactRole::AiAnalysis,
                 RecordingFileType::SessionRecordingLog
             ))
         );
         assert_eq!(
-            category(serde_json::json!({ "fileType": "webm", "artifact": "ai-analysis" })),
+            target(serde_json::json!({ "fileType": "webm", "artifact": "ai-analysis" })),
             Err(StatusCode::BAD_REQUEST)
         );
 
