@@ -46,7 +46,6 @@
                 <String Id="SearchButton">Suchen</String>
                 <String Id="ValidateButton">Überprüfen</String>
                 <String Id="ViewButton">Anzeigen</String>
-                <String Id="ViewErrorsButton">Konfigurationsprobleme anzeigen</String>
                 <String Id="ViewLogButton">Protokoll anzeigen</String>
                     <!-- propertyGroups -->
                 <String Id="Group_AgentTunnel">Agent Tunnel</String>
