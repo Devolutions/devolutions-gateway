@@ -110,10 +110,18 @@ Supported accounts:
 `LocalSystem` and `NT AUTHORITY\LocalService` are rejected.
 
 The installer grants the account the *Log on as a service* right and read/write access to `%ProgramData%\Devolutions\Gateway`.
-It also grants access to the configured system-store certificate's private key, including when an upgrade preserves the configuration.
+It grants access to a system-store certificate's private key only when `TlsCertificateStoreLocation` is explicitly `LocalMachine`, including for retained configuration.
 An explicit deny policy still takes precedence.
 Configure access to externally stored keys, custom user databases, logs, recordings, and remote resources separately.
 Changing the service account does not revoke earlier grants on shared certificate keys or remove previously assigned logon rights.
+
+An omitted or `null` certificate-store location means `CurrentUser` at runtime; the installer must not substitute `LocalMachine` or inspect its own SYSTEM profile.
+When the existing service and selected account resolve to the same SID and no reconfiguration is requested, setup leaves retained `CurrentUser` or `CurrentService` configuration and private-key ACLs unchanged and unmanaged.
+Setup logs that it skips certificate discovery, permission grants, and runtime access verification for these stores.
+This does not establish certificate or runtime availability.
+An identity change, missing service, or requested reconfiguration with retained non-machine-store configuration is rejected before the installation is modified; migrate to explicit `LocalMachine` or external certificate/key files first.
+Setup also aborts if configuration approved for retention changes or is removed after validation.
+New wizard selections of `CurrentUser` are rejected because the interactive administrator's profile is not the service's profile.
 
 Upgrades preserve the existing account unless another is specified.
 The existing MSI upgrade sequence recreates the service: password-based accounts therefore require the password again, supplied directly or through `Install-DGatewayPackage -ServiceCredential`.
