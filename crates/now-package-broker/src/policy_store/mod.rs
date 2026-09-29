@@ -484,7 +484,9 @@ impl PolicyStore {
                 );
                 let (_, current) = self.observe_storage(false);
                 let audit_path = current.canonical_path.clone();
-                let management = self.publish_external_observation(current);
+                // This request already made its own content live, so the reobserved difference is this
+                // write and not an external change. The terminal event reports the failed activation.
+                let management = self.publish_observation(current);
                 audit.failed_at(operation, &audit_path, crate::audit::FailureReason::ActivationFailed);
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
@@ -716,6 +718,7 @@ struct TestStorage {
     fail_target_retention: std::sync::atomic::AtomicBool,
     race_before_persist: parking_lot::Mutex<Option<PolicyDocument>>,
     post_persist_capability: parking_lot::Mutex<Option<(PolicyWriteCapability, Option<PolicyReadOnlyReason>)>>,
+    fail_after_publication: std::sync::atomic::AtomicBool,
     persisted_configured_paths: parking_lot::Mutex<Vec<PathBuf>>,
 }
 
@@ -729,6 +732,7 @@ impl TestStorage {
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
+            fail_after_publication: std::sync::atomic::AtomicBool::new(false),
             persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
         }
     }
@@ -741,6 +745,7 @@ impl TestStorage {
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
+            fail_after_publication: std::sync::atomic::AtomicBool::new(false),
             persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
         }
     }
@@ -751,6 +756,12 @@ impl TestStorage {
 
     fn race_before_next_persist(&self, policy: PolicyDocument) {
         *self.race_before_persist.lock() = Some(policy);
+    }
+
+    /// Makes the next `persist` report activation failure after the content was published.
+    fn fail_after_next_publication(&self) {
+        self.fail_after_publication
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -837,6 +848,14 @@ impl TestStorage {
             next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 2);
         }
         *self.observation.lock() = clone_observation(&next);
+        if self
+            .fail_after_publication
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(WriteFailure::PostPublication(anyhow::anyhow!(
+                "injected post-publication activation failure"
+            )));
+        }
         Ok(PersistedPolicy {
             policy,
             fingerprint: next.fingerprint,
@@ -1173,6 +1192,58 @@ mod storage_tests {
                 .fields
                 .iter()
                 .any(|(name, value)| name == "outcome" && value == "stale_conflict")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_publication_failure_is_not_audited_as_an_external_change() {
+        crate::audit::tests::take_events();
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let (audit, recorder) = recording_audit();
+        storage.fail_after_next_publication();
+
+        let error = store
+            .replace(request, audit)
+            .await
+            .expect_err("authoritative reload fails");
+
+        assert_eq!(error.code, ErrorCode::PolicyActivationFailed);
+        // This request published its own content, so the reobserved difference is not an external change.
+        assert!(crate::audit::tests::take_events().is_empty());
+        assert_eq!(
+            recorder
+                .events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>(),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_FAILED)
+            ]
+        );
+        assert!(
+            recorder.events()[1]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "activation_failed")
+        );
+        assert_eq!(
+            store
+                .active_policy()
+                .expect("published policy is active")
+                .metadata
+                .revision,
+            2
+        );
+        assert_eq!(
+            error.management.expect("management snapshot").state,
+            PolicyManagementState::Active
         );
     }
 
