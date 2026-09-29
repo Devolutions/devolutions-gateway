@@ -74,6 +74,7 @@ Describe 'Gateway lifecycle under <Kind>' -ForEach @($Lab.Accounts | ForEach-Obj
         $properties = @{}
         if ($Credential) { $properties['P.SERVICEPASSWORD'] = $Credential.GetNetworkCredential().Password }
         if ($Lab.AgentExecutable -and -not $Credential) {
+            $allowUnsigned = $Lab.NextMsi.Signature -ne 'Valid'
             $agent = Start-GatewayLabAgent -Executable $Lab.AgentExecutable -Directory "$script:caseDirectory\agent-trust" -Target $Lab.NextMsi
             try {
                 $service = Wait-GatewayLabService Running
@@ -81,13 +82,19 @@ Describe 'Gateway lifecycle under <Kind>' -ForEach @($Lab.Accounts | ForEach-Obj
                 $access.UpdateCommandWritable | Should -BeTrue
                 $access.UpdateStatusReadable | Should -BeTrue
                 $access.UpdateStatusWritable | Should -BeFalse
-                Invoke-GatewayLabAgentUpdate -Agent $agent -ExpectedError '*signature*' | Out-Null
-                (Get-GatewayLabState).ConfigHash | Should -Be $script:configHash
+                if ($allowUnsigned) {
+                    Invoke-GatewayLabAgentUpdate -Agent $agent -ExpectedError '*signature*' | Out-Null
+                    (Get-GatewayLabState).ConfigHash | Should -Be $script:configHash
+                } else {
+                    Invoke-GatewayLabAgentUpdate -Agent $agent -ExpectedVersion "20$($Lab.NextMsi.ProductVersion)" | Out-Null
+                }
             } finally { Stop-GatewayLabAgent $agent }
-            $agent = Start-GatewayLabAgent -Executable $Lab.AgentExecutable -Directory "$script:caseDirectory\agent-upgrade" -Target $Lab.NextMsi -AllowUnsigned
-            try {
-                Invoke-GatewayLabAgentUpdate -Agent $agent -ExpectedVersion "20$($Lab.NextMsi.ProductVersion)" | Out-Null
-            } finally { Stop-GatewayLabAgent $agent }
+            if ($allowUnsigned) {
+                $agent = Start-GatewayLabAgent -Executable $Lab.AgentExecutable -Directory "$script:caseDirectory\agent-upgrade" -Target $Lab.NextMsi -AllowUnsigned
+                try {
+                    Invoke-GatewayLabAgentUpdate -Agent $agent -ExpectedVersion "20$($Lab.NextMsi.ProductVersion)" | Out-Null
+                } finally { Stop-GatewayLabAgent $agent }
+            }
         } else {
             Invoke-GatewayLabMsi -Msi $Lab.NextMsi -LogPath "$script:caseDirectory\upgrade.log" -Properties $properties | Should -Be 0
         }

@@ -325,6 +325,9 @@ function Protect-GatewayLabArtifacts {
 
 function Remove-GatewayLabAccounts {
     param([Parameter(Mandatory)] $Lab)
+    if (Test-GatewayLabRecoveryRequired) {
+        throw 'MSI state is uncertain or requires a reboot; retaining test accounts for recovery'
+    }
     if ((Get-GatewayLabState).Service) { throw 'Gateway is still installed; retaining its test accounts for recovery' }
     for ($index = $Lab.Resources.Count - 1; $index -ge 0; $index--) {
         $resource = $Lab.Resources[$index]

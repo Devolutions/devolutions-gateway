@@ -47,3 +47,29 @@ Describe 'Rollback source isolation' {
             Should -Throw '*must not exist*'
     }
 }
+
+Describe 'Account fixture recovery guard' {
+    It 'retains fixtures before attempting any account, rights, or AD cleanup' {
+        InModuleScope GatewayLab {
+            Mock Test-GatewayLabRecoveryRequired { $true }
+            Mock Get-GatewayLabState { [pscustomobject]@{ Service = $null } }
+            Mock Save-GatewayLabManifest {}
+            $resource = [pscustomobject]@{ CleanupAttempts = 0 }
+            # Fail before any native cleanup even if the recovery guard regresses.
+            $resource | Add-Member -MemberType ScriptProperty -Name Type -Value {
+                $this.CleanupAttempts++
+                throw 'Fixture cleanup must not be attempted'
+            }
+            $resources = [Collections.Generic.List[object]]::new()
+            $resources.Add($resource)
+            $lab = @{ Resources = $resources }
+
+            { Remove-GatewayLabAccounts $lab } | Should -Throw '*retaining test accounts for recovery*'
+
+            $resource.CleanupAttempts | Should -Be 0
+            $resources.Count | Should -Be 1
+            Should -Invoke Get-GatewayLabState -Times 0 -Exactly
+            Should -Invoke Save-GatewayLabManifest -Times 0 -Exactly
+        }
+    }
+}
