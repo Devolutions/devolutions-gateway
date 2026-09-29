@@ -1,7 +1,7 @@
 param([hashtable] $Lab)
 
 BeforeAll {
-    Import-Module "$PSScriptRoot\..\..\src\windows-installer\GatewayLab.psm1" -Force
+    Import-Module "$PSScriptRoot\..\src\GatewayLab.psm1" -Force
     $script:target = $Lab.Accounts | Where-Object Kind -eq 'Local' | Select-Object -First 1
     if (-not $script:target) { throw 'Certificate migration requires the Local account fixture' }
 }

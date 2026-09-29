@@ -1,7 +1,7 @@
 param([hashtable] $Lab)
 
 BeforeAll {
-    Import-Module "$PSScriptRoot\..\..\src\windows-installer\GatewayLab.psm1" -Force
+    Import-Module "$PSScriptRoot\..\src\GatewayLab.psm1" -Force
     $Lab.RecoveryFailed = $false
 
     function Get-RollbackSnapshot {

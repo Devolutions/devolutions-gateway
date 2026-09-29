@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 if ($TestCertificateMigration -and 'Local' -notin $AccountKinds) {
     throw 'TestCertificateMigration requires the Local account fixture'
 }
-Import-Module "$PSScriptRoot\..\testsuite\src\windows-installer\GatewayLab.psm1" -Force
+Import-Module "$PSScriptRoot\src\GatewayLab.psm1" -Force
 $first = Get-GatewayLabMsi $Msi
 $next = Get-GatewayLabMsi $NextMsi
 if ($first.UpgradeCode -ne $next.UpgradeCode) { throw 'The MSI UpgradeCode values differ' }
@@ -86,9 +86,9 @@ try {
     Save-GatewayLabManifest $lab
     foreach ($reason in $lab.Blocked) { Write-Warning "Blocked scenario: $reason" }
     $testFile = if ($TestRollback) { 'Rollback.Tests.ps1' } else { 'ServiceAccounts.Tests.ps1' }
-    $container = New-PesterContainer -Path "$PSScriptRoot\..\testsuite\tests\windows-installer\$testFile" -Data @{ Lab = $lab }
+    $container = New-PesterContainer -Path "$PSScriptRoot\tests\$testFile" -Data @{ Lab = $lab }
     if ($TestCertificateMigration) {
-        $container = @($container) + @(New-PesterContainer -Path "$PSScriptRoot\..\testsuite\tests\windows-installer\CertificateMigration.Tests.ps1" -Data @{ Lab = $lab })
+        $container = @($container) + @(New-PesterContainer -Path "$PSScriptRoot\tests\CertificateMigration.Tests.ps1" -Data @{ Lab = $lab })
     }
     $configuration = New-PesterConfiguration
     $configuration.Run.Container = $container
