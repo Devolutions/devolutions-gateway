@@ -1,6 +1,6 @@
 use core::fmt;
 use std::cmp;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
 use std::pin::pin;
 use std::sync::Arc;
@@ -42,10 +42,30 @@ struct JrecManifest {
     start_time: i64,
     duration: i64,
     files: Vec<JrecFile>,
-    /// Non-recording artifacts grouped by kind. Each list is append-only, like `files`: names are
-    /// derived from positions. Keys stay strings so kinds written by a newer Gateway survive a rewrite.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    artifacts: BTreeMap<String, Vec<JrecArtifact>>,
+    #[serde(default, skip_serializing_if = "JrecArtifacts::is_empty")]
+    artifacts: JrecArtifacts,
+}
+
+/// Non-recording artifacts, one list per [`ArtifactKind`]. Each list is append-only, like `files`: names
+/// are derived from positions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct JrecArtifacts {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ai_analysis: Vec<JrecArtifact>,
+}
+
+impl JrecArtifacts {
+    fn is_empty(&self) -> bool {
+        let Self { ai_analysis } = self;
+        ai_analysis.is_empty()
+    }
+
+    fn of_kind_mut(&mut self, kind: ArtifactKind) -> &mut Vec<JrecArtifact> {
+        match kind {
+            ArtifactKind::AiAnalysis => &mut self.ai_analysis,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -667,7 +687,7 @@ impl RecordingManagerTask {
                 start_time: 0,
                 duration: 0,
                 files: Vec::new(),
-                artifacts: BTreeMap::new(),
+                artifacts: JrecArtifacts::default(),
             }
         };
 
@@ -689,7 +709,7 @@ impl RecordingManagerTask {
                 (file_name, index)
             }
             PushKind::Artifact(artifact_kind) => {
-                let artifacts = manifest.artifacts.entry(artifact_kind.as_str().to_owned()).or_default();
+                let artifacts = manifest.artifacts.of_kind_mut(artifact_kind);
                 let index = artifacts.len();
                 let file_name = format!("{}-{index}.{extension}", artifact_kind.as_str());
                 artifacts.push(JrecArtifact {
@@ -1601,22 +1621,6 @@ mod tests {
             .collect();
         assert_eq!(file_names, [json!("recording-0.webm"), json!("recording-1.webm")]);
         assert_eq!(manifest["artifacts"], expected_artifacts);
-    }
-
-    #[tokio::test]
-    async fn unknown_artifact_kinds_survive_a_rewrite() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        let mut manifest: serde_json::Value = serde_json::from_str(MASTER_MANIFEST).expect("manifest");
-        manifest["artifacts"] = json!({ "future-kind": [{ "fileName": "future-kind-0.bin" }] });
-        harness.write_manifest(id, &manifest.to_string());
-
-        harness.push(id, webm()).await;
-
-        assert_eq!(
-            harness.read_manifest(id)["artifacts"],
-            json!({ "future-kind": [{ "fileName": "future-kind-0.bin" }] })
-        );
     }
 
     #[test]

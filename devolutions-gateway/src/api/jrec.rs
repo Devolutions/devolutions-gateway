@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Seek as _, Write as _};
 use std::net::SocketAddr;
@@ -644,7 +643,21 @@ where
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
     #[serde(default)]
-    artifacts: BTreeMap<String, Vec<RecordingZipManifestFile>>,
+    artifacts: RecordingZipManifestArtifacts,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct RecordingZipManifestArtifacts {
+    #[serde(default)]
+    ai_analysis: Vec<RecordingZipManifestFile>,
+}
+
+impl RecordingZipManifestArtifacts {
+    fn into_files(self) -> Vec<RecordingZipManifestFile> {
+        let Self { ai_analysis } = self;
+        ai_analysis
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -707,13 +720,9 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let artifact_count = manifest.artifacts.values().map(Vec::len).sum::<usize>();
-    let mut artifact_names = Vec::with_capacity(manifest.files.len() + artifact_count);
-    for file in manifest
-        .files
-        .into_iter()
-        .chain(manifest.artifacts.into_values().flatten())
-    {
+    let artifacts = manifest.artifacts.into_files();
+    let mut artifact_names = Vec::with_capacity(manifest.files.len() + artifacts.len());
+    for file in manifest.files.into_iter().chain(artifacts) {
         if !is_safe_recording_file_name(&file.file_name) {
             warn!(
                 file_name = %file.file_name,
