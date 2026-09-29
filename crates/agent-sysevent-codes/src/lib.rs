@@ -83,10 +83,10 @@ pub fn user_session_process_terminated(session_id: u32, exit_code: i32, by: impl
         .field("by", by) // "user","service","timeout"
 }
 
-// 6010-6019 **Updater**
+// 6100-6199 **Updater**
 
-pub const UPDATER_TASK_ENABLED: u32 = 6010;
-pub const UPDATER_ERROR: u32 = 6011;
+pub const UPDATER_TASK_ENABLED: u32 = 6100;
+pub const UPDATER_ERROR: u32 = 6101;
 
 pub fn updater_task_enabled() -> Entry {
     Entry::new("Updater task enabled")
@@ -102,9 +102,9 @@ pub fn updater_error(step: impl ToString, error: impl std::fmt::Display) -> Entr
         .field("error_chain", format!("{error:#}"))
 }
 
-// 6020-6029 **PEDM**
+// 6200-6299 **PEDM**
 
-pub const PEDM_ENABLED: u32 = 6020;
+pub const PEDM_ENABLED: u32 = 6200;
 
 pub fn pedm_enabled() -> Entry {
     Entry::new("PEDM enabled")

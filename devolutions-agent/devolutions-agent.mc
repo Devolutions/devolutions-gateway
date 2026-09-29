@@ -111,9 +111,9 @@ Language=German
 Benutzersitzungsprozess beendet. Kontext=%1 SessionId=%2 ExitCode=%3 Durch=%4
 .
 
-; 6010-6019 Updater
+; 6100-6199 Updater
 
-MessageId=6010
+MessageId=6100
 SymbolicName=UPDATER_TASK_ENABLED
 Language=English
 Updater task enabled. Context=%1
@@ -125,7 +125,7 @@ Language=German
 Update-Aufgabe aktiviert. Kontext=%1
 .
 
-MessageId=6011
+MessageId=6101
 SymbolicName=UPDATER_ERROR
 Language=English
 Updater error. Context=%1 Step=%2 Error=%3
@@ -137,9 +137,9 @@ Language=German
 Update-Fehler. Kontext=%1 Schritt=%2 Fehler=%3
 .
 
-; 6020-6029 PEDM
+; 6200-6299 PEDM
 
-MessageId=6020
+MessageId=6200
 SymbolicName=PEDM_ENABLED
 Language=English
 PEDM enabled. Context=%1
