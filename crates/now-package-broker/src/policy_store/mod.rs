@@ -486,9 +486,16 @@ impl PolicyStore {
                 );
                 let (_, current) = self.observe_storage(false);
                 let audit_path = current.canonical_path.clone();
-                // This request already made its own content live, so the reobserved difference is this
-                // write and not an external change. The terminal event reports the failed activation.
-                let management = self.publish_observation(current);
+                // The publication is this request's own content, so a difference the reload reports
+                // afterwards is this write rather than an external change -- but only while the
+                // storage still holds the document this request committed. An administrator may
+                // replace the policy between publication and this re-observation, and that
+                // replacement must be audited as an external change instead of being absorbed.
+                let management = if holds_published_document(&current, &policy) {
+                    self.publish_observation(current)
+                } else {
+                    self.publish_external_observation(current)
+                };
                 audit.failed_at(operation, &audit_path, crate::audit::FailureReason::ActivationFailed);
                 return Err(error_with_management(
                     ErrorCode::PolicyActivationFailed,
@@ -707,6 +714,21 @@ fn error_with_management(
     response
 }
 
+/// Whether a re-observed storage state still holds the document a request just published.
+///
+/// Documents never compare equal by identity alone: an administrator can write a modified document
+/// that keeps the publication's id and revision, so both sides are compared as serialized values,
+/// exactly as the authoritative reload the storage performs after its own write.
+fn holds_published_document(observation: &Observation, published: &PolicyDocument) -> bool {
+    let Some(current) = observation.policy.as_ref() else {
+        return false;
+    };
+    match (serde_json::to_value(current), serde_json::to_value(published)) {
+        (Ok(current), Ok(published)) => current == published,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 fn observe_file(source: PolicyConfigurationSource, path: &Path) -> Observation {
     windows::observe(source, path, &windows::AtomicityProbeCache::new())
@@ -719,6 +741,7 @@ struct TestStorage {
     fail_concurrent_check: std::sync::atomic::AtomicBool,
     fail_target_retention: std::sync::atomic::AtomicBool,
     race_before_persist: parking_lot::Mutex<Option<PolicyDocument>>,
+    race_after_persist: parking_lot::Mutex<Option<Observation>>,
     post_persist_capability: parking_lot::Mutex<Option<(PolicyWriteCapability, Option<PolicyReadOnlyReason>)>>,
     fail_after_publication: std::sync::atomic::AtomicBool,
     persisted_configured_paths: parking_lot::Mutex<Vec<PathBuf>>,
@@ -733,6 +756,7 @@ impl TestStorage {
             fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
+            race_after_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
             fail_after_publication: std::sync::atomic::AtomicBool::new(false),
             persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
@@ -746,6 +770,7 @@ impl TestStorage {
             fail_concurrent_check: std::sync::atomic::AtomicBool::new(false),
             fail_target_retention: std::sync::atomic::AtomicBool::new(false),
             race_before_persist: parking_lot::Mutex::new(None),
+            race_after_persist: parking_lot::Mutex::new(None),
             post_persist_capability: parking_lot::Mutex::new(None),
             fail_after_publication: std::sync::atomic::AtomicBool::new(false),
             persisted_configured_paths: parking_lot::Mutex::new(Vec::new()),
@@ -758,6 +783,13 @@ impl TestStorage {
 
     fn race_before_next_persist(&self, policy: PolicyDocument) {
         *self.race_before_persist.lock() = Some(policy);
+    }
+
+    /// Makes the next `persist` publish the request's content, then replace it on disk with
+    /// `replacement` and report activation failure -- an administrator writing the file in the
+    /// window between publication and the authoritative reload.
+    fn race_after_next_publication(&self, replacement: Observation) {
+        *self.race_after_persist.lock() = Some(replacement);
     }
 
     /// Makes the next `persist` report activation failure after the content was published.
@@ -850,6 +882,12 @@ impl TestStorage {
             next.fingerprint = DiskFingerprint::test_active(bytes, 2, 1, 1, 2);
         }
         *self.observation.lock() = clone_observation(&next);
+        if let Some(replacement) = self.race_after_persist.lock().take() {
+            *self.observation.lock() = replacement;
+            return Err(WriteFailure::PostPublication(anyhow::anyhow!(
+                "injected external policy replacement after publication"
+            )));
+        }
         if self
             .fail_after_publication
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -1246,6 +1284,104 @@ mod storage_tests {
         assert_eq!(
             error.management.expect("management snapshot").state,
             PolicyManagementState::Active
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_publication_external_replacement_is_audited() {
+        crate::audit::tests::take_events();
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let (audit, recorder) = recording_audit();
+        storage.race_after_next_publication(test_observation(Some(policy("external", 7)), false, 9));
+
+        let error = store
+            .replace(request, audit)
+            .await
+            .expect_err("the reload observed a replacement");
+
+        assert_eq!(error.code, ErrorCode::PolicyActivationFailed);
+        // The storage no longer holds the committed document, so the replacement is an external
+        // change: it must be audited and served, not absorbed into this request.
+        let active = store.active_policy().expect("external policy is active");
+        assert_eq!(active.metadata.id.0, "external");
+        assert_eq!(active.metadata.revision, 7);
+        assert_eq!(
+            crate::audit::tests::take_events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>(),
+            [Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_APPLIED)]
+        );
+        assert_eq!(
+            recorder
+                .events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>(),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_FAILED)
+            ]
+        );
+        assert!(
+            recorder.events()[1]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "activation_failed")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_publication_external_removal_is_audited() {
+        crate::audit::tests::take_events();
+        let storage = Arc::new(TestStorage::new(Some(policy("current", 1))));
+        let store = PolicyStore::load_with_storage(
+            Some(PathBuf::from(r"C:\policy.json")),
+            Arc::clone(&storage) as Arc<dyn PolicyStorage>,
+            Monitoring::Available,
+        );
+        let request = update_request(&store);
+        let (audit, recorder) = recording_audit();
+        storage.race_after_next_publication(test_observation(None, false, 9));
+
+        let error = store
+            .replace(request, audit)
+            .await
+            .expect_err("the reload observed a removal");
+
+        assert_eq!(error.code, ErrorCode::PolicyActivationFailed);
+        assert!(
+            store.active_policy().is_none(),
+            "a removed external policy is not published"
+        );
+        let events = crate::audit::tests::take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_code,
+            Some(agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED)
+        );
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(name, value)| name == "reason" && value == "missing")
+        );
+        assert_eq!(
+            recorder
+                .events()
+                .iter()
+                .map(|entry| entry.event_code)
+                .collect::<Vec<_>>(),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CHANGE_FAILED)
+            ]
         );
     }
 

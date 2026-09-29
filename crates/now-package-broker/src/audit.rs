@@ -117,8 +117,8 @@ enum EntryClass {
     /// A write attempt or a denial. Recorded from unauthenticated requests, so it may be dropped
     /// when the sink saturates.
     Admission,
-    /// The terminal outcome of a policy write, or the observation of an external change. Never
-    /// dropped while the reserved capacity lasts.
+    /// The terminal outcome of a policy write, or the observation of an external change. It does
+    /// not consume the admission budget, so only a full queue or a gone worker can refuse it.
     Outcome,
 }
 
@@ -153,8 +153,9 @@ impl QueueRefusal {
 }
 
 trait AuditRecorder: Send + Sync {
-    /// Records one entry of `class`. Only [`EntryClass::Admission`] entries may be dropped, and only
-    /// when their budget or the queue is full.
+    /// Records one entry of `class`. Admission is best-effort for both classes: an
+    /// [`EntryClass::Admission`] entry is refused once admissions fill their budget, and either
+    /// class is refused while the shared queue is full or its worker is gone.
     fn record(&self, entry: Entry, class: EntryClass);
 
     /// Stops accepting entries and waits for the accepted ones to be emitted.
@@ -202,8 +203,8 @@ struct SystemRecorder {
 ///
 /// Every entry shares one bounded queue, so entries reach the sink in the order they were recorded
 /// and an accepted write's attempt precedes its terminal outcome. Write attempts and denials are
-/// refused once they occupy [`EVENT_LOG_ADMISSION_BUDGET`] slots, which keeps
-/// [`EVENT_LOG_OUTCOME_RESERVE`] slots available for outcomes and external changes.
+/// refused once they occupy [`EVENT_LOG_ADMISSION_BUDGET`] slots, so a flood of unauthenticated
+/// attempts cannot fill the queue and starve outcomes and external changes.
 #[cfg(any(test, not(debug_assertions)))]
 struct EventLogQueue {
     /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
