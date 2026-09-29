@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(all(not(test), not(debug_assertions)))]
 use std::sync::atomic::AtomicU64;
-#[cfg(any(test, not(debug_assertions)))]
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use agent_sysevent_codes as policy_events;
 use now_policy_api::{PolicyManagementState, PolicyReplacementOperation};
@@ -41,20 +39,78 @@ const EVENT_LOG_ADMISSION_BUDGET: usize = 256;
 #[cfg(any(test, not(debug_assertions)))]
 const EVENT_LOG_QUEUE_CAPACITY: usize = EVENT_LOG_ADMISSION_BUDGET + EVENT_LOG_OUTCOME_RESERVE;
 
+/// How long the shutdown waits for the accepted entries to reach the Event Log sink.
+///
+/// The worker is a plain thread, so a sink that stopped making progress would otherwise hold the
+/// shutdown until the agent stops the process. Entries still queued when this expires stay in the
+/// queue, and the worker keeps emitting them for as long as the process lives.
+#[cfg(any(test, not(debug_assertions)))]
+const EVENT_LOG_FLUSH_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How often flushing re-checks the queue, which the worker empties without signalling completion.
+#[cfg(any(test, not(debug_assertions)))]
+const EVENT_LOG_FLUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
 static RECORDER: std::sync::OnceLock<Arc<dyn AuditRecorder>> = std::sync::OnceLock::new();
+
+/// Connections that may still record a policy audit event.
+static AUDIT_PRODUCERS: AtomicUsize = AtomicUsize::new(0);
 
 /// The process-wide recorder, started on the first policy audit event.
 fn recorder() -> &'static Arc<dyn AuditRecorder> {
     RECORDER.get_or_init(default_recorder)
 }
 
+/// Held by a connection for as long as it may record a terminal policy audit event.
+///
+/// Serving a connection can commit a policy and record its outcome, and that work is synchronous,
+/// so the shutdown can give up on a connection that is still inside it. Holding a lease for the
+/// lifetime of the connection keeps [`drain`] from closing the queue under it.
+pub(crate) struct AuditLease(&'static AtomicUsize);
+
+impl AuditLease {
+    /// Marks the caller as able to record until the returned lease is dropped.
+    #[must_use]
+    pub(crate) fn acquire() -> Self {
+        Self::acquire_on(&AUDIT_PRODUCERS)
+    }
+
+    fn acquire_on(counter: &'static AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::AcqRel);
+        Self(counter)
+    }
+}
+
+impl Drop for AuditLease {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Stops accepting policy audit events and waits for the ones already accepted to reach the sink.
 ///
 /// The recorder lives in a process-lifetime static, so its worker is otherwise killed with whatever
 /// it is still holding when the process exits.
+///
+/// A connection that can still record an event keeps the queue open: closing it would reject the
+/// terminal event of a policy write that is still finishing, so the queue is flushed and left
+/// accepting for as long as the process lives instead.
 pub(crate) fn drain() {
     if let Some(recorder) = RECORDER.get() {
+        shutdown(recorder.as_ref(), AUDIT_PRODUCERS.load(Ordering::Acquire));
+    }
+}
+
+/// Closes the queue, unless a connection that can still record into it is alive.
+fn shutdown(recorder: &dyn AuditRecorder, producers: usize) {
+    if producers == 0 {
         recorder.drain();
+    } else {
+        tracing::warn!(
+            producers,
+            "Named pipe connections are still running blocking work; flushing the policy audit queue without closing it"
+        );
+        recorder.flush();
     }
 }
 
@@ -160,6 +216,12 @@ trait AuditRecorder: Send + Sync {
 
     /// Stops accepting entries and waits for the accepted ones to be emitted.
     fn drain(&self) {}
+
+    /// Waits for the accepted entries to be emitted, without closing the queue.
+    ///
+    /// Used instead of [`Self::drain`] while a connection that can still record is alive, so its
+    /// terminal event is emitted rather than rejected.
+    fn flush(&self) {}
 }
 
 fn default_recorder() -> Arc<dyn AuditRecorder> {
@@ -211,6 +273,8 @@ struct EventLogQueue {
     sender: Option<std::sync::mpsc::SyncSender<(Entry, EntryClass)>>,
     /// Write attempts and denials still queued, shared with the worker that dequeues them.
     admission_pending: Arc<AtomicUsize>,
+    /// Entries accepted but not yet emitted, shared with the worker that emits them.
+    pending: Arc<AtomicUsize>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -219,14 +283,17 @@ impl EventLogQueue {
     fn start(emit: impl FnMut(Entry) + Send + 'static) -> std::io::Result<Self> {
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_LOG_QUEUE_CAPACITY);
         let admission_pending = Arc::new(AtomicUsize::new(0));
+        let pending = Arc::new(AtomicUsize::new(0));
         let queued = Arc::clone(&admission_pending);
+        let outstanding = Arc::clone(&pending);
         let worker = std::thread::Builder::new()
             .name("policy-audit-event-log".to_owned())
-            .spawn(move || event_log_worker(&receiver, &queued, emit))?;
+            .spawn(move || event_log_worker(&receiver, &queued, &outstanding, emit))?;
 
         Ok(Self {
             sender: Some(sender),
             admission_pending,
+            pending,
             worker: Some(worker),
         })
     }
@@ -244,9 +311,12 @@ impl EventLogQueue {
                 return Err(QueueRefusal::Full);
             }
         }
+        // Claim the entry before sending, so the worker cannot emit it before a flush counts it.
+        self.pending.fetch_add(1, Ordering::AcqRel);
         match sender.try_send((entry, class)) {
             Ok(()) => Ok(()),
             Err(error) => {
+                self.pending.fetch_sub(1, Ordering::AcqRel);
                 if class == EntryClass::Admission {
                     // The entry never entered the queue, so its claimed slot is free again.
                     self.admission_pending.fetch_sub(1, Ordering::Relaxed);
@@ -302,6 +372,13 @@ impl AuditRecorder for SystemRecorder {
         // The lock keeps a concurrent `record` from queueing an entry the closed queue would drop.
         self.queue.lock().drain();
     }
+
+    fn flush(&self) {
+        // The pending count is read outside the lock, so a connection that is finishing its policy
+        // write can still record its terminal event while the worker catches up.
+        let pending = Arc::clone(&self.queue.lock().pending);
+        wait_for_emission(&pending, EVENT_LOG_FLUSH_GRACE);
+    }
 }
 
 #[cfg(not(test))]
@@ -340,6 +417,7 @@ fn event_log_emitter() -> impl FnMut(Entry) + Send + 'static {
 fn event_log_worker(
     receiver: &std::sync::mpsc::Receiver<(Entry, EntryClass)>,
     admission_pending: &AtomicUsize,
+    pending: &AtomicUsize,
     mut emit: impl FnMut(Entry),
 ) {
     while let Ok((entry, class)) = receiver.recv() {
@@ -348,6 +426,33 @@ fn event_log_worker(
             admission_pending.fetch_sub(1, Ordering::Relaxed);
         }
         emit(entry);
+        // Counted as emitted only after the sink call, so flushing cannot miss an entry being
+        // emitted: it is still counted before and after the call.
+        pending.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Waits, at most for `grace`, until every accepted entry has been emitted.
+///
+/// The worker empties the queue without signalling completion, so this polls the count it
+/// decrements. A sink that stopped making progress would otherwise hold the shutdown
+/// indefinitely, so giving up is logged rather than waited out.
+#[cfg(any(test, not(debug_assertions)))]
+fn wait_for_emission(pending: &AtomicUsize, grace: std::time::Duration) {
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        let queued = pending.load(Ordering::Acquire);
+        if queued == 0 {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                queued,
+                "Windows Event Log policy audit entries are still pending; the agent is stopping without waiting for them"
+            );
+            return;
+        }
+        std::thread::sleep(EVENT_LOG_FLUSH_POLL_INTERVAL);
     }
 }
 
@@ -657,6 +762,22 @@ pub(crate) mod tests {
         fn record(&self, _: Entry, _: EntryClass) {}
     }
 
+    /// Records which shutdown the recorder was asked for.
+    #[derive(Default)]
+    struct ShutdownRecorder(parking_lot::Mutex<Vec<&'static str>>);
+
+    impl AuditRecorder for ShutdownRecorder {
+        fn record(&self, _: Entry, _: EntryClass) {}
+
+        fn drain(&self) {
+            self.0.lock().push("drain");
+        }
+
+        fn flush(&self) {
+            self.0.lock().push("flush");
+        }
+    }
+
     fn test_audit() -> (WriteAudit, Arc<Recorder>) {
         let sid = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
         begin(&sid, Path::new(r"C:\client.exe"), Path::new(r"C:\policy.json"))
@@ -908,5 +1029,94 @@ pub(crate) mod tests {
             succeeded.succeeded_at(Path::new(r"C:\policy.json"), None, None, "new", 1, operation, true);
             assert_eq!(succeeded_recorder.events()[1].event_code, Some(success_code));
         }
+    }
+
+    #[test]
+    fn a_lease_holds_the_recorder_open_until_the_last_one_is_dropped() {
+        static PRODUCERS: AtomicUsize = AtomicUsize::new(0);
+
+        let lease = AuditLease::acquire_on(&PRODUCERS);
+        assert_eq!(PRODUCERS.load(Ordering::Acquire), 1);
+
+        let nested = AuditLease::acquire_on(&PRODUCERS);
+        drop(lease);
+        assert_eq!(
+            PRODUCERS.load(Ordering::Acquire),
+            1,
+            "a connection can only record while it holds a lease"
+        );
+
+        drop(nested);
+        assert_eq!(PRODUCERS.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_live_producer_makes_the_shutdown_flush_instead_of_closing_the_queue() {
+        let recorder = ShutdownRecorder(parking_lot::Mutex::new(Vec::new()));
+        shutdown(&recorder, 1);
+        assert_eq!(*recorder.0.lock(), ["flush"]);
+
+        let recorder = ShutdownRecorder(parking_lot::Mutex::new(Vec::new()));
+        shutdown(&recorder, 0);
+        assert_eq!(*recorder.0.lock(), ["drain"]);
+    }
+
+    #[test]
+    fn a_flushed_queue_still_accepts_the_terminal_event_of_a_live_producer() {
+        let (emitted, received) = std::sync::mpsc::channel();
+        let mut queue = EventLogQueue::start(move |entry| {
+            let _ = emitted.send(entry);
+        })
+        .expect("the audit worker starts");
+
+        queue
+            .record(
+                Entry::new("Policy management write attempted").event_code(policy_events::POLICY_WRITE_ATTEMPTED),
+                EntryClass::Admission,
+            )
+            .expect("the attempt is accepted");
+        wait_for_emission(&queue.pending, EVENT_LOG_FLUSH_GRACE);
+        assert_eq!(
+            queue.pending.load(Ordering::Acquire),
+            0,
+            "flushing waits for every accepted entry to reach the sink"
+        );
+
+        // The connection that is still finishing its policy write records its terminal event here.
+        queue
+            .record(
+                Entry::new("Policy management change succeeded").event_code(policy_events::POLICY_CHANGE_SUCCEEDED),
+                EntryClass::Outcome,
+            )
+            .expect("a flush leaves the queue accepting");
+        queue.drain();
+
+        let codes = received.iter().map(|entry| entry.event_code).collect::<Vec<_>>();
+        assert_eq!(
+            codes,
+            [
+                Some(policy_events::POLICY_WRITE_ATTEMPTED),
+                Some(policy_events::POLICY_CHANGE_SUCCEEDED)
+            ]
+        );
+    }
+
+    #[test]
+    fn flushing_gives_up_on_a_sink_that_stopped_making_progress() {
+        let pending = AtomicUsize::new(1);
+        let started = std::time::Instant::now();
+
+        wait_for_emission(&pending, std::time::Duration::from_millis(50));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(50));
+        assert_eq!(
+            pending.load(Ordering::Acquire),
+            1,
+            "the entry stays queued for the worker"
+        );
+
+        pending.store(0, Ordering::Release);
+        let flushed = std::time::Instant::now();
+        wait_for_emission(&pending, std::time::Duration::from_secs(5));
+        assert!(flushed.elapsed() < std::time::Duration::from_secs(1));
     }
 }

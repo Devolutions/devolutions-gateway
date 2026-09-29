@@ -45,21 +45,23 @@ const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(
 /// How long shutdown waits for the connections that are still serving a request, then for the
 /// aborted ones to actually stop.
 ///
-/// Serving a connection can record a policy audit event, and the caller drains the audit queue as
-/// soon as this function returns, so nothing may still be running by then. A healthy exchange
-/// completes in milliseconds, and each connection is already bounded by `CONNECTION_DEADLINE`, so
-/// this only has to cover the tail of a request already in progress; connections still stuck at
-/// the end of it are aborted rather than allowed to hold the shutdown. The same budget then bounds
-/// the wait for those aborts to take effect, so a connection stuck in synchronous work costs the
-/// queue one grace period instead of keeping it from ever being drained.
+/// A healthy exchange completes in milliseconds, and each connection is already bounded by
+/// `CONNECTION_DEADLINE`, so this only has to cover the tail of a request already in progress;
+/// connections still stuck at the end of it are aborted rather than allowed to hold the shutdown.
+/// The same budget then bounds the wait for those aborts to take effect, so a connection stuck in
+/// synchronous work costs the shutdown one grace period. Each connection holds an audit lease for
+/// its whole lifetime, so the queued events of a connection the shutdown gave up on are flushed
+/// instead of being dropped (see [`crate::audit::AuditLease`]).
 const CONNECTION_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Start the named pipe server and accept connections until shutdown.
 pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToken) -> anyhow::Result<()> {
-    // Serving a connection can record policy audit events, and the caller drains the audit queue as
-    // soon as this function returns, so no connection may outlive it. The accept loop runs in its
-    // own function, so that every one of its exit paths, including a failure to create the next
-    // pipe instance, reaches the drain below instead of returning straight out.
+    // Serving a connection can record policy audit events, and the caller stops the audit recorder
+    // as soon as this function returns, so a connection that outlives it must be known to the
+    // recorder. Each connection holds an audit lease for as long as it can record, which keeps its
+    // terminal event from being rejected. The accept loop runs in its own function, so that every
+    // one of its exit paths, including a failure to create the next pipe instance, reaches the
+    // drain below instead of returning straight out.
     let mut connections = tokio::task::JoinSet::new();
     let result = accept_connections(&state, &shutdown, &mut connections).await;
 
@@ -102,6 +104,11 @@ async fn accept_connections(
                     Ok(()) => {
                         let state = Arc::clone(state);
                         connections.spawn(async move {
+                            // Serving this connection can commit a policy and record its terminal
+                            // event, which is blocking work the shutdown cannot interrupt, so the
+                            // lease keeps the recorder from closing the queue under that event.
+                            let _audit_lease = crate::audit::AuditLease::acquire();
+
                             let serve = async move {
                                 // Keep blocking unauthenticated capture off the accept loop and
                                 // retain the connection slot until the work actually completes.
@@ -153,10 +160,8 @@ async fn accept_connections(
 
 /// Drain the connections the accept loop spawned, then report what the loop returned.
 ///
-/// Serving a connection can record policy audit events, and the caller drains the audit queue as
-/// soon as `run_pipe_server` returns, so no accepted connection may outlive it. An accept loop that
-/// fails after accepting one has to wait for that connection too, rather than let the `?` on the
-/// failing call drop the set and run an audit recorder destructor after the queue was drained.
+/// An accept loop that fails after accepting a connection has to wait for that connection too,
+/// rather than let the `?` on the failing call drop the set and abandon a served request mid-flight.
 async fn drain_after_accept_loop(
     connections: &mut tokio::task::JoinSet<()>,
     grace: std::time::Duration,
@@ -169,11 +174,11 @@ async fn drain_after_accept_loop(
 
 /// Wait for the connection tasks to finish, then abort the ones that outlive the grace.
 ///
-/// Serving a connection can record policy audit events, so the caller drains the audit queue as
-/// soon as this returns. Waiting is bounded on both sides: a task inside synchronous work, such as
-/// authenticating a client or reading the policy storage, never reaches a cancellation point, so
-/// the settle after the abort cannot be left unbounded either. Draining the queue after
-/// interrupting one such connection is worth far more than losing every event of it, and the agent
+/// Waiting is bounded on both sides: a task inside synchronous work, such as authenticating a
+/// client or writing the policy storage, never reaches a cancellation point, so the settle after
+/// the abort cannot be left unbounded either. A connection given up on here holds an audit lease,
+/// so the recorder flushes its queued events and keeps accepting, rather than closing the queue
+/// under the terminal event of the policy write that connection is still finishing. The agent
 /// gives the whole shutdown a fixed budget before it stops the runtime.
 async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace: std::time::Duration) {
     let drained = tokio::time::timeout(grace, async { while connections.join_next().await.is_some() {} }).await;
@@ -185,7 +190,9 @@ async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace:
         let settled = tokio::time::timeout(grace, async { while connections.join_next().await.is_some() {} }).await;
 
         if settled.is_err() {
-            error!("Named pipe connections are still running blocking work; their policy audit events may be lost");
+            error!(
+                "Named pipe connections are still running blocking work; their policy audit events may not reach the Windows Event Log before the agent stops the process"
+            );
         }
     }
 }

@@ -102,7 +102,9 @@ impl Task for BrokerTask {
         info!("package broker received shutdown signal");
         shutdown.cancel();
 
-        // Wait for the writers of policy audit events to stop, so the drain below is complete.
+        // Wait for the writers of policy audit events to stop, so the drain below is complete. The
+        // pipe server reports a connection it gave up on by keeping an audit lease alive, so the
+        // queue is flushed rather than closed and its terminal event is not rejected.
         let result = match server_handle.await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(error).context("broker pipe server error"),
