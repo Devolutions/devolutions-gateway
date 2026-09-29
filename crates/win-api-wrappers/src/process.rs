@@ -23,6 +23,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::LibraryLoader::{
     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GetModuleFileNameW, GetModuleHandleExW, GetProcAddress,
+    LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
 };
 use windows::Win32::System::ProcessStatus::K32GetMappedFileNameW;
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
@@ -593,6 +594,15 @@ pub struct Module {
 }
 
 impl Module {
+    pub(crate) fn load_system(name: &str) -> windows::core::Result<Self> {
+        let name = WideString::from(name);
+
+        // SAFETY: The name is null terminated; loading is restricted to the system directory.
+        let handle = unsafe { LoadLibraryExW(name.as_pcwstr(), None, LOAD_LIBRARY_SEARCH_SYSTEM32)? };
+
+        Ok(Self { handle })
+    }
+
     pub fn from_name(name: &str) -> windows::core::Result<Self> {
         let name = WideString::from(name);
         let mut handle = HMODULE::default();
@@ -653,9 +663,7 @@ impl Module {
 
 impl Drop for Module {
     fn drop(&mut self) {
-        // SAFETY: Only constructors are GetModuleHandleExW without the GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT flag.
-        // This means the reference count is incremented, making the handle valid for at least the lifetime of the object.
-        // This also means we must free it.
+        // SAFETY: Each constructor acquires a reference to the module, which this object owns.
         let _ = unsafe { FreeLibrary(self.handle) };
     }
 }
