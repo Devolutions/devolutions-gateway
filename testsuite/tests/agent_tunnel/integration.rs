@@ -575,12 +575,12 @@ async fn gateway_jmux_rejects_explicit_agent_when_agent_tunnel_is_disabled() {
     let direct = DirectTarget::bind().await;
     let mut jmux = JmuxSession::start(&direct.addr, Some(Uuid::new_v4()), None);
 
-    jmux.open(32, &direct.addr).await;
-    let Message::OpenFailure(failure) = receive_jmux_message(&mut jmux.peer).await else {
-        panic!("expected OPEN FAILURE");
-    };
-    assert_eq!(failure.recipient_channel_id, 32);
-    assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
+    let error = tokio::time::timeout(Duration::from_secs(5), &mut jmux.proxy_task)
+        .await
+        .expect("JMUX session should be rejected immediately")
+        .expect("JMUX task panicked")
+        .expect_err("explicit agent without Agent Tunnel must reject the session");
+    assert!(format!("{error:#}").contains("agent tunnel is not enabled"));
     direct
         .assert_not_connected("explicit agent must not connect directly when Agent Tunnel is disabled")
         .await;

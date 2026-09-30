@@ -28,6 +28,13 @@ pub async fn handle(
         RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
     }
 
+    if let Some(agent_id) = claims.jet_agent_id {
+        anyhow::ensure!(
+            agent_tunnel_handle.is_some(),
+            "agent {agent_id} specified in token requires agent tunnel routing, but agent tunnel is not enabled"
+        );
+    }
+
     let (reader, writer) = tokio::io::split(stream);
     let reader = Box::new(reader) as ErasedRead;
     let writer = Box::new(writer) as ErasedWrite;
@@ -113,11 +120,9 @@ pub async fn handle(
         .with_config(config)
         .with_outgoing_traffic_event_callback(traffic_event_callback);
 
-    // An explicit agent requires the connector even without an Agent Tunnel handle: `try_route` then
-    // fails the stream instead of letting `jmux-proxy` connect directly.
-    if agent_tunnel_handle.is_some() || explicit_agent_id.is_some() {
+    if let Some(agent_tunnel_handle) = agent_tunnel_handle {
         proxy = proxy.with_target_connector_override(move |destination_url: DestinationUrl| {
-            let agent_tunnel_handle = agent_tunnel_handle.clone();
+            let agent_tunnel_handle = Arc::clone(&agent_tunnel_handle);
 
             async move {
                 let target = TargetAddr::from_components(
@@ -129,7 +134,7 @@ pub async fn handle(
                 let route_target = route_target_from_target_addr(&target);
 
                 let routed = agent_tunnel::routing::try_route(
-                    agent_tunnel_handle.as_deref(),
+                    Some(agent_tunnel_handle.as_ref()),
                     explicit_agent_id,
                     &route_target,
                     session_id,
