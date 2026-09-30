@@ -52,10 +52,16 @@ namespace Devolutions.Gateway.Client.Model
         Mistral = 3,
 
         /// <summary>
+        /// Enum Gemini for value: gemini
+        /// </summary>
+        [EnumMember(Value = "gemini")]
+        Gemini = 4,
+
+        /// <summary>
         /// Enum OpenaiCompatible for value: openai-compatible
         /// </summary>
         [EnumMember(Value = "openai-compatible")]
-        OpenaiCompatible = 4
+        OpenaiCompatible = 5
     }
 
     public static class AiProviderExtensions
@@ -73,6 +79,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "anthropic";
                 case AiProvider.Mistral:
                     return "mistral";
+                case AiProvider.Gemini:
+                    return "gemini";
                 case AiProvider.OpenaiCompatible:
                     return "openai-compatible";
                 default:
