@@ -115,7 +115,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tasks::TaskErrorResponse,
         crate::tasks::TaskErrorCode,
         crate::tasks::ai_log::AiLogParams,
-        crate::tasks::ai_log::AiProvider,
+        crate::tasks::ai::AiProvider,
         crate::tasks::ai_log::AiLogSubstate,
     )),
     modifiers(&SecurityAddon),
