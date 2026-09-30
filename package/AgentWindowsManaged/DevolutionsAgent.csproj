@@ -23,6 +23,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\DevolutionsAgent_en-us.wxl" />
     <EmbeddedResource Include="Resources\DevolutionsAgent_fr-fr.wxl" />
+    <EmbeddedResource Include="Resources\AgentDialogSide.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
