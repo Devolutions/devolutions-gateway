@@ -590,6 +590,16 @@ pub(crate) struct RetainedExecutableSecurity {
     _ancestor_handles: Vec<File>,
 }
 
+impl RetainedExecutableSecurity {
+    /// Guard that pins nothing, letting tests exercise checks performed after trusted-writer validation.
+    #[cfg(test)]
+    pub(crate) fn unchecked_for_tests() -> Self {
+        Self {
+            _ancestor_handles: Vec::new(),
+        }
+    }
+}
+
 /// Verify trusted-writer security for an already-retained executable and pin its ancestors.
 pub(crate) fn verify_retained_executable_security(
     file: &File,

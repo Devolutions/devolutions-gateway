@@ -7,13 +7,6 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Package broker for the Devolutions Agent"
 publish = false
 
-[features]
-default = []
-# Development-only feature allowing broker client signature validation to be skipped.
-# Must never be enabled for shipped builds: without it, broker client signature validation is
-# unconditionally enforced regardless of the configuration file contents.
-dev-skip-broker-signature = []
-
 [lints]
 workspace = true
 

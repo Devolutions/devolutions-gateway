@@ -1422,7 +1422,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:AGENT_POLICY_TEST_SHA) {
             throw "Agent policy tests must build the requested commit $env:AGENT_POLICY_TEST_SHA, got $actualCommit"
           }
-          cargo build --locked -p devolutions-agent --features dev-skip-broker-signature
+          cargo build --locked -p devolutions-agent
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -1452,10 +1452,6 @@ jobs:
           if ($exitCode -ne 0) {
             exit $exitCode
           }
-
-      - name: Run policy route authorization tests
-        shell: pwsh
-        run: cargo test --locked -p now-package-broker --features dev-skip-broker-signature
 
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
