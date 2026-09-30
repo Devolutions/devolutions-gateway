@@ -987,7 +987,6 @@ mod tests {
         assert!(!is_json_content_type(&headers));
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     #[tokio::test]
     async fn policy_write_routes_reject_duplicate_members_before_draft_conversion() {
         let client = PipeClient::test_with_authority(true, true).expect("create elevated test client");
@@ -1070,7 +1069,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     async fn route_json(
         state: Arc<BrokerState>,
         client: PipeClient,
@@ -1170,15 +1168,10 @@ mod tests {
 
     #[tokio::test]
     async fn shared_router_exposes_policy_management_routes() {
-        let (management_status, body_status) = if cfg!(feature = "dev-skip-broker-signature") {
-            (StatusCode::OK, StatusCode::UNSUPPORTED_MEDIA_TYPE)
-        } else {
-            (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
-        };
         for (method, uri, expected_status) in [
-            (Method::GET, "/v1/policy/management", management_status),
-            (Method::POST, "/v1/policy/validate", body_status),
-            (Method::PUT, "/v1/policy", body_status),
+            (Method::GET, "/v1/policy/management", StatusCode::OK),
+            (Method::POST, "/v1/policy/validate", StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            (Method::PUT, "/v1/policy", StatusCode::UNSUPPORTED_MEDIA_TYPE),
             (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
         ] {
             let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
@@ -1186,7 +1179,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     #[tokio::test]
     async fn management_is_authenticated_but_only_elevated_administrators_can_write() {
         let unelevated = PipeClient::test_with_authority(false, false).expect("test client");
