@@ -2,9 +2,8 @@ use core::fmt;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
-use std::pin::{Pin, pin};
+use std::pin::pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -253,7 +252,7 @@ enum RecordingManagerMessage {
         disconnected_ttl: Duration,
         channel: oneshot::Sender<Utf8PathBuf>,
     },
-    NewArtifactPath {
+    GetRecordingsPath {
         channel: oneshot::Sender<Utf8PathBuf>,
     },
     AddArtifact {
@@ -300,8 +299,8 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("file_type", file_type)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::NewArtifactPath { channel: _ } => {
-                f.debug_struct("NewArtifactPath").finish_non_exhaustive()
+            RecordingManagerMessage::GetRecordingsPath { channel: _ } => {
+                f.debug_struct("GetRecordingsPath").finish_non_exhaustive()
             }
             RecordingManagerMessage::AddArtifact {
                 id,
@@ -337,57 +336,6 @@ impl fmt::Debug for RecordingManagerMessage {
     }
 }
 
-/// Streams an artifact into the recordings folder, returned by [`RecordingMessageSender::create_artifact`].
-///
-/// Dropping it without [`ArtifactWriter::finish`] discards what was written.
-#[derive(Debug)]
-pub struct ArtifactWriter {
-    file: Option<fs::File>,
-    temp_path: Utf8PathBuf,
-    id: Uuid,
-    kind: ArtifactKind,
-    sender: RecordingMessageSender,
-}
-
-impl ArtifactWriter {
-    /// Adds the written artifact to the session manifest and returns its file name.
-    pub async fn finish(mut self) -> anyhow::Result<String> {
-        let mut file = self.file.take().expect("only taken here");
-        file.flush().await.context("flush the artifact")?;
-        // Closed first: Windows may refuse to move a file that is still open.
-        drop(file.into_std().await);
-
-        self.sender
-            .add_artifact(self.id, self.kind, self.temp_path.clone())
-            .await
-    }
-
-    fn file(&mut self) -> Pin<&mut fs::File> {
-        Pin::new(self.file.as_mut().expect("only taken by finish"))
-    }
-}
-
-impl AsyncWrite for ArtifactWriter {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
-        self.get_mut().file().poll_write(cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut().file().poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut().file().poll_shutdown(cx)
-    }
-}
-
-impl Drop for ArtifactWriter {
-    fn drop(&mut self) {
-        // After a successful finish the file was moved away, so there is nothing left to remove.
-        let _ = std::fs::remove_file(&self.temp_path);
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct RecordingMessageSender {
     channel: mpsc::Sender<RecordingManagerMessage>,
@@ -417,36 +365,24 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    /// Starts a new artifact of `kind` for the session; it is listed in the manifest only once
-    /// [`ArtifactWriter::finish`] succeeds.
-    pub async fn create_artifact(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<ArtifactWriter> {
+    pub(crate) async fn get_recordings_path(&self) -> anyhow::Result<Utf8PathBuf> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::NewArtifactPath { channel: tx })
+            .send(RecordingManagerMessage::GetRecordingsPath { channel: tx })
             .await
             .ok()
-            .context("couldn't send NewArtifactPath message")?;
-        let temp_path = rx.await.context("couldn't receive the artifact path")?;
-
-        let recordings_path = temp_path.parent().expect("a parent");
-        fs::create_dir_all(recordings_path)
-            .await
-            .with_context(|| format!("create {recordings_path}"))?;
-
-        let file = fs::File::create(&temp_path)
-            .await
-            .with_context(|| format!("create {temp_path}"))?;
-
-        Ok(ArtifactWriter {
-            file: Some(file),
-            temp_path,
-            id,
-            kind,
-            sender: self.clone(),
-        })
+            .context("couldn't send GetRecordingsPath message")?;
+        rx.await.context("couldn't receive the recordings path")
     }
 
-    async fn add_artifact(&self, id: Uuid, kind: ArtifactKind, source: Utf8PathBuf) -> anyhow::Result<String> {
+    /// Moves `source`, a file in the recordings folder, into the session folder as the next artifact of `kind`,
+    /// and lists it in the manifest.
+    pub(crate) async fn add_artifact(
+        &self,
+        id: Uuid,
+        kind: ArtifactKind,
+        source: Utf8PathBuf,
+    ) -> anyhow::Result<String> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::AddArtifact {
@@ -822,7 +758,7 @@ impl RecordingManagerTask {
         };
 
         let artifacts = manifest.artifacts.of_kind_mut(kind);
-        let file_name = format!("{}-{}.{}", kind.as_str(), artifacts.len(), kind.file_type().extension());
+        let file_name = kind.file_name(artifacts.len());
 
         // The file is in place before the manifest lists it, so readers never see a dangling entry.
         let artifact_path = recording_path.join(&file_name);
@@ -968,11 +904,8 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::NewArtifactPath { channel } => {
-                        // Outside every session folder (not a session ID, so never listed), on the same volume so
-                        // `finish` can move it in atomically.
-                        let path = manager.recordings_path.join(format!(".artifact-{}.part", Uuid::new_v4()));
-                        let _ = channel.send(path);
+                    RecordingManagerMessage::GetRecordingsPath { channel } => {
+                        let _ = channel.send(manager.recordings_path.clone());
                     },
                     RecordingManagerMessage::AddArtifact { id, kind, source, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind, source).await);
@@ -1150,6 +1083,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::artifacts::ArtifactWriter;
 
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
@@ -1236,9 +1170,7 @@ mod tests {
         }
 
         async fn add_artifact(&self, id: Uuid, content: &str) -> String {
-            let mut writer = self
-                .sender
-                .create_artifact(id, AI_ANALYSIS)
+            let mut writer = ArtifactWriter::create(&self.sender, id, AI_ANALYSIS)
                 .await
                 .expect("create artifact");
             writer.write_all(content.as_bytes()).await.expect("write artifact");
@@ -1405,9 +1337,7 @@ mod tests {
         let id = Uuid::new_v4();
         harness.push(id, WEBM).await;
 
-        let mut writer = harness
-            .sender
-            .create_artifact(id, AI_ANALYSIS)
+        let mut writer = ArtifactWriter::create(&harness.sender, id, AI_ANALYSIS)
             .await
             .expect("create artifact");
         writer.write_all(b"partial").await.expect("write artifact");
