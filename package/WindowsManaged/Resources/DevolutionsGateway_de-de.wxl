@@ -46,7 +46,6 @@
                 <String Id="SearchButton">Suchen</String>
                 <String Id="ValidateButton">Überprüfen</String>
                 <String Id="ViewButton">Anzeigen</String>
-                <String Id="ViewErrorsButton">Konfigurationsprobleme anzeigen</String>
                 <String Id="ViewLogButton">Protokoll anzeigen</String>
                     <!-- propertyGroups -->
                 <String Id="Group_AgentTunnel">Agent Tunnel</String>
@@ -194,7 +193,7 @@ Wenn sie minimiert erscheint, aktivieren Sie sie über die Taskleiste.</String>
                 <String Id="EnterTextToSearch">Suchtext eingeben</String>
                 <String Id="NoCertificateSelected">Keine Auswahl</String>
                 <String Id="NoUsableCertificateFoundInFile">In der Datei wurde kein verwendbares Zertifikat gefunden.</String>
-                <String Id="PrivateKeyPermissionWillBeGranted">Das Konto Network Service verfügt möglicherweise nicht über die Berechtigung, den privaten Schlüssel des Zertifikats zu lesen. Das Installationsprogramm wird versuchen, den erforderlichen Zugriff zu gewähren.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">Das Konto {0} verfügt möglicherweise nicht über die Berechtigung, den privaten Schlüssel des Zertifikats zu lesen. Das Installationsprogramm wird versuchen, den erforderlichen Zugriff zu gewähren.</String>
                 <String Id="Search">Suchen</String>
                 <String Id="SearchForACertificateToUse">Zu verwendendes Zertifikat suchen</String>
                 <String Id="SearchResultPlural">{0} Ergebnisse</String>

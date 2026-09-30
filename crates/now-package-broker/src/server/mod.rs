@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -48,6 +49,7 @@ use responses::{
 // The unit value marks the scope in which an authenticated policy management request is dispatched.
 tokio::task_local! {
     static POLICY_MANAGEMENT_AUTHENTICATED: ();
+    static POLICY_WRITE_AUDIT: crate::audit::WriteAudit;
 }
 
 /// How long a per-user manager availability probe stays fresh before it is re-run.
@@ -293,6 +295,10 @@ async fn authenticate_policy_management(
     request: Request,
     next: Next,
 ) -> Response {
+    let write_audit = matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy")).then(|| {
+        let configured_path = PathBuf::from(state.policy_store.management_snapshot().configured_path);
+        crate::audit::WriteAudit::begin(client.user_sid(), client.executable_path(), &configured_path)
+    });
     let protected = matches!(
         (request.method(), request.uri().path()),
         (&Method::GET, "/v1/policy/management")
@@ -302,6 +308,9 @@ async fn authenticate_policy_management(
     );
     if protected {
         if let Err(error) = client.validate_connection(state.skip_signature_validation) {
+            if let Some(audit) = write_audit {
+                audit.denied(crate::audit::DenialReason::AuthenticationFailed);
+            }
             warn!(error = format!("{error:#}"), "Rejected policy management request");
             return (
                 StatusCode::UNAUTHORIZED,
@@ -312,7 +321,12 @@ async fn authenticate_policy_management(
             )
                 .into_response();
         }
-        return POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request)).await;
+        let authenticated = POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request));
+        return if let Some(audit) = write_audit {
+            POLICY_WRITE_AUDIT.scope(audit, authenticated).await
+        } else {
+            authenticated.await
+        };
     }
     next.run(request).await
 }
@@ -381,7 +395,11 @@ impl PackageBrokerServer for BrokerConnection {
         request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
         require_policy_management_authentication()?;
+        let audit = POLICY_WRITE_AUDIT
+            .try_with(Clone::clone)
+            .map_err(|_| error_response(ErrorCode::InternalError, "policy write audit context is unavailable"))?;
         if !self.client.is_elevated_administrator() {
+            audit.denied(crate::audit::DenialReason::AdministratorRequired);
             return Err(error_response(
                 ErrorCode::AdministratorRequired,
                 "policy replacement requires an elevated Administrator",
@@ -389,7 +407,7 @@ impl PackageBrokerServer for BrokerConnection {
         }
         self.state
             .policy_store
-            .replace(request)
+            .replace(request, audit)
             .await
             .map(|success| PolicyReplacementResponse {
                 response_kind: now_policy_api::PolicyReplacementResponseKind,
@@ -706,6 +724,17 @@ impl BrokerState {
         reason = "the shared API contract requires ErrorResponse values"
     )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
+        if !evaluator::source_name_is_unambiguous_for_manager(request.manager, &request.source.name) {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: package source name has ambiguous spelling"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "package source name has unsupported leading, trailing, default-ignorable, or wildcard characters",
+            ));
+        }
+
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
         // their content yet. Running them elevated would grant arbitrary elevated
@@ -969,7 +998,6 @@ mod tests {
         assert!(!is_json_content_type(&headers));
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     #[tokio::test]
     async fn policy_write_routes_reject_duplicate_members_before_draft_conversion() {
         let client = PipeClient::test_with_authority(true, true).expect("create elevated test client");
@@ -1009,7 +1037,6 @@ mod tests {
             "ExpectedStoreToken": replacement_state.policy_store.management_snapshot().store_token,
             "Operation": "Create",
             "ConflictHandling": "Reject",
-            "WarningsAcknowledged": false,
             "Draft": replacement_draft,
             "ValidationReceipt": validation.validation_receipt.expect("valid receipt"),
         });
@@ -1036,7 +1063,7 @@ mod tests {
                 Method::PUT,
                 "/v1/policy",
                 "Application/JSON; charset=utf-8",
-                r#"{"RequestKind":"PolicyReplacementRequest","RequestVersion":"1.0","ExpectedStoreToken":"invalid","Operation":"Create","ConflictHandling":"Reject","WarningsAcknowledged":false,"ValidationReceipt":"invalid","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
+                r#"{"RequestKind":"PolicyReplacementRequest","RequestVersion":"1.0","ExpectedStoreToken":"invalid","Operation":"Create","ConflictHandling":"Reject","ValidationReceipt":"invalid","Draft":{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"created","Publisher":"Test","Publisher":"Test"},"Enforcement":{"DefaultDecision":"Deny"},"Rules":[]}}"#,
             ),
         ] {
             let response = route_raw(
@@ -1053,7 +1080,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     async fn route_json(
         state: Arc<BrokerState>,
         client: PipeClient,
@@ -1153,15 +1179,10 @@ mod tests {
 
     #[tokio::test]
     async fn shared_router_exposes_policy_management_routes() {
-        let (management_status, body_status) = if cfg!(feature = "dev-skip-broker-signature") {
-            (StatusCode::OK, StatusCode::UNSUPPORTED_MEDIA_TYPE)
-        } else {
-            (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
-        };
         for (method, uri, expected_status) in [
-            (Method::GET, "/v1/policy/management", management_status),
-            (Method::POST, "/v1/policy/validate", body_status),
-            (Method::PUT, "/v1/policy", body_status),
+            (Method::GET, "/v1/policy/management", StatusCode::OK),
+            (Method::POST, "/v1/policy/validate", StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            (Method::PUT, "/v1/policy", StatusCode::UNSUPPORTED_MEDIA_TYPE),
             (Method::DELETE, "/v1/policy", StatusCode::METHOD_NOT_ALLOWED),
         ] {
             let response = route_request(shared_state(Some(permissive_policy())), method, uri).await;
@@ -1169,7 +1190,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
     #[tokio::test]
     async fn management_is_authenticated_but_only_elevated_administrators_can_write() {
         let unelevated = PipeClient::test_with_authority(false, false).expect("test client");
@@ -1211,7 +1231,6 @@ mod tests {
             "ExpectedStoreToken": state.policy_store.management_snapshot().store_token,
             "Operation": "Create",
             "ConflictHandling": "Reject",
-            "WarningsAcknowledged": false,
             "Draft": draft,
             "ValidationReceipt": validation.validation_receipt.expect("valid receipt")
         });

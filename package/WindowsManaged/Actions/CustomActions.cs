@@ -1,11 +1,11 @@
-﻿using DevolutionsGateway.Configuration;
-using DevolutionsGateway.Helpers;
+﻿using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -29,7 +29,6 @@ using WixSharp;
 using static DevolutionsGateway.Actions.WinAPI;
 using File = System.IO.File;
 using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
-using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
 
 namespace DevolutionsGateway.Actions
 {
@@ -491,338 +490,6 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
-        public static ActionResult EvaluateConfiguration(Session session)
-        {
-            ActionResult result = ActionResult.Success;
-            Dictionary<string, (bool, FileAccess, Exception)> results = new Dictionary<string, (bool, FileAccess, Exception)>();
-
-            uint read = FILE_READ_DATA /* aka FILE_LIST_DIRECTORY */ |
-                        FILE_READ_EA | FILE_EXECUTE /* aka FILE_TRAVERSE */ |
-                        FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
-            uint write = read | FILE_WRITE_DATA /* aka FILE_ADD_FILE */ |
-                         FILE_APPEND_DATA /* aka FILE_ADD_SUBDIRECTORY */ |
-                         FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES;
-            uint modify = write | DELETE;
-
-            // Attempt to open a path with the specified access, as a means to check for permissions
-            bool CanAccess(string path, bool isDirectory, uint desiredAccess)
-            {
-                using SafeFileHandle handle = CreateFile(
-                    path, desiredAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero,
-                    OPEN_EXISTING,
-                    isDirectory ? FILE_FLAG_BACKUP_SEMANTICS : 0,
-                    IntPtr.Zero);
-
-                int lastError = Marshal.GetLastWin32Error();
-
-                if (handle.IsInvalid)
-                {
-                    // ERROR_SUCCESS, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_ACCESS_DENIED
-                    if (!new[] {0, 2, 3, 5}.Contains(lastError))
-                    {
-                        session.Log($"CreateFile failed (error: {lastError})");
-                        throw new Win32Exception(lastError);
-                    }
-                }
-
-                return !handle.IsInvalid;
-            }
-
-            bool CheckAccess(string path, FileAccess desiredAccess, bool isDirectory)
-            {
-                if (string.IsNullOrEmpty(path))
-                {
-                    return true;
-                }
-
-                if (!Path.IsPathRooted(path))
-                {
-                    path = Path.Combine(ProgramDataDirectory, path);
-                }
-
-                uint accessMask;
-
-                switch (desiredAccess)
-                {
-                    case FileAccess.Write:
-                    {
-                        accessMask = write;
-                        break;
-                    }
-                    case FileAccess.Modify:
-                    {
-                        accessMask = modify;
-                        break;
-                    }
-                    default:
-                    {
-                        accessMask = read;
-                        break;
-                    }
-                }
-                
-                session.Log($"checking effective access {accessMask} to {path}");
-
-                try
-                {
-                    if (CanAccess(path, isDirectory, accessMask))
-                    {
-                        results[path] = (true, desiredAccess, null);
-
-                        return true;
-                    }
-
-                    results[path] = (false, desiredAccess, null);
-
-                    session.Log($"effective access to {path} does not match desired access {accessMask}");
-                    return false;
-
-                }
-                catch (Exception e)
-                {
-                    results[path] = (false, desiredAccess, e);
-
-                    session.Log($"failed to check effective access to {path}: {e.Message}");
-                    return false;
-                }
-            }
-
-            IdentityReference account =
-                new SecurityIdentifier(WellKnownSidType.NetworkServiceSid, null).Translate(typeof(NTAccount));
-
-            try
-            {
-                string[] userDomain = account.Value.Split('\\');
-                Gateway config = null;
-
-                session.Log($"evaluating configuration as {account.Value}");
-
-                using (Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty))
-                {
-                    string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
-
-                    if (!TryReadGatewayConfig(session, configPath, out config, out Exception e))
-                    {
-                        results[configPath] = (false, FileAccess.Read, e);
-                        session.Log("failed to load or parse the configuration file");
-                    }
-
-                    if (!CheckAccess(ProgramDataDirectory, FileAccess.Modify, true))
-                    {
-                        result = ActionResult.Failure;
-                    }
-
-                    List<string> readFiles = new()
-                    {
-                        config.DelegationPrivateKeyFile,
-                        config.ProvisionerPublicKeyFile,
-                        config.ProvisionerPrivateKeyFile,
-                        config.TlsCertificateSource == "External" ? config.TlsCertificateFile : null,
-                        config.TlsCertificateSource == "External" ? config.TlsPrivateKeyFile : null,
-                    };
-
-                    foreach (string readFile in readFiles.Where(x => !string.IsNullOrEmpty(x)))
-                    {
-                        if (!CheckAccess(readFile, FileAccess.Read, false))
-                        {
-                            result = ActionResult.Failure;
-                        }
-                    }
-
-                    List<string> writeFiles = new()
-                    {
-                        (config.WebApp?.Enabled ?? false) && config.WebApp.Authentication == "Custom"
-                            ? config.WebApp.UsersFile
-                            : null,
-                    };
-
-                    foreach (string writeFile in writeFiles.Where(x => !string.IsNullOrEmpty(x)))
-                    {
-                        if (!CheckAccess(writeFile, FileAccess.Write, false))
-                        {
-                            result = ActionResult.Failure;
-                        }
-                    }
-                }
-
-                string jrlFile = config.JrlFile;
-
-                if (!Path.IsPathRooted(jrlFile))
-                {
-                    jrlFile = Path.Combine(ProgramDataDirectory, jrlFile);
-                }
-
-                List<string> modifyFiles = new();
-
-                try
-                {
-                    if (File.Exists(jrlFile))
-                    {
-                        modifyFiles.Add(jrlFile);
-                    }
-                }
-                catch
-                {
-                }
-
-                using (Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty))
-                {
-                    string logDirectory = ProgramDataDirectory;
-                    string logPattern = "gateway.*.log";
-
-                    if (!string.IsNullOrEmpty(config.LogFile))
-                    {
-                        try
-                        {
-                            logDirectory = Path.GetDirectoryName(config.LogFile);
-                            logPattern = $"{Path.GetFileName(config.LogFile)}.*.log";
-
-                            if (!CheckAccess(logDirectory, FileAccess.Modify, true))
-                            {
-                                result = ActionResult.Failure;
-                            }
-
-                        }
-                        catch (Exception e)
-                        {
-                            if (logDirectory is not null)
-                            {
-                                results[logDirectory] = (false, FileAccess.Modify, e);
-                            }
-
-                            session.Log($"unexpected error while checking configuration: {e}");
-                            result = ActionResult.Failure;
-                        }
-                    }
-
-                    if (!string.IsNullOrEmpty(logDirectory))
-                    {
-                        try
-                        {
-                            modifyFiles.AddRange(Directory.GetFiles(logDirectory, logPattern)
-                                .OrderBy(x => new FileInfo(x).CreationTime)
-                                .Take(10));
-                        }
-                        catch (Exception e)
-                        {
-                            session.Log($"unexpected error while checking configuration: {e}");
-                            result = ActionResult.Failure;
-                        }
-                    }
-
-                    foreach (string modifyFile in modifyFiles.Where(x => !string.IsNullOrEmpty(x)))
-                    {
-                        if (!CheckAccess(modifyFile, FileAccess.Modify, false))
-                        {
-                            result = ActionResult.Failure;
-                        }
-                    }
-                }
-
-                string recordingPath = config.RecordingPath;
-
-                if (!Path.IsPathRooted(recordingPath))
-                {
-                    recordingPath = Path.Combine(ProgramDataDirectory, recordingPath);
-                }
-
-                if (Directory.Exists(recordingPath))
-                {
-                    using Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty);
-                    if (!CheckAccess(config.RecordingPath, FileAccess.Modify, true))
-                    {
-                        result = ActionResult.Failure;
-                    }
-                    else
-                    {
-                        if (!string.IsNullOrEmpty(recordingPath))
-                        {
-                            try
-                            {
-                                foreach (string recordingDir in Directory.GetDirectories(recordingPath)
-                                             .OrderBy(x => new DirectoryInfo(x).CreationTime)
-                                             .Take(10))
-                                {
-                                    if (!CheckAccess(recordingDir, FileAccess.Modify, true))
-                                    {
-                                        result = ActionResult.Failure;
-                                    }
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                results[recordingPath] = (false, FileAccess.Modify, e);
-                                session.Log($"unexpected error while checking configuration: {e}");
-                                result = ActionResult.Failure;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                results["Not applicable"] = (false, FileAccess.None, e);
-                session.Log($"unexpected error while checking configuration: {e}");
-                result = ActionResult.Failure;
-            }
-            
-            try
-            {
-                if (result == ActionResult.Failure)
-                {
-                    StringBuilder builder = new StringBuilder();
-
-                    builder.AppendLine("<html>");
-                    builder.AppendLine("<head></head>");
-                    builder.AppendLine("<body>");
-                    builder.AppendLine("<table style=\"width:100%\">");
-
-                    builder.Append("<tr>");
-                    builder.Append("<th>Path</th>");
-                    builder.Append("<th>Account</th>");
-                    builder.Append("<th>Access</th>");
-                    builder.Append("<th>Success</th>");
-                    builder.Append("<th>Error</th>");
-                    builder.Append("</tr>");
-
-                    foreach (string key in results.Keys)
-                    {
-                        builder.AppendLine("<tr>");
-                        builder.Append($"<td>{key}</td>");
-                        builder.Append($"<td>{account.Value}</td>");
-                        builder.Append($"<td>{results[key].Item2.AsString()}</td>");
-                        builder.Append($"<td>{results[key].Item1}</td>");
-                        builder.Append($"<td>{results[key].Item3}</td>");
-                        builder.AppendLine("</tr>");
-                    }
-
-                    builder.AppendLine("</table>");
-                    builder.AppendLine("</body>");
-                    builder.AppendLine("</html>");
-
-                    string tempPath = session.Get(GatewayProperties.userTempPath);
-
-                    if (string.IsNullOrEmpty(tempPath))
-                    {
-                        tempPath = Path.GetTempPath();
-                    }
-
-                    string reportPath = Path.Combine(tempPath, $"{session.Get(GatewayProperties.installId)}.{Includes.ERROR_REPORT_FILENAME}");
-
-                    session.Log($"writing configuration issues to {reportPath}");
-
-                    File.WriteAllText(reportPath, builder.ToString());
-                }
-            }
-            catch (Exception e)
-            {
-                session.Log($"unexpected error while writing results: {e}");
-            }
-
-            return result;
-        }
-
-        [CustomAction]
         public static ActionResult GetInstallDirFromRegistry(Session session)
         {
             try
@@ -945,6 +612,186 @@ namespace DevolutionsGateway.Actions
             return ActionResult.Success;
         }
 
+        /// <summary>
+        /// Read the logon account of any existing Devolutions Gateway service into the `GatewayServiceAccount` property,
+        /// so that upgrades preserve a custom service account unless one is explicitly specified.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult QueryGatewayServiceAccount(Session session)
+        {
+            try
+            {
+                string accountName = GatewayServiceAccount.QueryExistingAccount(Includes.SERVICE_NAME, LogDelegate.WithSession(session));
+                if (accountName == null)
+                {
+                    session.Log("no existing service found; the service account defaults to NETWORK SERVICE");
+                    return ActionResult.Success;
+                }
+
+                session.Set(GatewayProperties.existingServiceAccount, accountName);
+                if (string.IsNullOrWhiteSpace(session.Get(GatewayProperties.serviceAccount)))
+                {
+                    session.Set(GatewayProperties.serviceAccount, accountName);
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to query the existing service account: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Resolve and validate the `GatewayServiceAccount` property, and record its SID in `ServiceAccountSid`
+        /// for the deferred actions that set permissions.
+        /// </summary>
+        /// <remarks>
+        /// Runs before anything is changed on the system so that a failure leaves an existing installation intact.
+        /// A password is only required when the service is (re)created, i.e. on a first install or an upgrade.
+        /// On maintenance installs the existing service password is preserved by the service control manager.
+        /// </remarks>
+        [CustomAction]
+        public static ActionResult ValidateServiceAccount(Session session)
+        {
+            ActionResult Fail(string msg)
+            {
+                session.Log(msg);
+                using Record record = new(0) { FormatString = msg };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            string accountName = session.Get(GatewayProperties.serviceAccount);
+            string existingAccount = session.Get(GatewayProperties.existingServiceAccount);
+            bool maintenance = !string.IsNullOrEmpty(session["Installed"]);
+
+            if (maintenance && string.IsNullOrWhiteSpace(existingAccount) && string.IsNullOrWhiteSpace(accountName))
+            {
+                return Fail("The Gateway service is missing. Specify P.SERVICEACCOUNT explicitly to repair it.");
+            }
+
+            if (!GatewayServiceAccount.TryResolve(accountName, Includes.SERVICE_NAME, out GatewayServiceAccount account, out string error))
+            {
+                return Fail(error);
+            }
+
+            if (maintenance && !string.IsNullOrWhiteSpace(existingAccount))
+            {
+                if (!GatewayServiceAccount.TryResolve(existingAccount, Includes.SERVICE_NAME, out GatewayServiceAccount previous, out error))
+                {
+                    return Fail(error);
+                }
+
+                if (!previous.Sid.Equals(account.Sid))
+                {
+                    return Fail("Changing the service account during repair is not supported. Change the account during an upgrade instead.");
+                }
+
+                if (!string.IsNullOrEmpty(session.Get(GatewayProperties.servicePassword)))
+                {
+                    return Fail("Changing the service password during repair is not supported. Update the service credentials separately before repairing.");
+                }
+            }
+
+            session.Log($"service account {account.Name} ({account.Sid}) is of kind {account.Kind}");
+            session.Set(GatewayProperties.serviceAccount, account.Name);
+            session.Set(GatewayProperties.serviceAccountSid, account.Sid.Value);
+
+            string password = session.Get(GatewayProperties.servicePassword);
+            bool serviceWillBeCreated = !maintenance || string.IsNullOrWhiteSpace(existingAccount);
+
+            if (account.RequiresPassword)
+            {
+                if (string.IsNullOrEmpty(password))
+                {
+                    if (serviceWillBeCreated)
+                    {
+                        return Fail($"The service account '{account.Name}' requires a password. Specify it with the {GatewayProperties.servicePassword.Id} property, or use a passwordless account such as a group managed service account.");
+                    }
+
+                    session.Log("no password supplied; the existing service password is preserved");
+                }
+                else if (!account.TryValidatePassword(password, out error))
+                {
+                    return Fail(error);
+                }
+            }
+            else if (!string.IsNullOrEmpty(password))
+            {
+                session.Log($"ignoring the password supplied for the passwordless account {account.Name}");
+                session.Set(GatewayProperties.servicePassword, string.Empty);
+            }
+
+            try
+            {
+                bool configuring = session.Get(GatewayProperties.configureGateway) &&
+                    (!maintenance || !string.IsNullOrEmpty(session["REINSTALL"]));
+                if (configuring &&
+                    !session.Get(GatewayProperties.configureNgrok) &&
+                    session.Get(GatewayProperties.httpListenerScheme) == Constants.HttpsProtocol &&
+                    !(session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateCertificate)) &&
+                    session.Get(GatewayProperties.certificateMode) == Constants.CertificateMode.System)
+                {
+                    CertificateStorePermissions.ValidateSelection(session.Get(GatewayProperties.certificateLocation));
+                }
+
+                string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
+                string preservedHash = File.Exists(configPath)
+                    ? CertificateStorePermissions.ValidateExisting(
+                        JObject.Parse(File.ReadAllText(configPath)), account.Sid, existingAccount, configuring)
+                    : string.Empty;
+                session.Set(GatewayProperties.preservedCertificateConfigHash, preservedHash);
+                if (!string.IsNullOrEmpty(preservedHash))
+                {
+                    session.Log("retaining manually managed certificate-store configuration for the same service identity; certificate availability and private-key permissions are not verified");
+                }
+            }
+            catch (Exception e)
+            {
+                return Fail($"The certificate-store configuration cannot be used by this installation: {e.Message}");
+            }
+
+            return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Grant the service account the rights it needs to run the service. NETWORK SERVICE has them implicitly.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult ConfigureServiceAccount(Session session)
+        {
+            SecurityIdentifier serviceAccount = GetServiceAccountSid(session);
+
+            if (serviceAccount.IsWellKnown(WellKnownSidType.NetworkServiceSid))
+            {
+                return ActionResult.Success;
+            }
+
+            try
+            {
+                AccountRights.Grant(serviceAccount, AccountRights.LogonAsService);
+                session.Log($"granted {AccountRights.LogonAsService} to service account {serviceAccount}");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to grant {AccountRights.LogonAsService} to service account {serviceAccount}; the service may fail to start: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        /// <summary>
+        /// The SID recorded by <see cref="ValidateServiceAccount"/> for install and repair actions.
+        /// </summary>
+        private static SecurityIdentifier GetServiceAccountSid(Session session)
+        {
+            string sid = session.Get(GatewayProperties.serviceAccountSid);
+
+            return new SecurityIdentifier(sid);
+        }
+
         [CustomAction]
         public static ActionResult RestartGateway(Session session)
         {
@@ -1059,9 +906,9 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SetFileSecurity(session, ProgramDataDirectory, Includes.ProgramDataSddl(GetServiceAccountSid(session)));
 
-                // Files created before NetworkService was granted access to the program data directory
+                // Files created before the service account was granted access to the program data directory
                 // don't retroactively inherit the new ACE
                 // We fix this by removing access rule protection on the files
                 // and then reapplying the ACL
@@ -1078,6 +925,7 @@ namespace DevolutionsGateway.Actions
                     catch (Exception e)
                     {
                         session.Log($"failed to reset permissions on path {file.FullName}: {e}");
+                        return ActionResult.Failure;
                     }
                 }
 
@@ -1095,29 +943,39 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                // Skip when the gateway will auto-generate a certificate — the selected system-store
-                // cert (if any) isn't actually being used in that case.
-                if (session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateCertificate))
+                string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
+                if (!File.Exists(configPath))
                 {
-                    session.Log("certificate is being auto-generated; skipping private key permission grant");
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties.preservedCertificateConfigHash)))
+                    {
+                        throw new InvalidOperationException("the retained certificate-store configuration was removed after validation");
+                    }
+                    session.Log("no existing configuration; no certificate permissions to update");
                     return ActionResult.Success;
                 }
 
-                StoreLocation location = session.Get(GatewayProperties.certificateLocation);
-                StoreName storeName = session.Get(GatewayProperties.certificateStore);
-                string subjectName = session.Get(GatewayProperties.certificateName);
+                JObject config = JObject.Parse(File.ReadAllText(configPath));
+                if (CertificateStorePermissions.PreserveExisting(config, session.Get(GatewayProperties.preservedCertificateConfigHash)))
+                {
+                    session.Log("leaving retained CurrentUser/CurrentService configuration and private-key ACLs unmanaged; no certificate lookup, permission grant, or verification was performed");
+                    return ActionResult.Success;
+                }
+                if (!string.Equals((string)config["TlsCertificateSource"], "System", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ActionResult.Success;
+                }
 
+                string subjectName = (string)config["TlsCertificateSubjectName"];
+                string storeName = (string)config["TlsCertificateStoreName"] ?? "My";
+                StoreLocation location = StoreLocation.LocalMachine;
+                bool strictMode = (bool?)config["TlsVerifyStrict"] ?? false;
                 if (string.IsNullOrWhiteSpace(subjectName))
                 {
-                    session.Log("certificateName is empty; skipping private key permission grant");
-                    return ActionResult.Success;
+                    throw new InvalidOperationException("the system certificate subject is missing");
                 }
 
-                // Use the same selection logic the Gateway service uses at startup. Fresh installs
-                // initialize gateway.json with tls_verify_strict=true (devolutions-gateway/src/config.rs
-                // generate_new), so we apply the strict filter here too.
                 CertificateSelection.Result selection = CertificateSelection.Select(
-                    location, storeName, subjectName, strictMode: true);
+                    location, storeName, subjectName, strictMode);
 
                 if (selection.Selected == null)
                 {
@@ -1129,7 +987,7 @@ namespace DevolutionsGateway.Actions
                     {
                         session.Log($"no certificate matching subject {subjectName} found in {location}\\{storeName}");
                     }
-                    return ActionResult.Success;
+                    return ActionResult.Failure;
                 }
 
                 try
@@ -1137,19 +995,22 @@ namespace DevolutionsGateway.Actions
                     X509Certificate2 certificate = selection.Selected;
                     session.Log($"selected certificate {certificate.Thumbprint} (NotAfter={certificate.NotAfter:o}) for subject {subjectName}");
 
-                    if (PrivateKeyPermissions.HasNetworkServiceReadPermission(certificate))
+                    SecurityIdentifier serviceAccount = GetServiceAccountSid(session);
+
+                    if (PrivateKeyPermissions.HasReadPermission(certificate, serviceAccount))
                     {
-                        session.Log("NETWORK SERVICE already has Read access to the certificate's private key");
+                        session.Log($"service account {serviceAccount} already has Read access to the certificate's private key");
                         return ActionResult.Success;
                     }
 
-                    if (PrivateKeyPermissions.TryGrantNetworkServiceReadPermission(certificate, out Exception grantError))
+                    if (PrivateKeyPermissions.TryGrantReadPermission(certificate, serviceAccount, out Exception grantError))
                     {
-                        session.Log("granted NETWORK SERVICE Read access to the certificate's private key");
+                        session.Log($"granted service account {serviceAccount} Read access to the certificate's private key");
                         return ActionResult.Success;
                     }
 
-                    session.Log($"failed to grant NETWORK SERVICE Read access to the certificate's private key: {grantError}");
+                    session.Log($"failed to grant service account {serviceAccount} Read access to the certificate's private key: {grantError}");
+                    return ActionResult.Failure;
                 }
                 finally
                 {
@@ -1159,9 +1020,9 @@ namespace DevolutionsGateway.Actions
             catch (Exception e)
             {
                 session.Log($"unexpected error setting certificate private key permissions: {e}");
+                return ActionResult.Failure;
             }
 
-            return ActionResult.Success;
         }
 
         [CustomAction]
@@ -1169,7 +1030,13 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, DefaultUsersFile), Includes.USERS_FILE_SDDL);
+                string path = Path.Combine(ProgramDataDirectory, DefaultUsersFile);
+                if (!File.Exists(path))
+                {
+                    session.Log("no users database; no user file permissions to update");
+                    return ActionResult.Success;
+                }
+                SetFileSecurity(session, path, Includes.UsersFileSddl(GetServiceAccountSid(session)));
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1522,41 +1389,6 @@ namespace DevolutionsGateway.Actions
             }
 
             return Version.TryParse(version, out powerShellVersion);
-        }
-
-        internal static bool TryReadGatewayConfig(ILogger logger, string path, out Gateway gatewayConfig, out Exception error)
-        {
-            gatewayConfig = new Gateway();
-
-            if (!File.Exists(path))
-            {
-                error = new FileNotFoundException(path);
-                return false;
-            }
-
-            try
-            {
-                using StreamReader reader = new StreamReader(path);
-                using JsonReader jsonReader = new JsonTextReader(reader);
-
-                JsonSerializer serializer = new JsonSerializer();
-                gatewayConfig = serializer.Deserialize<Gateway>(jsonReader);
-
-                error = null;
-
-                return true;
-            }
-            catch (Exception e)
-            {
-                logger.Log($"failed to load configuration file at {path}: {e}");
-                error = e;
-                return false;
-            }
-        }
-
-        internal static bool TryReadGatewayConfig(Session session, string path, out Gateway gatewayConfig, out Exception error)
-        {
-            return TryReadGatewayConfig(LogDelegate.WithSession(session), path, out gatewayConfig, out error);
         }
 
         private static bool TryDownloadDvlsPublicKey(Session session, string url, out string path, out Exception error)

@@ -7,13 +7,6 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Package broker for the Devolutions Agent"
 publish = false
 
-[features]
-default = []
-# Development-only feature allowing broker client signature validation to be skipped.
-# Must never be enabled for shipped builds: without it, broker client signature validation is
-# unconditionally enforced regardless of the configuration file contents.
-dev-skip-broker-signature = []
-
 [lints]
 workspace = true
 
@@ -34,18 +27,22 @@ notify = { version = "7", default-features = false }
 http-body-util = "0.1"
 mime = "0.3"
 now-policy = "=0.5.0"
-now-policy-api = "=0.6.0"
-now-policy-server-template = "=0.6.0"
+now-policy-api = "0.7"
+now-policy-server-template = "0.7"
 parking_lot = "0.12"
 regex = "1"
 semver = "1"
 serde = "1"
 serde_json = "1"
 sha2 = "0.10"
+sysevent = { path = "../sysevent" }
+agent-sysevent-codes = { path = "../agent-sysevent-codes" }
+sysevent-winevent = { path = "../sysevent-winevent" }
 tokio = { version = "1.52", features = ["net", "io-util", "rt", "macros", "parking_lot", "fs", "sync", "time"] }
 tokio-util = "0.7"
 tower-service = "0.3"
 tracing = "0.1"
+unicode-normalization = "0.1"
 uuid = { version = "1.23", features = ["v4"] }
 widestring = "1.2"
 win-api-wrappers = { path = "../win-api-wrappers" }

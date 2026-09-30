@@ -21,7 +21,6 @@
                 <String Id="SearchButton">Rechercher</String>
                 <String Id="ValidateButton">Valider</String>
                 <String Id="ViewButton">Afficher</String>
-                <String Id="ViewErrorsButton">Afficher les problèmes de configuration</String>
                 <String Id="ViewLogButton">Afficher le journal</String>
                     <!-- enums -->
                 <String Id="AuthenticationMode_Custom">Personnalisée</String>
@@ -212,7 +211,7 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="EnterTextToSearch">Saisir le texte à rechercher</String>
                 <String Id="NoCertificateSelected">Aucune sélection</String>
                 <String Id="NoUsableCertificateFoundInFile">Aucun certificat utilisable n'a été trouvé dans le fichier.</String>
-                <String Id="PrivateKeyPermissionWillBeGranted">Le compte Network Service n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">Le compte {0} n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis.</String>
                 <String Id="Search">Rechercher</String>
                 <String Id="SearchForACertificateToUse">Trouver un certificat à utiliser</String>
                 <String Id="SearchResultPlural">{0} résultats</String>

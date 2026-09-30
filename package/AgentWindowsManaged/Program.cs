@@ -348,7 +348,8 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.PSU_FEATURE,
-            }
+            },
+            CreateEventLogSourceRegistryValue(project.Platform == Platform.x64),
         };
 
         List<Property> projectProperties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToList();
@@ -421,6 +422,21 @@ internal class Program
             msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
         }
     }
+
+    internal static RegValue CreateEventLogSourceRegistryValue(bool win64) =>
+        new(
+            RegistryHive.LocalMachine,
+            $"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\{Includes.PRODUCT_NAME}",
+            "EventMessageFile",
+            $"[{AgentProperties.InstallDir}]{Includes.EXECUTABLE_NAME}")
+        {
+            AttributesDefinition = "Type=string",
+            Win64 = win64,
+            // Uninstall removes this value through the ordinary component lifecycle. Do not use
+            // createAndRemoveOnUninstall: it deletes the whole source key, including values
+            // written by an administrator or another installer.
+            RegistryKeyAction = RegistryKeyAction.create,
+        };
 
     private static void Project_UnhandledException(ExceptionEventArgs e)
     {

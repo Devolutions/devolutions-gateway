@@ -9,18 +9,24 @@
 //!
 //! The Windows executor materializes these scripts into temporary `.ps1` files before launch.
 //!
-//! Both builders bind the policy-matched request source as the PowerShell repository.
+//! Both builders bind the policy-matched request source as the PowerShell repository
+//! and pin the invariant culture so repository lookup does not depend on the host locale.
 //! Options that don't apply to PowerShell modules (interactive, custom install
 //! location, winget's no-upgrade / uninstall-previous) are intentionally omitted.
 
 use anyhow::bail;
 use now_policy_api::{Operation, PackageRequest, Scope};
 
+/// Pins culture-sensitive lookups, including `-Repository` name matching, to the
+/// invariant culture instead of the host locale.
+const INVARIANT_CULTURE_PREFIX: &str =
+    "[System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture;";
+
 /// Build a Windows PowerShell 5.x (PowerShellGet) command from a validated request.
 pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_powershell_request(request)?;
 
-    let mut script = String::new();
+    let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
     let verb = match request.operation {
         Operation::Install => "Install-Module",
@@ -67,7 +73,7 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_powershell_request(request)?;
 
-    let mut script = String::new();
+    let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
     let verb = match request.operation {
         Operation::Install => "Install-PSResource",
@@ -223,7 +229,9 @@ mod tests {
         let script = script_of(&cmd);
         assert_eq!(cmd[0], "powershell.exe");
         // verb, then -Name <id>, -Confirm:$false, -Force.
-        assert!(script.starts_with("Install-Module -Name 'Pester' -Repository 'PSGallery' -Confirm:$false -Force"));
+        assert!(script.starts_with(&format!(
+            "{INVARIANT_CULTURE_PREFIX} Install-Module -Name 'Pester' -Repository 'PSGallery' -Confirm:$false -Force"
+        )));
         assert!(script.contains("-Scope CurrentUser"));
         assert!(script.contains("-RequiredVersion '5.6.0'"));
     }
@@ -254,7 +262,9 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.starts_with("Uninstall-Module -Name 'Pester' -Repository 'PSGallery'"));
+        assert!(script.starts_with(&format!(
+            "{INVARIANT_CULTURE_PREFIX} Uninstall-Module -Name 'Pester' -Repository 'PSGallery'"
+        )));
         assert!(!script.contains("-Scope"));
         assert!(!script.contains("-RequiredVersion"));
         assert!(!script.contains("-SkipPublisherCheck"));
@@ -266,7 +276,9 @@ mod tests {
         let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert_eq!(cmd[0], "pwsh.exe");
-        assert!(script.starts_with("Install-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"));
+        assert!(script.starts_with(&format!(
+            "{INVARIANT_CULTURE_PREFIX} Install-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
+        )));
         assert!(script.contains("-Version '5.6.0'"));
         assert!(script.contains("-TrustRepository"));
         assert!(script.contains("-AcceptLicense"));
@@ -291,7 +303,9 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.starts_with("Uninstall-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"));
+        assert!(script.starts_with(&format!(
+            "{INVARIANT_CULTURE_PREFIX} Uninstall-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
+        )));
         // Uninstall must not pin a version (it would remove only the matching version,
         // or fail if it does not match what is installed).
         assert!(!script.contains("-Version"));

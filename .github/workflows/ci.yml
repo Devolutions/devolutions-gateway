@@ -354,8 +354,6 @@ jobs:
           $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
           Write-Output "LIBCLANG_PATH=$VSINSTALLDIR\VC\Tools\Llvm\x64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
-          Install-Module VsDevShell -Force
         shell: pwsh
 
       - name: Configure Windows (arm) runner
@@ -592,6 +590,45 @@ jobs:
           name: devolutions-gateway-powershell
           path: powershell-staging
 
+  # Run Windows-only installer cases on native Windows PowerShell 5.1 and PowerShell 7.
+  # Keep artifact production in the Ubuntu job above to avoid duplicate shipping PowerShell artifacts.
+  gateway-service-account-tests:
+    name: Gateway service account tests [Windows]
+    needs: [preflight]
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Install Pester for Windows PowerShell
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        shell: powershell
+
+      - name: Run service account tests in Windows PowerShell
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $result = Invoke-Pester powershell\pester\ServiceAccount.Tests.ps1 -PassThru
+          if ($result.Result -ne 'Passed') {
+            exit 1
+          }
+        shell: powershell
+
+      - name: Install Pester for PowerShell 7
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        shell: pwsh
+
+      - name: Run service account tests in PowerShell 7
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $result = Invoke-Pester powershell\pester\ServiceAccount.Tests.ps1 -PassThru
+          if ($result.Result -ne 'Passed') {
+            exit 1
+          }
+        shell: pwsh
+
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     if: ${{ always() }}
@@ -696,9 +733,6 @@ jobs:
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
           choco install nasm
 
-          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
-          Install-Module VsDevShell -Force
-
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
@@ -707,9 +741,31 @@ jobs:
         id: find_mc
         if: ${{ matrix.os == 'windows' }}
         run: |
-          Enter-VsDevShell
-          $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
+          $sdkRoots = @(
+            $Env:WindowsSdkDir
+            (Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots" -Name KitsRoot10 -ErrorAction SilentlyContinue)
+            "${Env:ProgramFiles(x86)}\Windows Kits\10"
+          ) | Where-Object { $_ } | Select-Object -Unique
+          $candidates = @()
+          if ($Env:WindowsSdkVerBinPath) {
+            $candidates += Join-Path $Env:WindowsSdkVerBinPath "mc.exe"
+            $candidates += Join-Path $Env:WindowsSdkVerBinPath "x64\mc.exe"
+          }
+          foreach ($root in $sdkRoots) {
+            $bin = Join-Path $root "bin"
+            $candidates += Join-Path $bin "x64\mc.exe"
+            $candidates += Get-ChildItem -LiteralPath $bin -Directory -ErrorAction SilentlyContinue |
+              Where-Object Name -Match '^\d+\.\d+\.\d+\.\d+$' |
+              Sort-Object { [version]$_.Name } -Descending |
+              ForEach-Object { Join-Path $_.FullName "x64\mc.exe" }
+          }
+          $mc = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-Not $mc) {
+            throw "mc.exe was not found in the installed Windows SDK"
+          }
+          $path = Split-Path -Parent $mc
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
         shell: pwsh
 
       - name: Build
@@ -787,8 +843,8 @@ jobs:
 
   devolutions-gateway-merge:
     name: devolutions gateway merge artifacts
-    # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
-    if: ${{ always() }}
+    # Keep fork builds eligible when the webapp job is skipped, but never merge partial Gateway artifacts.
+    if: ${{ always() && needs.devolutions-gateway.result == 'success' }}
     needs: [preflight, devolutions-gateway]
     runs-on: ubuntu-latest
 
@@ -975,6 +1031,37 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         uses: microsoft/setup-msbuild@v3
 
+      - name: Find mc.exe
+        id: find_mc
+        if: ${{ matrix.os == 'windows' }}
+        run: |
+          $sdkRoots = @(
+            $Env:WindowsSdkDir
+            (Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots" -Name KitsRoot10 -ErrorAction SilentlyContinue)
+            "${Env:ProgramFiles(x86)}\Windows Kits\10"
+          ) | Where-Object { $_ } | Select-Object -Unique
+          $candidates = @()
+          if ($Env:WindowsSdkVerBinPath) {
+            $candidates += Join-Path $Env:WindowsSdkVerBinPath "mc.exe"
+            $candidates += Join-Path $Env:WindowsSdkVerBinPath "x64\mc.exe"
+          }
+          foreach ($root in $sdkRoots) {
+            $bin = Join-Path $root "bin"
+            $candidates += Join-Path $bin "x64\mc.exe"
+            $candidates += Get-ChildItem -LiteralPath $bin -Directory -ErrorAction SilentlyContinue |
+              Where-Object Name -Match '^\d+\.\d+\.\d+\.\d+$' |
+              Sort-Object { [version]$_.Name } -Descending |
+              ForEach-Object { Join-Path $_.FullName "x64\mc.exe" }
+          }
+          $mc = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-Not $mc) {
+            throw "mc.exe was not found in the installed Windows SDK"
+          }
+          $path = Split-Path -Parent $mc
+          Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        shell: pwsh
+
       - name: Build
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
@@ -985,6 +1072,7 @@ jobs:
             $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
             $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
             $Env:DAGENT_MULTI_PWSH_EXECUTABLE = "${{ steps.multi-pwsh.outputs.executable-path }}"
+            $Env:WindowsSdkVerBinPath = '${{ steps.find_mc.outputs.windows_sdk_ver_bin_path }}'
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
@@ -1122,6 +1210,20 @@ jobs:
         run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
+  agent-installer-event-log-tests:
+    name: Agent installer Event Log lifecycle tests
+    runs-on: windows-2022
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Tests
+        run: dotnet test package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj
+        shell: pwsh
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
@@ -1283,12 +1385,14 @@ jobs:
     name: Agent policy end-to-end test
     runs-on: windows-2022
     needs: [preflight]
+    env:
+      AGENT_POLICY_TEST_SHA: ${{ inputs.ref || github.event.pull_request.head.sha || needs.preflight.outputs.ref }}
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.preflight.outputs.ref }}
+          ref: ${{ env.AGENT_POLICY_TEST_SHA }}
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -1311,9 +1415,14 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
 
       - name: Build Agent policy test executables
+        id: build-policy-executables
         shell: pwsh
         run: |
-          cargo build --locked -p devolutions-agent --features dev-skip-broker-signature
+          $actualCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:AGENT_POLICY_TEST_SHA) {
+            throw "Agent policy tests must build the requested commit $env:AGENT_POLICY_TEST_SHA, got $actualCommit"
+          }
+          cargo build --locked -p devolutions-agent
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -1322,7 +1431,18 @@ jobs:
             exit $LASTEXITCODE
           }
 
+      - name: Run Agent policy tester as standard user
+        shell: pwsh
+        run: |
+          ./crates/agent-policy-tester/run-unelevated.ps1
+          $exitCode = $LASTEXITCODE
+          Get-Content -Path ./crates/agent-policy-tester/agent-policy-tester-unelevated.out
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
       - name: Run Agent policy tester as LocalSystem
+        if: ${{ !cancelled() && steps.build-policy-executables.outcome == 'success' }}
         shell: pwsh
         run: |
           $scriptPath = Resolve-Path -Path "./crates/agent-policy-tester/run-as-system.ps1"
@@ -1366,7 +1486,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

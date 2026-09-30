@@ -89,7 +89,20 @@ public partial class CertificateDialog : GatewayDialog
                 return false;
             }
 
-            outcome = ValidateSystemCertificate(out messages);
+            GatewayServiceAccount serviceAccount;
+            try
+            {
+                CertificateStorePermissions.ValidateSelection(this.cmbStoreLocation.Selected<StoreLocation>());
+                serviceAccount = this.ConfiguredServiceAccount;
+            }
+            catch (Exception error) when (error is InvalidOperationException || error is System.ComponentModel.Win32Exception)
+            {
+                this.Runtime.Session.Log(error.Message);
+                ShowValidationError(error.Message);
+                return false;
+            }
+
+            outcome = ValidateSystemCertificate(serviceAccount, out messages);
         }
 
         switch (outcome)
@@ -456,11 +469,21 @@ public partial class CertificateDialog : GatewayDialog
         }
     }
 
-    private ValidationOutcome ValidateSystemCertificate(out string[] errors)
+    private GatewayServiceAccount ConfiguredServiceAccount
+    {
+        get
+        {
+            GatewayProperties properties = new(this.Runtime.Session);
+
+            return GatewayServiceAccount.ResolveConfigured(properties.ServiceAccount, Includes.SERVICE_NAME);
+        }
+    }
+
+    private ValidationOutcome ValidateSystemCertificate(GatewayServiceAccount serviceAccount, out string[] errors)
     {
         bool valid = this.SelectedCertificate.Verify();
         CertificateIssues issues = CertificateChain.CheckCertificate(this.SelectedCertificate);
-        bool keyRead = PrivateKeyPermissions.HasNetworkServiceReadPermission(this.SelectedCertificate);
+        bool keyRead = PrivateKeyPermissions.HasReadPermission(this.SelectedCertificate, serviceAccount.Sid);
 
         if (valid && issues == CertificateIssues.None)
         {
@@ -470,7 +493,7 @@ public partial class CertificateDialog : GatewayDialog
                 return ValidationOutcome.Ok;
             }
 
-            errors = [I18n(Strings.PrivateKeyPermissionWillBeGranted)];
+            errors = [string.Format(I18n(Strings.PrivateKeyPermissionWillBeGranted), serviceAccount.Name)];
             return ValidationOutcome.KeyAccessOnly;
         }
 
@@ -490,7 +513,7 @@ public partial class CertificateDialog : GatewayDialog
 
         if (!keyRead)
         {
-            messages.Add(I18n(Strings.PrivateKeyPermissionWillBeGranted));
+            messages.Add(string.Format(I18n(Strings.PrivateKeyPermissionWillBeGranted), serviceAccount.Name));
         }
 
         errors = messages.ToArray();

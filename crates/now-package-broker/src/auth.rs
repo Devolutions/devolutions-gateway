@@ -209,7 +209,7 @@ impl PipeClient {
         Self::from_process_id(std::process::id())
     }
 
-    #[cfg(all(test, feature = "dev-skip-broker-signature"))]
+    #[cfg(test)]
     pub(crate) fn test_with_authority(is_elevated: bool, is_administrator: bool) -> anyhow::Result<Self> {
         let mut client = Self::from_current_process()?;
         client.is_elevated = is_elevated;
@@ -220,6 +220,10 @@ impl PipeClient {
     /// Security identifier of the authenticated pipe client user, captured at connect.
     pub(crate) fn user_sid(&self) -> &Sid {
         &self.user_sid
+    }
+
+    pub(crate) fn executable_path(&self) -> &Path {
+        &self.executable_path
     }
 
     pub(crate) fn is_elevated_administrator(&self) -> bool {
@@ -260,7 +264,7 @@ impl PipeClient {
 
     pub(crate) fn validate_connection(&self, skip_signature_validation: bool) -> anyhow::Result<()> {
         self.validate_process_instance()?;
-        if signature_validation_skipped(skip_signature_validation) {
+        if skip_signature_validation {
             warn!("DEBUG MODE: Skipping package broker client signature validation");
             return Ok(());
         }
@@ -366,16 +370,6 @@ impl PipeClient {
             requested_executable_path
         )
     }
-}
-
-/// Returns whether broker client signature validation is skipped.
-///
-/// The bypass is compile-time gated behind the development-only `dev-skip-broker-signature`
-/// cargo feature, which must never be enabled for shipped builds. Without the feature, this
-/// always returns `false` and signature validation is unconditionally enforced, no matter
-/// what the configuration says.
-fn signature_validation_skipped(skip_signature_validation: bool) -> bool {
-    cfg!(feature = "dev-skip-broker-signature") && skip_signature_validation
 }
 
 fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<u32> {
@@ -570,7 +564,6 @@ mod tests {
             .expect_err("an inherited pipe cannot outlive the authenticated process");
     }
 
-    #[cfg(not(feature = "dev-skip-broker-signature"))]
     fn client_user_sid() -> Sid {
         system_client().user_sid
     }
@@ -986,54 +979,58 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "dev-skip-broker-signature"))]
-    mod shipping_build {
-        use super::*;
+    #[test]
+    fn validate_connection_rejects_unsigned_client_by_default() {
+        // Retain the executable handle and a security guard so validation reaches the Authenticode
+        // check, which must reject the test binary because it is not Devolutions-signed.
+        let executable_path = std::env::current_exe().expect("current test executable path");
+        let executable_file = File::open(&executable_path).expect("open current test executable");
+        let client = PipeClient {
+            process_id: std::process::id(),
+            process_creation_time: SystemTime::UNIX_EPOCH,
+            process: None,
+            executable_path,
+            executable_file: Some(Arc::new(executable_file)),
+            executable_security: Some(Arc::new(RetainedExecutableSecurity::unchecked_for_tests())),
+            user_sid: client_user_sid(),
+            is_elevated: false,
+            is_administrator: false,
+        };
 
-        #[test]
-        fn signature_validation_is_never_skipped() {
-            assert!(!signature_validation_skipped(true));
-            assert!(!signature_validation_skipped(false));
-        }
-
-        #[test]
-        fn validate_signature_is_attempted_even_when_skip_is_requested() {
-            // The test binary is not Devolutions-signed, so validation must be attempted and fail
-            // even though the configuration requests skipping it.
-            let client = PipeClient {
-                process_id: std::process::id(),
-                process_creation_time: SystemTime::UNIX_EPOCH,
-                process: None,
-                executable_path: std::env::current_exe().expect("current test executable path"),
-                executable_file: None,
-                executable_security: None,
-                user_sid: client_user_sid(),
-                is_elevated: false,
-                is_administrator: false,
-            };
-
-            assert!(client.validate_connection(true).is_err());
-        }
+        let error = client
+            .validate_connection(false)
+            .expect_err("an unsigned client must be rejected when the bypass is not requested");
+        assert!(
+            format!("{error:#}").contains("executable signature is not valid"),
+            "unexpected validation error: {error:#}"
+        );
     }
 
-    #[cfg(feature = "dev-skip-broker-signature")]
-    mod dev_build {
-        use super::*;
+    #[test]
+    fn validate_connection_skips_signature_only_when_requested() {
+        // Without a retained handle or security guard, only the bypass lets validation succeed.
+        let client = PipeClient {
+            process_id: std::process::id(),
+            process_creation_time: SystemTime::UNIX_EPOCH,
+            process: None,
+            executable_path: std::env::current_exe().expect("current test executable path"),
+            executable_file: None,
+            executable_security: None,
+            user_sid: client_user_sid(),
+            is_elevated: false,
+            is_administrator: false,
+        };
 
-        #[test]
-        fn signature_bypass_does_not_disable_trusted_writer_security() {
-            let error = PipeClient::from_process_id_with_security(std::process::id())
-                .expect_err("the user-writable test executable path must be rejected");
-            assert!(
-                error.to_string().contains("trusted-writer security validation"),
-                "unexpected security error: {error:#}"
-            );
-        }
+        assert!(client.validate_connection(true).is_ok());
+    }
 
-        #[test]
-        fn signature_validation_is_skipped_only_when_requested() {
-            assert!(signature_validation_skipped(true));
-            assert!(!signature_validation_skipped(false));
-        }
+    #[test]
+    fn signature_bypass_does_not_disable_trusted_writer_security() {
+        let error = PipeClient::from_process_id_with_security(std::process::id())
+            .expect_err("the user-writable test executable path must be rejected");
+        assert!(
+            error.to_string().contains("trusted-writer security validation"),
+            "unexpected security error: {error:#}"
+        );
     }
 }

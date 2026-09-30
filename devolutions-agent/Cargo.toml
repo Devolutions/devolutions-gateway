@@ -8,13 +8,6 @@ description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
-[features]
-default = []
-# Development-only feature allowing the SkipBrokerSignatureValidation debug option to take effect.
-# Must never be enabled for shipped builds: without it, broker client signature validation is
-# unconditionally enforced regardless of the configuration file contents.
-dev-skip-broker-signature = ["now-package-broker/dev-skip-broker-signature"]
-
 [lints]
 workspace = true
 
@@ -53,7 +46,7 @@ tap = "1.0"
 tempfile = "3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tokio-stream = "0.1"
-tonic = { version = "0.12", features = ["transport"] }
+tonic = { version = "0.12", features = ["transport", "tls-native-roots"] }
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 x509-parser = "0.16"

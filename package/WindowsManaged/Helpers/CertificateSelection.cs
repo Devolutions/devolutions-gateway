@@ -80,6 +80,16 @@ namespace DevolutionsGateway.Helpers
             string subjectName,
             bool strictMode)
         {
+            using X509Store store = new(storeName, location);
+            return Select(location, store.Name, subjectName, strictMode);
+        }
+
+        internal static Result Select(
+            StoreLocation location,
+            string storeName,
+            string subjectName,
+            bool strictMode)
+        {
             Result result = new Result { StrictMode = strictMode };
 
             if (string.IsNullOrWhiteSpace(subjectName))
@@ -89,15 +99,10 @@ namespace DevolutionsGateway.Helpers
 
             X509Certificate2Collection matches;
 
-            try
             {
                 using X509Store store = new X509Store(storeName, location);
                 store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
                 matches = store.Certificates.Find(X509FindType.FindBySubjectName, subjectName, validOnly: false);
-            }
-            catch
-            {
-                return result;
             }
 
             CertificateIssues disqualifiers = strictMode

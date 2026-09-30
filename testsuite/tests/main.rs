@@ -6,5 +6,7 @@ mod agent_tunnel;
 mod cli;
 mod mcp_proxy;
 mod network_scanner;
+#[cfg(windows)]
+mod service_accounts;
 mod sysevent;
 mod timing;

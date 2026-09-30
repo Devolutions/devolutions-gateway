@@ -320,54 +320,6 @@ pub fn auth_summary(
         .field("by_reason", by_reason_json)
 }
 
-// 6000-6099 **Agent Integration**
-
-/// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
-pub const USER_SESSION_PROCESS_STARTED: u32 = 6000;
-/// Exit code; who triggered.
-pub const USER_SESSION_PROCESS_TERMINATED: u32 = 6001;
-pub const UPDATER_TASK_ENABLED: u32 = 6010;
-pub const UPDATER_ERROR: u32 = 6011;
-pub const PEDM_ENABLED: u32 = 6020;
-
-pub fn user_session_process_started(session_id: u32, kind: impl ToString, exe: impl ToString) -> Entry {
-    Entry::new("User session process started")
-        .event_code(USER_SESSION_PROCESS_STARTED)
-        .severity(Severity::Info)
-        .field("session_id", session_id)
-        .field("kind", kind) // "console","remote"
-        .field("exe", exe)
-}
-
-pub fn user_session_process_terminated(session_id: u32, exit_code: i32, by: impl ToString) -> Entry {
-    Entry::new("User session process terminated")
-        .event_code(USER_SESSION_PROCESS_TERMINATED)
-        .severity(Severity::Info)
-        .field("session_id", session_id)
-        .field("exit_code", exit_code)
-        .field("by", by) // "user","service","timeout"
-}
-
-pub fn updater_task_enabled() -> Entry {
-    Entry::new("Updater task enabled")
-        .event_code(UPDATER_TASK_ENABLED)
-        .severity(Severity::Info)
-}
-
-pub fn updater_error(step: impl ToString, error: impl std::fmt::Display) -> Entry {
-    Entry::new("Updater error")
-        .event_code(UPDATER_ERROR)
-        .severity(Severity::Error)
-        .field("step", step) // "download","verify","apply","rollback"
-        .field("error_chain", format!("{error:#}"))
-}
-
-pub fn pedm_enabled() -> Entry {
-    Entry::new("PEDM enabled")
-        .event_code(PEDM_ENABLED)
-        .severity(Severity::Info)
-}
-
 // 7000-7099 **Health**
 
 pub const RECORDING_STORAGE_LOW: u32 = 7010; // (Warning): remaining_bytes, threshold_bytes
@@ -399,3 +351,41 @@ pub fn xmf_not_found(path: impl AsRef<Path>, error: impl std::fmt::Display) -> E
         .field("path", path.as_ref().display())
         .field("error_chain", format!("{error:#}"))
 }
+
+/// Every declared Gateway event code, paired with its symbolic name.
+///
+/// `devolutions-gateway.mc` is checked against this inventory, and the check is an exact match in
+/// both directions, so adding a code here means adding its messages to the catalog, and an
+/// Agent-only code must never appear there.
+pub static DECLARED_CODES: &[(&str, u32)] = &[
+    ("SERVICE_STARTED", SERVICE_STARTED),
+    ("SERVICE_STOPPING", SERVICE_STOPPING),
+    ("CONFIG_INVALID", CONFIG_INVALID),
+    ("START_FAILED", START_FAILED),
+    ("BOOT_STACKTRACE_WRITTEN", BOOT_STACKTRACE_WRITTEN),
+    ("LISTENER_STARTED", LISTENER_STARTED),
+    ("LISTENER_BIND_FAILED", LISTENER_BIND_FAILED),
+    ("LISTENER_STOPPED", LISTENER_STOPPED),
+    ("TLS_CONFIGURED", TLS_CONFIGURED),
+    ("TLS_VERIFY_STRICT_DISABLED", TLS_VERIFY_STRICT_DISABLED),
+    ("TLS_CERTIFICATE_REJECTED", TLS_CERTIFICATE_REJECTED),
+    ("SYSTEM_CERT_SELECTED", SYSTEM_CERT_SELECTED),
+    ("TLS_KEY_LOAD_FAILED", TLS_KEY_LOAD_FAILED),
+    ("TLS_CERTIFICATE_NAME_MISMATCH", TLS_CERTIFICATE_NAME_MISMATCH),
+    ("TLS_NO_SUITABLE_CERTIFICATE", TLS_NO_SUITABLE_CERTIFICATE),
+    ("SESSION_OPENED", SESSION_OPENED),
+    ("SESSION_CLOSED", SESSION_CLOSED),
+    ("TOKEN_PROVISIONED", TOKEN_PROVISIONED),
+    ("TOKEN_REUSED", TOKEN_REUSED),
+    ("TOKEN_REUSE_LIMIT_EXCEEDED", TOKEN_REUSE_LIMIT_EXCEEDED),
+    ("RECORDING_STARTED", RECORDING_STARTED),
+    ("RECORDING_STOPPED", RECORDING_STOPPED),
+    ("RECORDING_ERROR", RECORDING_ERROR),
+    ("JWT_REJECTED", JWT_REJECTED),
+    ("JWT_ANOMALY", JWT_ANOMALY),
+    ("AUTHORIZATION_DENIED", AUTHORIZATION_DENIED),
+    ("AUTH_SUMMARY", AUTH_SUMMARY),
+    ("RECORDING_STORAGE_LOW", RECORDING_STORAGE_LOW),
+    ("DEBUG_OPTIONS_ENABLED", DEBUG_OPTIONS_ENABLED),
+    ("XMF_NOT_FOUND", XMF_NOT_FOUND),
+];

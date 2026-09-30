@@ -145,7 +145,7 @@ impl PsuAgent {
     }
 
     async fn run_single_connection(&self, shutdown_signal: &mut ShutdownSignal, app_token: &str) -> anyhow::Result<()> {
-        let endpoint = Endpoint::from_shared(self.server_url.clone())?;
+        let endpoint = psu_endpoint(&self.server_url)?;
         let channel = endpoint
             .connect()
             .await
@@ -314,6 +314,11 @@ impl PsuAgent {
     }
 }
 
+fn psu_endpoint(server_url: &str) -> Result<Endpoint, tonic::transport::Error> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    Endpoint::new(server_url.to_owned())
+}
+
 pub(crate) fn agent_message(agent_id: &str, connection_id: &str, payload: AgentPayload) -> AgentMessage {
     AgentMessage {
         request_id: Uuid::new_v4().simple().to_string(),
@@ -432,7 +437,47 @@ async fn get_powershell_version(executable: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt as _;
+    use tokio::net::TcpListener;
+
     use super::*;
+
+    async fn first_connection_byte(scheme: &str) -> u8 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
+        let url = format!("{scheme}://{}", listener.local_addr().expect("listener address"));
+        let endpoint = psu_endpoint(&url).expect("create endpoint");
+        let connection = tokio::spawn(async move { endpoint.connect().await });
+
+        let first_byte = tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut stream, _) = listener.accept().await.expect("accept connection");
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await.expect("read client preface");
+            byte[0]
+        })
+        .await
+        .expect("client did not connect");
+
+        connection.abort();
+        first_byte
+    }
+
+    #[tokio::test]
+    async fn https_endpoint_starts_tls_handshake() {
+        assert_eq!(
+            first_connection_byte("https").await,
+            0x16,
+            "HTTPS connection must start with a TLS ClientHello"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_endpoint_starts_http2_preface() {
+        assert_eq!(
+            first_connection_byte("http").await,
+            b'P',
+            "HTTP connection must start with the HTTP/2 preface"
+        );
+    }
 
     #[test]
     fn connect_request_omits_authorization_without_app_token() {

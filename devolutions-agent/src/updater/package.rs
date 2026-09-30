@@ -222,8 +222,13 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> 
         .arg("/l*v")
         .arg(log_path.as_str());
 
+    if ctx.product == Product::Gateway {
+        msiexec_command.arg("/norestart").arg("REBOOT=ReallySuppress");
+    }
+
     for param in ctx.actions.get_msiexec_install_params() {
-        msiexec_command.arg(param);
+        // These properties use MSI quoting, not the C runtime's backslash escaping.
+        msiexec_command.raw_arg(param);
     }
 
     let msi_install_result = msiexec_command.status().await;
@@ -285,14 +290,17 @@ async fn uninstall_msi(ctx: &UpdaterCtx, product_code: Uuid, log_path: &Utf8Path
 
     info!(%product_code, "Uninstalling MSI");
 
-    let msi_uninstall_result = tokio::process::Command::new("msiexec")
+    let mut command = tokio::process::Command::new("msiexec");
+    command
         .arg("/x")
         .arg(product_code.braced().to_string())
         .arg("/quiet")
         .arg("/l*v")
-        .arg(log_path.as_str())
-        .status()
-        .await;
+        .arg(log_path.as_str());
+    if ctx.product == Product::Gateway {
+        command.arg("/norestart").arg("REBOOT=ReallySuppress");
+    }
+    let msi_uninstall_result = command.status().await;
 
     if log_path.exists() {
         info!(%product_code, "MSI uninstall log: {log_path}");

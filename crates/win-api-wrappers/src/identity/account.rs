@@ -3,7 +3,9 @@ use std::ops::{Deref, DerefMut};
 use std::ptr;
 
 use anyhow::{Context as _, bail};
-use windows::Win32::Foundation::{ERROR_INVALID_SID, ERROR_MORE_DATA, GetLastError, MAX_PATH, WIN32_ERROR};
+use windows::Win32::Foundation::{
+    ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_SID, ERROR_MORE_DATA, GetLastError, MAX_PATH, WIN32_ERROR,
+};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
@@ -15,6 +17,7 @@ use windows::core::{PCWSTR, PWSTR};
 
 use crate::handle::HandleWrapper;
 use crate::identity::sid::Sid;
+use crate::process::Module;
 use crate::raw_buffer::RawBuffer;
 use crate::scope_guard::ScopeGuard;
 use crate::str::{U16CStr, U16CStrExt, U16CString, UnicodeStr};
@@ -301,8 +304,8 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
     let mut sid_use = Security::SID_NAME_USE::default();
 
     // SAFETY: Variable-sized parameters are provided as null pointers for the first call.
-    unsafe {
-        let _ = Security::LookupAccountNameW(
+    let size_query = unsafe {
+        Security::LookupAccountNameW(
             None,                     // local system
             account_name.as_pcwstr(), // account name to look up
             None,                     // no SID buffer yet
@@ -310,7 +313,12 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
             None,                     // no domain name buffer yet
             &mut domain_name_size,    // receives required domain name length (characters)
             &mut sid_use,             // receives the SID type (user/group)
-        );
+        )
+    };
+    if let Err(error) = size_query
+        && error.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult()
+    {
+        return Err(error);
     }
 
     let sid_align = align_of::<Security::SID>();
@@ -348,6 +356,29 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
     };
 
     Ok(AccountWithType::wrap(account, sid_use))
+}
+
+/// Check whether a managed service account is registered in the local Netlogon store.
+pub fn is_managed_service_account(account_name: &U16CStr) -> windows::core::Result<bool> {
+    use windows::Win32::Foundation::NTSTATUS;
+    use windows::core::BOOL;
+
+    let module = Module::load_system("logoncli.dll")?;
+    let symbol = module.resolve_symbol("NetIsServiceAccount")?;
+
+    // SAFETY: The symbol has the documented NetIsServiceAccount signature.
+    let query = unsafe {
+        std::mem::transmute::<*const std::ffi::c_void, unsafe extern "system" fn(PCWSTR, PCWSTR, *mut BOOL) -> NTSTATUS>(
+            symbol,
+        )
+    };
+    let mut managed = BOOL::default();
+
+    // SAFETY: The server is null, the account name is terminated, and the output is writable.
+    // The module remains loaded until the call completes.
+    unsafe { query(PCWSTR::null(), account_name.as_pcwstr(), &mut managed).ok()? };
+
+    Ok(managed.as_bool())
 }
 
 pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {

@@ -13,6 +13,8 @@ mod matching;
 mod version;
 mod wildcard;
 
+pub(crate) use wildcard::has_powershell_wildcard_syntax;
+
 #[cfg(test)]
 mod tests;
 
@@ -111,6 +113,29 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
         rule_id: winner.0.to_owned(),
         reason: winner.3.to_owned(),
     }
+}
+
+/// Whether a source spelling has a stable identity across package-manager lookup and
+/// policy evaluation.
+pub(crate) fn source_name_is_unambiguous(source_name: &str) -> bool {
+    source_name == source_name.trim() && !wildcard::has_default_ignorable_code_point(source_name)
+}
+
+/// Whether `manager` resolves a source spelling to exactly the literal repository name
+/// that policy evaluation matched.
+///
+/// PowerShell resolves `-Repository` through `WildcardPattern`, so a spelling with
+/// wildcard syntax could select repositories that policy evaluation never matched.
+pub(crate) fn source_name_is_unambiguous_for_manager(manager: now_policy_api::ManagerName, source_name: &str) -> bool {
+    source_name_is_unambiguous(source_name)
+        && !(is_powershell_manager(manager) && has_powershell_wildcard_syntax(source_name))
+}
+
+pub(crate) fn is_powershell_manager(manager: now_policy_api::ManagerName) -> bool {
+    matches!(
+        manager,
+        now_policy_api::ManagerName::PowerShell | now_policy_api::ManagerName::PowerShell7
+    )
 }
 
 pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {

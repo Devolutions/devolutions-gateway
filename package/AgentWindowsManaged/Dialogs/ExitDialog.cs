@@ -13,12 +13,19 @@ public partial class ExitDialog : AgentDialog
     {
         InitializeComponent();
 
-        this.textPanel.BackColor = Color.FromArgb(233, 233, 233);
+        this.BackColor = Color.FromArgb(241, 241, 241);
+        this.imgPanel.BackColor = this.BackColor;
+        this.textPanel.BackColor = this.BackColor;
+        this.image.BackColor = this.BackColor;
+        this.image.Width = 162;
     }
 
     public override void OnLoad(object sender, System.EventArgs e)
     {
-        image.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Dialog");
+        using Stream stream = GetType().Assembly.GetManifestResourceStream("DevolutionsAgent.Resources.AgentDialogSide.png")
+            ?? throw new InvalidOperationException("the Agent exit-dialog illustration is missing");
+        using Image illustration = Image.FromStream(stream);
+        image.Image = new Bitmap(illustration);
 
         if (Shell.UserInterrupted || Shell.Log.Contains("User cancelled installation."))
         {
