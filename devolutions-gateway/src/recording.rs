@@ -585,11 +585,6 @@ impl RecordingManagerTask {
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-            // An artifact may have created the manifest before any recording.
-            if existing_manifest.files.is_empty() {
-                existing_manifest.start_time = start_time;
-            }
-
             let file_name = format!("recording-{next_file_idx}.{}", file_type.extension());
             let recording_file = recording_path.join(&file_name);
 
@@ -740,22 +735,12 @@ impl RecordingManagerTask {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        let mut manifest = if recording_path.exists() {
-            JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?
-        } else {
-            fs::create_dir_all(&recording_path)
-                .await
-                .with_context(|| format!("failed to create recording path: {recording_path}"))?;
+        // A recording deleted while its artifact was being written must stay deleted.
+        if !manifest_path.exists() {
+            anyhow::bail!("session {id} has no recording");
+        }
 
-            // The session timing belongs to the recordings, so the first recording push sets it.
-            JrecManifest {
-                session_id: id,
-                start_time: 0,
-                duration: 0,
-                files: Vec::new(),
-                artifacts: JrecArtifacts::default(),
-            }
-        };
+        let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
 
         let artifacts = manifest.artifacts.of_kind_mut(kind);
         let file_name = kind.file_name(artifacts.len());
@@ -1222,26 +1207,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn artifact_first_leaves_session_timing_to_the_recording() {
+    async fn artifact_needs_a_recording() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
 
-        let artifact = harness.add_artifact(id, "analysis").await;
+        let mut writer = ArtifactWriter::create(&harness.sender, id, AI_ANALYSIS)
+            .await
+            .expect("create artifact");
+        writer.write_all(b"analysis").await.expect("write artifact");
 
-        assert_eq!(artifact, "ai-analysis-0.slog");
-        let manifest = harness.read_manifest(id);
-        assert_eq!(manifest["files"], json!([]));
-        assert_eq!(manifest["startTime"], 0);
-        assert_eq!(manifest["duration"], 0);
-        assert_eq!(
-            manifest["artifacts"],
-            json!({ "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] })
-        );
-
-        assert_eq!(harness.connect(id, WEBM).await, "recording-0.webm");
-        let manifest = harness.read_manifest(id);
-        assert_ne!(manifest["startTime"], 0);
-        assert_eq!(manifest["startTime"], manifest["files"][0]["startTime"]);
+        assert!(writer.finish().await.is_err());
+        let leftovers = std::fs::read_dir(&harness.recordings_path)
+            .expect("read recordings")
+            .count();
+        assert_eq!(leftovers, 0);
     }
 
     #[tokio::test]
@@ -1306,19 +1285,13 @@ mod tests {
     #[tokio::test]
     async fn artifact_stays_out_of_the_recording_lifecycle() {
         let harness = Harness::start();
-        let artifact_only = Uuid::new_v4();
+        let finished = Uuid::new_v4();
         let recorded = Uuid::new_v4();
+        harness.write_manifest(finished, MASTER_MANIFEST);
 
-        harness.add_artifact(artifact_only, "analysis").await;
-        assert!(
-            harness
-                .sender
-                .get_state(artifact_only)
-                .await
-                .expect("get state")
-                .is_none()
-        );
-        assert!(!harness.sender.active_recordings.contains(artifact_only));
+        harness.add_artifact(finished, "analysis").await;
+        assert!(harness.sender.get_state(finished).await.expect("get state").is_none());
+        assert!(!harness.sender.active_recordings.contains(finished));
         assert_eq!(harness.sender.get_count().await.expect("count"), 0);
 
         harness.push(recorded, WEBM).await;
