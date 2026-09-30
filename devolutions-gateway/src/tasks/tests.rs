@@ -565,8 +565,8 @@ async fn recording_ai_analysis_retry_resumes_at_the_first_chunk_without_a_checkp
         std::fs::read_to_string(workspace.join("chunks.done")).expect("chunks"),
         "3"
     );
-    assert!(workspace.join("chunk-0000.actions.jsonl").exists());
-    assert!(!workspace.join("chunk-0001.actions.jsonl").exists());
+    assert!(workspace.join("chunk-0000.json").exists());
+    assert!(!workspace.join("chunk-0001.json").exists());
     let chunk_starts = (0..3)
         .map(|index| first_line(&workspace.join(format!("chunk-{index:04}.txt"))))
         .collect::<Vec<_>>();
@@ -577,6 +577,13 @@ async fn recording_ai_analysis_retry_resumes_at_the_first_chunk_without_a_checkp
     let record = harness.record(snapshot.id).await;
     assert_eq!(record.state, TaskState::Success, "{:?}", record.error);
     assert_eq!(record.attempts, 2);
+
+    let result: serde_json::Value = serde_json::from_str(record.result.as_deref().expect("result")).expect("JSON");
+    assert_eq!(
+        result["usage"],
+        serde_json::json!({ "inputTokens": 30, "outputTokens": 60 }),
+        "chunk 0 counts from its checkpoint, the failed request not at all"
+    );
 
     let requests = requests.lock().clone();
     assert_eq!(requests.len(), 4, "only chunks 1 and 2 are sent again");

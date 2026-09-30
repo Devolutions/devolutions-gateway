@@ -2,8 +2,8 @@
 //!
 //! The task works in steps, keeping its files in the task workspace:
 //! 1. stream the terminal recordings into transcript chunk files (`chunk-NNNN.txt`);
-//! 2. ask the AI about each chunk and save its actions as a checkpoint (`chunk-NNNN.actions.jsonl`);
-//!    a retry skips the chunks that already have one;
+//! 2. ask the AI about each chunk and save its actions, the reported model and the token usage as a checkpoint
+//!    (`chunk-NNNN.json`); a retry skips the chunks that already have one;
 //! 3. merge the checkpoints into a `.slog` file and add it to the session.
 
 mod checkpoint;
@@ -15,12 +15,12 @@ use std::fs::File;
 use std::io::BufWriter;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_gateway_ai::AiClient;
-use devolutions_gateway_ai::session_actions::Action;
+use devolutions_gateway_ai::{AiClient, Usage};
 use secrecy::SecretString;
 use uuid::Uuid;
 
-use super::ai::AiSettings;
+use self::checkpoint::DescribedChunk;
+use super::ai::{AiSettings, TokenUsage};
 use super::{
     EphemeralParts, EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, TaskCtx, TaskError, TaskErrorCode, TaskKind,
 };
@@ -81,6 +81,13 @@ pub enum RecordingAiAnalysisSubstate {
 pub struct RecordingAiAnalysisOutput {
     /// Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
     pub file_name: String,
+    /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+    pub model: String,
+    /// Tokens the AI provider counted for the log, answers cut and asked again included.
+    ///
+    /// Absent when the provider did not report them for every request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TokenUsage>,
 }
 
 pub enum RecordingAiAnalysisTask {}
@@ -134,9 +141,19 @@ impl TaskKind for RecordingAiAnalysisTask {
                 .await
                 .map_err(|error| workspace_error(&error))?;
 
-            let actions = describe_chunk(&client, ctx.params.max_output_tokens, &chunk).await?;
+            let described = describe_chunk(&client, ctx.params.max_output_tokens, &chunk).await?;
 
-            blocking(move || checkpoint::write(&checkpoint, &actions).map_err(|error| workspace_error(&error))).await?;
+            debug!(
+                session.id = %session_id,
+                index,
+                actions = described.actions.len(),
+                model = ?described.model,
+                usage = ?described.usage,
+                "Chunk described"
+            );
+
+            blocking(move || checkpoint::write(&checkpoint, &described).map_err(|error| workspace_error(&error)))
+                .await?;
         }
 
         ctx.progress
@@ -144,10 +161,10 @@ impl TaskKind for RecordingAiAnalysisTask {
             .await;
 
         let log_path = workspace.join(LOG_FILE);
-        let model = ctx.params.model.clone();
-        let actions = blocking({
+        let requested_model = ctx.params.model.clone();
+        let merged = blocking({
             let log_path = log_path.clone();
-            move || merge_checkpoints(&workspace, total, start_time, duration, &model, &log_path)
+            move || merge_checkpoints(&workspace, total, start_time, duration, &requested_model, &log_path)
         })
         .await?;
 
@@ -155,9 +172,20 @@ impl TaskKind for RecordingAiAnalysisTask {
             .await
             .map_err(|error| TaskError::Permanent(format!("failed to add the log: {error:#}")))?;
 
-        info!(session.id = %session_id, file_name, actions, "Session log generated");
+        info!(
+            session.id = %session_id,
+            file_name,
+            actions = merged.actions,
+            model = merged.model,
+            usage = ?merged.usage,
+            "Session log generated"
+        );
 
-        Ok(RecordingAiAnalysisOutput { file_name })
+        Ok(RecordingAiAnalysisOutput {
+            file_name,
+            model: merged.model,
+            usage: merged.usage.map(TokenUsage::from),
+        })
     }
 }
 
@@ -209,9 +237,13 @@ async fn describe_chunk(
     client: &AiClient,
     max_output_tokens: Option<u32>,
     chunk: &str,
-) -> Result<Vec<Action>, TaskError> {
+) -> Result<DescribedChunk, TaskError> {
     let mut parts = VecDeque::from([chunk]);
-    let mut actions = Vec::new();
+    let mut described = DescribedChunk {
+        actions: Vec::new(),
+        model: None,
+        usage: Some(Usage::default()),
+    };
 
     while let Some(part) = parts.pop_front() {
         let mut request = client.describe_session_actions(part);
@@ -221,8 +253,14 @@ async fn describe_chunk(
         }
 
         match request.send().await {
-            Ok(response) => actions.extend(response.output),
-            Err(devolutions_gateway_ai::Error::Truncated { .. }) => {
+            Ok(response) => {
+                described.actions.extend(response.output);
+                described.model = described.model.or(response.model);
+                described.usage = add_usage(described.usage, response.usage);
+            }
+            Err(devolutions_gateway_ai::Error::Truncated { usage }) => {
+                described.usage = add_usage(described.usage, usage);
+
                 let Some((first, second)) = split_in_half(part) else {
                     return Err(TaskError::Permanent(TRUNCATED_ERROR.to_owned()));
                 };
@@ -235,7 +273,12 @@ async fn describe_chunk(
         }
     }
 
-    Ok(actions)
+    Ok(described)
+}
+
+/// Sums token counts; the total is unknown as soon as one count is.
+fn add_usage(total: Option<Usage>, more: Option<Usage>) -> Option<Usage> {
+    Some(total? + more?)
 }
 
 /// Cuts `part` on the line boundary closest to its middle, unless it is too short to split.
@@ -266,32 +309,53 @@ fn split_in_half(part: &str) -> Option<(&str, &str)> {
     Some(part.split_at(cut))
 }
 
-/// Writes the `.slog` from the checkpoints, and returns the number of actions.
+/// What [`merge_checkpoints`] wrote.
+struct MergedLog {
+    actions: usize,
+    model: String,
+    usage: Option<Usage>,
+}
+
+/// Writes the `.slog` from the checkpoints.
+///
+/// The log names the first model reported for a chunk, or `requested_model` when the provider reported none.
 fn merge_checkpoints(
     workspace: &Utf8Path,
     total: usize,
     start_time: i64,
     duration: i64,
-    model: &str,
+    requested_model: &str,
     log_path: &Utf8Path,
-) -> Result<usize, TaskError> {
+) -> Result<MergedLog, TaskError> {
     let log_error = |error: anyhow::Error| TaskError::Permanent(format!("failed to write the log: {error:#}"));
+    let read = |index| checkpoint::read(&checkpoint::path(workspace, index)).map_err(|error| workspace_error(&error));
+
+    // `session.start` names the model, so it is read before the log is written.
+    let mut model = None;
+    for index in 0..total {
+        model = read(index)?.model;
+        if model.is_some() {
+            break;
+        }
+    }
+    let model = model.unwrap_or_else(|| requested_model.to_owned());
 
     let out = File::create(log_path).map_err(|error| workspace_error(&error))?;
-    let mut log = slog::SlogWriter::start(BufWriter::new(out), start_time, model).map_err(log_error)?;
-    let mut count = 0;
+    let mut log = slog::SlogWriter::start(BufWriter::new(out), start_time, &model).map_err(log_error)?;
+    let mut actions = 0;
+    let mut usage = Some(Usage::default());
 
     // Chunks follow each other in time, so only the actions of one chunk need sorting.
     for index in 0..total {
-        let mut actions =
-            checkpoint::read(&checkpoint::path(workspace, index)).map_err(|error| workspace_error(&error))?;
-        actions.sort_by_key(|action| action.offset);
+        let mut described = read(index)?;
+        described.actions.sort_by_key(|action| action.offset);
 
-        for action in &actions {
+        for action in &described.actions {
             log.action(action).map_err(log_error)?;
         }
 
-        count += actions.len();
+        actions += described.actions.len();
+        usage = add_usage(usage, described.usage);
     }
 
     log.finish(duration)
@@ -301,7 +365,7 @@ fn merge_checkpoints(
         .sync_all()
         .map_err(|error| workspace_error(&error))?;
 
-    Ok(count)
+    Ok(MergedLog { actions, model, usage })
 }
 
 impl EphemeralTask for RecordingAiAnalysisTask {
@@ -456,5 +520,46 @@ mod tests {
             .expect("empty model");
 
         assert_eq!(error, TaskErrorCode::MissingModel);
+    }
+
+    #[test]
+    fn usage_total_is_unknown_once_a_count_is() {
+        let usage = |input_tokens, output_tokens| Usage {
+            input_tokens,
+            output_tokens,
+        };
+
+        assert_eq!(add_usage(Some(usage(1, 2)), Some(usage(10, 20))), Some(usage(11, 22)));
+        assert_eq!(add_usage(Some(usage(1, 2)), None), None);
+        assert_eq!(add_usage(None, Some(usage(10, 20))), None);
+    }
+
+    #[test]
+    fn output_holds_the_model_and_the_usage_when_known() {
+        let output = RecordingAiAnalysisOutput {
+            file_name: "ai-analysis-0.slog".to_owned(),
+            model: "gpt-test-2026-09-30".to_owned(),
+            usage: Some(TokenUsage {
+                input_tokens: 10,
+                output_tokens: 20,
+            }),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&output).expect("serializable"),
+            serde_json::json!({
+                "fileName": "ai-analysis-0.slog",
+                "model": "gpt-test-2026-09-30",
+                "usage": { "inputTokens": 10, "outputTokens": 20 }
+            })
+        );
+
+        let unknown = RecordingAiAnalysisOutput { usage: None, ..output };
+        assert!(
+            serde_json::to_value(&unknown)
+                .expect("serializable")
+                .get("usage")
+                .is_none()
+        );
     }
 }

@@ -684,6 +684,18 @@ fn read_manifest(session_dir: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(session_dir.join("recording.json")).unwrap()).unwrap()
 }
 
+/// Model the mock AI provider reports, as a real one reports a dated version of the requested model.
+const REPORTED_MODEL: &str = "gpt-test-2026-09-30";
+
+/// Result of a successful `recording.ai-analysis` task run against the mock AI provider.
+fn expected_result(file_name: &str, input_tokens: u64, output_tokens: u64) -> Value {
+    json!({
+        "fileName": file_name,
+        "model": REPORTED_MODEL,
+        "usage": { "inputTokens": input_tokens, "outputTokens": output_tokens }
+    })
+}
+
 /// A mock OpenAI-compatible provider that answers every request with the same action and keeps the request bodies.
 async fn spawn_ai_provider() -> (String, Arc<Mutex<Vec<Value>>>) {
     spawn_truncating_ai_provider(|_| false).await
@@ -709,7 +721,7 @@ async fn spawn_truncating_ai_provider(
                     "id": "chatcmpl-1",
                     "object": "chat.completion",
                     "created": 0,
-                    "model": "gpt-test",
+                    "model": REPORTED_MODEL,
                     "choices": [{
                         "index": 0,
                         "message": { "role": "assistant", "content": AI_ANSWER },
@@ -762,15 +774,19 @@ async fn recording_ai_analysis_task_appends_a_generated_log_to_the_session() {
 
     let first = run_recording_ai_analysis(&gateway.app, session_id, &base_url).await;
     assert_eq!(first["state"], "success", "{first}");
-    assert_eq!(first["result"], json!({ "fileName": "ai-analysis-0.slog" }));
+    assert_eq!(first["result"], expected_result("ai-analysis-0.slog", 10, 20));
 
     let requests_so_far = requests.lock().unwrap().clone();
     assert_eq!(requests_so_far.len(), 1);
     let sent = requests_so_far[0].to_string();
     assert!(sent.contains(r"[0.5] user@host:~$ whoami\n[1.6] user\n"), "{sent}");
+    assert_eq!(
+        requests_so_far[0]["model"], "gpt-test",
+        "the requested model is sent as is"
+    );
 
     let expected = [
-        r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-1"}"#,
+        r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test-2026-09-30","promptVersion":"session-actions-1"}"#,
         r#"{"timestamp":"2026-08-20T19:43:55.500Z","seq":1,"event":"session.action","description":"Checked the current user","parameters":{"Command":"whoami"}}"#,
         r#"{"timestamp":"2026-08-20T19:44:05.000Z","seq":2,"event":"session.end","description":"Session ended"}"#,
     ]
@@ -791,7 +807,7 @@ async fn recording_ai_analysis_task_appends_a_generated_log_to_the_session() {
     let second = run_recording_ai_analysis(&gateway.app, session_id, &base_url).await;
     assert_eq!(
         second["result"],
-        json!({ "fileName": "ai-analysis-1.slog" }),
+        expected_result("ai-analysis-1.slog", 10, 20),
         "{second}"
     );
     assert_eq!(
@@ -851,6 +867,11 @@ async fn recording_ai_analysis_task_splits_a_chunk_whose_answer_is_truncated() {
 
     let finished = run_recording_ai_analysis(&gateway.app, session_id, &base_url).await;
     assert_eq!(finished["state"], "success", "{finished}");
+    assert_eq!(
+        finished["result"],
+        expected_result("ai-analysis-0.slog", 30, 60),
+        "the cut answer counts too"
+    );
 
     let requests = requests
         .lock()
