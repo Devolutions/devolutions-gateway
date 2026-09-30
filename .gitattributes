@@ -16,6 +16,7 @@
 *.scss text eol=lf
 *.html text eol=lf
 *.slog text eol=lf
+*.mc text eol=lf
 
 devolutions-gateway/openapi/doc/index.adoc linguist-generated merge=binary
 devolutions-gateway/openapi/dotnet-client/src/** linguist-generated merge=binary

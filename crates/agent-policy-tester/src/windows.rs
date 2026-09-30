@@ -307,7 +307,6 @@ async fn assert_redirected_policy_rejected(
         "ExpectedStoreToken": management["Management"]["StoreToken"],
         "Operation": "Repair",
         "ConflictHandling": "Reject",
-        "WarningsAcknowledged": false,
         "Draft": full_policy(),
         "ValidationReceipt": "invalid"
     });
@@ -393,7 +392,6 @@ async fn replace_policy(
         "ExpectedStoreToken": expected_store_token,
         "Operation": operation,
         "ConflictHandling": "Reject",
-        "WarningsAcknowledged": true,
         "Draft": validation["CanonicalDraft"],
         "ValidationReceipt": validation["ValidationReceipt"]
     });
