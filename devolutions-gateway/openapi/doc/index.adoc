@@ -3814,7 +3814,7 @@ AI settings used by an &#x60;ai-log&#x60; task: the body of &#x60;POST /jet/task
 | 
 |  <<AiProvider>>  
 | 
-|    openai, anthropic, mistral, openai-compatible,  
+|    openai, anthropic, mistral, gemini, openai-compatible,  
 
 |===
 
@@ -3880,6 +3880,7 @@ Progress of a running &#x60;ai-log&#x60; task.
 | openai
 | anthropic
 | mistral
+| gemini
 | openai-compatible
 
 |===

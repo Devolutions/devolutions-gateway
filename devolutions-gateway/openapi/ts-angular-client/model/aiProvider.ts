@@ -9,12 +9,13 @@
  */
 
 
-export type AiProvider = 'openai' | 'anthropic' | 'mistral' | 'openai-compatible';
+export type AiProvider = 'openai' | 'anthropic' | 'mistral' | 'gemini' | 'openai-compatible';
 
 export const AiProvider = {
     Openai: 'openai' as AiProvider,
     Anthropic: 'anthropic' as AiProvider,
     Mistral: 'mistral' as AiProvider,
+    Gemini: 'gemini' as AiProvider,
     OpenaiCompatible: 'openai-compatible' as AiProvider
 };
 

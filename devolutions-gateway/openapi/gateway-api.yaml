@@ -1542,6 +1542,7 @@ components:
       - openai
       - anthropic
       - mistral
+      - gemini
       - openai-compatible
     AppCredential:
       type: object
