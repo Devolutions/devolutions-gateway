@@ -13,6 +13,7 @@ extern crate tracing;
 pub mod openapi;
 
 pub mod api;
+pub mod artifacts;
 pub mod cli;
 pub mod config;
 pub mod credential;

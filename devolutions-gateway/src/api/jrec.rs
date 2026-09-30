@@ -28,6 +28,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::DgwState;
 use crate::api::heartbeat::recording_storage_health;
+use crate::artifacts::JrecArtifacts;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::{PushOutcome, RecordingMessageSender};
@@ -36,7 +37,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 /// Read chunk size when streaming a finished session ZIP from the temp file.
 const ZIP_CHUNK_SIZE: usize = 64 * 1024;
 
-/// Maximum files in a session ZIP (`recording.json` + clips).
+/// Maximum files in a session ZIP (`recording.json` + clips and artifacts).
 ///
 /// Reconnect windows only mint a small number of clips per session in practice;
 /// this bound blocks pathological manifests without rejecting normal multi-clip packages.
@@ -633,6 +634,8 @@ where
 #[serde(rename_all = "camelCase")]
 struct RecordingZipManifest {
     files: Vec<RecordingZipManifestFile>,
+    #[serde(default)]
+    artifacts: JrecArtifacts,
 }
 
 #[derive(Debug, Deserialize)]
@@ -672,7 +675,7 @@ impl RecordingZipPlan {
     }
 }
 
-/// Snapshots `recording.json` and the clip files it references at call time.
+/// Snapshots `recording.json` and the clip and artifact files it references at call time.
 async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<RecordingZipPlan, HttpError> {
     let manifest_path = recording_dir.join("recording.json");
     let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|error| {
@@ -695,22 +698,27 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let mut clip_names = Vec::with_capacity(manifest.files.len());
-    for file in manifest.files {
-        if !is_safe_recording_file_name(&file.file_name) {
+    let file_names = manifest
+        .files
+        .into_iter()
+        .map(|file| file.file_name)
+        .chain(manifest.artifacts.into_file_names());
+    let mut clip_names = Vec::with_capacity(file_names.size_hint().0);
+    for file_name in file_names {
+        if !is_safe_recording_file_name(&file_name) {
             warn!(
-                file_name = %file.file_name,
+                %file_name,
                 "Skipping unsafe recording file name from manifest"
             );
             continue;
         }
 
-        let path = recording_dir.join(&file.file_name);
+        let path = recording_dir.join(&file_name);
         if path.is_file() {
-            clip_names.push(file.file_name);
+            clip_names.push(file_name);
         } else {
             warn!(
-                file_name = %file.file_name,
+                %file_name,
                 path = %path,
                 "Skipping missing recording file listed in manifest"
             );
@@ -1088,6 +1096,44 @@ mod tests {
         assert_eq!(
             plan.clip_names,
             vec!["recording-0.webm".to_owned(), "recording-1.webm".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshots_manifest_artifacts_for_zip() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 path");
+
+        let manifest = serde_json::json!({
+            "sessionId": "33333333-3333-3333-3333-333333333333",
+            "startTime": 1,
+            "duration": 5,
+            "files": [
+                { "fileName": "recording-0.webm", "startTime": 1, "duration": 5 }
+            ],
+            "artifacts": {
+                "ai-analysis": [
+                    { "fileName": "ai-analysis-0.slog" },
+                    { "fileName": "ai-analysis-1.slog" }
+                ]
+            }
+        });
+
+        tokio::fs::write(dir_path.join("recording.json"), manifest.to_string())
+            .await
+            .expect("write manifest");
+        for file_name in ["recording-0.webm", "ai-analysis-0.slog", "ai-analysis-1.slog"] {
+            tokio::fs::write(dir_path.join(file_name), b"content")
+                .await
+                .expect("write artifact");
+        }
+
+        let plan = snapshot_recording_zip_plan(&dir_path)
+            .await
+            .unwrap_or_else(|error| panic!("snapshot plan: {error}"));
+        assert_eq!(
+            plan.clip_names,
+            ["recording-0.webm", "ai-analysis-0.slog", "ai-analysis-1.slog"]
         );
     }
 
