@@ -230,8 +230,80 @@ async fn openai_compatible_uses_the_given_base_url() {
         header(&request.headers, "authorization"),
         Some(format!("Bearer {API_KEY}").as_str())
     );
-    assert_eq!(request.body["max_tokens"], 4096);
+    assert_eq!(request.body["max_tokens"], 16_000);
     assert!(request.body.get("max_completion_tokens").is_none());
+}
+
+#[tokio::test]
+async fn gemini_speaks_openai_chat_with_max_tokens() {
+    let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
+
+    let response = client(Provider::Gemini, base_url)
+        .describe_session_actions("[1.5] ls")
+        .max_output_tokens(1234)
+        .send()
+        .await
+        .unwrap();
+
+    assert_parsed_actions(&response.output);
+
+    let request = captured.lock().take().unwrap();
+    assert_eq!(request.path, "/v1/chat/completions");
+    assert_eq!(
+        header(&request.headers, "authorization"),
+        Some(format!("Bearer {API_KEY}").as_str())
+    );
+    assert_eq!(request.body["max_tokens"], 1234);
+    assert!(request.body.get("max_completion_tokens").is_none());
+}
+
+#[tokio::test]
+async fn think_blocks_are_not_read_as_actions() {
+    let answer = format!("<think>\n{{\"offsetSeconds\":9,\"description\":\"Drafted an action\"}}\n</think>\n{ANSWER}");
+    let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response(&answer)).await;
+
+    let response = client(Provider::OpenAiCompatible, base_url)
+        .describe_session_actions("[1.5] ls")
+        .send()
+        .await
+        .unwrap();
+
+    assert_parsed_actions(&response.output);
+}
+
+#[tokio::test]
+async fn silent_provider_times_out_as_transient() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    // Accepts connections and never answers.
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let _open = stream;
+                std::future::pending::<()>().await;
+            });
+        }
+    });
+
+    let started = std::time::Instant::now();
+    let error = AiClient::builder()
+        .provider(Provider::OpenAiCompatible)
+        .model(MODEL)
+        .api_key(API_KEY)
+        .base_url(Url::parse(&format!("http://{addr}/v1/")).unwrap())
+        .http_client(http_client())
+        .request_timeout(Duration::from_millis(200))
+        .build()
+        .unwrap()
+        .describe_session_actions("[0] whoami")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::Transport { .. }), "{error:?}");
+    assert!(error.is_transient());
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
 #[tokio::test]
@@ -330,6 +402,7 @@ fn build_requires_key_for_hosted_providers() {
         Provider::OpenAi,
         Provider::Anthropic,
         Provider::Mistral,
+        Provider::Gemini,
         Provider::OpenAiCompatible,
     ] {
         let result = AiClient::builder()
@@ -384,7 +457,12 @@ fn build_rejects_a_base_url_that_is_not_http() {
 
 #[test]
 fn build_uses_default_base_url() {
-    for provider in [Provider::OpenAi, Provider::Anthropic, Provider::Mistral] {
+    for provider in [
+        Provider::OpenAi,
+        Provider::Anthropic,
+        Provider::Mistral,
+        Provider::Gemini,
+    ] {
         let result = AiClient::builder()
             .provider(provider)
             .model(MODEL)

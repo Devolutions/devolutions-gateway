@@ -35,7 +35,8 @@ Rules:
 - Never copy passwords, secrets, or tokens. Write "[redacted]" instead.
 - If the user did nothing, write nothing."#;
 
-const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 4_096;
+/// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
+const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
 
 /// One user action found in a session transcript.
 #[derive(Debug, Clone, PartialEq)]
@@ -84,7 +85,7 @@ impl fmt::Debug for DescribeSessionActions<'_> {
 }
 
 impl DescribeSessionActions<'_> {
-    /// Upper bound of tokens in the answer; the default is 4096.
+    /// Upper bound of tokens in the answer; the default is 16000.
     pub fn max_output_tokens(mut self, max_output_tokens: u32) -> Self {
         self.max_output_tokens = max_output_tokens;
         self

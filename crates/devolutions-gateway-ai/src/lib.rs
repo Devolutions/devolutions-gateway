@@ -7,8 +7,9 @@
 //! Every purpose goes through one [`AiClient`], which holds the provider settings, and returns a [`Response`], which
 //! also tells which model answered and how many tokens the request used.
 //!
-//! Each provider is reached through its own HTTP API: OpenAI chat completions (also spoken by Mistral and many
+//! Each provider is reached through its own HTTP API: OpenAI chat completions (also spoken by Mistral, Gemini and many
 //! others) or Anthropic Messages. Only the few fields a single text completion needs are modeled.
+//! Requests are not streamed and are bounded by a timeout.
 //!
 //! A new purpose is a module like [`session_actions`]: a prompt and its `PROMPT_VERSION`, a request builder returned by
 //! a new [`AiClient`] method, and a parser turning the answer into typed output.
@@ -22,6 +23,6 @@ mod wire;
 pub use reqwest;
 pub use secrecy;
 
-pub use self::client::{AiClient, AiClientBuilder, BuildError, Provider};
+pub use self::client::{AiClient, AiClientBuilder, BuildError, DEFAULT_REQUEST_TIMEOUT, Provider};
 pub use self::error::Error;
 pub use self::response::{Response, Usage};

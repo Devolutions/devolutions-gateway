@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use reqwest::header::HeaderValue;
 use secrecy::{ExposeSecret as _, SecretString};
@@ -7,6 +8,9 @@ use url::Url;
 
 use crate::wire::{Api, anthropic, openai};
 use crate::{Error, Response, error};
+
+/// Default of [`AiClientBuilder::request_timeout`].
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// AI provider behind an [`AiClient`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +21,10 @@ pub enum Provider {
     Anthropic,
     /// Mistral chat completions; the default base URL is `https://api.mistral.ai/v1/`.
     Mistral,
-    /// Any endpoint speaking OpenAI chat completions, such as Gemini; the base URL is required.
+    /// Google Gemini through its OpenAI-compatible endpoint; the default base URL is
+    /// `https://generativelanguage.googleapis.com/v1beta/openai/`.
+    Gemini,
+    /// Any other endpoint speaking OpenAI chat completions, such as a self-hosted model server; the base URL is required.
     OpenAiCompatible,
 }
 
@@ -28,6 +35,7 @@ impl Provider {
             Self::OpenAi => "https://api.openai.com/v1/",
             Self::Anthropic => "https://api.anthropic.com/v1/",
             Self::Mistral => "https://api.mistral.ai/v1/",
+            Self::Gemini => "https://generativelanguage.googleapis.com/v1beta/openai/",
             Self::OpenAiCompatible => return None,
         };
 
@@ -38,7 +46,7 @@ impl Provider {
         match self {
             // OpenAI's newer models only accept `max_completion_tokens`; other servers only know `max_tokens`.
             Self::OpenAi => Api::OpenAiChat(openai::TokenLimit::MaxCompletionTokens),
-            Self::Mistral | Self::OpenAiCompatible => Api::OpenAiChat(openai::TokenLimit::MaxTokens),
+            Self::Mistral | Self::Gemini | Self::OpenAiCompatible => Api::OpenAiChat(openai::TokenLimit::MaxTokens),
             Self::Anthropic => Api::AnthropicMessages,
         }
     }
@@ -73,6 +81,7 @@ pub struct AiClientBuilder {
     api_key: Option<SecretString>,
     base_url: Option<Url>,
     http_client: Option<reqwest::Client>,
+    request_timeout: Option<Duration>,
 }
 
 impl AiClientBuilder {
@@ -109,6 +118,15 @@ impl AiClientBuilder {
         self
     }
 
+    /// Longest time one request may take, answer included; the default is [`DEFAULT_REQUEST_TIMEOUT`].
+    ///
+    /// Requests are not streamed, so it must leave the model time to write its whole answer.
+    #[must_use]
+    pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.request_timeout = Some(request_timeout);
+        self
+    }
+
     /// Checks every setting, so that no request of the client can fail because of them.
     pub fn build(self) -> Result<AiClient, BuildError> {
         let provider = self.provider.ok_or(BuildError::MissingProvider)?;
@@ -136,6 +154,7 @@ impl AiClientBuilder {
             base_url,
             api_key,
             http_client,
+            request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
         })
     }
 }
@@ -160,6 +179,7 @@ pub struct AiClient {
     base_url: Url,
     api_key: SecretString,
     http_client: reqwest::Client,
+    request_timeout: Duration,
 }
 
 impl fmt::Debug for AiClient {
@@ -168,6 +188,7 @@ impl fmt::Debug for AiClient {
             .field("provider", &self.provider)
             .field("model", &self.model)
             .field("base_url", &self.base_url.as_str())
+            .field("request_timeout", &self.request_timeout)
             .finish_non_exhaustive()
     }
 }
@@ -189,6 +210,7 @@ impl AiClient {
     /// Sends one completion request and returns the text of the answer.
     ///
     /// An answer cut at the output token limit is [`Error::Truncated`], because no purpose can use a partial answer.
+    /// The `<think>` blocks some models write before their answer are removed.
     pub(crate) async fn complete(&self, prompt: &Prompt<'_>) -> Result<Response<String>, Error> {
         debug!(
             provider = ?self.provider,
@@ -212,6 +234,7 @@ impl AiClient {
         };
 
         let response = request
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(|error| error::transport(&error, api_key))?;
@@ -231,8 +254,10 @@ impl AiClient {
             Api::AnthropicMessages => anthropic::parse(&body)?,
         };
 
+        let text = strip_think_blocks(completion.text);
+
         debug!(
-            output_len = completion.text.len(),
+            output_len = text.len(),
             truncated = completion.truncated,
             model = ?completion.model,
             usage = ?completion.usage,
@@ -246,11 +271,46 @@ impl AiClient {
         }
 
         Ok(Response {
-            output: completion.text,
+            output: text,
             model: completion.model,
             usage: completion.usage,
         })
     }
+}
+
+/// Removes the `<think>…</think>` blocks that some models write before their answer; an unclosed block runs to the end.
+fn strip_think_blocks(text: String) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+
+    if find_ignore_ascii_case(&text, OPEN).is_none() {
+        return text;
+    }
+
+    let mut stripped = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+
+    while let Some(open) = find_ignore_ascii_case(rest, OPEN) {
+        stripped.push_str(&rest[..open]);
+
+        let inside = &rest[open + OPEN.len()..];
+        let Some(close) = find_ignore_ascii_case(inside, CLOSE) else {
+            return stripped;
+        };
+
+        rest = &inside[close + CLOSE.len()..];
+    }
+
+    stripped.push_str(rest);
+    stripped
+}
+
+// The needle is ASCII, so a match always starts on a character boundary.
+fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 #[cfg(test)]
@@ -273,6 +333,10 @@ mod tests {
             (Provider::OpenAi, "https://api.openai.com/v1/"),
             (Provider::Anthropic, "https://api.anthropic.com/v1/"),
             (Provider::Mistral, "https://api.mistral.ai/v1/"),
+            (
+                Provider::Gemini,
+                "https://generativelanguage.googleapis.com/v1beta/openai/",
+            ),
         ] {
             let resolved = resolve_base_url(provider, None).expect("default base URL");
             assert_eq!(resolved.as_str(), expected);
@@ -282,6 +346,20 @@ mod tests {
             resolve_base_url(Provider::OpenAiCompatible, None),
             Err(BuildError::MissingBaseUrl(Provider::OpenAiCompatible))
         ));
+    }
+
+    #[test]
+    fn think_blocks_are_removed() {
+        for (text, expected) in [
+            ("answer", "answer"),
+            ("<think>plan</think>answer", "answer"),
+            ("<THINK>\nplan\n</Think>\nanswer\n", "\nanswer\n"),
+            ("a<think>1</think>b<think>2</think>c", "abc"),
+            ("é<think>plan", "é"),
+            ("</think>answer", "</think>answer"),
+        ] {
+            assert_eq!(strip_think_blocks(text.to_owned()), expected, "{text:?}");
+        }
     }
 
     #[test]
