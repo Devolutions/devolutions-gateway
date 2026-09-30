@@ -4251,13 +4251,22 @@ mod tests {
         let path = dir.path().join(PROBE_SOURCE_NAME);
         let mut file = match create_secure_transaction_file(&path) {
             Ok(file) => file,
-            Err(error) => {
+            // Assigning the Administrators owner requires elevation.
+            Err(error)
+                if error
+                    .root_cause()
+                    .downcast_ref::<windows::core::Error>()
+                    .is_some_and(|error| {
+                        error.code() == windows::Win32::Foundation::ERROR_INVALID_OWNER.to_hresult()
+                    }) =>
+            {
                 tracing::warn!(
                     error = %format!("{error:#}"),
                     "Skipping administrator-owned probe recovery fixture"
                 );
                 return;
             }
+            Err(error) => panic!("failed to create probe recovery fixture: {error:#}"),
         };
         file.write_all(PROBE_SOURCE_CONTENT).unwrap();
         file.sync_all().unwrap();
