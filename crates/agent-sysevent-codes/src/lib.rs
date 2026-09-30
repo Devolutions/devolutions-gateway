@@ -58,7 +58,7 @@ pub fn boot_stacktrace_written(path: &Path) -> Entry {
         .field("path", path.display())
 }
 
-// 6000-6009 **User Sessions**
+// 6000-6099 **User Sessions**
 
 /// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
 pub const USER_SESSION_PROCESS_STARTED: u32 = 6000;

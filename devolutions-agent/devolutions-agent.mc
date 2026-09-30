@@ -85,7 +85,7 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
-; 6000-6009 User Sessions
+; 6000-6099 User Sessions
 
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
