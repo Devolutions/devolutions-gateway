@@ -103,6 +103,7 @@ async fn accept_connections(
                 match result {
                     Ok(()) => {
                         let state = Arc::clone(state);
+                        let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
                         connections.spawn(async move {
                             // Serving this connection can commit a policy and record its terminal
                             // event, which is blocking work the shutdown cannot interrupt, so the
@@ -139,7 +140,7 @@ async fn accept_connections(
 
                             // Enforce a deadline so idle or slow clients cannot pin
                             // a connection slot indefinitely.
-                            if tokio::time::timeout(CONNECTION_DEADLINE, serve).await.is_err() {
+                            if tokio::time::timeout_at(connection_deadline, serve).await.is_err() {
                                 warn!("Closed named pipe connection: deadline exceeded");
                             }
                         });

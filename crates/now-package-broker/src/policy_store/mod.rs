@@ -1145,7 +1145,7 @@ mod storage_tests {
         assert_eq!(error.code, ErrorCode::ValidationFailed);
 
         let validation = store.validate_draft(&request.draft);
-        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/10");
+        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/11");
         let canonical = validation.canonical_draft.as_ref().expect("compatible draft");
         let old_receipt =
             store

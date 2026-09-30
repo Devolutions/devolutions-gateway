@@ -704,7 +704,7 @@ async fn validate_policy_by_pipe(pipe_name: &str, draft: &Value) -> anyhow::Resu
     let validation = validation_response.json()?["Validation"].clone();
     ensure!(validation["IsValid"] == true, "policy validation failed");
     ensure!(
-        validation["ValidatorVersion"] == "now-package-broker-policy-validator/10",
+        validation["ValidatorVersion"] == "now-package-broker-policy-validator/11",
         "unexpected validator contract"
     );
     ensure!(
@@ -1018,7 +1018,7 @@ async fn assert_invalid_draft(pipe_name: &str, draft: Value, expected_path: &str
     ensure!(
         invalid_validation.get("CanonicalDraft").is_none()
             && invalid_validation.get("ValidationReceipt").is_none()
-            && invalid_validation["ValidatorVersion"] == "now-package-broker-policy-validator/10",
+            && invalid_validation["ValidatorVersion"] == "now-package-broker-policy-validator/11",
         "invalid draft returned a canonical draft, receipt, or wrong validator version"
     );
     ensure!(
