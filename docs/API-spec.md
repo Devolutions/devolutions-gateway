@@ -132,6 +132,8 @@ For the following step, I'll assume the PowerShell module is used.
  "jet_flt": boolean,
  // Optional, but it is recommended to always scope to a specific Gateway ID
  "jet_gw_id": string (UUID),
+ // Optional, explicit agent: route through this Agent Tunnel agent or fail (jet_cm = "fwd" only)
+ "jet_agent_id": string (UUID),
  "iat": integer (i64),
  "nbf": integer (i64),
  "exp": integer (i64),
@@ -176,6 +178,8 @@ Using FreeRDP, token can be provided using `/pcb` argument with `xfreerdp` (e.g:
  "jet_aid": string (UUID),
  // Optional, but it is recommended to always scope to a specific Gateway ID
  "jet_gw_id": string (UUID),
+ // Optional, explicit agent: every channel is routed through this Agent Tunnel agent or fails
+ "jet_agent_id": string (UUID),
  "iat": integer (i64),
  "nbf": integer (i64),
  "exp": integer (i64),

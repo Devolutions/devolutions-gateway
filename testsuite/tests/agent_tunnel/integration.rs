@@ -345,6 +345,103 @@ async fn gateway_connect_upstream_does_not_bypass_failed_agent_routes() {
     listener.shutdown().await;
 }
 
+/// A Gateway JMUX session driven through an in-memory peer stream.
+struct JmuxSession {
+    id: Uuid,
+    peer: tokio::io::DuplexStream,
+    proxy_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    session_shutdown: ShutdownHandle,
+    session_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+}
+
+impl JmuxSession {
+    fn start(target: &TargetAddr, jet_agent_id: Option<Uuid>, agent_tunnel: Option<AgentTunnelHandle>) -> Self {
+        let id = Uuid::new_v4();
+        let (recordings, _recording_rx) = recording_message_channel();
+        let session_manager = SessionManagerTask::init(recordings);
+        let sessions = session_manager.handle();
+        let (session_shutdown, session_shutdown_signal) = ShutdownHandle::new();
+        let session_task = tokio::spawn(session_manager.run(session_shutdown_signal));
+        let (subscriber_tx, _subscriber_rx) = subscriber_channel();
+        let (traffic_audit_handle, _traffic_audit_rx) = TrafficAuditHandle::new();
+        let claims = JmuxTokenClaims {
+            jet_aid: id,
+            hosts: NonEmpty::new(target.clone()),
+            jet_ap: ApplicationProtocol::unknown(),
+            jet_rec: RecordingPolicy::None,
+            jet_ttl: SessionTtl::Unlimited,
+            exp: i64::MAX,
+            jti: Uuid::new_v4(),
+            jet_agent_id,
+        };
+        let (proxy_stream, peer) = tokio::io::duplex(8192);
+        let proxy_task = tokio::spawn(devolutions_gateway::jmux::handle(
+            proxy_stream,
+            claims,
+            sessions,
+            subscriber_tx,
+            traffic_audit_handle,
+            agent_tunnel.map(Arc::new),
+        ));
+
+        Self {
+            id,
+            peer,
+            proxy_task,
+            session_shutdown,
+            session_task,
+        }
+    }
+
+    async fn open(&mut self, channel_id: u32, target: &TargetAddr) {
+        send_jmux_message(
+            &mut self.peer,
+            Message::open(
+                LocalChannelId::from(channel_id),
+                4096,
+                jmux_proto::DestinationUrl::new(target.scheme(), target.host(), target.port()),
+            ),
+        )
+        .await;
+    }
+
+    async fn stop(self) {
+        self.proxy_task.abort();
+        self.session_shutdown.signal();
+        self.session_task
+            .await
+            .expect("session manager task panicked")
+            .expect("session manager shutdown");
+    }
+}
+
+/// A listening TCP target that detects any direct connection from the Gateway.
+struct DirectTarget {
+    listener: TcpListener,
+    addr: TargetAddr,
+}
+
+impl DirectTarget {
+    async fn bind() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
+        let port = listener.local_addr().expect("read direct target address").port();
+
+        Self {
+            listener,
+            addr: target("127.0.0.1", port),
+        }
+    }
+
+    async fn assert_not_connected(&self, reason: &str) {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), self.listener.accept())
+                .await
+                .is_err(),
+            "{reason}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
     let listener = bind_test_listener().await;
@@ -358,49 +455,13 @@ async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
         vec![],
     )
     .await;
-    let direct_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind direct target");
-    let target_port = direct_listener.local_addr().expect("read direct target address").port();
-    let target = target("127.0.0.1", target_port);
-    let session_id = Uuid::new_v4();
+    let direct = DirectTarget::bind().await;
+    let mut jmux = JmuxSession::start(&direct.addr, None, Some(listener.handle.clone()));
 
-    let (recordings, _recording_rx) = recording_message_channel();
-    let session_manager = SessionManagerTask::init(recordings);
-    let sessions = session_manager.handle();
-    let (session_shutdown, session_shutdown_signal) = ShutdownHandle::new();
-    let session_task = tokio::spawn(session_manager.run(session_shutdown_signal));
-    let (subscriber_tx, _subscriber_rx) = subscriber_channel();
-    let (traffic_audit_handle, _traffic_audit_rx) = TrafficAuditHandle::new();
-    let claims = JmuxTokenClaims {
-        jet_aid: session_id,
-        hosts: NonEmpty::new(target.clone()),
-        jet_ap: ApplicationProtocol::unknown(),
-        jet_rec: RecordingPolicy::None,
-        jet_ttl: SessionTtl::Unlimited,
-        exp: i64::MAX,
-        jti: Uuid::new_v4(),
-    };
-    let (proxy_stream, mut peer_stream) = tokio::io::duplex(8192);
-    let proxy_task = tokio::spawn(devolutions_gateway::jmux::handle(
-        proxy_stream,
-        claims,
-        sessions,
-        subscriber_tx,
-        traffic_audit_handle,
-        Some(Arc::new(listener.handle.clone())),
-    ));
-
-    send_jmux_message(
-        &mut peer_stream,
-        Message::open(
-            LocalChannelId::from(20),
-            4096,
-            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
-        ),
-    )
-    .await;
+    jmux.open(20, &direct.addr).await;
     let mut routed_session = tokio::time::timeout(
         Duration::from_secs(5),
-        accept_session_request(&connection, session_id, target.as_addr()),
+        accept_session_request(&connection, jmux.id, direct.addr.as_addr()),
     )
     .await
     .expect("routed JMUX request timed out");
@@ -408,13 +469,13 @@ async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
         .send_response(&ConnectResponse::success())
         .await
         .expect("accept routed JMUX request");
-    let Message::OpenSuccess(success) = receive_jmux_message(&mut peer_stream).await else {
+    let Message::OpenSuccess(success) = receive_jmux_message(&mut jmux.peer).await else {
         panic!("expected OPEN SUCCESS");
     };
     assert_eq!(success.recipient_channel_id, 20);
 
     let local_id = DistantChannelId::from(success.sender_channel_id);
-    send_jmux_message(&mut peer_stream, Message::data(local_id, Bytes::from_static(b"ping"))).await;
+    send_jmux_message(&mut jmux.peer, Message::data(local_id, Bytes::from_static(b"ping"))).await;
     let (mut routed_send, mut routed_recv) = routed_session.into_inner();
     let mut request = [0; 4];
     routed_recv
@@ -426,24 +487,16 @@ async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
         .write_all(b"pong")
         .await
         .expect("write routed JMUX response");
-    let Message::Data(response) = receive_jmux_message(&mut peer_stream).await else {
+    let Message::Data(response) = receive_jmux_message(&mut jmux.peer).await else {
         panic!("expected CHANNEL DATA");
     };
     assert_eq!(response.recipient_channel_id, 20);
     assert_eq!(response.transfer_data, b"pong"[..]);
 
-    send_jmux_message(
-        &mut peer_stream,
-        Message::open(
-            LocalChannelId::from(21),
-            4096,
-            jmux_proto::DestinationUrl::new("tcp", "127.0.0.1", target_port),
-        ),
-    )
-    .await;
+    jmux.open(21, &direct.addr).await;
     let mut failed_session = tokio::time::timeout(
         Duration::from_secs(5),
-        accept_session_request(&connection, session_id, target.as_addr()),
+        accept_session_request(&connection, jmux.id, direct.addr.as_addr()),
     )
     .await
     .expect("failed routed JMUX request timed out");
@@ -451,26 +504,88 @@ async fn gateway_jmux_uses_agent_route_without_direct_fallback() {
         .send_response(&ConnectResponse::error("connection refused"))
         .await
         .expect("reject routed JMUX request");
-    let Message::OpenFailure(failure) = receive_jmux_message(&mut peer_stream).await else {
+    let Message::OpenFailure(failure) = receive_jmux_message(&mut jmux.peer).await else {
         panic!("expected OPEN FAILURE");
     };
     assert_eq!(failure.recipient_channel_id, 21);
     assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), direct_listener.accept())
-            .await
-            .is_err(),
-        "matched Agent route must not fall back to direct TCP"
-    );
+    direct
+        .assert_not_connected("matched Agent route must not fall back to direct TCP")
+        .await;
 
-    proxy_task.abort();
-    session_shutdown.signal();
-    session_task
-        .await
-        .expect("session manager task panicked")
-        .expect("session manager shutdown");
+    jmux.stop().await;
     connection.close(0u32.into(), b"test done");
     listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_jmux_routes_explicit_agent_without_a_matching_route() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("jmux-explicit-agent").await;
+    let _ctrl = advertise_domain(&connection, listener.handle.registry(), agent_id, 1, "unused.example").await;
+    let direct = DirectTarget::bind().await;
+    let mut jmux = JmuxSession::start(&direct.addr, Some(agent_id), Some(listener.handle.clone()));
+
+    jmux.open(30, &direct.addr).await;
+    let mut routed_session = tokio::time::timeout(
+        Duration::from_secs(5),
+        accept_session_request(&connection, jmux.id, direct.addr.as_addr()),
+    )
+    .await
+    .expect("explicit agent never received the JMUX stream");
+    routed_session
+        .send_response(&ConnectResponse::success())
+        .await
+        .expect("accept routed JMUX request");
+    let Message::OpenSuccess(success) = receive_jmux_message(&mut jmux.peer).await else {
+        panic!("expected OPEN SUCCESS");
+    };
+    assert_eq!(success.recipient_channel_id, 30);
+    direct
+        .assert_not_connected("explicit agent must not fall back to direct TCP")
+        .await;
+
+    jmux.stop().await;
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_jmux_rejects_unknown_explicit_agent_without_direct_fallback() {
+    let listener = bind_test_listener().await;
+    let direct = DirectTarget::bind().await;
+    let mut jmux = JmuxSession::start(&direct.addr, Some(Uuid::new_v4()), Some(listener.handle.clone()));
+
+    jmux.open(31, &direct.addr).await;
+    let Message::OpenFailure(failure) = receive_jmux_message(&mut jmux.peer).await else {
+        panic!("expected OPEN FAILURE");
+    };
+    assert_eq!(failure.recipient_channel_id, 31);
+    assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
+    direct
+        .assert_not_connected("unknown explicit agent must not fall back to direct TCP")
+        .await;
+
+    jmux.stop().await;
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn gateway_jmux_rejects_explicit_agent_when_agent_tunnel_is_disabled() {
+    let direct = DirectTarget::bind().await;
+    let mut jmux = JmuxSession::start(&direct.addr, Some(Uuid::new_v4()), None);
+
+    jmux.open(32, &direct.addr).await;
+    let Message::OpenFailure(failure) = receive_jmux_message(&mut jmux.peer).await else {
+        panic!("expected OPEN FAILURE");
+    };
+    assert_eq!(failure.recipient_channel_id, 32);
+    assert_eq!(failure.reason_code, ReasonCode::GENERAL_FAILURE);
+    direct
+        .assert_not_connected("explicit agent must not connect directly when Agent Tunnel is disabled")
+        .await;
+
+    jmux.stop().await;
 }
 
 #[tokio::test]

@@ -38,6 +38,7 @@ pub async fn handle(
     debug!(?config, "JMUX config");
 
     let session_id = claims.jet_aid;
+    let explicit_agent_id = claims.jet_agent_id;
 
     let info = SessionInfo::builder()
         .id(session_id)
@@ -112,9 +113,11 @@ pub async fn handle(
         .with_config(config)
         .with_outgoing_traffic_event_callback(traffic_event_callback);
 
-    if let Some(agent_tunnel_handle) = agent_tunnel_handle {
+    // An explicit agent requires the connector even without an Agent Tunnel handle: `try_route` then
+    // fails the stream instead of letting `jmux-proxy` connect directly.
+    if agent_tunnel_handle.is_some() || explicit_agent_id.is_some() {
         proxy = proxy.with_target_connector_override(move |destination_url: DestinationUrl| {
-            let agent_tunnel_handle = Arc::clone(&agent_tunnel_handle);
+            let agent_tunnel_handle = agent_tunnel_handle.clone();
 
             async move {
                 let target = TargetAddr::from_components(
@@ -126,9 +129,8 @@ pub async fn handle(
                 let route_target = route_target_from_target_addr(&target);
 
                 let routed = agent_tunnel::routing::try_route(
-                    Some(agent_tunnel_handle.as_ref()),
-                    // TODO: Pass `jet_agent_id` after JMUX consumers start issuing it.
-                    None,
+                    agent_tunnel_handle.as_deref(),
+                    explicit_agent_id,
                     &route_target,
                     session_id,
                     target.as_addr(),

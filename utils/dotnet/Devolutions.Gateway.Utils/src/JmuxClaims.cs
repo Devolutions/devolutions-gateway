@@ -21,6 +21,9 @@ public class JmuxClaims : IGatewayClaims
     [JsonPropertyName("jet_rec")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RecordingPolicy? RecordingPolicy { get; set; }
+    [JsonPropertyName("jet_agent_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? AgentId { get; set; }
 
     public JmuxClaims(
         Guid scopeGatewayId,

@@ -96,6 +96,8 @@ pub struct JmuxClaims<'a> {
     pub exp: i64,
     pub nbf: i64,
     pub jti: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_id: Option<Uuid>,
 }
 
 #[derive(Clone, Serialize)]
@@ -270,6 +272,7 @@ pub enum SubCommandArgs {
         jet_ttl: Option<u64>,
         jet_aid: Option<Uuid>,
         jet_rec: bool,
+        jet_agent_id: Option<Uuid>,
     },
     Jrec {
         jet_rop: RecordingOperation,
@@ -453,6 +456,7 @@ pub fn generate_token(
             jet_ttl,
             jet_aid,
             jet_rec,
+            jet_agent_id,
         } => {
             let claims = JmuxClaims {
                 dst_hst: &dst_hst,
@@ -469,6 +473,7 @@ pub fn generate_token(
                 exp,
                 nbf,
                 jti,
+                jet_agent_id,
             };
             ("JMUX", serde_json::to_value(claims)?)
         }

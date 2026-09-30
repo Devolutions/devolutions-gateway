@@ -369,6 +369,7 @@ pub(crate) async fn sign_session_token(
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
                 jti,
+                jet_agent_id: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {
