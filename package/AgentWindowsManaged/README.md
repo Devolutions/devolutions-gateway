@@ -21,3 +21,12 @@ The absolute path to the main executable (DevolutionsAgent.exe) to be packaged
 The version to use for the installer. Note that in Windows Installer, the product version is restricted as follows:
 
 [0-255].[0-255].[0-65535]
+
+## Artwork
+
+`Resources/DevolutionsAgent.ico` supplies the MSI product icon and the Agent executable icons.
+`Resources/WixUIDialog.jpg` is the welcome illustration, while `Resources/AgentDialogSide.png` appears on the exit screen.
+`Resources/WixUIBanner.jpg` appears across the other wizard screens.
+The Desktop Agent uses `dotnet/DesktopAgent/Resources/AppIcon.ico` for its window and tray icon and `devolutions-agent-icon-shadow.png` for its About dialog.
+
+An MSI built with placeholder payloads is only for reviewing the wizard UI; do not install it.

@@ -11,7 +11,8 @@ public partial class WelcomeDialog : AgentDialog
     {
         InitializeComponent();
 
-        this.textPanel.BackColor = Color.FromArgb(233, 233, 233);
+        this.textPanel.BackColor = Color.FromArgb(241, 241, 241);
+        this.image.BackColor = this.textPanel.BackColor;
     }
 
     public override void OnLoad(object sender, EventArgs e)

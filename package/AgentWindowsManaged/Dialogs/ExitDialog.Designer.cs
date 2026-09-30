@@ -97,12 +97,11 @@ namespace WixSharpSetup.Dialogs
             // 
             // image
             // 
-            this.image.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left)));
+            this.image.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)));
             this.image.Location = new System.Drawing.Point(0, 0);
             this.image.Name = "image";
             this.image.Size = new System.Drawing.Size(494, 312);
-            this.image.SizeMode = System.Windows.Forms.PictureBoxSizeMode.StretchImage;
+            this.image.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.image.TabIndex = 4;
             this.image.TabStop = false;
             // 
