@@ -9,7 +9,7 @@ use now_policy::{
 };
 use now_policy_api::{self as api, PackageRequest};
 
-use super::{evaluate, source_name_is_unambiguous};
+use super::{evaluate, source_name_is_unambiguous, source_name_is_unambiguous_for_manager};
 
 fn make_policy(default_decision: Decision, rules: Vec<PolicyRule>) -> PolicyDocument {
     PolicyDocument {
@@ -172,6 +172,28 @@ fn default_ignorable_source_spelling_is_rejected_before_evaluation() {
     assert!(!source_name_is_unambiguous("PSGallery "));
     assert!(!source_name_is_unambiguous(" PSGallery"));
     assert!(source_name_is_unambiguous("PSGallery"));
+}
+
+#[test]
+fn powershell_wildcard_source_spelling_is_rejected_before_evaluation() {
+    for source_name in ["Corp*", "Corp?", "Corp[1]", "Corp`*"] {
+        assert!(!source_name_is_unambiguous_for_manager(
+            api::ManagerName::PowerShell,
+            source_name
+        ));
+        assert!(!source_name_is_unambiguous_for_manager(
+            api::ManagerName::PowerShell7,
+            source_name
+        ));
+        assert!(source_name_is_unambiguous_for_manager(
+            api::ManagerName::Winget,
+            source_name
+        ));
+    }
+    assert!(source_name_is_unambiguous_for_manager(
+        api::ManagerName::PowerShell7,
+        "PSGallery"
+    ));
 }
 
 #[test]

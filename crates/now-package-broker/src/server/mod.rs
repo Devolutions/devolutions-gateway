@@ -724,14 +724,14 @@ impl BrokerState {
         reason = "the shared API contract requires ErrorResponse values"
     )]
     fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
-        if !evaluator::source_name_is_unambiguous(&request.source.name) {
+        if !evaluator::source_name_is_unambiguous_for_manager(request.manager, &request.source.name) {
             warn!(
                 request_id = %request.request_id,
                 "Rejecting request: package source name has ambiguous spelling"
             );
             return Err(error_response(
                 ErrorCode::ValidationFailed,
-                "package source name has unsupported leading, trailing, or default-ignorable characters",
+                "package source name has unsupported leading, trailing, default-ignorable, or wildcard characters",
             ));
         }
 

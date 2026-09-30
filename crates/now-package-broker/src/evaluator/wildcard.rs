@@ -17,10 +17,14 @@ pub(super) fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bo
     patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
 }
 
-/// Match an exact source name using the PowerShell repository identity semantics.
+/// Match an exact source name using PowerShell repository identity semantics.
 ///
-/// PowerShell resolves repository names after canonical Unicode normalization with
-/// ordinal case-insensitive comparison.
+/// PowerShell compares literal repository names case-insensitively with the current
+/// culture, which the broker pins to the invariant culture.
+/// This approximates that comparison with canonical (NFC) normalization and ordinal
+/// case-insensitive comparison.
+/// Residual collation differences only involve repositories registered in the
+/// requesting user's own repository store, which that user can already repoint.
 /// Source names are literals, so this deliberately does not apply wildcard semantics.
 pub(super) fn literal_case_insensitive_match(value: &str, expected: &str) -> bool {
     let value: Vec<u16> = value.nfc().collect::<String>().encode_utf16().collect();
@@ -36,6 +40,11 @@ pub(super) fn literal_case_insensitive_match(value: &str, expected: &str) -> boo
 /// otherwise preserve them for `-Repository` and make policy identity ambiguous.
 pub(super) fn has_default_ignorable_code_point(value: &str) -> bool {
     DEFAULT_IGNORABLE_CODE_POINT.is_match(value)
+}
+
+/// Characters that PowerShell `WildcardPattern` interprets as wildcard or escape syntax.
+pub(super) fn has_powershell_wildcard_syntax(value: &str) -> bool {
+    value.contains(['*', '?', '[', ']', '`'])
 }
 
 fn wildcard_match(value: &str, pattern: &str) -> bool {

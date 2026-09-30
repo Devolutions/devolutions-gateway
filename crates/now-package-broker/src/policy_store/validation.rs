@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use now_policy::{
-    Decision, PackageIdentifierCondition, PolicyConstraints, PolicyDraftDocument, PolicyDraftMetadata, PolicyMatch,
-    PolicyRule, VersionCondition,
+    Decision, ManagerName, PackageIdentifierCondition, PolicyConstraints, PolicyDraftDocument, PolicyDraftMetadata,
+    PolicyMatch, PolicyRule, VersionCondition,
 };
 use now_policy_api::{
     API_VERSION_STR, PolicyFinding, PolicyFindingCode, PolicyFindingSeverity, PolicyValidationResult,
@@ -12,7 +12,7 @@ use now_policy_api::{
 
 use crate::evaluator;
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/10";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/11";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -421,14 +421,27 @@ fn check_rule(index: usize, rule: &PolicyRule, findings: &mut Findings) {
     if let Some(reason) = &rule.reason {
         check_string_len(reason, 0, 512, &format!("{base}/Reason"), findings);
     }
+    let applies_to_powershell = rule.match_criteria.managers.is_empty()
+        || rule
+            .match_criteria
+            .managers
+            .iter()
+            .any(|manager| matches!(manager, ManagerName::PowerShell | ManagerName::PowerShell7));
     for (source_index, source_name) in rule.match_criteria.source_names.iter().enumerate() {
-        if !evaluator::source_name_is_unambiguous(source_name.as_ref()) {
+        let source_name = source_name.as_ref();
+        if !evaluator::source_name_is_unambiguous(source_name)
+            || (applies_to_powershell
+                && !evaluator::source_name_is_unambiguous_for_manager(
+                    now_policy_api::ManagerName::PowerShell,
+                    source_name,
+                ))
+        {
             findings.push(rule_finding(
                 rule,
                 PolicyFindingSeverity::Error,
                 PolicyFindingCode::InvalidFieldValue,
                 format!("{base}/Match/SourceNames/{source_index}"),
-                "SourceNames must not contain leading, trailing, or default-ignorable characters",
+                "SourceNames must not contain leading, trailing, or default-ignorable characters, or PowerShell wildcard characters in rules that apply to PowerShell",
             ));
         }
     }
@@ -748,6 +761,17 @@ mod tests {
             json!({ "Managers": ["PowerShell"], "SourceNames": ["PSGallery"] })
         )]);
         assert!(validate_draft(&valid).is_valid);
+
+        let mut wildcard = draft();
+        wildcard["Rules"] = json!([rule("deny", json!({ "SourceNames": ["Corp*"] }))]);
+        assert!(!validate_draft(&wildcard).is_valid);
+
+        let mut non_powershell_wildcard = draft();
+        non_powershell_wildcard["Rules"] = json!([rule(
+            "deny",
+            json!({ "Managers": ["Winget"], "SourceNames": ["Corp*"] })
+        )]);
+        assert!(validate_draft(&non_powershell_wildcard).is_valid);
     }
 
     #[test]

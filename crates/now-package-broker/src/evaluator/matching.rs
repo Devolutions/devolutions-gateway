@@ -135,11 +135,12 @@ fn source_names_match(
     allowed: &BTreeSet<now_policy::SourceName>,
 ) -> bool {
     allowed.is_empty()
-        || allowed.iter().any(|source| match manager {
-            now_policy_api::ManagerName::PowerShell | now_policy_api::ManagerName::PowerShell7 => {
+        || allowed.iter().any(|source| {
+            if super::is_powershell_manager(manager) {
                 literal_case_insensitive_match(value, source.as_ref())
+            } else {
+                source.as_ref().eq_ignore_ascii_case(value)
             }
-            _ => source.as_ref().eq_ignore_ascii_case(value),
         })
 }
 

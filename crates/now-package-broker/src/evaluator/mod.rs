@@ -119,6 +119,23 @@ pub(crate) fn source_name_is_unambiguous(source_name: &str) -> bool {
     source_name == source_name.trim() && !wildcard::has_default_ignorable_code_point(source_name)
 }
 
+/// Whether `manager` resolves a source spelling to exactly the literal repository name
+/// that policy evaluation matched.
+///
+/// PowerShell resolves `-Repository` through `WildcardPattern`, so a spelling with
+/// wildcard syntax could select repositories that policy evaluation never matched.
+pub(crate) fn source_name_is_unambiguous_for_manager(manager: now_policy_api::ManagerName, source_name: &str) -> bool {
+    source_name_is_unambiguous(source_name)
+        && !(is_powershell_manager(manager) && wildcard::has_powershell_wildcard_syntax(source_name))
+}
+
+pub(crate) fn is_powershell_manager(manager: now_policy_api::ManagerName) -> bool {
+    matches!(
+        manager,
+        now_policy_api::ManagerName::PowerShell | now_policy_api::ManagerName::PowerShell7
+    )
+}
+
 pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {
     if request.options.scope == Some(Scope::Machine) || request.client.requested_elevation == Elevation::Elevated {
         Elevation::Elevated
