@@ -8,6 +8,7 @@
 //!
 //! The task system is unstable: it starts only when `__debug__.enable_unstable` is set.
 
+pub mod ai;
 pub mod ai_log;
 
 use core::marker::PhantomData;

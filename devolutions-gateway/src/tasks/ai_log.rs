@@ -1,10 +1,10 @@
 //! `ai-log` task: describes what the user did in one session and stores the result as a new log of that session.
 
-use devolutions_gateway_ai::{AiClient, BuildError, Provider};
 use secrecy::SecretString;
 use url::Url;
 use uuid::Uuid;
 
+use super::ai::{AiProvider, AiSettings};
 use super::{EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, TaskCtx, TaskError, TaskErrorCode, TaskKind};
 use crate::DgwState;
 
@@ -32,40 +32,6 @@ pub struct AiLogParams {
     pub max_output_tokens: Option<u32>,
 }
 
-/// The persisted part of [`AiLogParams`]: everything but the API key.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiLogSettings {
-    pub provider: AiProvider,
-    pub model: String,
-    pub base_url: Option<Url>,
-    pub max_output_tokens: Option<u32>,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AiProvider {
-    #[serde(rename = "openai")]
-    OpenAi,
-    #[serde(rename = "anthropic")]
-    Anthropic,
-    #[serde(rename = "mistral")]
-    Mistral,
-    #[serde(rename = "openai-compatible")]
-    OpenAiCompatible,
-}
-
-impl From<AiProvider> for Provider {
-    fn from(provider: AiProvider) -> Self {
-        match provider {
-            AiProvider::OpenAi => Provider::OpenAi,
-            AiProvider::Anthropic => Provider::Anthropic,
-            AiProvider::Mistral => Provider::Mistral,
-            AiProvider::OpenAiCompatible => Provider::OpenAiCompatible,
-        }
-    }
-}
-
 /// Progress of a running `ai-log` task.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Default, Serialize)]
@@ -85,7 +51,7 @@ impl TaskKind for AiLogTask {
     const RETRY: RetryPolicy = RetryPolicy::JOB_QUEUE;
 
     type Target = AiLogTarget;
-    type Params = AiLogSettings;
+    type Params = AiSettings;
     type Substate = AiLogSubstate;
     type Output = AiLogOutput;
 
@@ -94,8 +60,7 @@ impl TaskKind for AiLogTask {
             return Err(TaskError::Permanent(SECRETS_LOST_ERROR.to_owned()));
         };
 
-        let _client =
-            build_client(&ctx.params, api_key, &ctx.state).map_err(|error| TaskError::Permanent(error.message()))?;
+        let _client = ctx.params.client(api_key, &ctx.state)?;
 
         Err(TaskError::Permanent("ai-log task not implemented yet".to_owned()))
     }
@@ -109,7 +74,7 @@ impl EphemeralTask for AiLogTask {
         target: &AiLogTarget,
         request: AiLogParams,
         state: &DgwState,
-    ) -> Result<(AiLogSettings, SecretString), TaskErrorCode> {
+    ) -> Result<(AiSettings, SecretString), TaskErrorCode> {
         if state.recordings.active_recordings.contains(target.session_id) {
             return Err(TaskErrorCode::RecordingActive);
         }
@@ -122,91 +87,16 @@ impl EphemeralTask for AiLogTask {
             max_output_tokens,
         } = request;
 
-        let settings = AiLogSettings {
+        let settings = AiSettings {
             provider,
             model,
             base_url,
             max_output_tokens,
         };
 
-        build_client(&settings, &api_key, state).map_err(|error| match error {
-            ClientError::Build(error) => {
-                let code = build_error_code(&error);
-                debug!(%error, ?code, "Invalid AI settings");
-                code
-            }
-            ClientError::HttpClient(error) => {
-                error!(%error, "Failed to build the HTTP client for the AI provider");
-                TaskErrorCode::Internal
-            }
-        })?;
+        settings.check(&api_key, state)?;
 
         Ok((settings, api_key))
-    }
-}
-
-enum ClientError {
-    Build(BuildError),
-    HttpClient(reqwest::Error),
-}
-
-impl ClientError {
-    fn message(&self) -> String {
-        match self {
-            ClientError::Build(error) => error.to_string(),
-            ClientError::HttpClient(error) => format!("failed to build the HTTP client: {error}"),
-        }
-    }
-}
-
-fn build_client(settings: &AiLogSettings, api_key: &SecretString, state: &DgwState) -> Result<AiClient, ClientError> {
-    let provider = Provider::from(settings.provider);
-
-    let mut builder = AiClient::builder()
-        .provider(provider)
-        .model(settings.model.clone())
-        .api_key(api_key.clone());
-
-    let endpoint = settings.base_url.clone().or_else(|| provider.default_base_url());
-
-    if let Some(base_url) = settings.base_url.clone() {
-        builder = builder.base_url(base_url);
-    }
-
-    // Without an endpoint, `build` reports the missing base URL before it needs the HTTP client.
-    if let Some(endpoint) = endpoint {
-        let proxy_config = state.conf_handle.get_conf().proxy.to_proxy_config();
-
-        let http_client =
-            http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &endpoint, &proxy_config)
-                .map_err(ClientError::HttpClient)?;
-
-        builder = builder.http_client(http_client);
-    }
-
-    builder.build().map_err(ClientError::Build)
-}
-
-fn build_error_code(error: &BuildError) -> TaskErrorCode {
-    match error {
-        BuildError::MissingModel => TaskErrorCode::MissingModel,
-        BuildError::MissingApiKey(_) => TaskErrorCode::MissingApiKey,
-        BuildError::MissingBaseUrl(_) => TaskErrorCode::MissingBaseUrl,
-        _ => TaskErrorCode::InvalidAiSettings,
-    }
-}
-
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the ai-log runner, which comes in a later change")
-)]
-fn classify_ai_error(error: &devolutions_gateway_ai::Error) -> TaskError {
-    let message = error.to_string();
-
-    if error.is_transient() {
-        TaskError::Transient(message)
-    } else {
-        TaskError::Permanent(message)
     }
 }
 
@@ -268,52 +158,14 @@ mod tests {
         assert!(!format!("{api_key:?}").contains(API_KEY));
     }
 
-    #[test]
-    fn build_errors_map_to_stable_codes() {
-        assert_eq!(build_error_code(&BuildError::MissingModel), TaskErrorCode::MissingModel);
-        assert_eq!(
-            build_error_code(&BuildError::MissingApiKey(Provider::OpenAi)),
-            TaskErrorCode::MissingApiKey
-        );
-        assert_eq!(
-            build_error_code(&BuildError::MissingBaseUrl(Provider::OpenAiCompatible)),
-            TaskErrorCode::MissingBaseUrl
-        );
-    }
+    #[tokio::test]
+    async fn invalid_ai_settings_are_refused_with_a_code() {
+        let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
+        let mut params = params();
+        params.model = " ".to_owned();
 
-    #[test]
-    fn rate_limits_server_and_network_errors_are_transient() {
-        let status = |status| devolutions_gateway_ai::Error::Status {
-            status,
-            message: "failed".to_owned(),
-            code: None,
-            retry_after: None,
-        };
+        let error = AiLogTask::prepare(&target(), params, &state).expect_err("empty model");
 
-        let network = devolutions_gateway_ai::Error::Transport {
-            message: "connection refused".to_owned(),
-        };
-        assert!(matches!(classify_ai_error(&network), TaskError::Transient(_)));
-
-        for code in [429, 500, 503] {
-            assert!(
-                matches!(classify_ai_error(&status(code)), TaskError::Transient(_)),
-                "{code}"
-            );
-        }
-
-        for code in [400, 401, 403, 404] {
-            assert!(
-                matches!(classify_ai_error(&status(code)), TaskError::Permanent(_)),
-                "{code}"
-            );
-        }
-
-        assert!(matches!(
-            classify_ai_error(&devolutions_gateway_ai::Error::InvalidOutput {
-                reason: "no valid action line".to_owned()
-            }),
-            TaskError::Permanent(_)
-        ));
+        assert_eq!(error, TaskErrorCode::MissingModel);
     }
 }
