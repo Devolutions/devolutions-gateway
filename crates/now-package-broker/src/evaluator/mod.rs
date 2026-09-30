@@ -13,6 +13,8 @@ mod matching;
 mod version;
 mod wildcard;
 
+pub(crate) use wildcard::has_powershell_wildcard_syntax;
+
 #[cfg(test)]
 mod tests;
 
@@ -126,7 +128,7 @@ pub(crate) fn source_name_is_unambiguous(source_name: &str) -> bool {
 /// wildcard syntax could select repositories that policy evaluation never matched.
 pub(crate) fn source_name_is_unambiguous_for_manager(manager: now_policy_api::ManagerName, source_name: &str) -> bool {
     source_name_is_unambiguous(source_name)
-        && !(is_powershell_manager(manager) && wildcard::has_powershell_wildcard_syntax(source_name))
+        && !(is_powershell_manager(manager) && has_powershell_wildcard_syntax(source_name))
 }
 
 pub(crate) fn is_powershell_manager(manager: now_policy_api::ManagerName) -> bool {

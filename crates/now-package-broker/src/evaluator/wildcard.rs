@@ -30,7 +30,7 @@ pub(super) fn literal_case_insensitive_match(value: &str, expected: &str) -> boo
     let value: Vec<u16> = value.nfc().collect::<String>().encode_utf16().collect();
     let expected: Vec<u16> = expected.nfc().collect::<String>().encode_utf16().collect();
 
-    // SAFETY: The binding marshals both valid UTF-8 strings as bounded UTF-16.
+    // SAFETY: Both slices contain valid, initialized UTF-16 code units.
     unsafe { CompareStringOrdinal(&value, &expected, true) == CSTR_EQUAL }
 }
 
@@ -43,7 +43,7 @@ pub(super) fn has_default_ignorable_code_point(value: &str) -> bool {
 }
 
 /// Characters that PowerShell `WildcardPattern` interprets as wildcard or escape syntax.
-pub(super) fn has_powershell_wildcard_syntax(value: &str) -> bool {
+pub(crate) fn has_powershell_wildcard_syntax(value: &str) -> bool {
     value.contains(['*', '?', '[', ']', '`'])
 }
 

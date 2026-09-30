@@ -427,23 +427,19 @@ fn check_rule(index: usize, rule: &PolicyRule, findings: &mut Findings) {
             .managers
             .iter()
             .any(|manager| matches!(manager, ManagerName::PowerShell | ManagerName::PowerShell7));
-    for (source_index, source_name) in rule.match_criteria.source_names.iter().enumerate() {
+    // SourceNames is a set, so report the collection rather than a reordered index.
+    if rule.match_criteria.source_names.iter().any(|source_name| {
         let source_name = source_name.as_ref();
-        if !evaluator::source_name_is_unambiguous(source_name)
-            || (applies_to_powershell
-                && !evaluator::source_name_is_unambiguous_for_manager(
-                    now_policy_api::ManagerName::PowerShell,
-                    source_name,
-                ))
-        {
-            findings.push(rule_finding(
-                rule,
-                PolicyFindingSeverity::Error,
-                PolicyFindingCode::InvalidFieldValue,
-                format!("{base}/Match/SourceNames/{source_index}"),
-                "SourceNames must not contain leading, trailing, or default-ignorable characters, or PowerShell wildcard characters in rules that apply to PowerShell",
-            ));
-        }
+        !evaluator::source_name_is_unambiguous(source_name)
+            || (applies_to_powershell && evaluator::has_powershell_wildcard_syntax(source_name))
+    }) {
+        findings.push(rule_finding(
+            rule,
+            PolicyFindingSeverity::Error,
+            PolicyFindingCode::InvalidFieldValue,
+            format!("{base}/Match/SourceNames"),
+            "SourceNames must not contain leading, trailing, or default-ignorable characters, or PowerShell wildcard characters in rules that apply to PowerShell",
+        ));
     }
     if let Some(PackageIdentifierCondition::Patterns(patterns)) = &rule.match_criteria.package_identifiers {
         check_patterns(
@@ -751,7 +747,7 @@ mod tests {
                 result
                     .findings
                     .iter()
-                    .any(|finding| finding.path == "/Rules/0/Match/SourceNames/0")
+                    .any(|finding| finding.path == "/Rules/0/Match/SourceNames")
             );
         }
 
