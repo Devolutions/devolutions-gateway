@@ -19,6 +19,8 @@ pub enum AiProvider {
     Anthropic,
     #[serde(rename = "mistral")]
     Mistral,
+    #[serde(rename = "gemini")]
+    Gemini,
     #[serde(rename = "openai-compatible")]
     OpenAiCompatible,
 }
@@ -29,6 +31,7 @@ impl From<AiProvider> for Provider {
             AiProvider::OpenAi => Provider::OpenAi,
             AiProvider::Anthropic => Provider::Anthropic,
             AiProvider::Mistral => Provider::Mistral,
+            AiProvider::Gemini => Provider::Gemini,
             AiProvider::OpenAiCompatible => Provider::OpenAiCompatible,
         }
     }
@@ -186,5 +189,27 @@ mod tests {
             reason: "no valid action line".to_owned(),
         };
         assert!(matches!(TaskError::from(invalid), TaskError::Permanent(_)));
+    }
+
+    #[test]
+    fn providers_keep_their_wire_names() {
+        for (provider, name) in [
+            (AiProvider::OpenAi, "openai"),
+            (AiProvider::Anthropic, "anthropic"),
+            (AiProvider::Mistral, "mistral"),
+            (AiProvider::Gemini, "gemini"),
+            (AiProvider::OpenAiCompatible, "openai-compatible"),
+        ] {
+            assert_eq!(serde_json::to_value(provider).expect("serializable"), name);
+            assert_eq!(
+                serde_json::from_value::<AiProvider>(serde_json::Value::from(name)).expect("known name"),
+                provider
+            );
+        }
+    }
+
+    #[test]
+    fn gemini_has_a_default_base_url() {
+        assert!(Provider::from(AiProvider::Gemini).default_base_url().is_some());
     }
 }
