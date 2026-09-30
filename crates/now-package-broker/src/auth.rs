@@ -980,9 +980,35 @@ mod tests {
     }
 
     #[test]
-    fn validate_connection_validates_signature_unless_skipped() {
-        // The test binary is not Devolutions-signed, so validation must be attempted and fail
-        // unless the configuration requests skipping it.
+    fn validate_connection_rejects_unsigned_client_by_default() {
+        // Retain the executable handle and a security guard so validation reaches the Authenticode
+        // check, which must reject the test binary because it is not Devolutions-signed.
+        let executable_path = std::env::current_exe().expect("current test executable path");
+        let executable_file = File::open(&executable_path).expect("open current test executable");
+        let client = PipeClient {
+            process_id: std::process::id(),
+            process_creation_time: SystemTime::UNIX_EPOCH,
+            process: None,
+            executable_path,
+            executable_file: Some(Arc::new(executable_file)),
+            executable_security: Some(Arc::new(RetainedExecutableSecurity::unchecked_for_tests())),
+            user_sid: client_user_sid(),
+            is_elevated: false,
+            is_administrator: false,
+        };
+
+        let error = client
+            .validate_connection(false)
+            .expect_err("an unsigned client must be rejected when the bypass is not requested");
+        assert!(
+            format!("{error:#}").contains("executable signature is not valid"),
+            "unexpected validation error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn validate_connection_skips_signature_only_when_requested() {
+        // Without a retained handle or security guard, only the bypass lets validation succeed.
         let client = PipeClient {
             process_id: std::process::id(),
             process_creation_time: SystemTime::UNIX_EPOCH,
@@ -995,7 +1021,6 @@ mod tests {
             is_administrator: false,
         };
 
-        assert!(client.validate_connection(false).is_err());
         assert!(client.validate_connection(true).is_ok());
     }
 
