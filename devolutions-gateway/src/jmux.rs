@@ -133,8 +133,8 @@ pub async fn handle(
                 .context("invalid JMUX target")?;
                 let route_target = route_target_from_target_addr(&target);
 
-                let routed = agent_tunnel::routing::try_route(
-                    Some(agent_tunnel_handle.as_ref()),
+                let routed = agent_tunnel::routing::route(
+                    &agent_tunnel_handle,
                     explicit_agent_id,
                     &route_target,
                     session_id,
