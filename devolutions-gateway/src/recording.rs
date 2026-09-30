@@ -252,14 +252,10 @@ enum RecordingManagerMessage {
         disconnected_ttl: Duration,
         channel: oneshot::Sender<Utf8PathBuf>,
     },
-    GetRecordingsPath {
-        channel: oneshot::Sender<Utf8PathBuf>,
-    },
     AddArtifact {
         id: Uuid,
         kind: ArtifactKind,
-        source: Utf8PathBuf,
-        channel: oneshot::Sender<anyhow::Result<String>>,
+        channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
     Disconnect {
         id: Uuid,
@@ -299,19 +295,10 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("file_type", file_type)
                 .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::GetRecordingsPath { channel: _ } => {
-                f.debug_struct("GetRecordingsPath").finish_non_exhaustive()
-            }
-            RecordingManagerMessage::AddArtifact {
-                id,
-                kind,
-                source,
-                channel: _,
-            } => f
+            RecordingManagerMessage::AddArtifact { id, kind, channel: _ } => f
                 .debug_struct("AddArtifact")
                 .field("id", id)
                 .field("kind", kind)
-                .field("source", source)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
@@ -365,32 +352,13 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    pub(crate) async fn get_recordings_path(&self) -> anyhow::Result<Utf8PathBuf> {
+    /// Adds an empty artifact of `kind` to the session and returns its path, for the caller to write into.
+    ///
+    /// Fails when the session has no recording.
+    pub async fn add_artifact(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<Utf8PathBuf> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::GetRecordingsPath { channel: tx })
-            .await
-            .ok()
-            .context("couldn't send GetRecordingsPath message")?;
-        rx.await.context("couldn't receive the recordings path")
-    }
-
-    /// Moves `source`, a file in the recordings folder, into the session folder as the next artifact of `kind`,
-    /// and lists it in the manifest.
-    pub(crate) async fn add_artifact(
-        &self,
-        id: Uuid,
-        kind: ArtifactKind,
-        source: Utf8PathBuf,
-    ) -> anyhow::Result<String> {
-        let (tx, rx) = oneshot::channel();
-        self.channel
-            .send(RecordingManagerMessage::AddArtifact {
-                id,
-                kind,
-                source,
-                channel: tx,
-            })
+            .send(RecordingManagerMessage::AddArtifact { id, kind, channel: tx })
             .await
             .ok()
             .context("couldn't send AddArtifact message")?;
@@ -731,11 +699,11 @@ impl RecordingManagerTask {
         Ok(())
     }
 
-    async fn handle_add_artifact(&self, id: Uuid, kind: ArtifactKind, source: Utf8PathBuf) -> anyhow::Result<String> {
+    async fn handle_add_artifact(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<Utf8PathBuf> {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
-        // A recording deleted while its artifact was being written must stay deleted.
+        // A recording deleted while its artifact was being generated must stay deleted.
         if !manifest_path.exists() {
             anyhow::bail!("session {id} has no recording");
         }
@@ -744,22 +712,19 @@ impl RecordingManagerTask {
 
         let artifacts = manifest.artifacts.of_kind_mut(kind);
         let file_name = kind.file_name(artifacts.len());
-
-        // The file is in place before the manifest lists it, so readers never see a dangling entry.
         let artifact_path = recording_path.join(&file_name);
-        fs::rename(&source, &artifact_path)
-            .await
-            .with_context(|| format!("move {source} to {artifact_path}"))?;
 
-        artifacts.push(JrecArtifact {
-            file_name: file_name.clone(),
-        });
+        fs::File::create(&artifact_path)
+            .await
+            .with_context(|| format!("create {artifact_path}"))?;
+
+        artifacts.push(JrecArtifact { file_name });
 
         manifest
             .save_to_file(&manifest_path)
             .context("write manifest to disk")?;
 
-        Ok(file_name)
+        Ok(artifact_path)
     }
 
     fn handle_remove(&mut self, id: Uuid) {
@@ -889,11 +854,8 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::GetRecordingsPath { channel } => {
-                        let _ = channel.send(manager.recordings_path.clone());
-                    },
-                    RecordingManagerMessage::AddArtifact { id, kind, source, channel } => {
-                        let _ = channel.send(manager.handle_add_artifact(id, kind, source).await);
+                    RecordingManagerMessage::AddArtifact { id, kind, channel } => {
+                        let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
                     RecordingManagerMessage::Disconnect { id } => {
                         if let Err(e) = manager.handle_disconnect(id).await {
@@ -1068,8 +1030,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::artifacts::ArtifactWriter;
-
     const MASTER_MANIFEST: &str = r#"{
   "sessionId": "22fcd533-5e72-4db7-aa0f-29952dbbca9f",
   "startTime": 1,
@@ -1155,11 +1115,9 @@ mod tests {
         }
 
         async fn add_artifact(&self, id: Uuid, content: &str) -> String {
-            let mut writer = ArtifactWriter::create(&self.sender, id, AI_ANALYSIS)
-                .await
-                .expect("create artifact");
-            writer.write_all(content.as_bytes()).await.expect("write artifact");
-            writer.finish().await.expect("finish artifact")
+            let path = self.sender.add_artifact(id, AI_ANALYSIS).await.expect("add artifact");
+            std::fs::write(&path, content).expect("write artifact");
+            path.file_name().expect("file name").to_owned()
         }
 
         fn read_file(&self, id: Uuid, file_name: &str) -> String {
@@ -1209,18 +1167,9 @@ mod tests {
     #[tokio::test]
     async fn artifact_needs_a_recording() {
         let harness = Harness::start();
-        let id = Uuid::new_v4();
 
-        let mut writer = ArtifactWriter::create(&harness.sender, id, AI_ANALYSIS)
-            .await
-            .expect("create artifact");
-        writer.write_all(b"analysis").await.expect("write artifact");
-
-        assert!(writer.finish().await.is_err());
-        let leftovers = std::fs::read_dir(&harness.recordings_path)
-            .expect("read recordings")
-            .count();
-        assert_eq!(leftovers, 0);
+        assert!(harness.sender.add_artifact(Uuid::new_v4(), AI_ANALYSIS).await.is_err());
+        assert!(!harness.recordings_path.exists());
     }
 
     #[tokio::test]
@@ -1302,26 +1251,6 @@ mod tests {
         ));
         assert!(harness.sender.active_recordings.contains(recorded));
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
-    }
-
-    #[tokio::test]
-    async fn unfinished_artifact_leaves_nothing_behind() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        harness.push(id, WEBM).await;
-
-        let mut writer = ArtifactWriter::create(&harness.sender, id, AI_ANALYSIS)
-            .await
-            .expect("create artifact");
-        writer.write_all(b"partial").await.expect("write artifact");
-        drop(writer);
-
-        assert!(harness.read_manifest(id).get("artifacts").is_none());
-        let leftovers: Vec<_> = std::fs::read_dir(&harness.recordings_path)
-            .expect("read recordings")
-            .map(|entry| entry.expect("entry").file_name())
-            .collect();
-        assert_eq!(leftovers, [std::ffi::OsString::from(id.to_string())]);
     }
 
     #[test]
