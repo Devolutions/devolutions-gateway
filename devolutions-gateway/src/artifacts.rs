@@ -17,9 +17,9 @@ impl JrecArtifacts {
         ai_analysis.is_empty()
     }
 
-    pub(crate) fn into_file_names(self) -> Vec<String> {
+    pub(crate) fn into_file_names(self) -> impl IntoIterator<Item = String> {
         let Self { ai_analysis } = self;
-        ai_analysis.into_iter().map(|artifact| artifact.file_name).collect()
+        ai_analysis.into_iter().map(|artifact| artifact.file_name)
     }
 
     pub(crate) fn of_kind_mut(&mut self, kind: ArtifactKind) -> &mut Vec<JrecArtifact> {

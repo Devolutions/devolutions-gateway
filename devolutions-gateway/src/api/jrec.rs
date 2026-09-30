@@ -698,9 +698,13 @@ async fn snapshot_recording_zip_plan(recording_dir: &Utf8Path) -> Result<Recordi
         HttpError::not_found().msg("requested recording does not exist")
     })?;
 
-    let artifacts = manifest.artifacts.into_file_names();
-    let mut clip_names = Vec::with_capacity(manifest.files.len() + artifacts.len());
-    for file_name in manifest.files.into_iter().map(|file| file.file_name).chain(artifacts) {
+    let file_names = manifest
+        .files
+        .into_iter()
+        .map(|file| file.file_name)
+        .chain(manifest.artifacts.into_file_names());
+    let mut clip_names = Vec::with_capacity(file_names.size_hint().0);
+    for file_name in file_names {
         if !is_safe_recording_file_name(&file_name) {
             warn!(
                 %file_name,
