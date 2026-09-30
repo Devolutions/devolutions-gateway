@@ -5,7 +5,7 @@
 
 use core::fmt;
 
-use devolutions_gateway_ai::{AiClient, BuildError, Provider};
+use devolutions_gateway_ai::{AiClient, BuildError, Provider, Usage};
 use secrecy::SecretString;
 use url::Url;
 
@@ -109,6 +109,34 @@ impl From<devolutions_gateway_ai::Error> for TaskError {
             TaskError::Transient(error.to_string())
         } else {
             TaskError::Permanent(error.to_string())
+        }
+    }
+}
+
+/// Tokens counted by the AI provider, as stored in task checkpoints and results.
+///
+/// It mirrors [`Usage`], so that a change in the AI crate never changes what the task records hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl From<Usage> for TokenUsage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+        }
+    }
+}
+
+impl From<TokenUsage> for Usage {
+    fn from(usage: TokenUsage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
         }
     }
 }
