@@ -4,13 +4,19 @@ use std::time::Duration;
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::post;
-use devolutions_gateway_ai::{AiClient, BuildError, Provider};
+use devolutions_gateway_ai::session_actions::Action;
+use devolutions_gateway_ai::{AiClient, BuildError, Error, Provider, Usage};
 use parking_lot::Mutex;
 use tokio::net::TcpListener;
 use url::Url;
 
 const API_KEY: &str = "sk-test-secret";
 const MODEL: &str = "model-under-test";
+const REPORTED_MODEL: &str = "model-under-test-2026-09-30";
+const USAGE: Usage = Usage {
+    input_tokens: 10,
+    output_tokens: 20,
+};
 const ANSWER: &str = "{\"offsetSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\nnot an action\n{\"offsetSeconds\":4,\"description\":\"Opened a shell\"}";
 
 #[derive(Debug)]
@@ -65,7 +71,7 @@ fn openai_response(content: &str) -> serde_json::Value {
         "id": "chatcmpl-1",
         "object": "chat.completion",
         "created": 0,
-        "model": MODEL,
+        "model": REPORTED_MODEL,
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": content },
@@ -80,7 +86,7 @@ fn anthropic_response(text: &str) -> serde_json::Value {
         "id": "msg_1",
         "type": "message",
         "role": "assistant",
-        "model": MODEL,
+        "model": REPORTED_MODEL,
         "content": [{ "type": "text", "text": text }],
         "stop_reason": "end_turn",
         "stop_sequence": null,
@@ -88,7 +94,7 @@ fn anthropic_response(text: &str) -> serde_json::Value {
     })
 }
 
-fn assert_parsed_actions(actions: &[devolutions_gateway_ai::Action]) {
+fn assert_parsed_actions(actions: &[Action]) {
     assert_eq!(actions.len(), 2);
     assert_eq!(actions[0].offset, Duration::from_millis(1500));
     assert_eq!(actions[0].description, "Listed files");
@@ -110,14 +116,16 @@ fn body_contains(body: &serde_json::Value, needle: &str) -> bool {
 async fn openai_chat_request_and_response() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
-    let actions = client(Provider::OpenAi, base_url)
+    let response = client(Provider::OpenAi, base_url)
         .describe_session_actions("[1.5] ls")
         .max_output_tokens(1234)
         .send()
         .await
         .unwrap();
 
-    assert_parsed_actions(&actions);
+    assert_parsed_actions(&response.output);
+    assert_eq!(response.model.as_deref(), Some(REPORTED_MODEL));
+    assert_eq!(response.usage, Some(USAGE));
 
     let request = captured.lock().take().unwrap();
     assert_eq!(request.path, "/v1/chat/completions");
@@ -135,14 +143,16 @@ async fn openai_chat_request_and_response() {
 async fn anthropic_messages_request_and_response() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, anthropic_response(ANSWER)).await;
 
-    let actions = client(Provider::Anthropic, base_url)
+    let response = client(Provider::Anthropic, base_url)
         .describe_session_actions("[1.5] ls")
         .max_output_tokens(1234)
         .send()
         .await
         .unwrap();
 
-    assert_parsed_actions(&actions);
+    assert_parsed_actions(&response.output);
+    assert_eq!(response.model.as_deref(), Some(REPORTED_MODEL));
+    assert_eq!(response.usage, Some(USAGE));
 
     let request = captured.lock().take().unwrap();
     assert_eq!(request.path, "/v1/messages");
@@ -155,7 +165,7 @@ async fn anthropic_messages_request_and_response() {
 }
 
 #[tokio::test]
-async fn provider_error_is_redacted() {
+async fn provider_error_is_redacted_and_permanent() {
     let body = serde_json::json!({ "error": { "message": format!("Incorrect API key provided: {API_KEY}") } });
     let (base_url, _captured) = spawn_provider(StatusCode::UNAUTHORIZED, body).await;
 
@@ -165,25 +175,54 @@ async fn provider_error_is_redacted() {
         .await
         .unwrap_err();
 
-    assert!(
-        matches!(error, devolutions_gateway_ai::Error::Request { status: Some(401), .. }),
-        "{error:?}"
-    );
+    assert!(matches!(error, Error::Status { status: 401, .. }), "{error:?}");
+    assert!(!error.is_transient());
     assert!(!error.to_string().contains(API_KEY), "{error}");
     assert!(!format!("{error:?}").contains(API_KEY), "{error:?}");
+}
+
+#[tokio::test]
+async fn rate_limit_is_transient() {
+    let body = serde_json::json!({ "error": { "message": "Rate limit reached" } });
+    let (base_url, _captured) = spawn_provider(StatusCode::TOO_MANY_REQUESTS, body).await;
+
+    let error = client(Provider::Anthropic, base_url)
+        .describe_session_actions("[0] whoami")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::Status { status: 429, .. }), "{error:?}");
+    assert!(error.is_transient());
+}
+
+#[tokio::test]
+async fn unreachable_provider_is_transient() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let error = client(Provider::OpenAi, Url::parse(&format!("http://{addr}/v1/")).unwrap())
+        .describe_session_actions("[0] whoami")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::Transport { .. }), "{error:?}");
+    assert!(error.is_transient());
 }
 
 #[tokio::test]
 async fn openai_compatible_uses_the_given_base_url() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
-    let actions = client(Provider::OpenAiCompatible, base_url)
+    let response = client(Provider::OpenAiCompatible, base_url)
         .describe_session_actions("[1.5] ls")
         .send()
         .await
         .unwrap();
 
-    assert_parsed_actions(&actions);
+    assert_parsed_actions(&response.output);
 
     let request = captured.lock().take().unwrap();
     assert_eq!(request.path, "/v1/chat/completions");
@@ -193,6 +232,63 @@ async fn openai_compatible_uses_the_given_base_url() {
     );
     assert_eq!(request.body["max_tokens"], 4096);
     assert!(request.body.get("max_completion_tokens").is_none());
+}
+
+#[tokio::test]
+async fn answer_without_model_or_usage_is_accepted() {
+    let mut answer = openai_response(ANSWER);
+    let fields = answer.as_object_mut().unwrap();
+    fields.remove("model");
+    fields.remove("usage");
+    let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
+
+    let response = client(Provider::OpenAiCompatible, base_url)
+        .describe_session_actions("[1.5] ls")
+        .send()
+        .await
+        .unwrap();
+
+    assert_parsed_actions(&response.output);
+    assert_eq!(response.model, None);
+    assert_eq!(response.usage, None);
+}
+
+#[tokio::test]
+async fn answers_cut_at_the_token_limit_are_truncated() {
+    let mut openai = openai_response(ANSWER);
+    openai["choices"][0]["finish_reason"] = "length".into();
+    let mut anthropic = anthropic_response(ANSWER);
+    anthropic["stop_reason"] = "max_tokens".into();
+
+    for (provider, response) in [(Provider::OpenAi, openai), (Provider::Anthropic, anthropic)] {
+        let (base_url, _captured) = spawn_provider(StatusCode::OK, response).await;
+
+        let error = client(provider, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::Truncated { usage: Some(USAGE) }),
+            "{provider:?}: {error:?}"
+        );
+        assert!(!error.is_transient());
+    }
+}
+
+#[tokio::test]
+async fn answer_without_any_action_line_is_invalid_output() {
+    let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response("Sorry, I cannot help.")).await;
+
+    let error = client(Provider::OpenAi, base_url)
+        .describe_session_actions("[1.5] ls")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::InvalidOutput { .. }), "{error:?}");
+    assert!(!error.is_transient());
 }
 
 fn complete_builder(provider: Provider) -> devolutions_gateway_ai::AiClientBuilder {
@@ -256,6 +352,13 @@ fn build_requires_key_for_hosted_providers() {
 }
 
 #[test]
+fn build_rejects_a_key_that_is_not_a_header_value() {
+    let result = complete_builder(Provider::Anthropic).api_key("sk-test\r\n").build();
+
+    assert!(matches!(result, Err(BuildError::InvalidApiKey)), "{result:?}");
+}
+
+#[test]
 fn build_requires_base_url_without_default() {
     let result = AiClient::builder()
         .provider(Provider::OpenAiCompatible)
@@ -268,6 +371,15 @@ fn build_requires_base_url_without_default() {
         matches!(result, Err(BuildError::MissingBaseUrl(Provider::OpenAiCompatible))),
         "{result:?}"
     );
+}
+
+#[test]
+fn build_rejects_a_base_url_that_is_not_http() {
+    let result = complete_builder(Provider::OpenAiCompatible)
+        .base_url(Url::parse("file:///etc/").unwrap())
+        .build();
+
+    assert!(matches!(result, Err(BuildError::UnsupportedBaseUrl)), "{result:?}");
 }
 
 #[test]
