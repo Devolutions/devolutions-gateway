@@ -37,9 +37,4 @@ public class TaskClaims : IGatewayClaims
     {
         return "TASK";
     }
-
-    public long? GetDefaultLifetime()
-    {
-        return 600;
-    }
 }
