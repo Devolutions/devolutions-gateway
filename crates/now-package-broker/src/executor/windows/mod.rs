@@ -839,6 +839,10 @@ fn prepare_bun_cmd_script(
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
     script.push_str("\r\ncall ");
+    // `call` expands the line a second time, so percent signs and carets would not survive literally.
+    if executable.contains(['%', '^']) {
+        bail!("bun.cmd path cannot contain percent signs or carets");
+    }
     append_batch_executable(&mut script, executable)?;
     for arg in args {
         script.push(' ');
@@ -1500,6 +1504,18 @@ mod tests {
                 Err(error) => error,
             };
             assert!(error.to_string().contains("batch metacharacters"));
+        }
+
+        for executable in [
+            r"C:\Users\100%\bun.cmd",
+            r"C:\Users\%USERNAME%\bun.cmd",
+            r"C:\Tools^\bun.cmd",
+        ] {
+            let error = match prepare_bun_cmd_script(executable, &["add".to_owned()], Some(temp_dir.path())) {
+                Ok(_) => panic!("{executable} must be rejected for the call line"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("percent signs or carets"));
         }
     }
 
