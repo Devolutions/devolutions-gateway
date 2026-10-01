@@ -99,6 +99,15 @@ impl RequestFlags {
     }
 }
 
+/// Whether the request supplies a custom install location that is not a single plain local drive path.
+///
+/// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
+/// [`evaluate`] also denies them for direct callers.
+pub(crate) fn has_unacceptable_install_location(request: &PackageRequest) -> bool {
+    let flags = RequestFlags::from_request(request);
+    flags.has_custom_install_location && flags.custom_install_location.is_none()
+}
+
 /// Evaluate a parsed request against a parsed policy document.
 ///
 /// Both the policy and request should have already been deserialized into typed structs.

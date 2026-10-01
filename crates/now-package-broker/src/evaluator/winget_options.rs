@@ -19,19 +19,21 @@ pub(super) struct WingetOptions<'a> {
 
 pub(super) fn winget_options(parameters: &[CustomParameterString]) -> WingetOptions<'_> {
     let mut options = WingetOptions::default();
-    let mut parameters = parameters.iter().map(|parameter| parameter.0.trim());
+    // Values stay exactly as WinGet receives them; only option detection ignores leading whitespace.
+    let mut parameters = parameters.iter().map(|parameter| parameter.0.as_str());
 
     while let Some(parameter) = parameters.next() {
-        let (option, is_long) = if let Some(long) = parameter.strip_prefix("--") {
+        let option = parameter.trim_start();
+        let (option, is_long) = if let Some(long) = option.strip_prefix("--") {
             (long, true)
-        } else if let Some(short) = parameter.strip_prefix('-') {
+        } else if let Some(short) = option.strip_prefix('-') {
             (short, false)
         } else {
             continue;
         };
         let (name, attached_value) = match option.split_once('=') {
-            Some((name, value)) => (name, Some(value)),
-            None => (option, None),
+            Some((name, value)) => (name.trim_end(), Some(value)),
+            None => (option.trim_end(), None),
         };
         let is = |long_name: &str, short_name: Option<&str>| {
             if is_long {
@@ -81,6 +83,12 @@ mod tests {
             assert_eq!(winget_options(&parameters).locations, [Some(r"C:\Tools")], "{values:?}");
         }
         assert_eq!(winget_options(&parameters(&["--location"])).locations, [None]);
+
+        let raw = parameters(&["--location", "C:\\Tools\n", "-l=C:\\Tools "]);
+        assert_eq!(
+            winget_options(&raw).locations,
+            [Some("C:\\Tools\n"), Some("C:\\Tools ")]
+        );
     }
 
     #[test]

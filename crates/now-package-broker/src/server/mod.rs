@@ -758,6 +758,19 @@ impl BrokerState {
             ));
         }
 
+        // A custom install location (typed or passed through WinGet custom parameters) must be a
+        // single plain local drive path. Like the gates above, this is not bypassable by audit mode.
+        if evaluator::has_unacceptable_install_location(request) {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: unacceptable custom install location"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "custom install location must be a single absolute local drive path without relative segments",
+            ));
+        }
+
         let received_at = Utc::now();
         let policy = self
             .active_policy_snapshot()
@@ -1399,6 +1412,19 @@ mod tests {
             panic!("expected non-elevated pre/post commands to be accepted");
         };
         assert!(evaluated.would_execute);
+    }
+
+    #[test]
+    fn unacceptable_install_location_is_rejected_even_under_permissive_policy() {
+        for location in [r"C:\Tools\..\Windows\System32", ""] {
+            let mut request = request();
+            request.options.custom_install_location = Some(location.to_owned());
+
+            let Err(error) = state().evaluate_request(&request) else {
+                panic!("expected install location {location:?} to be rejected");
+            };
+            assert_eq!(error.code, ErrorCode::ValidationFailed);
+        }
     }
 
     #[test]
