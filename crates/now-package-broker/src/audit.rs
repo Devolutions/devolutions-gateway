@@ -1,5 +1,6 @@
 //! Structured audit events for policy management writes and external policy changes.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(all(not(test), not(debug_assertions)))]
@@ -13,25 +14,41 @@ use sysevent::Entry;
 use sysevent::Severity;
 #[cfg(all(not(test), not(debug_assertions)))]
 use sysevent::SystemEventSink;
+use tokio_util::sync::CancellationToken;
 use win_api_wrappers::identity::sid::Sid;
 
 const INTENT: &str = "PUT /v1/policy";
 const MAX_SID_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 1024;
 const MAX_POLICY_ID_BYTES: usize = 256;
+
+/// How long the denials of one caller are counted after its first logged denial.
+const DENIAL_SUMMARY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How often the counted denials whose interval elapsed are summarized.
+const DENIAL_SUMMARY_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Callers whose denials are counted separately.
+///
+/// The denials of further callers share one window per reason, so requests from many accounts
+/// cannot grow the tracking map.
+const MAX_DENIAL_WINDOWS: usize = 64;
+
+/// The caller recorded in the summary of the shared overflow windows.
+const OVERFLOW_ACTOR_SID: &str = "<other>";
+
 /// Slots of the Event Log queue kept for terminal outcomes and external changes.
 ///
-/// Only the outcome of an authenticated policy write, which the policy store serializes, and the
-/// policy store's own observation of an external change take these slots. Attempts and denials,
-/// which an unauthenticated client can produce at will, are refused before reaching them.
+/// Only the outcome of an authorized policy write, which the policy store serializes, and the
+/// policy store's own observation of an external change take these slots. Attempts and denials
+/// are refused before reaching them.
 #[cfg(any(test, not(debug_assertions)))]
 const EVENT_LOG_OUTCOME_RESERVE: usize = 64;
 
 /// Slots of the Event Log queue that write attempts and denials may occupy.
 ///
-/// The write attempt is recorded before the pipe client is authenticated, so a client that never
-/// authenticates can produce this class at will. It is the class that yields when the sink
-/// saturates.
+/// Denials are throttled per caller and attempts are only recorded for authorized callers, but this
+/// is still the class that yields when the sink saturates.
 #[cfg(any(test, not(debug_assertions)))]
 const EVENT_LOG_ADMISSION_BUDGET: usize = 256;
 
@@ -97,6 +114,8 @@ impl Drop for AuditLease {
 /// terminal event of a policy write that is still finishing, so the queue is flushed and left
 /// accepting for as long as the process lives instead.
 pub(crate) fn drain() {
+    // The denials counted since their caller's last logged denial would otherwise be lost.
+    summarize_pending_denials();
     if let Some(recorder) = RECORDER.get() {
         shutdown(recorder.as_ref(), AUDIT_PRODUCERS.load(Ordering::Acquire));
     }
@@ -115,7 +134,7 @@ fn shutdown(recorder: &dyn AuditRecorder, producers: usize) {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DenialReason {
     AuthenticationFailed,
     AdministratorRequired,
@@ -171,8 +190,7 @@ impl FailureReason {
 /// class only decides whether an entry may be refused to keep capacity for the other class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EntryClass {
-    /// A write attempt or a denial. Recorded from unauthenticated requests, so it may be dropped
-    /// when the sink saturates.
+    /// A write attempt, a denial or a denial summary. It may be dropped when the sink saturates.
     Admission,
     /// The terminal outcome of a policy write, or the observation of an external change. It does
     /// not consume the admission budget, so only a full queue or a gone worker can refuse it.
@@ -266,8 +284,8 @@ struct SystemRecorder {
 ///
 /// Every entry shares one bounded queue, so entries reach the sink in the order they were recorded
 /// and an accepted write's attempt precedes its terminal outcome. Write attempts and denials are
-/// refused once they occupy [`EVENT_LOG_ADMISSION_BUDGET`] slots, so a flood of unauthenticated
-/// attempts cannot fill the queue and starve outcomes and external changes.
+/// refused once they occupy [`EVENT_LOG_ADMISSION_BUDGET`] slots, so they cannot fill the queue and
+/// starve outcomes and external changes.
 #[cfg(any(test, not(debug_assertions)))]
 struct EventLogQueue {
     /// `None` once [`Self::drain`] closed the queue, so no later entry can be accepted.
@@ -509,6 +527,10 @@ impl Drop for WriteAuditState {
 pub(crate) struct WriteAudit(Arc<WriteAuditState>);
 
 impl WriteAudit {
+    /// Records the write attempt of a caller authorized to manage the policy.
+    ///
+    /// The returned audit records a `request_rejected` denial if it is dropped before its terminal
+    /// outcome, so every recorded attempt is paired with a result.
     pub(crate) fn begin(actor_sid: &Sid, actor_exe: &Path, path: &Path) -> Self {
         Self::begin_with_recorder(actor_sid, actor_exe, path, Arc::clone(recorder()))
     }
@@ -526,14 +548,6 @@ impl WriteAudit {
             EntryClass::Admission,
         );
         Self(state)
-    }
-
-    pub(crate) fn denied(&self, reason: DenialReason) {
-        // A denial is recorded before the pipe client authenticates, so an unauthenticated flood can
-        // produce it at will: it yields rather than consuming the capacity reserved for outcomes.
-        self.finish(EntryClass::Admission, |state| {
-            policy_events::policy_write_denied(&state.actor_sid, &state.actor_exe, INTENT, &state.path, reason.as_str())
-        });
     }
 
     pub(crate) fn failed(&self, operation: PolicyReplacementOperation, reason: FailureReason) {
@@ -636,10 +650,7 @@ impl WriteAudit {
         });
     }
 
-    /// Records the terminal event of `class`, which decides whether a request flood may drop it.
-    ///
-    /// A denial never reaches the policy store, so it yields like an attempt; the reserved capacity
-    /// is kept for the outcome of an authenticated write.
+    /// Records the terminal event of `class`, which decides whether a saturated sink may drop it.
     fn finish(&self, class: EntryClass, entry: impl FnOnce(&WriteAuditState) -> Entry) {
         if self
             .0
@@ -656,6 +667,166 @@ impl WriteAuditState {
     fn record(&self, entry: Entry, class: EntryClass) {
         self.recorder.record(entry, class);
     }
+}
+
+/// Records that a caller was refused a policy write before its attempt was recorded.
+///
+/// Such a caller can repeat the request at will, so only its first denial for a given reason is
+/// logged. The denials that follow within [`DENIAL_SUMMARY_INTERVAL`] are counted and logged as
+/// one summary once the interval elapses or the broker stops.
+pub(crate) fn write_denied(actor_sid: &Sid, actor_exe: &Path, path: &Path, reason: DenialReason) {
+    let actor_sid = bounded(actor_sid.to_string(), MAX_SID_BYTES);
+    let actor_exe = bounded(actor_exe.display().to_string(), MAX_PATH_BYTES);
+    let path = bounded_path(path);
+    record_denials(with_denials(|denials| {
+        denials.deny(actor_sid, &actor_exe, &path, reason, std::time::Instant::now())
+    }));
+}
+
+/// Periodically logs the summaries of the denial intervals that elapsed, until `shutdown`.
+///
+/// [`drain`] logs the summaries still pending when the broker stops.
+pub(crate) fn spawn_denial_summary_task(shutdown: CancellationToken) {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                () = shutdown.cancelled() => break,
+                () = tokio::time::sleep(DENIAL_SUMMARY_TICK) => {
+                    record_denials(with_denials(|denials| denials.summarize_elapsed(std::time::Instant::now())));
+                }
+            }
+        }
+    });
+}
+
+fn record_denials(entries: Vec<Entry>) {
+    for entry in entries {
+        recorder().record(entry, EntryClass::Admission);
+    }
+}
+
+/// Logs the summary of every denial counted so far, whether or not its interval elapsed.
+pub(crate) fn summarize_pending_denials() {
+    record_denials(with_denials(|denials| denials.summarize_all(std::time::Instant::now())));
+}
+
+/// The process-wide denial throttle.
+///
+/// Tests get one per thread, like their recorder, so concurrent tests acting as the same user do
+/// not count each other's denials.
+fn with_denials<R>(f: impl FnOnce(&DenialThrottle) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        static DENIALS: std::sync::LazyLock<DenialThrottle> = std::sync::LazyLock::new(DenialThrottle::default);
+        f(&DENIALS)
+    }
+    #[cfg(test)]
+    {
+        std::thread_local! {
+            static DENIALS: DenialThrottle = DenialThrottle::default();
+        }
+        DENIALS.with(f)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DenialKey {
+    actor_sid: String,
+    reason: DenialReason,
+}
+
+struct DenialWindow {
+    opened_at: std::time::Instant,
+    /// Denials counted since the window opened, without being logged individually.
+    suppressed: u64,
+}
+
+/// Collapses the repeated denials of each caller into its first denial and a periodic summary.
+///
+/// INVARIANT: at most [`MAX_DENIAL_WINDOWS`] windows plus one overflow window per reason are open.
+#[derive(Default)]
+struct DenialThrottle(parking_lot::Mutex<HashMap<DenialKey, DenialWindow>>);
+
+impl DenialThrottle {
+    /// Counts one denial, and returns the entries to log for it.
+    ///
+    /// The denial is logged when it opens a window for its caller and reason. The summaries of the
+    /// windows that elapsed are returned first.
+    fn deny(
+        &self,
+        actor_sid: String,
+        actor_exe: &str,
+        path: &Path,
+        reason: DenialReason,
+        now: std::time::Instant,
+    ) -> Vec<Entry> {
+        let mut windows = self.0.lock();
+        let mut entries = summarize(&mut windows, now, false);
+        let key = DenialKey { actor_sid, reason };
+        if let Some(window) = windows.get_mut(&key) {
+            window.suppressed = window.suppressed.saturating_add(1);
+        } else if windows.len() < MAX_DENIAL_WINDOWS {
+            entries.push(policy_events::policy_write_denied(
+                &key.actor_sid,
+                actor_exe,
+                INTENT,
+                path,
+                reason.as_str(),
+            ));
+            windows.insert(
+                key,
+                DenialWindow {
+                    opened_at: now,
+                    suppressed: 0,
+                },
+            );
+        } else {
+            // The overflow window never logs a denial individually, so it counts this one as well.
+            let window = windows
+                .entry(DenialKey {
+                    actor_sid: OVERFLOW_ACTOR_SID.to_owned(),
+                    reason,
+                })
+                .or_insert(DenialWindow {
+                    opened_at: now,
+                    suppressed: 0,
+                });
+            window.suppressed = window.suppressed.saturating_add(1);
+        }
+        entries
+    }
+
+    /// Closes the windows whose interval elapsed, and returns their summaries.
+    fn summarize_elapsed(&self, now: std::time::Instant) -> Vec<Entry> {
+        summarize(&mut self.0.lock(), now, false)
+    }
+
+    /// Closes every window, and returns their summaries.
+    fn summarize_all(&self, now: std::time::Instant) -> Vec<Entry> {
+        summarize(&mut self.0.lock(), now, true)
+    }
+}
+
+/// Closes the elapsed windows, or all of them, and returns a summary for each that counted denials.
+fn summarize(windows: &mut HashMap<DenialKey, DenialWindow>, now: std::time::Instant, all: bool) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    windows.retain(|key, window| {
+        let elapsed = now.saturating_duration_since(window.opened_at);
+        if !all && elapsed < DENIAL_SUMMARY_INTERVAL {
+            return true;
+        }
+        if window.suppressed > 0 {
+            entries.push(policy_events::policy_write_denied_summary(
+                &key.actor_sid,
+                INTENT,
+                key.reason.as_str(),
+                window.suppressed,
+                elapsed.as_secs(),
+            ));
+        }
+        false
+    });
+    entries
 }
 
 pub(crate) fn external_change_applied(path: &Path, new_id: &str, new_revision: u32) {
@@ -808,10 +979,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn attempt_precedes_denial_and_only_one_terminal_event_is_recorded() {
+    fn attempt_precedes_its_only_terminal_event() {
         let (audit, recorder) = test_audit();
-        audit.denied(DenialReason::AuthenticationFailed);
         audit.failed(PolicyReplacementOperation::Update, FailureReason::InvalidPolicy);
+        audit.succeeded_at(
+            Path::new(r"C:\policy.json"),
+            None,
+            None,
+            "new",
+            1,
+            PolicyReplacementOperation::Update,
+            false,
+        );
+        drop(audit);
         assert_eq!(
             recorder
                 .events()
@@ -820,19 +1000,13 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>(),
             [
                 Some(policy_events::POLICY_WRITE_ATTEMPTED),
-                Some(policy_events::POLICY_WRITE_DENIED)
+                Some(policy_events::POLICY_CHANGE_FAILED)
             ]
         );
     }
 
     #[test]
-    fn a_denial_yields_like_an_attempt_while_an_outcome_keeps_the_reserve() {
-        // A denial is reachable before the pipe client authenticates, so an unauthenticated flood
-        // must be unable to spend the capacity reserved for the outcome of an accepted write.
-        let (denied, recorder) = test_audit();
-        denied.denied(DenialReason::AuthenticationFailed);
-        assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Admission]);
-
+    fn a_rejected_request_yields_like_an_attempt_while_an_outcome_keeps_the_reserve() {
         let (abandoned, recorder) = test_audit();
         drop(abandoned);
         assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Admission]);
@@ -840,6 +1014,155 @@ pub(crate) mod tests {
         let (failed, recorder) = test_audit();
         failed.failed(PolicyReplacementOperation::Update, FailureReason::InvalidPolicy);
         assert_eq!(recorder.classes(), [EntryClass::Admission, EntryClass::Outcome]);
+    }
+
+    fn deny(throttle: &DenialThrottle, actor_sid: &str, reason: DenialReason, now: std::time::Instant) -> Vec<Entry> {
+        throttle.deny(
+            actor_sid.to_owned(),
+            r"C:\client.exe",
+            Path::new(r"C:\policy.json"),
+            reason,
+            now,
+        )
+    }
+
+    fn field<'a>(entry: &'a Entry, name: &str) -> &'a str {
+        entry
+            .fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing {name} field"))
+    }
+
+    #[test]
+    fn repeated_denials_of_one_caller_are_logged_once_then_summarized() {
+        let throttle = DenialThrottle::default();
+        let start = std::time::Instant::now();
+
+        let first = deny(&throttle, "S-1-5-21-1", DenialReason::AdministratorRequired, start);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].event_code, Some(policy_events::POLICY_WRITE_DENIED));
+        assert_eq!(field(&first[0], "reason"), "administrator_required");
+
+        for offset in 1..=1_000 {
+            let now = start + std::time::Duration::from_millis(offset);
+            assert!(deny(&throttle, "S-1-5-21-1", DenialReason::AdministratorRequired, now).is_empty());
+        }
+        assert!(
+            throttle
+                .summarize_elapsed(start + DENIAL_SUMMARY_INTERVAL - std::time::Duration::from_millis(1))
+                .is_empty()
+        );
+
+        let summaries = throttle.summarize_elapsed(start + DENIAL_SUMMARY_INTERVAL);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(
+            summaries[0].event_code,
+            Some(policy_events::POLICY_WRITE_DENIED_SUMMARY)
+        );
+        assert_eq!(field(&summaries[0], "actor_sid"), "S-1-5-21-1");
+        assert_eq!(field(&summaries[0], "reason"), "administrator_required");
+        assert_eq!(field(&summaries[0], "suppressed"), "1000");
+        assert_eq!(field(&summaries[0], "interval_s"), "60");
+
+        // The summary closed the window, so the next denial is logged again.
+        let reopened = deny(
+            &throttle,
+            "S-1-5-21-1",
+            DenialReason::AdministratorRequired,
+            start + DENIAL_SUMMARY_INTERVAL,
+        );
+        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened[0].event_code, Some(policy_events::POLICY_WRITE_DENIED));
+    }
+
+    #[test]
+    fn a_denial_logs_the_summaries_of_elapsed_windows_first() {
+        let throttle = DenialThrottle::default();
+        let start = std::time::Instant::now();
+        deny(&throttle, "S-1-5-21-1", DenialReason::AuthenticationFailed, start);
+        deny(&throttle, "S-1-5-21-1", DenialReason::AuthenticationFailed, start);
+
+        let entries = deny(
+            &throttle,
+            "S-1-5-21-1",
+            DenialReason::AuthenticationFailed,
+            start + DENIAL_SUMMARY_INTERVAL,
+        );
+        assert_eq!(
+            entries.iter().map(|entry| entry.event_code).collect::<Vec<_>>(),
+            [
+                Some(policy_events::POLICY_WRITE_DENIED_SUMMARY),
+                Some(policy_events::POLICY_WRITE_DENIED)
+            ]
+        );
+        assert_eq!(field(&entries[0], "suppressed"), "1");
+    }
+
+    #[test]
+    fn callers_and_reasons_are_counted_separately_and_quiet_windows_are_not_summarized() {
+        let throttle = DenialThrottle::default();
+        let now = std::time::Instant::now();
+        for (actor_sid, reason) in [
+            ("S-1-5-21-1", DenialReason::AuthenticationFailed),
+            ("S-1-5-21-1", DenialReason::AdministratorRequired),
+            ("S-1-5-21-2", DenialReason::AuthenticationFailed),
+        ] {
+            assert_eq!(deny(&throttle, actor_sid, reason, now).len(), 1);
+        }
+        assert!(deny(&throttle, "S-1-5-21-2", DenialReason::AuthenticationFailed, now).is_empty());
+
+        let summaries = throttle.summarize_all(now);
+        assert_eq!(
+            summaries.len(),
+            1,
+            "only the window that counted a denial is summarized"
+        );
+        assert_eq!(field(&summaries[0], "actor_sid"), "S-1-5-21-2");
+        assert_eq!(field(&summaries[0], "suppressed"), "1");
+        assert!(throttle.0.lock().is_empty(), "summarizing every window closes them all");
+    }
+
+    #[test]
+    fn denials_of_many_callers_keep_the_tracking_map_and_the_log_bounded() {
+        let throttle = DenialThrottle::default();
+        let now = std::time::Instant::now();
+        let callers = MAX_DENIAL_WINDOWS + 100;
+
+        let mut logged = 0;
+        for round in 0..3 {
+            for caller in 0..callers {
+                let entries = deny(
+                    &throttle,
+                    &format!("S-1-5-21-{caller}"),
+                    DenialReason::AuthenticationFailed,
+                    now,
+                );
+                if round > 0 {
+                    assert!(entries.is_empty(), "a caller's repeated denial is only counted");
+                }
+                logged += entries.len();
+            }
+        }
+        assert_eq!(logged, MAX_DENIAL_WINDOWS);
+        assert_eq!(throttle.0.lock().len(), MAX_DENIAL_WINDOWS + 1);
+
+        let summaries = throttle.summarize_all(now);
+        assert_eq!(summaries.len(), MAX_DENIAL_WINDOWS + 1);
+        let overflow = summaries
+            .iter()
+            .find(|entry| field(entry, "actor_sid") == OVERFLOW_ACTOR_SID)
+            .expect("the callers beyond the tracked ones share the overflow window");
+        assert_eq!(field(overflow, "suppressed"), (100 * 3).to_string());
+        let counted: u64 = summaries
+            .iter()
+            .map(|entry| field(entry, "suppressed").parse::<u64>().expect("a count"))
+            .sum();
+        assert_eq!(
+            usize::try_from(counted).expect("a small count") + logged,
+            callers * 3,
+            "every denial is either logged or counted"
+        );
     }
 
     #[test]

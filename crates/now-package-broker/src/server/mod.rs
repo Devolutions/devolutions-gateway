@@ -295,10 +295,7 @@ async fn authenticate_policy_management(
     request: Request,
     next: Next,
 ) -> Response {
-    let write_audit = matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy")).then(|| {
-        let configured_path = PathBuf::from(state.policy_store.management_snapshot().configured_path);
-        crate::audit::WriteAudit::begin(client.user_sid(), client.executable_path(), &configured_path)
-    });
+    let is_policy_write = matches!((request.method(), request.uri().path()), (&Method::PUT, "/v1/policy"));
     let protected = matches!(
         (request.method(), request.uri().path()),
         (&Method::GET, "/v1/policy/management")
@@ -308,8 +305,13 @@ async fn authenticate_policy_management(
     );
     if protected {
         if let Err(error) = client.validate_connection(state.skip_signature_validation) {
-            if let Some(audit) = write_audit {
-                audit.denied(crate::audit::DenialReason::AuthenticationFailed);
+            if is_policy_write {
+                crate::audit::write_denied(
+                    client.user_sid(),
+                    client.executable_path(),
+                    &configured_policy_path(&state),
+                    crate::audit::DenialReason::AuthenticationFailed,
+                );
             }
             warn!(error = format!("{error:#}"), "Rejected policy management request");
             return (
@@ -322,13 +324,24 @@ async fn authenticate_policy_management(
                 .into_response();
         }
         let authenticated = POLICY_MANAGEMENT_AUTHENTICATED.scope((), next.run(request));
-        return if let Some(audit) = write_audit {
+        // The attempt is only recorded for a caller allowed to write the policy; the handler
+        // records the denial of any other caller.
+        return if is_policy_write && client.is_elevated_administrator() {
+            let audit = crate::audit::WriteAudit::begin(
+                client.user_sid(),
+                client.executable_path(),
+                &configured_policy_path(&state),
+            );
             POLICY_WRITE_AUDIT.scope(audit, authenticated).await
         } else {
             authenticated.await
         };
     }
     next.run(request).await
+}
+
+fn configured_policy_path(state: &BrokerState) -> PathBuf {
+    PathBuf::from(state.policy_store.management_snapshot().configured_path)
 }
 
 #[expect(
@@ -395,16 +408,21 @@ impl PackageBrokerServer for BrokerConnection {
         request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
         require_policy_management_authentication()?;
-        let audit = POLICY_WRITE_AUDIT
-            .try_with(Clone::clone)
-            .map_err(|_| error_response(ErrorCode::InternalError, "policy write audit context is unavailable"))?;
         if !self.client.is_elevated_administrator() {
-            audit.denied(crate::audit::DenialReason::AdministratorRequired);
+            crate::audit::write_denied(
+                self.client.user_sid(),
+                self.client.executable_path(),
+                &configured_policy_path(&self.state),
+                crate::audit::DenialReason::AdministratorRequired,
+            );
             return Err(error_response(
                 ErrorCode::AdministratorRequired,
                 "policy replacement requires an elevated Administrator",
             ));
         }
+        let audit = POLICY_WRITE_AUDIT
+            .try_with(Clone::clone)
+            .map_err(|_| error_response(ErrorCode::InternalError, "policy write audit context is unavailable"))?;
         self.state
             .policy_store
             .replace(request, audit)
@@ -1251,6 +1269,106 @@ mod tests {
         let elevated = PipeClient::test_with_authority(true, true).expect("test client");
         let accepted = route_json(state, elevated, Method::PUT, "/v1/policy", replacement).await;
         assert_eq!(accepted.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rejected_policy_writes_are_summarized_while_authorized_writes_are_audited() {
+        crate::audit::tests::take_events();
+        let codes = |events: Vec<sysevent::Entry>| events.iter().map(|entry| entry.event_code).collect::<Vec<_>>();
+        let draft = serde_json::json!({
+            "PolicyFormatVersion": "1.0.0",
+            "Metadata": { "Id": "created", "Publisher": "Test" },
+            "Enforcement": { "DefaultDecision": "Deny" },
+            "Rules": []
+        });
+        let state = shared_state(None);
+        let validation = state.policy_store.validate_draft(&draft);
+        let replacement = serde_json::json!({
+            "RequestKind": "PolicyReplacementRequest",
+            "RequestVersion": "1.0",
+            "ExpectedStoreToken": state.policy_store.management_snapshot().store_token,
+            "Operation": "Create",
+            "ConflictHandling": "Reject",
+            "Draft": draft,
+            "ValidationReceipt": validation.validation_receipt.expect("valid receipt")
+        });
+
+        let mut unsigned = state_with_policy_store(&state);
+        unsigned.skip_signature_validation = false;
+        let unsigned = Arc::new(unsigned);
+        let unelevated = PipeClient::test_with_authority(false, false).expect("test client");
+        for _ in 0..50 {
+            let response = route_json(
+                Arc::clone(&unsigned),
+                unelevated.clone(),
+                Method::PUT,
+                "/v1/policy",
+                replacement.clone(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+            let response = route_json(
+                Arc::clone(&state),
+                unelevated.clone(),
+                Method::PUT,
+                "/v1/policy",
+                replacement.clone(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+
+        let events = crate::audit::tests::take_events();
+        assert_eq!(
+            codes(events.clone()),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_DENIED),
+                Some(agent_sysevent_codes::POLICY_WRITE_DENIED)
+            ],
+            "only the first denial of each reason is logged, and no attempt is recorded"
+        );
+        let reasons = events
+            .iter()
+            .flat_map(|entry| &entry.fields)
+            .filter(|(name, _)| name == "reason")
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(reasons, ["authentication_failed", "administrator_required"]);
+
+        let elevated = PipeClient::test_with_authority(true, true).expect("test client");
+        let accepted = route_json(Arc::clone(&state), elevated, Method::PUT, "/v1/policy", replacement).await;
+        assert_eq!(accepted.status(), StatusCode::OK);
+        assert_eq!(
+            codes(crate::audit::tests::take_events()),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_ATTEMPTED),
+                Some(agent_sysevent_codes::POLICY_CREATE_SUCCEEDED)
+            ]
+        );
+
+        crate::audit::summarize_pending_denials();
+        let summaries = crate::audit::tests::take_events();
+        assert_eq!(
+            codes(summaries.clone()),
+            [
+                Some(agent_sysevent_codes::POLICY_WRITE_DENIED_SUMMARY),
+                Some(agent_sysevent_codes::POLICY_WRITE_DENIED_SUMMARY)
+            ]
+        );
+        assert!(summaries.iter().all(|entry| {
+            entry
+                .fields
+                .iter()
+                .any(|(name, value)| name == "suppressed" && value == "49")
+        }));
+    }
+
+    fn state_with_policy_store(state: &BrokerState) -> BrokerState {
+        BrokerState {
+            policy_store: Arc::clone(&state.policy_store),
+            ..self::state()
+        }
     }
 
     #[test]
