@@ -10,6 +10,7 @@
 //! Each provider is reached through its own HTTP API: OpenAI chat completions (also spoken by Mistral, Gemini and many
 //! others) or Anthropic Messages. Only the few fields a single text completion needs are modeled.
 //! Requests are not streamed and are bounded by a timeout.
+//! An answer the provider refused or cut short is an error, so a purpose only parses whole answers.
 //!
 //! A new purpose is a module like [`session_actions`]: a prompt and its `PROMPT_VERSION`, a request builder returned by
 //! a new [`AiClient`] method, and a parser turning the answer into typed output.

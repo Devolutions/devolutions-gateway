@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::{Completion, Message, endpoint, parse_body, usage};
+use super::{Completion, Message, Stop, endpoint, parse_body, usage};
 use crate::Error;
 use crate::client::Prompt;
 
@@ -44,9 +44,16 @@ pub(crate) fn parse(body: &[u8]) -> Result<Completion, Error> {
         .collect::<Vec<_>>()
         .join("\n");
 
+    let stop = match response.stop_reason.as_deref() {
+        // A full context window cuts the answer like the output token limit.
+        Some("max_tokens" | "model_context_window_exceeded") => Stop::Truncated,
+        Some("refusal") => Stop::Refused("stop reason refusal"),
+        _ => Stop::Complete,
+    };
+
     Ok(Completion {
         text,
-        truncated: response.stop_reason.as_deref() == Some("max_tokens"),
+        stop,
         model: response.model,
         usage: response
             .usage
@@ -99,7 +106,7 @@ mod tests {
         .expect("valid answer");
 
         assert_eq!(completion.text, "a\nb");
-        assert!(!completion.truncated);
+        assert_eq!(completion.stop, Stop::Complete);
         assert_eq!(completion.model.as_deref(), Some("claude-test-20260101"));
         assert_eq!(
             completion.usage,
@@ -111,11 +118,33 @@ mod tests {
     }
 
     #[test]
-    fn max_tokens_stop_reason_is_truncated() {
-        let completion = parse(br#"{"content":[{"type":"text","text":"partial"}],"stop_reason":"max_tokens"}"#)
+    fn max_tokens_and_full_context_window_are_truncated() {
+        for stop_reason in ["max_tokens", "model_context_window_exceeded"] {
+            let body = format!(r#"{{"content":[{{"type":"text","text":"partial"}}],"stop_reason":"{stop_reason}"}}"#);
+
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(completion.stop, Stop::Truncated, "{stop_reason}");
+            assert_eq!(completion.usage, None);
+        }
+    }
+
+    #[test]
+    fn refusal_stop_reason_is_refused() {
+        let completion = parse(br#"{"content":[{"type":"text","text":"I cannot help."}],"stop_reason":"refusal"}"#)
             .expect("valid answer");
 
-        assert!(completion.truncated);
-        assert_eq!(completion.usage, None);
+        assert_eq!(completion.stop, Stop::Refused("stop reason refusal"));
+    }
+
+    #[test]
+    fn other_stop_reasons_are_complete() {
+        for stop_reason in [r#""end_turn""#, r#""stop_sequence""#, r#""pause_turn""#, "null"] {
+            let body = format!(r#"{{"content":[{{"type":"text","text":"answer"}}],"stop_reason":{stop_reason}}}"#);
+
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(completion.stop, Stop::Complete, "{stop_reason}");
+        }
     }
 }

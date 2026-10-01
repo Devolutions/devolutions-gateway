@@ -95,7 +95,9 @@ impl DescribeSessionActions<'_> {
     ///
     /// Invalid lines in the answer are skipped with a warning.
     /// The answer is [`Error::InvalidOutput`] only when it has lines but none of them is a valid action.
-    /// An answer cut at the output token limit is [`Error::Truncated`]: send a shorter transcript instead.
+    /// An answer cut short by the output token limit or the context window is [`Error::Truncated`]: send a shorter
+    /// transcript instead.
+    /// A refusal of the provider is [`Error::Refused`], never an empty list.
     pub async fn send(self) -> Result<Response<Vec<Action>>, Error> {
         let prompt = Prompt {
             system: PROMPT,

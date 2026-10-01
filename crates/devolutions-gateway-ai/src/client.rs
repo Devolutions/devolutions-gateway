@@ -6,7 +6,7 @@ use secrecy::{ExposeSecret as _, SecretString};
 use tracing::debug;
 use url::Url;
 
-use crate::wire::{Api, anthropic, openai};
+use crate::wire::{Api, Stop, anthropic, openai};
 use crate::{Error, Response, error};
 
 /// Default of [`AiClientBuilder::request_timeout`].
@@ -16,6 +16,8 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     /// OpenAI chat completions; the default base URL is `https://api.openai.com/v1/`.
+    ///
+    /// Requests are sent with `"store": false`, so OpenAI does not keep them as stored completions.
     OpenAi,
     /// Anthropic Messages; the default base URL is `https://api.anthropic.com/v1/`.
     Anthropic,
@@ -44,9 +46,8 @@ impl Provider {
 
     fn api(self) -> Api {
         match self {
-            // OpenAI's newer models only accept `max_completion_tokens`; other servers only know `max_tokens`.
-            Self::OpenAi => Api::OpenAiChat(openai::TokenLimit::MaxCompletionTokens),
-            Self::Mistral | Self::Gemini | Self::OpenAiCompatible => Api::OpenAiChat(openai::TokenLimit::MaxTokens),
+            Self::OpenAi => Api::OpenAiChat(openai::Dialect::OpenAi),
+            Self::Mistral | Self::Gemini | Self::OpenAiCompatible => Api::OpenAiChat(openai::Dialect::Other),
             Self::Anthropic => Api::AnthropicMessages,
         }
     }
@@ -209,7 +210,9 @@ impl AiClient {
 
     /// Sends one completion request and returns the text of the answer.
     ///
-    /// An answer cut at the output token limit is [`Error::Truncated`], because no purpose can use a partial answer.
+    /// An answer cut short by the output token limit or the context window is [`Error::Truncated`], because no purpose
+    /// can use a partial answer.
+    /// A refusal is [`Error::Refused`], so that no purpose reads it as an empty answer.
     /// The `<think>` blocks some models write before their answer are removed.
     pub(crate) async fn complete(&self, prompt: &Prompt<'_>) -> Result<Response<String>, Error> {
         debug!(
@@ -225,8 +228,8 @@ impl AiClient {
         let api_key = self.api_key.expose_secret();
 
         let request = match api {
-            Api::OpenAiChat(limit) => {
-                openai::request(&self.http_client, &self.base_url, api_key, &self.model, prompt, limit)
+            Api::OpenAiChat(dialect) => {
+                openai::request(&self.http_client, &self.base_url, api_key, &self.model, prompt, dialect)
             }
             Api::AnthropicMessages => {
                 anthropic::request(&self.http_client, &self.base_url, api_key, &self.model, prompt)
@@ -240,13 +243,14 @@ impl AiClient {
             .map_err(|error| error::transport(&error, api_key))?;
 
         let status = response.status();
+        let retry_after = error::retry_after(response.headers());
         let body = response
             .bytes()
             .await
             .map_err(|error| error::transport(&error, api_key))?;
 
         if !status.is_success() {
-            return Err(error::status(status, &body, api_key));
+            return Err(error::status(status, retry_after, &body, api_key));
         }
 
         let completion = match api {
@@ -258,23 +262,28 @@ impl AiClient {
 
         debug!(
             output_len = text.len(),
-            truncated = completion.truncated,
+            stop = ?completion.stop,
             model = ?completion.model,
             usage = ?completion.usage,
             "Received AI completion"
         );
 
-        if completion.truncated {
-            return Err(Error::Truncated {
+        match completion.stop {
+            Stop::Complete => Ok(Response {
+                output: text,
+                model: completion.model,
                 usage: completion.usage,
-            });
+            }),
+            Stop::Truncated => Err(Error::Truncated {
+                usage: completion.usage,
+            }),
+            Stop::Refused(reason) => Err(Error::Refused {
+                reason: reason.to_owned(),
+            }),
+            Stop::Failed(reason) => Err(Error::InvalidResponse {
+                reason: reason.to_owned(),
+            }),
         }
-
-        Ok(Response {
-            output: text,
-            model: completion.model,
-            usage: completion.usage,
-        })
     }
 }
 
