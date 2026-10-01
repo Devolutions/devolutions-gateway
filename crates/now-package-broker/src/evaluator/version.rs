@@ -38,12 +38,18 @@ pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
 /// npm and Bun resolve partial versions and selector syntax as ranges (`1.2`, `1.2.x` and `^1.2.3` select the newest match).
 /// Cargo and `dotnet tool` may also read such versions as a requirement or a NuGet range.
 /// For these managers, only a concrete version with at least three numeric release components is known.
+/// PSResourceGet (`PowerShell7`) reads a concrete NuGet version, including a partial one padded with zeros,
+/// as exact, and anything else (`[1.0,2.0)`, `1.*`) as a range.
 /// The other managers either pin an exact version, padding missing components with zeros, or reject range syntax.
 fn manager_resolves_as_range(manager: ManagerName, version: &str) -> bool {
-    matches!(
-        manager,
-        ManagerName::Npm | ManagerName::Bun | ManagerName::Cargo | ManagerName::Dotnet
-    ) && (LenientVersion::parse(version).is_none() || release_component_count(version) < 3)
+    let concrete = LenientVersion::parse(version).is_some();
+    match manager {
+        ManagerName::Npm | ManagerName::Bun | ManagerName::Cargo | ManagerName::Dotnet => {
+            !concrete || release_component_count(version) < 3
+        }
+        ManagerName::PowerShell7 => !concrete,
+        _ => false,
+    }
 }
 
 fn release_component_count(version: &str) -> usize {
@@ -292,6 +298,18 @@ mod tests {
             ManagerName::Pip,
         ] {
             assert!(!manager_resolves_as_range(manager, "1.2"), "{manager:?}");
+        }
+        for version in ["[1.0.0,2.0.0)", "(,1.0]", "1.*", "[1.2.3]"] {
+            assert!(
+                manager_resolves_as_range(ManagerName::PowerShell7, version),
+                "{version}"
+            );
+        }
+        for version in ["1.2.3", "1.2.3-preview1"] {
+            assert!(
+                !manager_resolves_as_range(ManagerName::PowerShell7, version),
+                "{version}"
+            );
         }
     }
 
