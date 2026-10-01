@@ -25,7 +25,11 @@ pub(super) fn package_identifiers_match(
 
     let mut candidates = vec![identifier_key(manager, value, decision)];
     if decision == Decision::Deny {
-        candidates.extend(embedded_package_names(value).map(|name| identifier_key(manager, name, decision)));
+        candidates.extend(
+            embedded_package_names(manager, value)
+                .into_iter()
+                .map(|name| identifier_key(manager, name, decision)),
+        );
     }
 
     match condition {
@@ -47,19 +51,24 @@ pub(super) fn package_identifiers_match(
 
 /// Package names embedded in a decorated identifier.
 ///
-/// Some managers accept identifiers that carry more than a package name, such as npm
-/// aliases (`alias:@scope/target@1.0.0`), versioned specifiers (`name@1.2.3`), and vcpkg
-/// feature or triplet qualifiers (`port[feature]:triplet`).
-/// This yields each `:`-separated segment without its `[...]` features or `@version` suffix;
-/// a leading `@` is kept as part of an npm scope.
-pub(super) fn embedded_package_names(identifier: &str) -> impl Iterator<Item = &str> {
-    identifier.split(':').map(|segment| {
-        let segment = segment.split_once('[').map_or(segment, |(name, _features)| name);
-        segment
-            .rfind('@')
-            .filter(|index| *index > 0)
-            .map_or(segment, |index| &segment[..index])
-    })
+/// - npm and Bun aliases (`alias:@scope/target@1.0.0`, `alias@npm:target`) name both the alias and the target package.
+/// - vcpkg qualifies a port with features and a triplet (`port[feature]:triplet`).
+/// - Other managers may accept a versioned specifier (`name@1.2.3`).
+///
+/// A leading `@` is kept as part of an npm scope.
+pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> Vec<&str> {
+    match manager {
+        ManagerName::Npm | ManagerName::Bun => identifier.split(':').map(strip_version_suffix).collect(),
+        ManagerName::Vcpkg => vec![identifier.split(['[', ':']).next().unwrap_or(identifier)],
+        _ => vec![strip_version_suffix(identifier)],
+    }
+}
+
+fn strip_version_suffix(specifier: &str) -> &str {
+    specifier
+        .rfind('@')
+        .filter(|index| *index > 0)
+        .map_or(specifier, |index| &specifier[..index])
 }
 
 /// Whether a decorated identifier may also select a package version, such as `name@1.2.3`.
@@ -311,11 +320,31 @@ mod tests {
 
     #[test]
     fn embedded_names_keep_npm_scopes() {
-        assert_eq!(embedded_package_names("@scope/pkg").collect::<Vec<_>>(), ["@scope/pkg"]);
+        assert_eq!(embedded_package_names(ManagerName::Npm, "@scope/pkg"), ["@scope/pkg"]);
         assert!(!identifier_may_select_version("@scope/pkg"));
         assert!(identifier_may_select_version("@scope/pkg@1.0.0"));
         assert!(identifier_may_select_version("alias:react@18"));
         assert!(!identifier_may_select_version("alias:react"));
+    }
+
+    #[test]
+    fn qualifiers_are_not_package_names() {
+        assert_eq!(
+            embedded_package_names(ManagerName::Vcpkg, "curl[ssl]:x64-windows"),
+            ["curl"]
+        );
+        assert!(!matches(
+            ManagerName::Vcpkg,
+            "zlib:x64-windows",
+            &exact(&["x64-windows"]),
+            Decision::Deny
+        ));
+        assert!(!matches(
+            ManagerName::Scoop,
+            "app:other",
+            &exact(&["other"]),
+            Decision::Deny
+        ));
     }
 
     #[test]
