@@ -126,21 +126,27 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
 
 /// Scope the operation runs in, or `None` when the package manager decides at execution time.
 ///
-/// Mirrors the command builders when the request omits the scope:
+/// Mirrors the command builders:
+/// - PowerShell uninstall removes the module wherever it is installed, ignoring the requested scope.
+/// - Otherwise, a requested scope is used as is.
 /// - npm, pip, Cargo, Scoop, Bun, vcpkg and `dotnet tool` always run per user.
-/// - PowerShell installs and updates default to `CurrentUser`; uninstall removes the module wherever it is installed.
+/// - PowerShell installs and updates default to `CurrentUser`.
 /// - Chocolatey always runs machine-wide.
 /// - WinGet leaves the scope to the installer.
 fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
     use now_policy_api::{ManagerName as M, Operation as O, Scope as S};
 
+    if matches!(request.manager, M::PowerShell | M::PowerShell7) && request.operation == O::Uninstall {
+        return None;
+    }
     if let Some(scope) = request.options.scope {
         return Some(scope);
     }
 
     match request.manager {
-        M::Npm | M::Pip | M::Cargo | M::Scoop | M::Bun | M::Vcpkg | M::Dotnet => Some(S::User),
-        M::PowerShell | M::PowerShell7 if request.operation != O::Uninstall => Some(S::User),
+        M::Npm | M::Pip | M::Cargo | M::Scoop | M::Bun | M::Vcpkg | M::Dotnet | M::PowerShell | M::PowerShell7 => {
+            Some(S::User)
+        }
         M::Chocolatey => Some(S::Machine),
         _ => None,
     }
@@ -148,19 +154,24 @@ fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
 
 /// Architecture the operation selects, or `None` when the package manager decides at execution time.
 ///
-/// Mirrors the command builders when the request omits the architecture:
-/// - npm, pip, Cargo, Bun and PowerShell packages are architecture-neutral.
+/// Mirrors the command builders:
+/// - PowerShell packages are architecture-neutral; the builders ignore the requested architecture.
+/// - Otherwise, a requested architecture is used as is.
+/// - npm, pip, Cargo and Bun packages are architecture-neutral.
 /// - vcpkg encodes the architecture in the triplet source name (`x64-windows`).
 /// - WinGet, Chocolatey, Scoop and `dotnet tool` pick an architecture from the host, the package and user configuration.
 fn effective_architecture(request: &PackageRequest) -> Option<now_policy_api::Architecture> {
     use now_policy_api::{Architecture as A, ManagerName as M};
 
+    if matches!(request.manager, M::PowerShell | M::PowerShell7) {
+        return Some(A::Neutral);
+    }
     if let Some(architecture) = request.package.architecture {
         return Some(architecture);
     }
 
     match request.manager {
-        M::Npm | M::Pip | M::Cargo | M::Bun | M::PowerShell | M::PowerShell7 => Some(A::Neutral),
+        M::Npm | M::Pip | M::Cargo | M::Bun => Some(A::Neutral),
         M::Vcpkg => match request.source.name.split('-').next() {
             Some(prefix) if prefix.eq_ignore_ascii_case("x64") => Some(A::X64),
             Some(prefix) if prefix.eq_ignore_ascii_case("x86") => Some(A::X86),
@@ -439,6 +450,13 @@ mod tests {
         request.package.architecture = Some(A::X64);
         assert_eq!(effective_scope(&request), Some(S::Machine));
         assert_eq!(effective_architecture(&request), Some(A::X64));
+
+        // The PowerShell builders ignore the requested architecture, and the requested scope on uninstall.
+        request.manager = M::PowerShell7;
+        request.operation = O::Uninstall;
+        request.options.scope = Some(S::User);
+        assert_eq!(effective_scope(&request), None);
+        assert_eq!(effective_architecture(&request), Some(A::Neutral));
     }
 
     #[test]

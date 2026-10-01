@@ -68,7 +68,6 @@ pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> 
                     .rfind('@')
                     .filter(|index| *index > 0)
                     .map(|index| &prefix[..index]);
-                let target = target.split_once('#').map_or(target, |(target, _reference)| target);
                 alias.into_iter().chain([strip_version_suffix(target)]).collect()
             }
         },
@@ -77,7 +76,11 @@ pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> 
     }
 }
 
+/// Strip a `#ref` Git reference and an `@version` suffix, keeping a leading `@` scope.
 fn strip_version_suffix(specifier: &str) -> &str {
+    let specifier = specifier
+        .split_once('#')
+        .map_or(specifier, |(specifier, _reference)| specifier);
     specifier
         .rfind('@')
         .filter(|index| *index > 0)
@@ -312,6 +315,8 @@ mod tests {
         let cases = [
             (ManagerName::Npm, "alias:@babel/core@7.0.0", "@babel/core"),
             (ManagerName::Npm, "alias@npm:react", "react"),
+            (ManagerName::Npm, "owner/repo#v1", "owner/repo"),
+            (ManagerName::Npm, "alias:owner/repo#semver:^1", "owner/repo"),
             (ManagerName::Bun, "react@18.0.0", "react"),
             (ManagerName::Vcpkg, "zlib:x64-windows", "zlib"),
             (ManagerName::Vcpkg, "curl[ssl,http2]:x64-windows", "curl"),
