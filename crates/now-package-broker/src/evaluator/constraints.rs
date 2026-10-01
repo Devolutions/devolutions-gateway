@@ -16,10 +16,10 @@ pub(super) fn constraints_pass(
         return true;
     };
 
-    if !c.allow_interactive && request.options.interactive {
+    if !c.allow_interactive && flags.interactive {
         return false;
     }
-    if !c.allow_skip_hash_check && request.options.skip_hash_check {
+    if !c.allow_skip_hash_check && flags.skip_hash_check {
         return false;
     }
     if !c.allow_pre_release && request.options.pre_release {
@@ -134,6 +134,8 @@ mod tests {
 
     fn flags() -> RequestFlags {
         RequestFlags {
+            interactive: false,
+            skip_hash_check: false,
             has_custom_parameters: false,
             has_custom_install_location: false,
             has_pre_post_commands: false,
@@ -152,15 +154,15 @@ mod tests {
 
     #[test]
     fn boolean_risky_option_gates_are_enforced() {
-        let mut request = request();
-        request.options.interactive = true;
+        let mut flags = flags();
+        flags.interactive = true;
 
         let constraints = PolicyConstraints {
             allow_interactive: false,
             ..Default::default()
         };
 
-        assert!(!constraints_pass(&Some(constraints), &request, &flags()));
+        assert!(!constraints_pass(&Some(constraints), &request(), &flags));
     }
 
     #[test]

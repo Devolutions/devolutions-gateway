@@ -24,6 +24,7 @@ mod install_location;
 mod matching;
 mod version;
 mod wildcard;
+mod winget_options;
 
 pub(crate) use wildcard::has_powershell_wildcard_syntax;
 
@@ -38,37 +39,56 @@ pub struct PolicyDecision {
     pub reason: String,
 }
 
+/// Request characteristics as the package manager will apply them, including options set
+/// through WinGet custom parameters.
 struct RequestFlags {
+    interactive: bool,
+    skip_hash_check: bool,
     has_custom_parameters: bool,
+    /// Whether any install location is supplied, including an empty one.
     has_custom_install_location: bool,
     has_pre_post_commands: bool,
     has_kill_before_operation: bool,
     has_uninstall_previous: bool,
     no_upgrade: bool,
-    /// Normalized custom install location, or `None` when absent or not a plain local drive path.
+    /// Normalized custom install location, or `None` when absent, supplied more than once, or not a
+    /// plain local drive path.
     custom_install_location: Option<String>,
     custom_parameters: Vec<String>,
 }
 
 impl RequestFlags {
     fn from_request(request: &PackageRequest) -> Self {
+        let winget = if request.manager == now_policy_api::ManagerName::Winget {
+            winget_options::winget_options(&request.options.custom_parameters)
+        } else {
+            winget_options::WingetOptions::default()
+        };
+
+        let mut locations = request
+            .options
+            .custom_install_location
+            .as_deref()
+            .map(Some)
+            .into_iter()
+            .collect::<Vec<_>>();
+        locations.extend(winget.locations.iter().copied());
+        let custom_install_location = match locations.as_slice() {
+            [Some(location)] => install_location::normalize_install_location(location),
+            _ => None,
+        };
+
         Self {
+            interactive: request.options.interactive || winget.interactive,
+            skip_hash_check: request.options.skip_hash_check || winget.skip_hash_check,
             has_custom_parameters: !request.options.custom_parameters.is_empty(),
-            has_custom_install_location: request
-                .options
-                .custom_install_location
-                .as_deref()
-                .is_some_and(|location| !location.is_empty()),
+            has_custom_install_location: !locations.is_empty(),
             has_pre_post_commands: request.options.pre_operation_command.is_some()
                 || request.options.post_operation_command.is_some(),
             has_kill_before_operation: !request.options.kill_before_operation.is_empty(),
-            has_uninstall_previous: request.options.uninstall_previous,
-            no_upgrade: request.options.no_upgrade,
-            custom_install_location: request
-                .options
-                .custom_install_location
-                .as_deref()
-                .and_then(install_location::normalize_install_location),
+            has_uninstall_previous: request.options.uninstall_previous || winget.uninstall_previous,
+            no_upgrade: request.options.no_upgrade || winget.no_upgrade,
+            custom_install_location,
             custom_parameters: request
                 .options
                 .custom_parameters
@@ -90,7 +110,7 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
         return PolicyDecision {
             decision: Decision::Deny,
             rule_id: "<validation-failure>".to_owned(),
-            reason: "Custom install location must be an absolute local drive path without relative segments."
+            reason: "Custom install location must be a single absolute local drive path without relative segments."
                 .to_owned(),
         };
     }

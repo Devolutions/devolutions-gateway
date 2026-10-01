@@ -52,8 +52,8 @@ pub(super) fn package_identifiers_match(
 /// Package names embedded in a decorated identifier.
 ///
 /// - npm aliases (`alias:@scope/target@1.0.0`) name both the alias and the target package.
-/// - Bun specifiers (`alias@npm:target`, `npm:target`, `github:owner/repo`) name the optional alias
-///   before the protocol and the target after it; the protocol itself is not a package name.
+/// - Bun specifiers (`alias@npm:target`, `npm:target`, `github:owner/repo#v1`) name the optional alias
+///   before the protocol and the target after it, without a `#ref`; the protocol itself is not a package name.
 /// - vcpkg qualifies a port with features and a triplet (`port[feature]:triplet`).
 /// - Other managers may accept a versioned specifier (`name@1.2.3`).
 ///
@@ -68,6 +68,7 @@ pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> 
                     .rfind('@')
                     .filter(|index| *index > 0)
                     .map(|index| &prefix[..index]);
+                let target = target.split_once('#').map_or(target, |(target, _reference)| target);
                 alias.into_iter().chain([strip_version_suffix(target)]).collect()
             }
         },
@@ -83,11 +84,13 @@ fn strip_version_suffix(specifier: &str) -> &str {
         .map_or(specifier, |index| &specifier[..index])
 }
 
-/// Whether a decorated identifier may also select a package version, such as `name@1.2.3`.
+/// Whether a decorated identifier may also select a package version, such as `name@1.2.3` or a
+/// Git reference (`owner/repo#v1`).
 pub(super) fn identifier_may_select_version(identifier: &str) -> bool {
-    identifier
-        .split(':')
-        .any(|segment| segment.rfind('@').is_some_and(|index| index > 0))
+    identifier.contains('#')
+        || identifier
+            .split(':')
+            .any(|segment| segment.rfind('@').is_some_and(|index| index > 0))
 }
 
 fn identifier_key(manager: ManagerName, identifier: &str, decision: Decision) -> Cow<'_, str> {
@@ -346,6 +349,9 @@ mod tests {
         for shortcut in ["gitlab", "bitbucket", "gist", "sourcehut", "github", "file"] {
             let value = format!("{shortcut}:owner/repo");
             assert_eq!(embedded_package_names(ManagerName::Bun, &value), ["owner/repo"]);
+            let value = format!("{shortcut}:owner/repo#v1.2.3");
+            assert_eq!(embedded_package_names(ManagerName::Bun, &value), ["owner/repo"]);
+            assert!(identifier_may_select_version(&value));
         }
         assert!(!matches(
             ManagerName::Bun,

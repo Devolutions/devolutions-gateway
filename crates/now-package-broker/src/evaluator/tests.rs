@@ -598,3 +598,70 @@ fn partial_npm_versions_are_unknown() {
     let result = evaluate(&deny_exact, &request);
     assert_eq!(result.rule_id, "<default>");
 }
+
+#[test]
+fn winget_custom_parameters_apply_policy_relevant_options() {
+    let allow_any = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 100, Decision::Allow, PolicyMatch::default())],
+    );
+    let parameters = |values: &[&str]| {
+        values
+            .iter()
+            .map(|value| api::CustomParameterString((*value).to_owned()))
+            .collect::<Vec<_>>()
+    };
+
+    for values in [
+        &["--location", r"C:\Tools\..\Windows"][..],
+        &["-l=Tools"],
+        &["--location"],
+        &["--location", r"C:\Tools", "-l", r"D:\Tools"],
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_parameters = parameters(values);
+        assert_eq!(
+            evaluate(&allow_any, &request).rule_id,
+            "<validation-failure>",
+            "{values:?}"
+        );
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_install_location = Some(r"C:\Tools".to_owned());
+    request.options.custom_parameters = parameters(&["--location", r"D:\Tools"]);
+    assert_eq!(evaluate(&allow_any, &request).rule_id, "<validation-failure>");
+
+    let deny_skip_hash = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-skip-hash",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                skip_hash_check: Some(true),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = parameters(&["--Ignore-Security-Hash"]);
+    assert_eq!(evaluate(&deny_skip_hash, &request).rule_id, "deny-skip-hash");
+
+    // Other managers reject custom parameters, so their values are not interpreted.
+    request.manager = api::ManagerName::Npm;
+    assert_eq!(evaluate(&deny_skip_hash, &request).rule_id, "<default>");
+}
+
+#[test]
+fn explicitly_empty_install_location_is_denied() {
+    let allow_any = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 100, Decision::Allow, PolicyMatch::default())],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.manager = api::ManagerName::Dotnet;
+    request.options.custom_install_location = Some(String::new());
+
+    assert_eq!(evaluate(&allow_any, &request).rule_id, "<validation-failure>");
+}
