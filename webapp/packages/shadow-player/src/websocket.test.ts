@@ -27,21 +27,31 @@ function encodedMessage(type: number, payload = ''): ArrayBuffer {
 class FakeWebSocket {
   static readonly OPEN = 1;
   static latest: FakeWebSocket | null = null;
+  static instances: FakeWebSocket[] = [];
 
   binaryType: BinaryType = 'blob';
   readyState = FakeWebSocket.OPEN;
+  protocol = '';
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
 
-  constructor(readonly url: string) {
+  constructor(
+    readonly url: string,
+    readonly protocols?: string | string[],
+  ) {
     FakeWebSocket.latest = this;
+    FakeWebSocket.instances.push(this);
   }
 
   send(): void {}
 
   close(): void {}
+
+  emitOpen(): void {
+    this.onopen?.(new Event('open'));
+  }
 
   emitMessage(data: ArrayBuffer): void {
     this.onmessage?.(new MessageEvent('message', { data }));
@@ -54,6 +64,17 @@ class FakeWebSocket {
   emitError(): void {
     this.onerror?.(new Event('error'));
   }
+
+  /** A failed handshake, as browsers report it: error, then close with 1006. */
+  emitHandshakeFailure(): void {
+    this.emitError();
+    this.emitClose();
+  }
+}
+
+/** Lets every queued event callback run: a macrotask turn drains all pending microtasks first. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('ServerWebSocket', () => {
@@ -64,6 +85,104 @@ describe('ServerWebSocket', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     FakeWebSocket.latest = null;
+    FakeWebSocket.instances = [];
+  });
+
+  it('falls back to shadow protocol v1 when the v2 handshake fails', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const onopen = vi.fn();
+    const onerror = vi.fn();
+    const onclose = vi.fn();
+    websocket.onopen(onopen);
+    websocket.onerror(onerror);
+    websocket.onclose(onclose);
+
+    FakeWebSocket.instances[0]?.emitHandshakeFailure();
+    await settle();
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[1]?.url).toBe('ws://example.test');
+    expect(FakeWebSocket.instances[1]?.protocols).toEqual([]);
+    expect(onerror).not.toHaveBeenCalled();
+    expect(onclose).not.toHaveBeenCalled();
+
+    FakeWebSocket.instances[1]?.emitOpen();
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(websocket.shadowProtocolVersion()).toBe('v1');
+  });
+
+  it('reports the failure when the v1 fallback also fails', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const onerror = vi.fn();
+    const onclose = vi.fn();
+    websocket.onerror(onerror);
+    websocket.onclose(onclose);
+
+    FakeWebSocket.instances[0]?.emitHandshakeFailure();
+    FakeWebSocket.instances[1]?.emitHandshakeFailure();
+    await settle();
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(onerror).toHaveBeenCalledTimes(1);
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconnect when an opened socket closes', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const onclose = vi.fn();
+    websocket.onclose(onclose);
+
+    FakeWebSocket.instances[0]?.emitOpen();
+    FakeWebSocket.instances[0]?.emitClose();
+    await settle();
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconnect when the caller closes before the socket opens', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const onclose = vi.fn();
+    websocket.onclose(onclose);
+
+    websocket.close(1000, 'replaced');
+    FakeWebSocket.instances[0]?.emitClose();
+    await settle();
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers shadow protocol v2 during the handshake', () => {
+    new ServerWebSocket('ws://example.test');
+
+    expect(FakeWebSocket.latest?.protocols).toEqual(['jrec-shadow.v2']);
+  });
+
+  it('reports the shadow protocol version the Gateway selected', () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const socket = FakeWebSocket.latest;
+    expect(socket).not.toBeNull();
+
+    expect(websocket.shadowProtocolVersion()).toBe('v1');
+    if (socket) {
+      socket.protocol = 'jrec-shadow.v2';
+    }
+    expect(websocket.shadowProtocolVersion()).toBe('v2');
+  });
+
+  it('accepts segment-started on a v1 connection', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const received = deferred<string>();
+    const onFailure = vi.fn();
+    websocket.onmessage((message) => received.resolve(message.type), onFailure);
+
+    FakeWebSocket.latest?.emitOpen();
+    FakeWebSocket.latest?.emitMessage(encodedMessage(4, '{"codec":"vp8"}'));
+
+    expect(await received.promise).toBe('segment-started');
+    expect(websocket.shadowProtocolVersion()).toBe('v1');
+    expect(onFailure).not.toHaveBeenCalled();
   });
 
   it('serializes messages and dispatches close after pending message work', async () => {
@@ -88,6 +207,7 @@ describe('ServerWebSocket', () => {
     }, vi.fn());
     websocket.onclose(() => closed.resolve());
 
+    socket?.emitOpen();
     socket?.emitMessage(encodedMessage(1, '{"codec":"vp8"}'));
     socket?.emitMessage(encodedMessage(0, 'chunk'));
     socket?.emitClose();
@@ -125,6 +245,7 @@ describe('ServerWebSocket', () => {
     }, vi.fn());
     websocket.onerror(() => errorDispatched.resolve());
 
+    socket?.emitOpen();
     socket?.emitMessage(encodedMessage(3));
     socket?.emitError();
 
