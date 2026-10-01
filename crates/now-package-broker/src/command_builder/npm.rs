@@ -10,6 +10,11 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
+use super::{quote_powershell_literal, validate_package_version};
+
+/// npm version selectors that are inert when passed through the `npm.cmd` shim, such as `~1.2` or `1.x`.
+const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
+
 /// Build an npm command from a validated request.
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_npm_request(request)?;
@@ -84,6 +89,7 @@ fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
     validate_script_value("package id", &request.package.id.0)?;
     if let Some(version) = request.package.version.as_deref() {
         validate_script_value("package version", version)?;
+        validate_package_version("npm", version, NPM_VERSION_EXTRA_CHARACTERS)?;
     }
 
     Ok(())
@@ -135,12 +141,7 @@ fn append_raw(script: &mut String, value: &str) {
 }
 
 fn append_value(script: &mut String, value: &str) {
-    append_raw(script, &quote_ps(value));
-}
-
-fn quote_ps(value: &str) -> String {
-    let escaped = value.replace('\'', "''");
-    format!("'{escaped}'")
+    append_raw(script, &quote_powershell_literal(value));
 }
 
 fn validate_script_value(name: &str, value: &str) -> anyhow::Result<()> {
@@ -346,5 +347,33 @@ mod tests {
         let error = build_npm_command(&request).expect_err("line separator should fail");
 
         assert!(error.to_string().contains("control line separators"));
+    }
+
+    #[test]
+    fn versions_with_unsupported_characters_are_rejected() {
+        for version in ["1.0'", "1.0\u{2019}", "1.0&x", "^1.0", "1.0 || 2.0", "-1.0"] {
+            let mut request = make_request();
+            request.package.version = Some(VersionString(version.to_owned()));
+
+            let error = build_npm_command(&request).expect_err("unsupported version should fail");
+
+            assert!(error.to_string().contains("package version"), "{version}: {error:#}");
+        }
+    }
+
+    #[test]
+    fn package_ids_double_every_single_quote_character() {
+        for quote in ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            let mut request = make_request();
+            request.package.version = None;
+            request.package.id = PackageIdentifier::from(format!("contoso{quote}tool"));
+
+            let cmd = build_npm_command(&request).expect("build command");
+
+            assert_eq!(
+                script_of(&cmd),
+                format!("npm install 'contoso{quote}{quote}tool' --global")
+            );
+        }
     }
 }

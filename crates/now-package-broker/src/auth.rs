@@ -235,8 +235,8 @@ impl PipeClient {
         request: &PackageRequest,
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
-        self.validate_client_context(&request.client)?;
-        self.validate_connection(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)?;
+        self.validate_client_context(&request.client)
     }
 
     pub(crate) fn validate_status_request(
@@ -244,8 +244,8 @@ impl PipeClient {
         request: &StatusRequest,
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
-        self.validate_client_context(&request.client)?;
-        self.validate_connection(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)?;
+        self.validate_client_context(&request.client)
     }
 
     pub(crate) fn validate_cancel_request(
@@ -253,8 +253,8 @@ impl PipeClient {
         request: &CancelRequest,
         skip_signature_validation: bool,
     ) -> anyhow::Result<()> {
-        self.validate_client_context(&request.client)?;
-        self.validate_connection(skip_signature_validation)
+        self.validate_connection(skip_signature_validation)?;
+        self.validate_client_context(&request.client)
     }
 
     fn validate_client_context(&self, client: &ClientContext) -> anyhow::Result<()> {
@@ -341,9 +341,24 @@ impl PipeClient {
     }
 
     fn validate_executable_path(&self, requested_executable_path: &str) -> anyhow::Result<()> {
+        // Validate the shape before any I/O so that only plain local drive paths are ever opened.
+        if !is_plain_local_drive_path(requested_executable_path) {
+            bail!("request client executable path is not a plain local drive path");
+        }
+
         let requested_path = Path::new(requested_executable_path);
-        if !requested_path.is_absolute() {
-            bail!("request client executable path is not absolute");
+        if crate::policy_security::windows_paths_equal(requested_path, &self.executable_path) {
+            return Ok(());
+        }
+
+        // Equivalent spellings of the same file fall back to a file identity comparison,
+        // restricted to the drive and file name of the captured executable.
+        if !same_drive_and_file_name(requested_path, &self.executable_path) {
+            bail!(
+                "pipe client executable '{}' does not match request client executable '{}'",
+                self.executable_path.display(),
+                requested_executable_path
+            );
         }
 
         let actual_id = if let Some(executable_file) = &self.executable_file {
@@ -428,6 +443,39 @@ fn is_supported_local_image_path(path: &Path) -> bool {
     path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
 }
 
+/// Accepts only plain drive-letter paths such as `C:\dir\client.exe`.
+///
+/// UNC, device, and namespace-prefixed paths, drive-relative paths, forward slashes,
+/// alternate data streams, and control characters are rejected.
+fn is_plain_local_drive_path(path: &str) -> bool {
+    let [drive, b':', b'\\', rest @ ..] = path.as_bytes() else {
+        return false;
+    };
+
+    // Multi-byte UTF-8 sequences never contain ASCII bytes, so a byte scan is sufficient.
+    drive.is_ascii_alphabetic()
+        && !rest.is_empty()
+        && !rest
+            .iter()
+            .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
+}
+
+fn same_drive_and_file_name(requested: &Path, actual: &Path) -> bool {
+    let (Some(requested_text), Some(actual_text)) = (requested.to_str(), actual.to_str()) else {
+        return false;
+    };
+    if !is_plain_local_drive_path(actual_text) || !requested_text[..1].eq_ignore_ascii_case(&actual_text[..1]) {
+        return false;
+    }
+
+    match (requested.file_name(), actual.file_name()) {
+        (Some(requested_name), Some(actual_name)) => {
+            crate::policy_security::os_strings_match_case_insensitive(requested_name, actual_name)
+        }
+        _ => false,
+    }
+}
+
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
 fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
@@ -436,12 +484,15 @@ fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
 }
 
 /// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
+///
+/// A final-component reparse point is opened itself rather than followed.
 fn file_id(path: &Path) -> anyhow::Result<FILE_ID_INFO> {
-    use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_WRITE};
+    use windows::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_WRITE};
 
     let file = OpenOptions::new()
         .access_mode(FILE_READ_ATTRIBUTES.0)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
         .open(path)?;
 
     file_id_from_handle(&file)
@@ -631,6 +682,105 @@ mod tests {
         std::fs::remove_file(&temp).expect("remove temp file");
 
         assert!(!same_file(&exe_id, &temp_id));
+    }
+
+    fn current_exe_client() -> PipeClient {
+        PipeClient {
+            executable_path: std::env::current_exe().expect("current exe"),
+            ..system_client()
+        }
+    }
+
+    #[test]
+    fn plain_local_drive_path_shape() {
+        for path in [
+            r"C:\Program Files\Devolutions\client.exe",
+            r"z:\client.exe",
+            r"C:\Données\client.exe",
+        ] {
+            assert!(is_plain_local_drive_path(path), "{path}");
+        }
+
+        for path in [
+            "",
+            r"C:",
+            r"C:\",
+            r"C:client.exe",
+            r"\client.exe",
+            r"client.exe",
+            r"..\client.exe",
+            r"\\server\share\client.exe",
+            r"\\server@80\share\client.exe",
+            r"\\server@SSL\DavWWWRoot\client.exe",
+            r"\\?\C:\client.exe",
+            r"\\?\UNC\server\share\client.exe",
+            r"\\.\C:\client.exe",
+            r"\\.\pipe\client",
+            r"\??\C:\client.exe",
+            r"\??\UNC\server\share\client.exe",
+            r"//server/share/client.exe",
+            r"C:/client.exe",
+            r"C:\dir/client.exe",
+            r"C:\client.exe:stream",
+            r"C:\client.exe::$DATA",
+            "C:\\client.exe\0",
+            "C:\\client\n.exe",
+            r"1:\client.exe",
+        ] {
+            assert!(!is_plain_local_drive_path(path), "{path:?}");
+        }
+    }
+
+    #[test]
+    fn executable_path_rejects_non_local_shapes_before_io() {
+        let client = current_exe_client();
+        for path in [
+            r"\\server\share\client.exe",
+            r"\\server@80\share\client.exe",
+            r"\\?\UNC\server\share\client.exe",
+            r"\\.\C:\client.exe",
+            r"\??\C:\client.exe",
+            r"C:\client.exe:stream",
+            r"C:client.exe",
+        ] {
+            let error = client
+                .validate_executable_path(path)
+                .expect_err("non-local executable path shapes must be rejected");
+            assert!(
+                error.to_string().contains("not a plain local drive path"),
+                "unexpected error for {path}: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn executable_path_accepts_captured_path_case_insensitively() {
+        let client = current_exe_client();
+        let requested = client.executable_path.to_str().expect("UTF-8 exe path").to_uppercase();
+        client
+            .validate_executable_path(&requested)
+            .expect("the captured path must match regardless of case");
+    }
+
+    #[test]
+    fn executable_path_falls_back_to_file_identity_for_equivalent_local_paths() {
+        let client = current_exe_client();
+        let exe = &client.executable_path;
+        let mut alternate = exe.parent().expect("exe parent").join(".");
+        alternate.push(exe.file_name().expect("exe file name"));
+        client
+            .validate_executable_path(alternate.to_str().expect("UTF-8 exe path"))
+            .expect("an equivalent local path must match by file identity");
+    }
+
+    #[test]
+    fn executable_path_rejects_different_file_name_without_identity_lookup() {
+        let client = current_exe_client();
+        let other = client.executable_path.with_file_name("other-client.exe");
+        let error = client
+            .validate_executable_path(other.to_str().expect("UTF-8 path"))
+            .expect_err("a different file name must be rejected");
+        assert!(error.to_string().contains("does not match"), "{error:#}");
     }
 
     #[test]

@@ -22,6 +22,7 @@ use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
     ProcessStartedCallback, is_canceled_error,
 };
+use crate::command_builder::{BATCH_METACHARACTERS, quote_powershell_literal};
 use crate::policy_security;
 
 mod privileges;
@@ -589,7 +590,7 @@ fn prepare_winget_script(
             resolve_winget_executable(env, requires_elevation).map(|(path, guard)| (path.display().to_string(), guard))
         },
     )?;
-    append_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -658,7 +659,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
         resolve_trusted_chocolatey_executable(user_env, default_install_root, requires_elevation)?;
     append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
     script.push_str("\r\n");
-    append_batch_argument(&mut script, &executable.display().to_string())?;
+    append_batch_executable(&mut script, &executable.display().to_string())?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -705,7 +706,7 @@ fn prepare_vcpkg_script(
         || Ok(executable.clone()),
         |env| resolve_vcpkg_executable(env).map(|path| path.display().to_string()),
     )?;
-    append_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -747,10 +748,10 @@ fn prepare_cargo_script(
         || Ok(executable.clone()),
         |env| resolve_cargo_executable(env).map(|path| path.display().to_string()),
     )?;
-    append_cargo_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
-        append_cargo_batch_argument(&mut script, arg)?;
+        append_batch_argument(&mut script, arg)?;
     }
     script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
 
@@ -838,7 +839,7 @@ fn prepare_bun_cmd_script(
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
     script.push_str("\r\ncall ");
-    append_batch_argument(&mut script, executable)?;
+    append_batch_executable(&mut script, executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -987,10 +988,6 @@ fn is_pip_python_command(command: &[String]) -> bool {
 
 fn command_is_bun(command: &[String]) -> bool {
     executable_is(command, "bun") || executable_is(command, "bun.exe") || executable_is(command, "bun.cmd")
-}
-
-fn quote_powershell_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn trusted_system32_executable(name: &str) -> String {
@@ -1233,55 +1230,35 @@ fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bo
         || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
 }
 
-fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
-    if value.contains(['\0', '\r', '\n']) {
-        bail!("package manager command arguments cannot contain control line separators");
+/// Append a broker-resolved executable path as a quoted batch token.
+fn append_batch_executable(script: &mut String, path: &str) -> anyhow::Result<()> {
+    if path.contains(['\0', '\r', '\n', '"']) {
+        bail!("package manager executable path cannot contain control line separators or quotes");
     }
 
     script.push('"');
-
-    let mut backslashes = 0;
-    for c in value.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                for _ in 0..=(backslashes * 2) {
-                    script.push('\\');
-                }
-                script.push('"');
-                backslashes = 0;
-            }
-            '%' => {
-                for _ in 0..backslashes {
-                    script.push('\\');
-                }
-                script.push_str("%%");
-                backslashes = 0;
-            }
-            c => {
-                for _ in 0..backslashes {
-                    script.push('\\');
-                }
-                script.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-
-    for _ in 0..(backslashes * 2) {
-        script.push('\\');
-    }
+    script.push_str(&path.replace('%', "%%"));
     script.push('"');
 
     Ok(())
 }
 
-fn append_cargo_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
-    if value.contains('"') {
-        bail!("broker command arguments cannot contain double quotes");
+/// Append a package manager argument as a quoted batch token.
+///
+/// Values containing batch metacharacters are rejected rather than escaped.
+fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
+    if value.contains(BATCH_METACHARACTERS) {
+        bail!("package manager command arguments cannot contain batch metacharacters");
     }
 
-    append_batch_argument(script, value)
+    script.push('"');
+    script.push_str(value);
+    // Double trailing backslashes so the target program does not read them as escaping the closing quote.
+    let trailing_backslashes = value.len() - value.trim_end_matches('\\').len();
+    script.extend(std::iter::repeat_n('\\', trailing_backslashes));
+    script.push('"');
+
+    Ok(())
 }
 
 fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyhow::Result<()> {
@@ -1349,9 +1326,10 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
-        prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
-        reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
+        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, append_batch_executable,
+        execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
+        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
+        resolve_trusted_chocolatey_executable, resolve_winget_executable,
     };
     use crate::executor::{CommandExecutor as _, ExecutionContext};
 
@@ -1470,8 +1448,9 @@ mod tests {
             "winget.exe".to_owned(),
             "install".to_owned(),
             "--id".to_owned(),
-            "Vendor.Package&Name".to_owned(),
-            "100%".to_owned(),
+            "Vendor.Package".to_owned(),
+            "--location".to_owned(),
+            "C:\\Tools\\".to_owned(),
         ];
         let command =
             prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare WinGet command");
@@ -1484,8 +1463,54 @@ mod tests {
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
-        assert!(script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\""));
+        assert!(
+            script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package\" \"--location\" \"C:\\Tools\\\\\"")
+        );
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn batch_wrapper_rejects_metacharacters_for_every_batch_manager() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        for executable in ["winget.exe", "cargo.exe", "vcpkg.exe"] {
+            for metacharacter in BATCH_METACHARACTERS {
+                let command = vec![
+                    executable.to_owned(),
+                    "install".to_owned(),
+                    format!("Vendor{metacharacter}Package"),
+                ];
+                let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None, false) {
+                    Ok(_) => panic!("{executable} argument with {metacharacter:?} must be rejected"),
+                    Err(error) => error,
+                };
+                assert!(
+                    error.to_string().contains("batch metacharacters"),
+                    "unexpected error for {executable} with {metacharacter:?}: {error:#}"
+                );
+            }
+        }
+
+        for metacharacter in BATCH_METACHARACTERS {
+            let error = match prepare_bun_cmd_script(
+                r"C:\Tools\bun.cmd",
+                &["add".to_owned(), format!("typescript{metacharacter}")],
+                Some(temp_dir.path()),
+            ) {
+                Ok(_) => panic!("bun.cmd argument with {metacharacter:?} must be rejected"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("batch metacharacters"));
+        }
+    }
+
+    #[test]
+    fn batch_executable_path_escapes_percent_and_rejects_quotes() {
+        let mut script = String::new();
+        append_batch_executable(&mut script, r"C:\Users\100%\bin\tool.exe").expect("append executable");
+        assert_eq!(script, r#""C:\Users\100%%\bin\tool.exe""#);
+
+        append_batch_executable(&mut String::new(), "C:\\Tools\\\"x\".exe")
+            .expect_err("a quoted executable path must be rejected");
     }
 
     #[test]
@@ -1719,9 +1744,8 @@ mod tests {
         let command = vec![
             "choco.exe".to_owned(),
             "install".to_owned(),
-            "Vendor.Package&Name".to_owned(),
-            "100%".to_owned(),
-            "Quoted\"Value".to_owned(),
+            "Vendor.Package".to_owned(),
+            "--version=1.2.3".to_owned(),
         ];
         let command = prepare_chocolatey_script_in_with_default_install_root(
             &command,
@@ -1742,7 +1766,7 @@ mod tests {
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
         assert!(script.contains(&format!("set \"ChocolateyInstall={}\"", install_root.display())));
         assert!(script.contains(&format!(
-            "\"{}\" \"install\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"",
+            "\"{}\" \"install\" \"Vendor.Package\" \"--version=1.2.3\"",
             choco_bin.join("choco.exe").display()
         )));
         assert!(script.contains("if \"%CHOCO_EXIT_CODE%\"==\"3010\" exit /b 0"));
@@ -1902,7 +1926,7 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.to_string().contains("double quotes"));
+        assert!(error.to_string().contains("batch metacharacters"));
     }
 
     #[test]

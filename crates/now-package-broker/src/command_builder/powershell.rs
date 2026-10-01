@@ -17,6 +17,11 @@
 use anyhow::bail;
 use now_policy_api::{Operation, PackageRequest, Scope};
 
+use super::{quote_powershell_literal, validate_package_version, validate_source_name};
+
+/// Version range syntax accepted by PowerShellGet and PSResourceGet, such as `[1.0, 2.0)` or `1.*`.
+const POWERSHELL_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*', ' '];
+
 /// Pins culture-sensitive lookups, including `-Repository` name matching, to the
 /// invariant culture instead of the host locale.
 const INVARIANT_CULTURE_PREFIX: &str =
@@ -128,6 +133,10 @@ fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.source.name.trim().is_empty() {
         bail!("PowerShell package source name is required");
     }
+    validate_source_name("PowerShell", request.source.name.trim())?;
+    if let Some(version) = request.package.version.as_deref() {
+        validate_package_version("PowerShell", version, POWERSHELL_VERSION_RANGE_CHARACTERS)?;
+    }
     if let Some(param) = request.options.custom_parameters.iter().find(|param| !param.is_empty()) {
         bail!(
             "PowerShell custom parameters are not supported by the broker: {}",
@@ -156,12 +165,7 @@ fn append_raw(script: &mut String, value: &str) {
 
 fn append_flag_value(script: &mut String, flag_or_verb: &str, value: &str) {
     append_raw(script, flag_or_verb);
-    append_raw(script, &quote_ps(value));
-}
-
-fn quote_ps(value: &str) -> String {
-    let escaped = value.replace('\'', "''");
-    format!("'{escaped}'")
+    append_raw(script, &quote_powershell_literal(value));
 }
 
 #[cfg(test)]
@@ -329,5 +333,58 @@ mod tests {
         let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
         assert!(script.contains("-Name 'Vendor''s.Module'"));
+    }
+
+    #[test]
+    fn powershell_literals_double_every_single_quote_character() {
+        for quote in ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            let mut request = make_request(ManagerName::PowerShell7);
+            request.package.id = PackageIdentifier::from(format!("Vendor{quote}Module"));
+            let cmd = build_powershell7_command(&request).expect("build command");
+            let script = script_of(&cmd);
+            assert!(
+                script.contains(&format!("-Name 'Vendor{quote}{quote}Module'")),
+                "quote {quote:?} must be doubled: {script}"
+            );
+        }
+    }
+
+    #[test]
+    fn powershell_version_and_source_reject_unsupported_characters() {
+        for value in [
+            "1.0'",
+            "1.0\u{2018}",
+            "1.0\u{2019}",
+            "1.0\u{201A}",
+            "1.0\u{201B}",
+            "1.0;x",
+            "$x",
+            "-1.0",
+        ] {
+            let mut request = make_request(ManagerName::PowerShell);
+            request.package.version = Some(VersionString(value.to_owned()));
+            build_powershell5_command(&request).expect_err("unsupported version characters must be rejected");
+        }
+
+        for value in [
+            "PS'Gallery",
+            "PS\u{2018}Gallery",
+            "PS\u{2019}Gallery",
+            "PS;Gallery",
+            "$Gallery",
+            "-Gallery",
+        ] {
+            let mut request = make_request(ManagerName::PowerShell7);
+            request.source.name = value.to_owned();
+            build_powershell7_command(&request).expect_err("unsupported source characters must be rejected");
+        }
+    }
+
+    #[test]
+    fn powershell7_accepts_version_ranges() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.package.version = Some(VersionString("[1.0.0, 2.0.0)".to_owned()));
+        let cmd = build_powershell7_command(&request).expect("build command");
+        assert!(script_of(&cmd).contains("-Version '[1.0.0, 2.0.0)'"));
     }
 }

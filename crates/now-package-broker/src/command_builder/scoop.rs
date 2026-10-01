@@ -7,6 +7,8 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
+use super::quote_powershell_literal;
+
 /// Build a Scoop command from a validated request.
 ///
 /// The command is returned as a PowerShell inline script so the Windows executor
@@ -191,12 +193,7 @@ fn append_raw(script: &mut String, value: &str) {
 }
 
 fn append_ps_arg(script: &mut String, value: &str) {
-    append_raw(script, &quote_ps(value));
-}
-
-fn quote_ps(value: &str) -> String {
-    let escaped = value.replace('\'', "''");
-    format!("'{escaped}'")
+    append_raw(script, &quote_powershell_literal(value));
 }
 
 #[cfg(test)]
@@ -329,6 +326,22 @@ mod tests {
         let error = build_scoop_command(&request).expect_err("machine-scope Scoop should fail");
 
         assert!(error.to_string().contains("machine/global scope"));
+    }
+
+    #[test]
+    fn script_arguments_double_every_single_quote_character() {
+        for quote in ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            let mut request = make_request();
+            request.source.name = format!("main{quote}bucket");
+
+            let cmd = build_scoop_command(&request).expect("build command");
+            let script = script_of(&cmd);
+
+            assert!(
+                script.contains(&format!("& $scoop 'install' 'main{quote}{quote}bucket/7zip'")),
+                "quote {quote:?} must be doubled: {script}"
+            );
+        }
     }
 
     #[test]

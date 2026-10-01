@@ -17,7 +17,7 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use windows::Win32::Foundation::GENERIC_ALL;
 use windows::Win32::Security;
 use windows::Win32::Security::Authorization::SET_ACCESS;
-use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA};
 
 use crate::auth::PipeClient;
 use crate::server::{BrokerState, build_router_for_client, serve_connection};
@@ -224,36 +224,51 @@ fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result
     Ok(server)
 }
 
+/// Access granted to `BUILTIN\Users` on the broker pipe.
+///
+/// Clients need to read, write data, and set the pipe read mode through `FILE_WRITE_ATTRIBUTES`.
+/// `FILE_GENERIC_WRITE` is deliberately not granted because it includes `FILE_APPEND_DATA`,
+/// which for named pipes is `FILE_CREATE_PIPE_INSTANCE`.
+const PIPE_CLIENT_ACCESS: u32 = FILE_GENERIC_READ.0 | FILE_WRITE_DATA.0 | FILE_WRITE_ATTRIBUTES.0;
+
 /// Build a security descriptor that grants:
 /// - SYSTEM: full control
 /// - Administrators: full control
-/// - BUILTIN\Users: read + write (allows interactive users to connect)
+/// - BUILTIN\Users: client read and write access, without the right to create pipe instances
 fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security::attributes::SecurityAttributes> {
-    let system_sid = Sid::from_well_known(Security::WinLocalSystemSid, None).context("failed to create SYSTEM SID")?;
+    let users_sid = Sid::from_well_known(Security::WinBuiltinUsersSid, None).context("failed to create Users SID")?;
     let admins_sid = Sid::from_well_known(Security::WinBuiltinAdministratorsSid, None)
         .context("failed to create Administrators SID")?;
-    let users_sid = Sid::from_well_known(Security::WinBuiltinUsersSid, None).context("failed to create Users SID")?;
 
-    let entries = [
-        ExplicitAccess {
-            access_permissions: GENERIC_ALL.0,
-            access_mode: SET_ACCESS,
-            inheritance: Security::ACE_FLAGS(0),
-            trustee: Trustee::Sid(system_sid),
-        },
-        ExplicitAccess {
+    build_security_attributes(Some(admins_sid), users_sid)
+}
+
+fn build_security_attributes(
+    admins_sid: Option<Sid>,
+    client_sid: Sid,
+) -> anyhow::Result<win_api_wrappers::security::attributes::SecurityAttributes> {
+    let system_sid = Sid::from_well_known(Security::WinLocalSystemSid, None).context("failed to create SYSTEM SID")?;
+
+    let mut entries = vec![ExplicitAccess {
+        access_permissions: GENERIC_ALL.0,
+        access_mode: SET_ACCESS,
+        inheritance: Security::ACE_FLAGS(0),
+        trustee: Trustee::Sid(system_sid),
+    }];
+    if let Some(admins_sid) = admins_sid {
+        entries.push(ExplicitAccess {
             access_permissions: GENERIC_ALL.0,
             access_mode: SET_ACCESS,
             inheritance: Security::ACE_FLAGS(0),
             trustee: Trustee::Sid(admins_sid),
-        },
-        ExplicitAccess {
-            access_permissions: FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0,
-            access_mode: SET_ACCESS,
-            inheritance: Security::ACE_FLAGS(0),
-            trustee: Trustee::Sid(users_sid),
-        },
-    ];
+        });
+    }
+    entries.push(ExplicitAccess {
+        access_permissions: PIPE_CLIENT_ACCESS,
+        access_mode: SET_ACCESS,
+        inheritance: Security::ACE_FLAGS(0),
+        trustee: Trustee::Sid(client_sid),
+    });
 
     let empty_acl = Acl::new().context("failed to create empty ACL")?;
     let dacl = empty_acl.set_entries(&entries).context("failed to set ACL entries")?;
@@ -282,6 +297,116 @@ mod tests {
 
     /// Blocking work a connection can be stuck in that aborting it cannot interrupt.
     const NON_ABORTABLE_CONNECTION_WORK: Duration = Duration::from_secs(1);
+
+    fn current_user_sid() -> Sid {
+        use win_api_wrappers::process::Process;
+        use windows::Win32::Security::TOKEN_QUERY;
+
+        Process::current_process()
+            .token(TOKEN_QUERY)
+            .expect("open current process token")
+            .sid_and_attributes()
+            .expect("query current token user")
+            .sid
+    }
+
+    fn unique_pipe_name(tag: &str) -> String {
+        format!(
+            r"\\.\pipe\Devolutions.Now.PackageBroker.test.{tag}.{}.{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        )
+    }
+
+    /// Create a first pipe instance granting only client access to the current user,
+    /// without the Administrators entry, so that the checks below hold for elevated test runs too.
+    fn create_client_access_pipe(pipe_name: &str) -> NamedPipeServer {
+        let security_attributes =
+            build_security_attributes(None, current_user_sid()).expect("build pipe security attributes");
+
+        // SAFETY: `security_attributes` owns a valid `SECURITY_ATTRIBUTES` that outlives the call.
+        unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .create_with_security_attributes_raw(pipe_name, security_attributes.as_mut_ptr().cast())
+        }
+        .expect("create first pipe instance")
+    }
+
+    #[test]
+    fn pipe_client_access_never_includes_pipe_instance_creation() {
+        use windows::Win32::Storage::FileSystem::{FILE_APPEND_DATA, FILE_CREATE_PIPE_INSTANCE, FILE_GENERIC_WRITE};
+
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_CREATE_PIPE_INSTANCE.0, 0);
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_APPEND_DATA.0, 0);
+        assert_ne!(PIPE_CLIENT_ACCESS & FILE_GENERIC_WRITE.0, FILE_GENERIC_WRITE.0);
+    }
+
+    #[tokio::test]
+    async fn client_access_cannot_create_additional_pipe_instances() {
+        let pipe_name = unique_pipe_name("instance");
+        let _server = create_client_access_pipe(&pipe_name);
+
+        let error = ServerOptions::new()
+            .create(&pipe_name)
+            .expect_err("client access must not allow creating another pipe instance");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
+    }
+
+    #[tokio::test]
+    async fn client_access_allows_read_and_write_data_clients() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use std::os::windows::io::IntoRawHandle as _;
+
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tokio::net::windows::named_pipe::NamedPipeClient;
+        use windows::Win32::Foundation::GENERIC_READ;
+
+        let pipe_name = unique_pipe_name("client");
+        let mut server = create_client_access_pipe(&pipe_name);
+
+        let file = std::fs::OpenOptions::new()
+            .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
+            .custom_flags(windows::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED.0)
+            .security_qos_flags(windows::Win32::Storage::FileSystem::SECURITY_IDENTIFICATION.0)
+            .open(&pipe_name)
+            .expect("open the pipe with GENERIC_READ | FILE_WRITE_DATA");
+        // SAFETY: The handle is a freshly opened, exclusively owned named pipe client handle.
+        let mut client = unsafe { NamedPipeClient::from_raw_handle(file.into_raw_handle()) }.expect("wrap client");
+        server.connect().await.expect("accept the client");
+
+        client.write_all(b"ping").await.expect("client write");
+        let mut request = [0u8; 4];
+        server.read_exact(&mut request).await.expect("server read");
+        assert_eq!(&request, b"ping");
+
+        server.write_all(b"pong").await.expect("server write");
+        let mut response = [0u8; 4];
+        client.read_exact(&mut response).await.expect("client read");
+        assert_eq!(&response, b"pong");
+    }
+
+    #[tokio::test]
+    async fn client_access_rejects_generic_write_clients() {
+        use tokio::net::windows::named_pipe::ClientOptions;
+
+        let pipe_name = unique_pipe_name("generic");
+        let _server = create_client_access_pipe(&pipe_name);
+
+        let error = ClientOptions::new()
+            .open(&pipe_name)
+            .expect_err("GENERIC_WRITE requests FILE_CREATE_PIPE_INSTANCE, which clients are not granted");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn timed_out_capture_keeps_its_permit_until_blocking_work_finishes() {

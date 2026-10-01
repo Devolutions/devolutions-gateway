@@ -3,7 +3,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::set_if_true;
+use super::{set_if_true, validate_batch_arguments, validate_package_version, validate_source_name};
 
 /// Build the Chocolatey command line from a validated request.
 ///
@@ -46,6 +46,9 @@ pub fn build_chocolatey_command(request: &PackageRequest) -> anyhow::Result<Vec<
             command.push("--allow-downgrade".to_owned());
         }
     }
+
+    // The Windows executor runs Chocolatey through a generated batch script.
+    validate_batch_arguments("Chocolatey", &command)?;
 
     Ok(command)
 }
@@ -108,6 +111,9 @@ fn validate_chocolatey_request(request: &PackageRequest) -> anyhow::Result<()> {
 
     if matches!(request.operation, Operation::Install | Operation::Update) {
         chocolatey_source(request)?;
+        if let Some(version) = request.package.version.as_deref() {
+            validate_package_version("Chocolatey", version, &[])?;
+        }
     }
 
     Ok(())
@@ -118,6 +124,7 @@ fn chocolatey_source(request: &PackageRequest) -> anyhow::Result<&str> {
     if source.is_empty() {
         bail!("Chocolatey package source name is required");
     }
+    validate_source_name("Chocolatey", source)?;
     Ok(source)
 }
 
@@ -283,5 +290,30 @@ mod tests {
         request = make_request();
         request.options.custom_install_location = Some("C:\\Tools".to_owned());
         assert!(build_chocolatey_command(&request).is_err());
+    }
+
+    #[test]
+    fn batch_metacharacters_in_package_id_are_rejected() {
+        for metacharacter in crate::command_builder::BATCH_METACHARACTERS {
+            let mut request = make_request();
+            request.package.id = PackageIdentifier::from(format!("git{metacharacter}x"));
+            let error = build_chocolatey_command(&request).expect_err("metacharacter must be rejected");
+            assert!(error.to_string().contains("batch metacharacters"), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn version_and_source_reject_unsupported_characters() {
+        for version in ["2.48.1\"", "2.48.1&x", "2.48.1%PATH%", "-2.48.1", "2.48 1"] {
+            let mut request = make_request();
+            request.package.version = Some(VersionString(version.to_owned()));
+            build_chocolatey_command(&request).expect_err("unsupported version must be rejected");
+        }
+
+        for source in ["comm\"unity", "comm|unity", "-community", "https://example.test/api/v2"] {
+            let mut request = make_request();
+            request.source.name = source.to_owned();
+            build_chocolatey_command(&request).expect_err("unsupported source must be rejected");
+        }
     }
 }

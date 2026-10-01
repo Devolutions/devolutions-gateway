@@ -8,9 +8,11 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::{set_if_specified, set_if_true};
+use super::{set_if_specified, set_if_true, validate_package_version};
 
 const NUGET_ORG_V3_SOURCE: &str = "https://api.nuget.org/v3/index.json";
+/// NuGet version range syntax, such as `[1.0,2.0)` or `1.*`.
+const DOTNET_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*'];
 
 /// Build the .NET tool command line from a validated request.
 ///
@@ -94,6 +96,9 @@ fn validate_dotnet_request(request: &PackageRequest) -> anyhow::Result<()> {
     }
     if matches!(request.operation, Operation::Install | Operation::Update) {
         dotnet_source(request)?;
+        if let Some(version) = request.package.version.as_deref() {
+            validate_package_version(".NET", version, DOTNET_VERSION_RANGE_CHARACTERS)?;
+        }
     }
 
     Ok(())
