@@ -65,6 +65,10 @@
       "$ref": "#/definitions/CertStoreLocation",
       "description": "Location of the System Certificate Store to use for TLS."
     },
+    "TlsVerifyStrict": {
+      "type": "boolean",
+      "description": "Enables strict TLS certificate verification (SAN presence and serverAuth EKU). If unset, the runtime default is false (compat mode); newly generated configuration files set it to true."
+    },
     "CredSspCertificateFile": {
       "type": "string",
       "description": "Path to the certificate to use for CredSSP credential injection (overrides TLS certificate)."
@@ -91,6 +95,11 @@
     "RecordingPath": {
       "type": "string",
       "description": "Path to the recordings folder."
+    },
+    "MinRecordingStorageFreeSpace": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Minimum free space (in bytes) on the recording storage volume below which the gateway returns HTTP 507 on recording push. Omit to skip this threshold check."
     },
     "Ngrok": {
       "$ref": "#/definitions/NgrokConf",
@@ -127,14 +136,20 @@
       },
       "description": "Array of plugin paths."
     },
+    "JobQueueDatabase": {
+      "type": "string",
+      "description": "(Unstable) Path to the SQLite database file for the job queue."
+    },
+    "TrafficAuditDatabase": {
+      "type": "string",
+      "description": "(Unstable) Path to the SQLite database file for the traffic audit repository."
+    },
     "__debug__": {
       "$ref": "#/definitions/DebugConf",
       "description": "Debug configuration."
     }
   },
-  "required": [
-    "Listeners"
-  ],
+  "required": [],
   "additionalProperties": true,
   "definitions": {
     "ConfDataPubKeyFormat": {
@@ -335,7 +350,7 @@
         {
           "type": "object",
           "properties": {
-            "proto": {
+            "Proto": {
               "type": "string",
               "enum": [
                 "tcp"
@@ -368,7 +383,7 @@
             }
           },
           "required": [
-            "proto",
+            "Proto",
             "RemoteAddr"
           ],
           "additionalProperties": false
@@ -376,7 +391,7 @@
         {
           "type": "object",
           "properties": {
-            "proto": {
+            "Proto": {
               "type": "string",
               "enum": [
                 "http"
@@ -417,7 +432,7 @@
             }
           },
           "required": [
-            "proto",
+            "Proto",
             "Domain"
           ],
           "additionalProperties": false
@@ -558,6 +573,12 @@
         "lib_xmf_path": {
           "type": "string",
           "description": "Path to lib XMF files."
+        },
+        "ws_keep_alive_interval": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 45,
+          "description": "WebSocket keep-alive interval in seconds (interval before a Ping is sent). Default is 45."
         },
         "enable_unstable": {
           "type": "boolean",
