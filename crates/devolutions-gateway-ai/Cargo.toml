@@ -3,7 +3,7 @@ name = "devolutions-gateway-ai"
 version = "0.0.0"
 edition = "2024"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
-description = "AI requests for Devolutions Gateway, one method per purpose"
+description = "High-level AI for Devolutions Gateway, one method per purpose"
 publish = false
 
 [lints]

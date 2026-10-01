@@ -1,19 +1,32 @@
-//! AI requests for Devolutions Gateway, one method per purpose.
+//! High-level AI for Devolutions Gateway: one method per purpose, never a raw request to a model.
 //!
-//! A purpose is one job Gateway gives to an AI model, such as listing the actions of a session transcript with
+//! A purpose is one AI job Gateway needs done, such as listing what a user did in a session transcript with
 //! [`AiClient::describe_session_actions`].
-//! Each purpose owns its prompt, the version of that prompt, and the parser of the answer, so Gateway gets typed
-//! results and never writes a prompt or reads raw model text.
-//! Every purpose goes through one [`AiClient`], which holds the provider settings, and returns a [`Response`], which
-//! also tells which model answered and how many tokens the request used.
+//! The crate does not expose low-level AI requests: there is no chat, no completion call, and no way to pass a prompt.
+//! A consumer states what it needs and gets a typed result; it is not expected to know, or care, how the result is
+//! obtained.
 //!
-//! Each provider is reached through its own HTTP API: OpenAI chat completions (also spoken by Mistral, Gemini and many
-//! others) or Anthropic Messages. Only the few fields a single text completion needs are modeled.
-//! Requests are not streamed and are bounded by a timeout.
-//! An answer the provider refused or cut short is an error, so a purpose only parses whole answers.
+//! Behind each purpose, the crate owns everything about talking to the model:
+//! - the prompt and its version, which readers of the results can record;
+//! - the HTTP API of each provider and its quirks: OpenAI chat completions (also spoken by Mistral, Gemini and many
+//!   others) and Anthropic Messages;
+//! - the request limits: the output token limit, and a timeout, since requests are not streamed;
+//! - reading the answer: reasoning blocks are dropped, and an answer the provider refused or cut short is an error,
+//!   so only whole answers are parsed;
+//! - turning the model text into typed output;
+//! - keeping the API key out of logs and errors, and telling which errors are worth retrying with
+//!   [`Error::is_transient`].
 //!
-//! A new purpose is a module like [`session_actions`]: a prompt and its `PROMPT_VERSION`, a request builder returned by
-//! a new [`AiClient`] method, and a parser turning the answer into typed output.
+//! A consumer only gives an [`AiClient`] the provider settings (provider, model, API key, and its own HTTP client, so
+//! its proxy and TLS policy apply) and gives each purpose its input.
+//! Every purpose returns a [`Response`]: the output, the model that answered, and the tokens used.
+//!
+//! The provider APIs are implemented here on purpose, rather than through a general LLM crate, to keep dependencies
+//! small. Only what the purposes need is supported: one non-streamed text request per call, without chat history,
+//! tools, or embeddings.
+//!
+//! A new purpose is a module like [`session_actions`]: its prompt and `PROMPT_VERSION`, a request builder returned by
+//! a new [`AiClient`] method, and the parser of the answer.
 
 mod client;
 mod error;
