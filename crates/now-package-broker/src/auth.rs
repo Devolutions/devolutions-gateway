@@ -24,7 +24,7 @@ use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
-use windows::Win32::Storage::FileSystem::{FILE_EXECUTE, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_READ};
+use windows::Win32::Storage::FileSystem::{FILE_EXECUTE, FILE_READ_ATTRIBUTES, FILE_SHARE_READ};
 use windows::Win32::System::Threading::{
     PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
 };
@@ -340,8 +340,10 @@ impl PipeClient {
         )
     }
 
+    /// Match the request's executable path against the captured process image path.
+    ///
+    /// The requested path is only compared as text and is never opened.
     fn validate_executable_path(&self, requested_executable_path: &str) -> anyhow::Result<()> {
-        // Validate the shape before any I/O so that only plain local drive paths are ever opened.
         if !is_plain_local_drive_path(requested_executable_path) {
             bail!("request client executable path is not a plain local drive path");
         }
@@ -351,32 +353,13 @@ impl PipeClient {
             return Ok(());
         }
 
-        // Equivalent spellings of the same file fall back to a file identity comparison,
-        // restricted to the drive and file name of the captured executable.
-        if !same_drive_and_file_name(requested_path, &self.executable_path) {
-            bail!(
-                "pipe client executable '{}' does not match request client executable '{}'",
-                self.executable_path.display(),
-                requested_executable_path
-            );
-        }
-
-        let actual_id = if let Some(executable_file) = &self.executable_file {
-            file_id_from_handle(executable_file).context("failed to query retained pipe client executable identity")?
-        } else {
-            file_id(&self.executable_path).with_context(|| {
-                format!(
-                    "failed to query pipe client executable '{}' file identity",
-                    self.executable_path.display()
-                )
-            })?
-        };
-        let requested_id = file_id(requested_path).with_context(|| {
-            format!("failed to query request client executable '{requested_executable_path}' file identity")
-        })?;
-
-        if same_file(&actual_id, &requested_id) {
-            return Ok(());
+        // Also accept the normalized final path of the retained image, which resolves short names.
+        if let Some(executable_file) = &self.executable_file {
+            let final_path = crate::policy_security::final_path_from_handle(executable_file)
+                .context("failed to query retained pipe client executable final path")?;
+            if crate::policy_security::windows_paths_equal(requested_path, &final_path) {
+                return Ok(());
+            }
         }
 
         bail!(
@@ -460,22 +443,6 @@ fn is_plain_local_drive_path(path: &str) -> bool {
             .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
 }
 
-fn same_drive_and_file_name(requested: &Path, actual: &Path) -> bool {
-    let (Some(requested_text), Some(actual_text)) = (requested.to_str(), actual.to_str()) else {
-        return false;
-    };
-    if !is_plain_local_drive_path(actual_text) || !requested_text[..1].eq_ignore_ascii_case(&actual_text[..1]) {
-        return false;
-    }
-
-    match (requested.file_name(), actual.file_name()) {
-        (Some(requested_name), Some(actual_name)) => {
-            crate::policy_security::os_strings_match_case_insensitive(requested_name, actual_name)
-        }
-        _ => false,
-    }
-}
-
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
 fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     let account_name = U16CString::from_str(account_name).context("account name contains an interior NUL character")?;
@@ -483,53 +450,51 @@ fn resolve_account_sid(account_name: &str) -> anyhow::Result<Sid> {
     Ok(account.sid.clone())
 }
 
-/// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
-///
-/// A final-component reparse point is opened itself rather than followed.
-fn file_id(path: &Path) -> anyhow::Result<FILE_ID_INFO> {
-    use windows::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_WRITE};
-
-    let file = OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES.0)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(path)?;
-
-    file_id_from_handle(&file)
-}
-
-fn file_id_from_handle(file: &File) -> anyhow::Result<FILE_ID_INFO> {
-    use std::os::windows::io::AsRawHandle as _;
-
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx};
-
-    let mut info = FILE_ID_INFO::default();
-    let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
-
-    // SAFETY: `file` is an open file handle, and the output pointer points to a
-    // properly sized FILE_ID_INFO valid for the duration of the call.
-    unsafe {
-        GetFileInformationByHandleEx(
-            HANDLE(file.as_raw_handle()),
-            FileIdInfo,
-            (&raw mut info).cast(),
-            info_size,
-        )
-    }?;
-
-    Ok(info)
-}
-
-fn same_file(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
-    left.VolumeSerialNumber == right.VolumeSerialNumber && left.FileId.Identifier == right.FileId.Identifier
-}
-
 #[cfg(test)]
 mod tests {
     use windows::Win32::Security::{WinLocalSystemSid, WinWorldSid};
+    use windows::Win32::Storage::FileSystem::FILE_ID_INFO;
 
     use super::*;
+
+    /// Queries the volume serial number and 128-bit file ID uniquely identifying the file.
+    fn file_id(path: &Path) -> anyhow::Result<FILE_ID_INFO> {
+        use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_WRITE};
+
+        let file = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .open(path)?;
+
+        file_id_from_handle(&file)
+    }
+
+    fn file_id_from_handle(file: &File) -> anyhow::Result<FILE_ID_INFO> {
+        use std::os::windows::io::AsRawHandle as _;
+
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx};
+
+        let mut info = FILE_ID_INFO::default();
+        let info_size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
+
+        // SAFETY: `file` is an open file handle, and the output pointer points to a
+        // properly sized FILE_ID_INFO valid for the duration of the call.
+        unsafe {
+            GetFileInformationByHandleEx(
+                HANDLE(file.as_raw_handle()),
+                FileIdInfo,
+                (&raw mut info).cast(),
+                info_size,
+            )
+        }?;
+
+        Ok(info)
+    }
+
+    fn same_file(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
+        left.VolumeSerialNumber == right.VolumeSerialNumber && left.FileId.Identifier == right.FileId.Identifier
+    }
 
     fn system_sid() -> Sid {
         Sid::from_well_known(WinLocalSystemSid, None).expect("well-known SYSTEM SID")
@@ -763,18 +728,55 @@ mod tests {
     }
 
     #[test]
-    fn executable_path_falls_back_to_file_identity_for_equivalent_local_paths() {
+    fn executable_path_rejects_equivalent_spellings_of_the_captured_path() {
         let client = current_exe_client();
         let exe = &client.executable_path;
         let mut alternate = exe.parent().expect("exe parent").join(".");
         alternate.push(exe.file_name().expect("exe file name"));
-        client
+        let error = client
             .validate_executable_path(alternate.to_str().expect("UTF-8 exe path"))
-            .expect("an equivalent local path must match by file identity");
+            .expect_err("only the captured or final image path may match");
+        assert!(error.to_string().contains("does not match"), "{error:#}");
     }
 
     #[test]
-    fn executable_path_rejects_different_file_name_without_identity_lookup() {
+    fn executable_path_does_not_follow_directory_reparse_points() {
+        let client = current_exe_client();
+        let exe = &client.executable_path;
+        let root = tempfile::tempdir().expect("create junction test directory");
+        let junction = root.path().join("client-dir");
+        create_directory_junction(&junction, exe.parent().expect("exe parent"));
+        let aliased = junction.join(exe.file_name().expect("exe file name"));
+
+        let error = client
+            .validate_executable_path(aliased.to_str().expect("UTF-8 path"))
+            .expect_err("a path through a junction must not resolve to the captured executable");
+        assert!(error.to_string().contains("does not match"), "{error:#}");
+
+        std::fs::remove_dir(&junction).expect("remove junction");
+    }
+
+    #[test]
+    fn executable_path_accepts_retained_image_final_path() {
+        let exe = std::env::current_exe().expect("current exe");
+        let executable_file = File::open(&exe).expect("open current exe");
+        let final_path = crate::policy_security::final_path_from_handle(&executable_file).expect("query final path");
+        let client = PipeClient {
+            executable_path: PathBuf::from(r"C:\captured\short~1\client.exe"),
+            executable_file: Some(Arc::new(executable_file)),
+            ..system_client()
+        };
+
+        client
+            .validate_executable_path(&final_path.to_str().expect("UTF-8 path").to_uppercase())
+            .expect("the normalized final path of the retained image must match");
+        client
+            .validate_executable_path(r"C:\captured\other\client.exe")
+            .expect_err("unrelated paths must not match");
+    }
+
+    #[test]
+    fn executable_path_rejects_different_file_name() {
         let client = current_exe_client();
         let other = client.executable_path.with_file_name("other-client.exe");
         let error = client
