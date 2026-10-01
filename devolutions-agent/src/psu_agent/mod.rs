@@ -70,6 +70,8 @@ impl Task for PsuAgentTask {
 /// Timing parameters for the PSU gRPC connection and its reconnection policy.
 #[derive(Debug, Clone, Copy)]
 struct ConnectionSettings {
+    /// Upper bound for resolving a `$secret:` AppToken through PowerShell.
+    app_token_resolution_timeout: Duration,
     /// Upper bound for establishing the transport (TCP, TLS, and HTTP/2 handshakes).
     connect_timeout: Duration,
     /// Upper bound for the server to accept the agent stream once the transport is established.
@@ -87,6 +89,7 @@ struct ConnectionSettings {
 impl Default for ConnectionSettings {
     fn default() -> Self {
         Self {
+            app_token_resolution_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(15),
             stream_start_timeout: Duration::from_secs(30),
             keep_alive_interval: Duration::from_secs(30),
@@ -364,7 +367,8 @@ impl PsuAgent {
             return Ok(app_token.to_owned());
         }
 
-        let worker = PowerShellWorker::new(self.conf.powershell.clone())
+        // A hung secret vault must not stall every reconnect attempt; the worker kills the PowerShell process on timeout.
+        let worker = PowerShellWorker::new(self.conf.powershell.clone(), self.settings.app_token_resolution_timeout)
             .context("failed to initialize PSU PowerShell worker for gRPC AppToken secret resolution")?;
 
         worker
@@ -706,6 +710,54 @@ mod tests {
             .expect("agent did not stop")
             .expect("agent task panicked")
             .expect("agent run failed");
+    }
+
+    #[tokio::test]
+    async fn hung_app_token_resolution_times_out_and_kills_powershell() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("still-running");
+
+        // Stands in for PowerShell blocked on a secret vault: it ignores its arguments and writes the marker
+        // only if it is still alive after the timeout.
+        let script = if cfg!(windows) {
+            let script = temp_dir.path().join("hung-pwsh.cmd");
+            let content = format!("@ping -n 4 127.0.0.1 >nul\r\n@echo done> \"{}\"\r\n", marker.display());
+            std::fs::write(&script, content).expect("write script");
+            script
+        } else {
+            let script = temp_dir.path().join("hung-pwsh.sh");
+            let content = format!("#!/bin/sh\nsleep 3\ntouch '{}'\n", marker.display());
+            std::fs::write(&script, content).expect("write script");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+            }
+            script
+        };
+
+        let mut agent = test_agent(
+            "http://127.0.0.1:9",
+            "$secret:AppToken",
+            ConnectionSettings {
+                app_token_resolution_timeout: Duration::from_millis(500),
+                ..ConnectionSettings::default()
+            },
+        );
+        agent.conf.powershell.executable_path =
+            Some(camino::Utf8PathBuf::from_path_buf(script).expect("UTF-8 script path"));
+
+        let error = tokio::time::timeout(Duration::from_secs(2), agent.resolve_app_token())
+            .await
+            .expect("AppToken resolution was not bounded by its timeout")
+            .expect_err("hung AppToken resolution should fail");
+        assert!(
+            format!("{error:#}").contains("timed out"),
+            "unexpected error: {error:#}"
+        );
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!marker.exists(), "the timed-out PowerShell process was not killed");
     }
 
     #[tokio::test]

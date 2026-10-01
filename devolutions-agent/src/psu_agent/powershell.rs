@@ -306,8 +306,6 @@ try {
 $response | ConvertTo-Json -Compress -Depth 16
 "#;
 
-const POWERSHELL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-
 #[derive(Debug, Clone)]
 pub(crate) struct PowerShellWorker {
     conf: PsuPowerShellConf,
@@ -317,11 +315,8 @@ pub(crate) struct PowerShellWorker {
 }
 
 impl PowerShellWorker {
-    pub(crate) fn new(conf: PsuPowerShellConf) -> anyhow::Result<Self> {
-        Self::with_execution_timeout(conf, POWERSHELL_EXECUTION_TIMEOUT)
-    }
-
-    fn with_execution_timeout(conf: PsuPowerShellConf, execution_timeout: Duration) -> anyhow::Result<Self> {
+    /// The PowerShell process is killed when a request exceeds `execution_timeout`.
+    pub(crate) fn new(conf: PsuPowerShellConf, execution_timeout: Duration) -> anyhow::Result<Self> {
         let worker_limit = effective_worker_limit(&conf);
         Ok(Self {
             conf,
@@ -554,10 +549,13 @@ mod tests {
 
     #[tokio::test]
     async fn literal_app_token_does_not_require_secret_resolution() {
-        let worker = PowerShellWorker::new(PsuPowerShellConf {
-            executable_path: Some(Utf8PathBuf::from("missing-pwsh")),
-            ..PsuPowerShellConf::default()
-        })
+        let worker = PowerShellWorker::new(
+            PsuPowerShellConf {
+                executable_path: Some(Utf8PathBuf::from("missing-pwsh")),
+                ..PsuPowerShellConf::default()
+            },
+            Duration::from_secs(30),
+        )
         .expect("create worker");
 
         let token = worker.resolve_app_token("literal-token").await.expect("resolve token");
