@@ -15,12 +15,12 @@
 //! location, winget's no-upgrade / uninstall-previous) are intentionally omitted.
 
 use anyhow::bail;
-use now_policy_api::{Operation, PackageRequest, Scope};
+use now_policy_api::{ManagerName, Operation, PackageRequest, Scope};
 
 use super::{quote_powershell_literal, validate_package_version, validate_source_name};
 
-/// Version range syntax accepted by PowerShellGet and PSResourceGet, such as `[1.0, 2.0)` or `1.*`.
-const POWERSHELL_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*', ' '];
+/// Version range syntax accepted by PSResourceGet, such as `[1.0, 2.0)` or `1.*`.
+const POWERSHELL7_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*', ' '];
 
 /// Pins culture-sensitive lookups, including `-Repository` name matching, to the
 /// invariant culture instead of the host locale.
@@ -135,7 +135,13 @@ fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
     }
     validate_source_name("PowerShell", request.source.name.trim())?;
     if let Some(version) = request.package.version.as_deref() {
-        validate_package_version("PowerShell", version, POWERSHELL_VERSION_RANGE_CHARACTERS)?;
+        // Only PSResourceGet's `-Version` accepts ranges; PowerShellGet's `-RequiredVersion` is exact.
+        let extra = if request.manager == ManagerName::PowerShell7 {
+            POWERSHELL7_VERSION_RANGE_CHARACTERS
+        } else {
+            &[]
+        };
+        validate_package_version("PowerShell", version, extra)?;
     }
     if let Some(param) = request.options.custom_parameters.iter().find(|param| !param.is_empty()) {
         bail!(
@@ -386,5 +392,9 @@ mod tests {
         request.package.version = Some(VersionString("[1.0.0, 2.0.0)".to_owned()));
         let cmd = build_powershell7_command(&request).expect("build command");
         assert!(script_of(&cmd).contains("-Version '[1.0.0, 2.0.0)'"));
+
+        let mut request = make_request(ManagerName::PowerShell);
+        request.package.version = Some(VersionString("[1.0.0, 2.0.0)".to_owned()));
+        build_powershell5_command(&request).expect_err("PowerShellGet -RequiredVersion only accepts exact versions");
     }
 }
