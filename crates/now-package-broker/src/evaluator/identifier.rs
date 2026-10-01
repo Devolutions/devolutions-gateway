@@ -1,0 +1,233 @@
+//! Package identifier matching.
+
+use std::borrow::Cow;
+
+use now_policy::{Decision, PackageIdentifierCondition};
+use now_policy_api::ManagerName;
+
+use super::wildcard::wildcard_match;
+
+/// Whether a rule's package identifier condition matches the requested identifier.
+///
+/// Identifiers and patterns are compared in their [`canonical_identifier`] form.
+/// Deny rules fail closed and additionally ignore letter case for every manager.
+pub(super) fn package_identifiers_match(
+    manager: ManagerName,
+    value: &str,
+    condition: Option<&PackageIdentifierCondition>,
+    decision: Decision,
+) -> bool {
+    let Some(condition) = condition else {
+        return true;
+    };
+    let value = identifier_key(manager, value, decision);
+
+    match condition {
+        PackageIdentifierCondition::Exact(identifiers) => identifiers
+            .iter()
+            .any(|identifier| identifier_key(manager, identifier.as_ref(), decision) == value),
+        PackageIdentifierCondition::Patterns(patterns) => {
+            patterns.is_empty()
+                || patterns
+                    .iter()
+                    .any(|pattern| wildcard_match(&value, &identifier_key(manager, pattern.as_ref(), decision)))
+        }
+    }
+}
+
+fn identifier_key(manager: ManagerName, identifier: &str, decision: Decision) -> Cow<'_, str> {
+    let canonical = canonical_identifier(manager, identifier);
+    match decision {
+        Decision::Allow => canonical,
+        Decision::Deny => Cow::Owned(canonical.to_ascii_lowercase()),
+    }
+}
+
+/// Canonical form of a package identifier under the package manager's own name equivalence.
+///
+/// Identifiers with the same canonical form select the same package:
+/// - pip normalizes names per PEP 503: letter case is ignored and runs of `-`, `_` and `.` are equivalent.
+/// - Cargo (crates.io) ignores letter case and treats `-` and `_` as equivalent.
+/// - PowerShell repositories, Chocolatey, NuGet (`dotnet tool`), Scoop and vcpkg ignore letter case.
+///
+/// Other identifiers are case-sensitive: the broker resolves WinGet identifiers with `--exact`,
+/// and npm treats legacy mixed-case names as distinct packages.
+pub(super) fn canonical_identifier(manager: ManagerName, identifier: &str) -> Cow<'_, str> {
+    match manager {
+        ManagerName::Pip => Cow::Owned(pep503_normalize(identifier)),
+        ManagerName::Cargo => Cow::Owned(identifier.to_ascii_lowercase().replace('_', "-")),
+        ManagerName::PowerShell
+        | ManagerName::PowerShell7
+        | ManagerName::Chocolatey
+        | ManagerName::Dotnet
+        | ManagerName::Scoop
+        | ManagerName::Vcpkg => Cow::Owned(identifier.to_ascii_lowercase()),
+        ManagerName::Winget
+        | ManagerName::Npm
+        | ManagerName::Bun
+        | ManagerName::Apt
+        | ManagerName::Dnf
+        | ManagerName::Flatpak
+        | ManagerName::Homebrew
+        | ManagerName::Pacman
+        | ManagerName::Snap => Cow::Borrowed(identifier),
+    }
+}
+
+fn pep503_normalize(identifier: &str) -> String {
+    let mut normalized = String::with_capacity(identifier.len());
+    let mut previous_was_separator = false;
+
+    for character in identifier.chars() {
+        if matches!(character, '-' | '_' | '.') {
+            if !previous_was_separator {
+                normalized.push('-');
+            }
+            previous_was_separator = true;
+        } else {
+            normalized.push(character.to_ascii_lowercase());
+            previous_was_separator = false;
+        }
+    }
+
+    normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use now_policy::{PackageIdentifier, StringPattern};
+
+    use super::*;
+
+    fn exact(identifiers: &[&str]) -> PackageIdentifierCondition {
+        PackageIdentifierCondition::Exact(
+            identifiers
+                .iter()
+                .map(|identifier| PackageIdentifier::parse(identifier).expect("valid identifier"))
+                .collect::<BTreeSet<_>>(),
+        )
+    }
+
+    fn patterns(patterns: &[&str]) -> PackageIdentifierCondition {
+        PackageIdentifierCondition::Patterns(
+            patterns
+                .iter()
+                .map(|pattern| StringPattern((*pattern).to_owned()))
+                .collect(),
+        )
+    }
+
+    fn matches(manager: ManagerName, value: &str, condition: &PackageIdentifierCondition, decision: Decision) -> bool {
+        package_identifiers_match(manager, value, Some(condition), decision)
+    }
+
+    #[test]
+    fn canonical_identifiers_follow_manager_name_equivalence() {
+        assert_eq!(canonical_identifier(ManagerName::Pip, "Foo__Bar.-baz"), "foo-bar-baz");
+        assert_eq!(canonical_identifier(ManagerName::Cargo, "Cargo_Edit"), "cargo-edit");
+        assert_eq!(
+            canonical_identifier(ManagerName::PowerShell, "Az.Accounts"),
+            "az.accounts"
+        );
+        assert_eq!(canonical_identifier(ManagerName::Chocolatey, "Git"), "git");
+        assert_eq!(canonical_identifier(ManagerName::Winget, "Git.Git"), "Git.Git");
+        assert_eq!(canonical_identifier(ManagerName::Npm, "JSONStream"), "JSONStream");
+    }
+
+    #[test]
+    fn exact_identifiers_use_canonical_form_for_both_decisions() {
+        for decision in [Decision::Allow, Decision::Deny] {
+            assert!(matches(
+                ManagerName::PowerShell,
+                "az.accounts",
+                &exact(&["Az.Accounts"]),
+                decision
+            ));
+            assert!(matches(ManagerName::Chocolatey, "GIT", &exact(&["git"]), decision));
+            assert!(matches(
+                ManagerName::Pip,
+                "Python_Dateutil",
+                &exact(&["python-dateutil"]),
+                decision
+            ));
+            assert!(matches(
+                ManagerName::Cargo,
+                "cargo_edit",
+                &exact(&["cargo-edit"]),
+                decision
+            ));
+            assert!(!matches(
+                ManagerName::Pip,
+                "python-dateutils",
+                &exact(&["python-dateutil"]),
+                decision
+            ));
+        }
+    }
+
+    #[test]
+    fn deny_identifiers_ignore_case_for_case_sensitive_managers() {
+        assert!(matches(
+            ManagerName::Winget,
+            "git.git",
+            &exact(&["Git.Git"]),
+            Decision::Deny
+        ));
+        assert!(matches(
+            ManagerName::Npm,
+            "jsonstream",
+            &exact(&["JSONStream"]),
+            Decision::Deny
+        ));
+
+        assert!(!matches(
+            ManagerName::Winget,
+            "git.git",
+            &exact(&["Git.Git"]),
+            Decision::Allow
+        ));
+        assert!(!matches(
+            ManagerName::Npm,
+            "jsonstream",
+            &exact(&["JSONStream"]),
+            Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn patterns_use_canonical_form() {
+        for decision in [Decision::Allow, Decision::Deny] {
+            assert!(matches(
+                ManagerName::Pip,
+                "Django_REST.framework",
+                &patterns(&["django-rest-*"]),
+                decision
+            ));
+            assert!(matches(
+                ManagerName::Cargo,
+                "tokio_util",
+                &patterns(&["tokio-*"]),
+                decision
+            ));
+            assert!(matches(
+                ManagerName::Winget,
+                "microsoft.vscode",
+                &patterns(&["Microsoft.*"]),
+                decision
+            ));
+            assert!(!matches(ManagerName::Pip, "flask", &patterns(&["django-*"]), decision));
+        }
+    }
+
+    #[test]
+    fn absent_condition_matches_any_identifier() {
+        assert!(package_identifiers_match(
+            ManagerName::Winget,
+            "Any.Package",
+            None,
+            Decision::Deny
+        ));
+    }
+}

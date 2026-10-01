@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use chrono::Utc;
 use now_policy::{
     Decision, PackageIdentifier, PackageIdentifierCondition, PolicyDocument, PolicyEnforcement, PolicyFormatVersion,
-    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId, SourceName,
+    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId, SemanticVersion, SourceName, VersionCondition, VersionRange,
+    VersionString,
 };
 use now_policy_api::{self as api, PackageRequest};
 
@@ -282,4 +283,161 @@ fn deny_wins_priority_ties() {
     let result = evaluate(&policy, &make_request(api::Operation::Install, "Some.Package"));
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "deny-tie");
+}
+
+fn rule(id: &str, priority: u32, decision: Decision, match_criteria: PolicyMatch) -> PolicyRule {
+    PolicyRule {
+        id: ResourceId::from(id),
+        enabled: true,
+        priority,
+        decision,
+        reason: None,
+        match_criteria,
+        constraints: None,
+    }
+}
+
+fn exact_identifier(identifier: &str) -> Option<PackageIdentifierCondition> {
+    Some(PackageIdentifierCondition::Exact(BTreeSet::from([
+        PackageIdentifier::parse(identifier).expect("valid identifier"),
+    ])))
+}
+
+fn deny_range_policy() -> PolicyDocument {
+    make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-old",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Contoso.Tool"),
+                version: Some(VersionCondition::Range(VersionRange {
+                    min_version: None,
+                    max_version: Some(SemanticVersion::parse("2.0.0").expect("valid version")),
+                    include_prerelease: false,
+                })),
+                ..Default::default()
+            },
+        )],
+    )
+}
+
+fn allow_exact_version_policy() -> PolicyDocument {
+    make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-pinned",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Contoso.Tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("3.0.0").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    )
+}
+
+fn versioned_request(version: Option<&str>) -> PackageRequest {
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.package.version = version.map(|version| api::VersionString(version.to_owned()));
+    request
+}
+
+#[test]
+fn deny_identifiers_match_case_variants() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-git",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Git.Git"),
+                ..Default::default()
+            },
+        )],
+    );
+
+    let result = evaluate(&policy, &make_request(api::Operation::Install, "git.GIT"));
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-git");
+}
+
+#[test]
+fn identifiers_use_manager_name_equivalence() {
+    let policy = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-dateutil",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("python-dateutil"),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Python_DateUtil");
+    request.manager = api::ManagerName::Pip;
+
+    let result = evaluate(&policy, &request);
+    assert_eq!(result.decision, Decision::Allow);
+
+    request.manager = api::ManagerName::Npm;
+    let result = evaluate(&policy, &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn deny_version_conditions_match_unknown_or_equivalent_versions() {
+    let policy = deny_range_policy();
+
+    for version in [None, Some("latest"), Some("1.5.0.0"), Some("v1.5"), Some("2.0.0-beta")] {
+        let result = evaluate(&policy, &versioned_request(version));
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "deny-old", "{version:?}");
+    }
+
+    let result = evaluate(&policy, &versioned_request(Some("2.0.1")));
+    assert_eq!(result.decision, Decision::Allow);
+    assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn allow_version_conditions_require_the_exact_known_version() {
+    let policy = allow_exact_version_policy();
+
+    let result = evaluate(&policy, &versioned_request(Some("3.0.0")));
+    assert_eq!(result.decision, Decision::Allow);
+
+    for version in [None, Some("3.0.0.0"), Some("v3.0.0")] {
+        let result = evaluate(&policy, &versioned_request(version));
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+    }
+}
+
+#[test]
+fn version_selecting_custom_parameters_make_the_version_unknown() {
+    let mut request = versioned_request(Some("3.0.0"));
+    request.options.custom_parameters = vec![api::CustomParameterString("--version=1.0.0".to_owned())];
+
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-old");
+
+    let result = evaluate(&allow_exact_version_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "<default>");
+
+    request.options.custom_parameters = vec![api::CustomParameterString("--silent".to_owned())];
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Allow);
+    let result = evaluate(&allow_exact_version_policy(), &request);
+    assert_eq!(result.decision, Decision::Allow);
 }

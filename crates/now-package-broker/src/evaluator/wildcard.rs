@@ -1,6 +1,5 @@
 //! Case-insensitive wildcard matching helpers.
 
-use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use unicode_normalization::UnicodeNormalization as _;
@@ -8,10 +7,6 @@ use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 
 static DEFAULT_IGNORABLE_CODE_POINT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"\p{Default_Ignorable_Code_Point}").expect("valid Unicode property regex"));
-
-pub(super) fn wildcard_any<S: AsRef<str>>(value: &str, patterns: &BTreeSet<S>) -> bool {
-    patterns.is_empty() || patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
-}
 
 pub(super) fn wildcard_any_vec<S: AsRef<str>>(value: &str, patterns: &[S]) -> bool {
     patterns.iter().any(|pattern| wildcard_match(value, pattern.as_ref()))
@@ -47,7 +42,7 @@ pub(crate) fn has_powershell_wildcard_syntax(value: &str) -> bool {
     value.contains(['*', '?', '[', ']', '`'])
 }
 
-fn wildcard_match(value: &str, pattern: &str) -> bool {
+pub(super) fn wildcard_match(value: &str, pattern: &str) -> bool {
     // Convert glob pattern to regex: escape everything except *, which becomes .*
     let regex_pattern = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
     regex::RegexBuilder::new(&regex_pattern)
@@ -58,31 +53,17 @@ fn wildcard_match(value: &str, pattern: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use now_policy::StringPattern;
-
     use super::*;
 
     #[test]
-    fn empty_pattern_set_matches_everything() {
-        assert!(wildcard_any(
-            "Microsoft.VisualStudioCode",
-            &BTreeSet::<StringPattern>::new()
-        ));
-    }
-
-    #[test]
     fn wildcard_match_is_case_insensitive() {
-        let patterns = BTreeSet::from([StringPattern("microsoft.*code".to_owned())]);
-        assert!(wildcard_any("Microsoft.VisualStudioCode", &patterns));
+        assert!(wildcard_match("Microsoft.VisualStudioCode", "microsoft.*code"));
     }
 
     #[test]
     fn wildcard_does_not_treat_regex_metacharacters_as_regex() {
-        let patterns = BTreeSet::from([StringPattern("Contoso.Tools+".to_owned())]);
-        assert!(wildcard_any("Contoso.Tools+", &patterns));
-        assert!(!wildcard_any("Contoso.Toolss", &patterns));
+        assert!(wildcard_match("Contoso.Tools+", "Contoso.Tools+"));
+        assert!(!wildcard_match("Contoso.Toolss", "Contoso.Tools+"));
     }
 
     #[test]

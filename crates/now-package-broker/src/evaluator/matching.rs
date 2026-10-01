@@ -2,28 +2,38 @@
 
 use std::collections::BTreeSet;
 
-use now_policy::{
-    Architecture, Elevation, ManagerName, Operation, PackageIdentifierCondition, PolicyRule, Scope, VersionCondition,
-};
+use now_policy::{Architecture, Decision, Elevation, ManagerName, Operation, PolicyRule, Scope};
 use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
-use super::wildcard::{literal_case_insensitive_match, wildcard_any};
+use super::identifier::package_identifiers_match;
+use super::version::version_condition_matches;
+use super::wildcard::literal_case_insensitive_match;
 
+/// Whether `rule` matches `request`.
+///
+/// `requested_version` is `None` when the version is unknown before execution.
 pub(super) fn rule_matches(
     rule: &PolicyRule,
     request: &PackageRequest,
     flags: &RequestFlags,
-    effective_version: &str,
+    requested_version: Option<&str>,
 ) -> bool {
     let m = &rule.match_criteria;
 
     operations_match(request.operation, &m.operations)
         && managers_match(request.manager, &m.managers)
         && source_names_match(request.manager, &request.source.name, &m.source_names)
-        && package_identifiers_match(&request.package.id, &m.package_identifiers)
-        && versions_match(effective_version, &m.version)
+        && package_identifiers_match(
+            request.manager,
+            &request.package.id.0,
+            m.package_identifiers.as_ref(),
+            rule.decision,
+        )
+        && m.version
+            .as_ref()
+            .is_none_or(|condition| version_condition_matches(requested_version, condition, rule.decision))
         && scopes_match(request.options.scope, &m.scopes)
         && architectures_match(request.package.architecture, &m.architectures)
         && elevation_match(super::effective_execution_elevation(request), &m.execution_elevation)
@@ -35,7 +45,8 @@ pub(super) fn rule_matches(
         && optional_bool_matches(flags.has_pre_post_commands, m.has_pre_post_commands)
         && optional_bool_matches(flags.has_kill_before_operation, m.has_kill_before_operation)
         && optional_bool_matches(flags.has_uninstall_previous, m.has_uninstall_previous)
-        && constraints_pass(&rule.constraints, request, flags)
+        // Constraints only narrow Allow rules; a Deny rule matches regardless of them.
+        && (rule.decision == Decision::Deny || constraints_pass(&rule.constraints, request, flags))
 }
 
 fn policy_operation(operation: now_policy_api::Operation) -> Operation {
@@ -144,29 +155,6 @@ fn source_names_match(
         })
 }
 
-fn package_identifiers_match(
-    value: &now_policy_api::PackageIdentifier,
-    condition: &Option<PackageIdentifierCondition>,
-) -> bool {
-    match condition {
-        None => true,
-        Some(PackageIdentifierCondition::Exact(identifiers)) => {
-            identifiers.iter().any(|identifier| identifier.as_ref() == value.0)
-        }
-        Some(PackageIdentifierCondition::Patterns(patterns)) => wildcard_any(&value.0, patterns),
-    }
-}
-
-fn versions_match(value: &str, condition: &Option<VersionCondition>) -> bool {
-    match condition {
-        None => true,
-        Some(VersionCondition::Exact(versions)) => {
-            !value.is_empty() && versions.iter().any(|version| version.0 == value)
-        }
-        Some(VersionCondition::Range(range)) => super::version::version_range_matches(value, range),
-    }
-}
-
 fn optional_bool_matches(value: bool, expected: Option<bool>) -> bool {
     expected.is_none_or(|expected| expected == value)
 }
@@ -238,7 +226,7 @@ mod tests {
     fn matches(match_criteria: PolicyMatch) -> bool {
         let request = request();
         let flags = RequestFlags::from_request(&request);
-        rule_matches(&rule(match_criteria), &request, &flags, "1.2.3")
+        rule_matches(&rule(match_criteria), &request, &flags, Some("1.2.3"))
     }
 
     #[test]
@@ -284,7 +272,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -299,7 +287,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -312,7 +300,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -326,7 +314,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -340,6 +328,26 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
+    }
+
+    #[test]
+    fn constraints_narrow_allow_rules_but_not_deny_rules() {
+        let mut request = request();
+        request.options.interactive = true;
+        let flags = RequestFlags::from_request(&request);
+        let mut rule = rule(PolicyMatch {
+            managers: BTreeSet::from([ManagerName::Winget]),
+            ..Default::default()
+        });
+        rule.constraints = Some(now_policy::PolicyConstraints {
+            allow_interactive: false,
+            ..Default::default()
+        });
+
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
+
+        rule.decision = Decision::Deny;
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 }

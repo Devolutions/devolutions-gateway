@@ -4,11 +4,15 @@
 //! 1. Match enabled rules against request
 //! 2. Sort by priority (lowest wins), deny wins on tie
 //! 3. Fall back to `enforcement.defaultDecision`
+//!
+//! Matching fails closed for both decisions: when a request characteristic is in doubt,
+//! such as an unknown package version, Deny rules match and Allow rules do not.
 
 use now_policy::{Decision, PolicyDocument};
 use now_policy_api::{Elevation, PackageRequest, Scope};
 
 mod constraints;
+mod identifier;
 mod matching;
 mod version;
 mod wildcard;
@@ -68,7 +72,7 @@ impl RequestFlags {
 /// This function performs the rule-matching logic only.
 pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDecision {
     let flags = RequestFlags::from_request(request);
-    let effective_version = version::get_effective_version(request);
+    let requested_version = version::requested_version(request);
 
     let mut matched_rules: Vec<(&str, u32, Decision, &str)> = Vec::new();
 
@@ -77,7 +81,7 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
             continue;
         }
 
-        if matching::rule_matches(rule, request, &flags, &effective_version) {
+        if matching::rule_matches(rule, request, &flags, requested_version) {
             matched_rules.push((
                 &rule.id,
                 rule.priority,
