@@ -19,12 +19,12 @@ use now_policy::{Decision, PolicyDocument};
 use now_policy_api::{Elevation, PackageRequest, Scope};
 
 mod constraints;
+mod custom_options;
 mod identifier;
 mod install_location;
 mod matching;
 mod version;
 mod wildcard;
-mod winget_options;
 
 pub(crate) use wildcard::has_powershell_wildcard_syntax;
 
@@ -40,7 +40,7 @@ pub struct PolicyDecision {
 }
 
 /// Request characteristics as the package manager will apply them, including options set
-/// through WinGet custom parameters.
+/// through custom parameters.
 struct RequestFlags {
     interactive: bool,
     skip_hash_check: bool,
@@ -59,11 +59,7 @@ struct RequestFlags {
 
 impl RequestFlags {
     fn from_request(request: &PackageRequest) -> Self {
-        let winget = if request.manager == now_policy_api::ManagerName::Winget {
-            winget_options::winget_options(&request.options.custom_parameters)
-        } else {
-            winget_options::WingetOptions::default()
-        };
+        let custom = custom_options::custom_options(request.manager, &request.options.custom_parameters);
 
         let mut locations = request
             .options
@@ -72,22 +68,22 @@ impl RequestFlags {
             .map(Some)
             .into_iter()
             .collect::<Vec<_>>();
-        locations.extend(winget.locations.iter().copied());
+        locations.extend(custom.locations.iter().copied());
         let custom_install_location = match locations.as_slice() {
             [Some(location)] => install_location::normalize_install_location(location),
             _ => None,
         };
 
         Self {
-            interactive: request.options.interactive || winget.interactive,
-            skip_hash_check: request.options.skip_hash_check || winget.skip_hash_check,
+            interactive: request.options.interactive || custom.interactive,
+            skip_hash_check: request.options.skip_hash_check || custom.skip_hash_check,
             has_custom_parameters: !request.options.custom_parameters.is_empty(),
             has_custom_install_location: !locations.is_empty(),
             has_pre_post_commands: request.options.pre_operation_command.is_some()
                 || request.options.post_operation_command.is_some(),
             has_kill_before_operation: !request.options.kill_before_operation.is_empty(),
-            has_uninstall_previous: request.options.uninstall_previous || winget.uninstall_previous,
-            no_upgrade: request.options.no_upgrade || winget.no_upgrade,
+            has_uninstall_previous: request.options.uninstall_previous || custom.uninstall_previous,
+            no_upgrade: request.options.no_upgrade || custom.no_upgrade,
             custom_install_location,
             custom_parameters: request
                 .options

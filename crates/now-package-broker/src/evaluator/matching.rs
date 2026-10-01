@@ -7,6 +7,7 @@ use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
+use super::custom_options::{custom_options, resolve};
 use super::identifier::package_identifiers_match;
 use super::version::version_condition_matches;
 use super::wildcard::literal_case_insensitive_match;
@@ -127,7 +128,9 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
 /// Scope the operation runs in, or `None` when the package manager decides at execution time.
 ///
 /// Mirrors the command builders:
-/// - PowerShell uninstall removes the module wherever it is installed, ignoring the requested scope.
+/// - PowerShell and pip uninstall remove the package wherever it is installed, ignoring the requested scope.
+/// - A scope set through custom parameters applies only when the request leaves the scope unset;
+///   otherwise the scope is ambiguous.
 /// - Otherwise, a requested scope is used as is.
 /// - npm, pip, Cargo, Scoop, Bun, vcpkg and `dotnet tool` always run per user.
 /// - PowerShell installs and updates default to `CurrentUser`.
@@ -136,8 +139,12 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
 fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
     use now_policy_api::{ManagerName as M, Operation as O, Scope as S};
 
-    if matches!(request.manager, M::PowerShell | M::PowerShell7) && request.operation == O::Uninstall {
+    if matches!(request.manager, M::PowerShell | M::PowerShell7 | M::Pip) && request.operation == O::Uninstall {
         return None;
+    }
+    let custom = custom_options(request.manager, &request.options.custom_parameters);
+    if let Some(scope) = resolve(request.options.scope, &custom.scopes) {
+        return scope;
     }
     if let Some(scope) = request.options.scope {
         return Some(scope);
@@ -156,6 +163,8 @@ fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
 ///
 /// Mirrors the command builders:
 /// - PowerShell packages are architecture-neutral; the builders ignore the requested architecture.
+/// - An architecture set through custom parameters applies only when the request leaves the
+///   architecture unset; otherwise the architecture is ambiguous.
 /// - `dotnet tool` `Neutral` and Chocolatey `X64` add no command-line option, so the manager picks the
 ///   architecture from the host and the package.
 /// - Otherwise, a requested architecture is used as is.
@@ -165,8 +174,15 @@ fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
 fn effective_architecture(request: &PackageRequest) -> Option<now_policy_api::Architecture> {
     use now_policy_api::{Architecture as A, ManagerName as M};
 
+    if matches!(request.manager, M::PowerShell | M::PowerShell7) {
+        return Some(A::Neutral);
+    }
+    let custom = custom_options(request.manager, &request.options.custom_parameters);
+    if let Some(architecture) = resolve(request.package.architecture, &custom.architectures) {
+        return architecture;
+    }
+
     match (request.manager, request.package.architecture) {
-        (M::PowerShell | M::PowerShell7, _) => return Some(A::Neutral),
         (M::Dotnet, Some(A::Neutral)) | (M::Chocolatey, Some(A::X64)) => return None,
         (_, Some(architecture)) => return Some(architecture),
         (_, None) => {}
@@ -430,6 +446,7 @@ mod tests {
             (M::PowerShell, O::Install, "PSGallery", Some(S::User), Some(A::Neutral)),
             (M::PowerShell7, O::Update, "PSGallery", Some(S::User), Some(A::Neutral)),
             (M::PowerShell, O::Uninstall, "PSGallery", None, Some(A::Neutral)),
+            (M::Pip, O::Uninstall, "pip", None, Some(A::Neutral)),
             (M::Chocolatey, O::Install, "chocolatey", Some(S::Machine), None),
             (M::Winget, O::Install, "winget", None, None),
         ];
@@ -470,6 +487,29 @@ mod tests {
         request.manager = M::Chocolatey;
         request.package.architecture = Some(A::X86);
         assert_eq!(effective_architecture(&request), Some(A::X86));
+
+        // WinGet and Scoop options passed through custom parameters.
+        let custom = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| api::CustomParameterString((*value).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        request.manager = M::Winget;
+        request.options.scope = None;
+        request.package.architecture = None;
+        request.options.custom_parameters = custom(&["--scope", "machine", "-a", "x86"]);
+        assert_eq!(effective_scope(&request), Some(S::Machine));
+        assert_eq!(effective_architecture(&request), Some(A::X86));
+
+        request.options.scope = Some(S::User);
+        request.package.architecture = Some(A::X64);
+        assert_eq!(effective_scope(&request), None);
+        assert_eq!(effective_architecture(&request), None);
+
+        request.manager = M::Scoop;
+        request.options.custom_parameters = custom(&["-a", "32bit"]);
+        assert_eq!(effective_architecture(&request), None);
     }
 
     #[test]
