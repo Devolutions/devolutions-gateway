@@ -43,7 +43,7 @@ pub(super) fn package_identifiers_match(
                     let pattern = identifier_key(manager, pattern.as_ref(), decision);
                     candidates
                         .iter()
-                        .any(|candidate| wildcard_match_with_case(candidate, &pattern, false))
+                        .any(|candidate| wildcard_match_with_case(candidate, &pattern, decision == Decision::Deny))
                 })
         }
     }
@@ -268,6 +268,22 @@ mod tests {
             ));
             assert!(!matches(ManagerName::Pip, "flask", &patterns(&["django-*"]), decision));
         }
+    }
+
+    #[test]
+    fn deny_patterns_use_unicode_case_folding() {
+        assert!(matches(
+            ManagerName::PowerShell,
+            "kmodule",
+            &patterns(&["\u{212A}*"]),
+            Decision::Deny
+        ));
+        assert!(!matches(
+            ManagerName::PowerShell,
+            "kmodule",
+            &patterns(&["\u{212A}*"]),
+            Decision::Allow
+        ));
     }
 
     #[test]

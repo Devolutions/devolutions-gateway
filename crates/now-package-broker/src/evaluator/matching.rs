@@ -34,8 +34,8 @@ pub(super) fn rule_matches(
         && m.version
             .as_ref()
             .is_none_or(|condition| version_condition_matches(requested_version, condition, rule.decision))
-        && scopes_match(request.options.scope, &m.scopes)
-        && architectures_match(request.package.architecture, &m.architectures)
+        && scopes_match(request.options.scope, &m.scopes, rule.decision)
+        && architectures_match(request.package.architecture, &m.architectures, rule.decision)
         && elevation_match(super::effective_execution_elevation(request), &m.execution_elevation)
         && optional_bool_matches(request.options.interactive, m.interactive)
         && optional_bool_matches(request.options.skip_hash_check, m.skip_hash_check)
@@ -120,20 +120,28 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
     allowed.is_empty() || allowed.contains(&policy_manager(manager))
 }
 
-fn scopes_match(scope: Option<now_policy_api::Scope>, allowed: &BTreeSet<Scope>) -> bool {
+/// An absent request value lets the package manager choose, so it matches Deny rules only.
+fn scopes_match(scope: Option<now_policy_api::Scope>, allowed: &BTreeSet<Scope>, decision: Decision) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    scope.map(policy_scope).is_some_and(|scope| allowed.contains(&scope))
+    scope.map_or(decision == Decision::Deny, |scope| {
+        allowed.contains(&policy_scope(scope))
+    })
 }
 
-fn architectures_match(architecture: Option<now_policy_api::Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
+/// An absent request value lets the package manager choose, so it matches Deny rules only.
+fn architectures_match(
+    architecture: Option<now_policy_api::Architecture>,
+    allowed: &BTreeSet<Architecture>,
+    decision: Decision,
+) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    architecture
-        .map(policy_architecture)
-        .is_some_and(|architecture| allowed.contains(&architecture))
+    architecture.map_or(decision == Decision::Deny, |architecture| {
+        allowed.contains(&policy_architecture(architecture))
+    })
 }
 
 fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elevation>) -> bool {
@@ -276,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_scope_or_architecture_in_request_fails_when_rule_restricts_them() {
+    fn absent_scope_or_architecture_matches_only_deny_rules_that_restrict_them() {
         let mut request = request();
         request.options.scope = None;
         request.package.architecture = None;
@@ -288,6 +296,10 @@ mod tests {
         });
 
         assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
+
+        let mut rule = rule;
+        rule.decision = Decision::Deny;
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
