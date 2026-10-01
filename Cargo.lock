@@ -1929,6 +1929,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "devolutions-gateway-ai"
+version = "0.0.0"
+dependencies = [
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio 1.52.3",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "devolutions-gateway-generators"
 version = "0.0.0"
 dependencies = [
