@@ -51,14 +51,33 @@ pub(super) fn package_identifiers_match(
 
 /// Package names embedded in a decorated identifier.
 ///
-/// - npm and Bun aliases (`alias:@scope/target@1.0.0`, `alias@npm:target`) name both the alias and the target package.
+/// - npm aliases (`alias:@scope/target@1.0.0`) name both the alias and the target package.
+/// - Bun aliases (`alias@npm:target`) name both packages; a protocol prefix (`npm:`, `file:`, `github:`) is not a package name.
 /// - vcpkg qualifies a port with features and a triplet (`port[feature]:triplet`).
 /// - Other managers may accept a versioned specifier (`name@1.2.3`).
 ///
 /// A leading `@` is kept as part of an npm scope.
 pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> Vec<&str> {
+    const BUN_PROTOCOLS: &[&str] = &[
+        "npm",
+        "file",
+        "link",
+        "workspace",
+        "git",
+        "git+ssh",
+        "git+https",
+        "github",
+        "http",
+        "https",
+    ];
+
     match manager {
-        ManagerName::Npm | ManagerName::Bun => identifier.split(':').map(strip_version_suffix).collect(),
+        ManagerName::Npm => identifier.split(':').map(strip_version_suffix).collect(),
+        ManagerName::Bun => identifier
+            .split(':')
+            .map(strip_version_suffix)
+            .filter(|name| !BUN_PROTOCOLS.iter().any(|protocol| name.eq_ignore_ascii_case(protocol)))
+            .collect(),
         ManagerName::Vcpkg => vec![identifier.split(['[', ':']).next().unwrap_or(identifier)],
         _ => vec![strip_version_suffix(identifier)],
     }
@@ -345,6 +364,23 @@ mod tests {
 
     #[test]
     fn qualifiers_are_not_package_names() {
+        assert_eq!(embedded_package_names(ManagerName::Bun, "npm:react"), ["react"]);
+        assert_eq!(
+            embedded_package_names(ManagerName::Bun, "alias@npm:react@18.0.0"),
+            ["alias", "react"]
+        );
+        assert!(!matches(
+            ManagerName::Bun,
+            "npm:react",
+            &exact(&["npm"]),
+            Decision::Deny
+        ));
+        assert!(matches(
+            ManagerName::Bun,
+            "npm:react",
+            &exact(&["react"]),
+            Decision::Deny
+        ));
         assert_eq!(
             embedded_package_names(ManagerName::Vcpkg, "curl[ssl]:x64-windows"),
             ["curl"]

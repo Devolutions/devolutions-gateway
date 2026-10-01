@@ -32,15 +32,15 @@ pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
 
 /// Whether `manager` may resolve `version` to a range of versions rather than a single version.
 ///
-/// npm and Bun resolve a partial version as a range (`1.2` selects the newest `1.2.x`).
-/// Cargo and `dotnet tool` may also read a partial version as a requirement or a NuGet minimum version.
-/// The other managers either pin an exact version, padding missing components with zeros, or reject partial versions.
-/// Range syntax such as `^1.2` or `1.*` is not a comparable version and is already unknown to Deny rules.
+/// npm and Bun resolve partial versions and selector syntax as ranges (`1.2`, `1.2.x` and `^1.2.3` select the newest match).
+/// Cargo and `dotnet tool` may also read such versions as a requirement or a NuGet range.
+/// For these managers, only a concrete version with at least three numeric release components is known.
+/// The other managers either pin an exact version, padding missing components with zeros, or reject range syntax.
 fn manager_resolves_as_range(manager: ManagerName, version: &str) -> bool {
     matches!(
         manager,
         ManagerName::Npm | ManagerName::Bun | ManagerName::Cargo | ManagerName::Dotnet
-    ) && release_component_count(version) < 3
+    ) && (LenientVersion::parse(version).is_none() || release_component_count(version) < 3)
 }
 
 fn release_component_count(version: &str) -> usize {
@@ -270,7 +270,9 @@ mod tests {
             ManagerName::Cargo,
             ManagerName::Dotnet,
         ] {
-            for version in ["1", "1.2", "v1.2", "1.2-beta", "1+build"] {
+            for version in [
+                "1", "1.2", "v1.2", "1.2-beta", "1+build", "1.2.x", "^1.2.3", "~1.2.3", "[1.2.3]", "latest",
+            ] {
                 assert!(manager_resolves_as_range(manager, version), "{manager:?} {version}");
             }
             for version in ["1.2.3", "v1.2.3", "1.2.3-beta.1", "1.2.3+build.5", "1.2.3.4"] {
