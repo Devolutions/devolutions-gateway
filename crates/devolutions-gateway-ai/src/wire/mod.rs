@@ -36,7 +36,7 @@ pub(crate) enum Stop {
     Truncated,
     /// The provider refused to answer, so the text is not an answer.
     Refused(&'static str),
-    /// The provider failed while writing the answer.
+    /// The answer ended in a way no purpose can use, such as a failure of the provider or an unexpected stop reason.
     Failed(&'static str),
 }
 
@@ -77,8 +77,15 @@ pub(crate) fn parse_error_body(body: &[u8]) -> ErrorBody {
     }
 }
 
-fn endpoint(base_url: &Url, path: &str) -> String {
-    format!("{}/{path}", base_url.as_str().trim_end_matches('/'))
+/// URL of an API path, such as `chat/completions`, under the path of the base URL.
+///
+/// The query of the base URL is kept, for servers that need one on every request, such as the `api-version` of Azure
+/// OpenAI; its fragment is dropped.
+fn endpoint(base_url: &Url, path: &str) -> Url {
+    let mut endpoint = base_url.clone();
+    endpoint.set_path(&format!("{}/{path}", base_url.path().trim_end_matches('/')));
+    endpoint.set_fragment(None);
+    endpoint
 }
 
 // The reason never quotes the body, because the answer may contain session data.
@@ -105,13 +112,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn endpoint_joins_with_or_without_trailing_slash() {
-        for base_url in ["https://api.example/v1/", "https://api.example/v1"] {
+    fn endpoint_is_under_the_base_path() {
+        for (base_url, expected) in [
+            ("https://h/v1", "https://h/v1/chat/completions"),
+            ("https://h/v1/", "https://h/v1/chat/completions"),
+            (
+                "https://h/v1?api-version=1",
+                "https://h/v1/chat/completions?api-version=1",
+            ),
+            (
+                "https://h/v1/?api-version=1",
+                "https://h/v1/chat/completions?api-version=1",
+            ),
+            ("https://h/v1/#frag", "https://h/v1/chat/completions"),
+            ("https://h", "https://h/chat/completions"),
+            ("http://127.0.0.1:8080/v1/", "http://127.0.0.1:8080/v1/chat/completions"),
+        ] {
             let base_url = Url::parse(base_url).expect("valid URL");
-            assert_eq!(
-                endpoint(&base_url, "chat/completions"),
-                "https://api.example/v1/chat/completions"
-            );
+
+            assert_eq!(endpoint(&base_url, "chat/completions").as_str(), expected, "{base_url}");
         }
     }
 

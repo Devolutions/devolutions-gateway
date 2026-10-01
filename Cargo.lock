@@ -1932,7 +1932,6 @@ dependencies = [
 name = "devolutions-gateway-ai"
 version = "0.0.0"
 dependencies = [
- "axum 0.8.9",
  "reqwest",
  "secrecy",
  "serde",

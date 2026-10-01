@@ -2,16 +2,16 @@
 
 //! Round trips against mock providers: what each API receives, and how its answers and errors come back.
 
+use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::Router;
-use axum::http::header::RETRY_AFTER;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
-use axum::routing::post;
 use devolutions_gateway_ai::session_actions::Action;
 use devolutions_gateway_ai::{AiClient, Error, Provider, Usage};
-use tokio::net::TcpListener;
+use reqwest::StatusCode;
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
 const API_KEY: &str = "sk-test-secret";
@@ -22,49 +22,126 @@ const USAGE: Usage = Usage {
     output_tokens: 20,
 };
 const ANSWER: &str = "{\"offsetSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\nnot an action\n{\"offsetSeconds\":4,\"description\":\"Opened a shell\"}";
+/// Largest answer body the client reads, the same as in the crate.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug)]
 struct CapturedRequest {
+    /// Path of the request, with its query if any.
     path: String,
-    headers: HeaderMap,
+    /// Headers of the request, by lowercase name.
+    headers: HashMap<String, String>,
     body: serde_json::Value,
 }
 
 type Captured = Arc<Mutex<Option<CapturedRequest>>>;
 
-/// A provider answering every request with `status` and `response`, keeping the last request.
-async fn spawn_provider(status: StatusCode, response: serde_json::Value) -> (Url, Captured) {
-    spawn_provider_with_headers(status, HeaderMap::new(), response).await
+/// Answer of a mock provider to every request.
+struct MockAnswer {
+    status: StatusCode,
+    /// Headers besides `content-type`, `content-length` and `connection`, such as `retry-after`.
+    headers: &'static [(&'static str, &'static str)],
+    body: Vec<u8>,
+    /// Whether the answer has a `content-length`; without one, closing the connection ends the body.
+    content_length: bool,
 }
 
-/// A provider answering every request with `status`, `response_headers` and `response`, keeping the last request.
-async fn spawn_provider_with_headers(
-    status: StatusCode,
-    response_headers: HeaderMap,
-    response: serde_json::Value,
-) -> (Url, Captured) {
+impl MockAnswer {
+    fn new(status: StatusCode, body: impl Into<Vec<u8>>) -> Self {
+        Self {
+            status,
+            headers: &[],
+            body: body.into(),
+            content_length: true,
+        }
+    }
+}
+
+/// A provider answering every request with `status` and `response`, keeping the last request.
+async fn spawn_provider(status: StatusCode, response: serde_json::Value) -> (Url, Captured) {
+    spawn_mock(MockAnswer::new(status, response.to_string())).await
+}
+
+/// A provider answering every request with `answer`, keeping the last request.
+///
+/// It speaks just enough HTTP/1.1 for the client: one request per connection, closed after the answer.
+async fn spawn_mock(answer: MockAnswer) -> (Url, Captured) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
     let captured = Captured::default();
 
-    let app = Router::new().fallback(post({
+    tokio::spawn({
         let captured = Arc::clone(&captured);
-        move |uri: Uri, headers: HeaderMap, body: String| {
-            let captured = Arc::clone(&captured);
-            async move {
-                *captured.lock().unwrap() = Some(CapturedRequest {
-                    path: uri.path().to_owned(),
-                    headers,
-                    body: serde_json::from_str(&body).unwrap(),
-                });
-                (status, response_headers, axum::Json(response))
+        async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut stream).await;
+                *captured.lock().unwrap() = Some(request);
+                write_answer(&mut stream, &answer).await;
             }
         }
-    }));
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    });
 
     (Url::parse(&format!("http://{addr}/v1/")).unwrap(), captured)
+}
+
+/// Reads the head of a request up to its empty line, then `content-length` bytes of body.
+async fn read_request(stream: &mut TcpStream) -> CapturedRequest {
+    let mut reader = BufReader::new(stream);
+
+    // Such as `POST /v1/chat/completions HTTP/1.1`.
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).await.unwrap();
+    let path = request_line.split(' ').nth(1).unwrap().to_owned();
+
+    let mut headers = HashMap::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let line = line.trim_end();
+
+        if line.is_empty() {
+            break;
+        }
+
+        let (name, value) = line.split_once(':').unwrap();
+        headers.insert(name.to_ascii_lowercase(), value.trim().to_owned());
+    }
+
+    let content_length: usize = headers
+        .get("content-length")
+        .map_or(0, |length| length.parse().unwrap());
+    let mut body = vec![0; content_length];
+    reader.read_exact(&mut body).await.unwrap();
+
+    CapturedRequest {
+        path,
+        headers,
+        body: serde_json::from_slice(&body).unwrap(),
+    }
+}
+
+async fn write_answer(stream: &mut TcpStream, answer: &MockAnswer) {
+    let content_length = if answer.content_length {
+        format!("content-length: {}\r\n", answer.body.len())
+    } else {
+        String::new()
+    };
+    let headers: String = answer
+        .headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect();
+    let head = format!(
+        "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\n{content_length}connection: close\r\n{headers}\r\n",
+        answer.status.as_u16(),
+        answer.status.canonical_reason().unwrap_or_default(),
+    );
+
+    // The client may close the connection without reading the whole body, such as when it is over the size limit.
+    let _ = stream
+        .write_all(&[head.as_bytes(), answer.body.as_slice()].concat())
+        .await;
 }
 
 fn client(provider: Provider, base_url: Url) -> AiClient {
@@ -116,8 +193,8 @@ fn assert_parsed_actions(actions: &[Action]) {
     assert_eq!(actions[1].object, None);
 }
 
-fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name).map(|value| value.to_str().unwrap())
+fn header<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+    headers.get(name).map(String::as_str)
 }
 
 fn take(captured: &Captured) -> CapturedRequest {
@@ -293,6 +370,31 @@ async fn think_blocks_are_not_read_as_actions() {
 }
 
 #[tokio::test]
+async fn think_tags_inside_an_action_are_kept() {
+    const COMMAND: &str = "grep '<think>x</think>' notes.txt";
+
+    let action = serde_json::json!({
+        "offsetSeconds": 2,
+        "description": "Searched notes",
+        "parameters": { "Command": COMMAND }
+    });
+    let answer = format!("<think>plan</think>\n{action}");
+    let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response(&answer)).await;
+
+    let response = client(Provider::OpenAiCompatible, base_url)
+        .describe_session_actions("[2] grep '<think>x</think>' notes.txt")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.output.len(), 1);
+    assert_eq!(
+        response.output[0].parameters.get("Command").map(String::as_str),
+        Some(COMMAND)
+    );
+}
+
+#[tokio::test]
 async fn answers_cut_at_the_token_limit_are_truncated() {
     let openai = |finish_reason: &str| {
         let mut response = openai_response(ANSWER);
@@ -376,6 +478,69 @@ async fn provider_failure_while_answering_is_invalid_response() {
 }
 
 #[tokio::test]
+async fn unexpected_answers_are_invalid_responses() {
+    let openai = |finish_reason: &str| {
+        let mut response = openai_response(ANSWER);
+        response["choices"][0]["finish_reason"] = finish_reason.into();
+        response
+    };
+    let anthropic = |stop_reason: &str| {
+        let mut response = anthropic_response(ANSWER);
+        response["stop_reason"] = stop_reason.into();
+        response
+    };
+    let mut no_choice = openai_response(ANSWER);
+    no_choice["choices"] = serde_json::json!([]);
+    let mut no_content = openai_response(ANSWER);
+    no_content["choices"][0]["message"]["content"] = serde_json::Value::Null;
+
+    for (provider, response) in [
+        (Provider::OpenAi, openai("tool_calls")),
+        (Provider::Gemini, openai("something_new")),
+        (Provider::OpenAi, no_choice),
+        (Provider::OpenAiCompatible, no_content),
+        (Provider::Anthropic, anthropic("tool_use")),
+        (Provider::Anthropic, anthropic("pause_turn")),
+    ] {
+        let (base_url, _captured) = spawn_provider(StatusCode::OK, response).await;
+
+        let error = client(provider, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::InvalidResponse { .. }),
+            "{provider:?}: {error:?}"
+        );
+        assert!(!error.is_transient());
+        assert!(!error.to_string().contains("Listed files"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn empty_answers_have_no_action() {
+    let mut anthropic = anthropic_response("");
+    anthropic["content"] = serde_json::json!([]);
+
+    for (provider, answer) in [
+        (Provider::OpenAi, openai_response("")),
+        (Provider::Anthropic, anthropic),
+    ] {
+        let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
+
+        let response = client(provider, base_url)
+            .describe_session_actions("[0.5] ")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.output.is_empty(), "{provider:?}: {:?}", response.output);
+    }
+}
+
+#[tokio::test]
 async fn answer_without_any_action_line_is_invalid_output() {
     let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response("Sorry, I cannot help.")).await;
 
@@ -412,8 +577,11 @@ async fn rate_limit_is_transient_and_keeps_retry_after() {
         "type": "error",
         "error": { "type": "rate_limit_error", "message": "Rate limit reached" }
     });
-    let headers = HeaderMap::from_iter([(RETRY_AFTER, HeaderValue::from_static("7"))]);
-    let (base_url, _captured) = spawn_provider_with_headers(StatusCode::TOO_MANY_REQUESTS, headers, body).await;
+    let answer = MockAnswer {
+        headers: &[("retry-after", "7")],
+        ..MockAnswer::new(StatusCode::TOO_MANY_REQUESTS, body.to_string())
+    };
+    let (base_url, _captured) = spawn_mock(answer).await;
 
     let error = client(Provider::Anthropic, base_url)
         .describe_session_actions("[0] whoami")
@@ -525,6 +693,170 @@ async fn error_messages_are_read_from_gemini_and_mistral_bodies() {
         );
         assert!(!error.is_transient());
     }
+}
+
+#[tokio::test]
+async fn instructions_are_a_system_message() {
+    for provider in [
+        Provider::OpenAi,
+        Provider::Mistral,
+        Provider::Gemini,
+        Provider::OpenAiCompatible,
+    ] {
+        let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
+
+        client(provider, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap();
+
+        let request = take(&captured);
+        let messages = &request.body["messages"];
+        assert_eq!(messages.as_array().map(Vec::len), Some(2), "{provider:?}");
+        assert_eq!(messages[0]["role"], "system", "{provider:?}");
+        assert!(
+            messages[0]["content"]
+                .as_str()
+                .is_some_and(|instructions| !instructions.is_empty()),
+            "{provider:?}"
+        );
+        assert_eq!(messages[1]["role"], "user", "{provider:?}");
+        assert_eq!(messages[1]["content"], "[1.5] ls", "{provider:?}");
+    }
+}
+
+#[tokio::test]
+async fn base_url_query_is_kept() {
+    for (provider, answer, expected_path) in [
+        (
+            Provider::OpenAiCompatible,
+            openai_response(ANSWER),
+            "/v1/chat/completions?api-version=1",
+        ),
+        (
+            Provider::Anthropic,
+            anthropic_response(ANSWER),
+            "/v1/messages?api-version=1",
+        ),
+    ] {
+        let (mut base_url, captured) = spawn_provider(StatusCode::OK, answer).await;
+        base_url.set_query(Some("api-version=1"));
+
+        client(provider, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(take(&captured).path, expected_path, "{provider:?}");
+    }
+}
+
+#[tokio::test]
+async fn answer_up_to_the_size_limit_is_read() {
+    // JSON allows whitespace after the value, so the padded answer stays valid.
+    let mut body = openai_response(ANSWER).to_string().into_bytes();
+    body.resize(MAX_RESPONSE_BYTES, b' ');
+
+    for content_length in [true, false] {
+        let answer = MockAnswer {
+            content_length,
+            ..MockAnswer::new(StatusCode::OK, body.clone())
+        };
+        let (base_url, _captured) = spawn_mock(answer).await;
+
+        let response = client(Provider::OpenAi, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap();
+
+        assert_parsed_actions(&response.output);
+    }
+}
+
+#[tokio::test]
+async fn answer_over_the_size_limit_is_invalid_response() {
+    let mut body = openai_response(ANSWER).to_string().into_bytes();
+    body.resize(MAX_RESPONSE_BYTES + 1, b' ');
+
+    for content_length in [true, false] {
+        let answer = MockAnswer {
+            content_length,
+            ..MockAnswer::new(StatusCode::OK, body.clone())
+        };
+        let (base_url, _captured) = spawn_mock(answer).await;
+
+        let error = client(Provider::OpenAi, base_url)
+            .describe_session_actions("[1.5] ls")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(&error, Error::InvalidResponse { reason } if reason.contains("larger than")),
+            "content_length {content_length}: {error:?}"
+        );
+        assert!(!error.is_transient());
+        assert!(!error.to_string().contains("Listed files"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn error_answer_over_the_size_limit_keeps_the_status() {
+    // Read whole, the body would give its message.
+    let mut body = serde_json::json!({ "error": { "message": "Overloaded" } })
+        .to_string()
+        .into_bytes();
+    body.resize(MAX_RESPONSE_BYTES + 1, b' ');
+
+    for content_length in [true, false] {
+        let answer = MockAnswer {
+            content_length,
+            ..MockAnswer::new(StatusCode::SERVICE_UNAVAILABLE, body.clone())
+        };
+        let (base_url, _captured) = spawn_mock(answer).await;
+
+        let error = client(Provider::OpenAi, base_url)
+            .describe_session_actions("[0] whoami")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                Error::Status { status: 503, message, code: None, .. } if message == "Service Unavailable"
+            ),
+            "content_length {content_length}: {error:?}"
+        );
+        assert!(error.is_transient());
+    }
+}
+
+#[tokio::test]
+async fn answer_cut_by_a_closed_connection_is_transient() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    // Promises a longer body than it sends, then closes the connection.
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\nconnection: close\r\n\r\n{\"choices\":")
+            .await
+            .unwrap();
+    });
+
+    let error = client(Provider::OpenAi, Url::parse(&format!("http://{addr}/v1/")).unwrap())
+        .describe_session_actions("[0] whoami")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::Transport { .. }), "{error:?}");
+    assert!(error.is_transient());
 }
 
 #[tokio::test]

@@ -19,5 +19,4 @@ tracing = "0.1"
 url = "2.5"
 
 [dev-dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1.52", features = ["macros", "net", "rt-multi-thread"] }
+tokio = { version = "1.52", features = ["io-util", "macros", "net", "rt-multi-thread"] }

@@ -2,11 +2,19 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::warn;
 use url::Url;
 
 use super::{Completion, Message, Stop, endpoint, parse_body, usage};
 use crate::Error;
 use crate::client::Prompt;
+
+/// Role of the instructions for every server, OpenAI included.
+///
+/// The OpenAI reference still documents `system` messages and says "With o1 models and newer, `developer` messages
+/// replace the previous `system` messages", but never that older models, such as gpt-4o, accept `developer`:
+/// <https://platform.openai.com/docs/api-reference/chat/create>.
+const INSTRUCTIONS_ROLE: &str = "system";
 
 /// Server behind the API, because a few request fields differ between servers.
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +47,7 @@ pub(crate) fn request(
             model,
             messages: [
                 Message {
-                    role: "system",
+                    role: INSTRUCTIONS_ROLE,
                     content: prompt.system,
                 },
                 Message {
@@ -55,14 +63,16 @@ pub(crate) fn request(
 
 pub(crate) fn parse(body: &[u8]) -> Result<Completion, Error> {
     let response: ChatResponse = parse_body(body)?;
-    let choice = response.choices.into_iter().next();
+
+    let Some(choice) = response.choices.into_iter().next() else {
+        return Err(Error::InvalidResponse {
+            reason: "answer has no choice".to_owned(),
+        });
+    };
 
     Ok(Completion {
-        stop: choice.as_ref().map_or(Stop::Complete, ChatChoice::stop),
-        text: choice
-            .and_then(|choice| choice.message.content)
-            .map(ChatContent::into_text)
-            .unwrap_or_default(),
+        stop: choice.stop(),
+        text: choice.message.content.map(ChatContent::into_text).unwrap_or_default(),
         model: response.model,
         usage: response
             .usage
@@ -110,10 +120,23 @@ impl ChatChoice {
 
         // Mistral also reports a full context window as `model_length`, and a failure as `error`.
         match self.finish_reason.as_deref() {
+            // Some OpenAI-compatible servers send no finish reason.
+            Some("stop") | None => {
+                // An empty text is an answer, since a purpose may expect nothing, but a missing one is not.
+                if self.message.content.is_some() {
+                    Stop::Complete
+                } else {
+                    Stop::Failed("answer has no content")
+                }
+            }
             Some("length" | "model_length") => Stop::Truncated,
             Some("content_filter") => Stop::Refused("content filter"),
             Some("error") => Stop::Failed("provider stopped with finish_reason error"),
-            _ => Stop::Complete,
+            // Such as `tool_calls`, which a request without tools should never get.
+            Some(finish_reason) => {
+                warn!(finish_reason, "Unexpected AI finish reason");
+                Stop::Failed("unexpected finish reason")
+            }
         }
     }
 }
@@ -181,23 +204,62 @@ mod tests {
     #[test]
     fn length_finish_reasons_are_truncated() {
         for finish_reason in ["length", "model_length"] {
-            let body =
-                format!(r#"{{"choices":[{{"message":{{"content":"partial"}},"finish_reason":"{finish_reason}"}}]}}"#);
+            for content in [r#""partial""#, "null"] {
+                let body = format!(
+                    r#"{{"choices":[{{"message":{{"content":{content}}},"finish_reason":"{finish_reason}"}}]}}"#
+                );
 
-            let completion = parse(body.as_bytes()).expect("valid answer");
+                let completion = parse(body.as_bytes()).expect("valid answer");
 
-            assert_eq!(completion.stop, Stop::Truncated, "{finish_reason}");
+                assert_eq!(completion.stop, Stop::Truncated, "{body}");
+            }
         }
     }
 
     #[test]
-    fn model_usage_and_content_are_optional() {
-        let completion = parse(br#"{"choices":[{"message":{"content":null}}]}"#).expect("valid answer");
+    fn model_usage_and_finish_reason_are_optional() {
+        let completion = parse(br#"{"choices":[{"message":{"content":"hello"}}]}"#).expect("valid answer");
 
-        assert_eq!(completion.text, "");
+        assert_eq!(completion.text, "hello");
         assert_eq!(completion.stop, Stop::Complete);
         assert_eq!(completion.model, None);
         assert_eq!(completion.usage, None);
+    }
+
+    #[test]
+    fn empty_content_is_an_empty_answer() {
+        let completion =
+            parse(br#"{"choices":[{"message":{"content":""},"finish_reason":"stop"}]}"#).expect("valid answer");
+
+        assert_eq!(completion.text, "");
+        assert_eq!(completion.stop, Stop::Complete);
+    }
+
+    #[test]
+    fn missing_content_is_failed() {
+        for body in [
+            r#"{"choices":[{"message":{"content":null},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[{"message":{},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[{"message":{"content":null}}]}"#,
+        ] {
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(completion.stop, Stop::Failed("answer has no content"), "{body}");
+        }
+    }
+
+    #[test]
+    fn answer_without_choice_is_invalid() {
+        for body in [r#"{"choices":[]}"#, r#"{"model":"gpt-test","choices":[],"usage":null}"#] {
+            let Err(error) = parse(body.as_bytes()) else {
+                panic!("an answer without choice must be invalid: {body}");
+            };
+
+            assert!(
+                matches!(&error, Error::InvalidResponse { reason } if reason == "answer has no choice"),
+                "{error:?}"
+            );
+        }
     }
 
     #[test]
@@ -229,6 +291,10 @@ mod tests {
                 "content filter",
             ),
             (
+                r#"{"choices":[{"message":{"content":null},"finish_reason":"content_filter"}]}"#,
+                "content filter",
+            ),
+            (
                 r#"{"choices":[{"message":{"content":null,"refusal":"I cannot help."},"finish_reason":"stop"}]}"#,
                 "refusal message",
             ),
@@ -257,5 +323,21 @@ mod tests {
             parse(br#"{"choices":[{"message":{"content":"partial"},"finish_reason":"error"}]}"#).expect("valid answer");
 
         assert!(matches!(completion.stop, Stop::Failed(_)), "{:?}", completion.stop);
+    }
+
+    #[test]
+    fn unexpected_finish_reasons_are_failed() {
+        for finish_reason in ["tool_calls", "function_call", "something_new"] {
+            let body =
+                format!(r#"{{"choices":[{{"message":{{"content":"answer"}},"finish_reason":"{finish_reason}"}}]}}"#);
+
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(
+                completion.stop,
+                Stop::Failed("unexpected finish reason"),
+                "{finish_reason}"
+            );
+        }
     }
 }

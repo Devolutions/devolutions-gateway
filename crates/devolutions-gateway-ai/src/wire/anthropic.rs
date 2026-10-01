@@ -1,6 +1,7 @@
 //! Anthropic Messages.
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use url::Url;
 
 use super::{Completion, Message, Stop, endpoint, parse_body, usage};
@@ -34,6 +35,7 @@ pub(crate) fn request(
 pub(crate) fn parse(body: &[u8]) -> Result<Completion, Error> {
     let response: MessagesResponse = parse_body(body)?;
 
+    // Without a text block, such as in an empty `end_turn` answer, the text is empty.
     let text = response
         .content
         .into_iter()
@@ -45,10 +47,16 @@ pub(crate) fn parse(body: &[u8]) -> Result<Completion, Error> {
         .join("\n");
 
     let stop = match response.stop_reason.as_deref() {
+        // Some Anthropic-compatible servers send no stop reason.
+        Some("end_turn" | "stop_sequence") | None => Stop::Complete,
         // A full context window cuts the answer like the output token limit.
         Some("max_tokens" | "model_context_window_exceeded") => Stop::Truncated,
         Some("refusal") => Stop::Refused("stop reason refusal"),
-        _ => Stop::Complete,
+        // Such as `tool_use` or `pause_turn`, which a request without tools should never get.
+        Some(stop_reason) => {
+            warn!(stop_reason, "Unexpected AI stop reason");
+            Stop::Failed("unexpected stop reason")
+        }
     };
 
     Ok(Completion {
@@ -138,13 +146,42 @@ mod tests {
     }
 
     #[test]
-    fn other_stop_reasons_are_complete() {
-        for stop_reason in [r#""end_turn""#, r#""stop_sequence""#, r#""pause_turn""#, "null"] {
-            let body = format!(r#"{{"content":[{{"type":"text","text":"answer"}}],"stop_reason":{stop_reason}}}"#);
+    fn end_turn_stop_sequence_and_no_stop_reason_are_complete() {
+        for stop_reason in [
+            r#","stop_reason":"end_turn""#,
+            r#","stop_reason":"stop_sequence""#,
+            r#","stop_reason":null"#,
+            "",
+        ] {
+            let body = format!(r#"{{"content":[{{"type":"text","text":"answer"}}]{stop_reason}}}"#);
 
             let completion = parse(body.as_bytes()).expect("valid answer");
 
-            assert_eq!(completion.stop, Stop::Complete, "{stop_reason}");
+            assert_eq!(completion.text, "answer", "{body}");
+            assert_eq!(completion.stop, Stop::Complete, "{body}");
+        }
+    }
+
+    #[test]
+    fn answer_without_text_block_is_empty() {
+        for content in ["[]", r#"[{"type":"thinking","thinking":"hidden"}]"#] {
+            let body = format!(r#"{{"content":{content},"stop_reason":"end_turn"}}"#);
+
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(completion.text, "", "{body}");
+            assert_eq!(completion.stop, Stop::Complete, "{body}");
+        }
+    }
+
+    #[test]
+    fn other_stop_reasons_are_failed() {
+        for stop_reason in ["tool_use", "pause_turn", "something_new"] {
+            let body = format!(r#"{{"content":[{{"type":"text","text":"answer"}}],"stop_reason":"{stop_reason}"}}"#);
+
+            let completion = parse(body.as_bytes()).expect("valid answer");
+
+            assert_eq!(completion.stop, Stop::Failed("unexpected stop reason"), "{stop_reason}");
         }
     }
 }

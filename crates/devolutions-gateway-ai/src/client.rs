@@ -12,6 +12,12 @@ use crate::{Error, Response, error};
 /// Default of [`AiClientBuilder::request_timeout`].
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+/// Largest answer body read from a provider.
+///
+/// A 16000-token answer, the default output limit of session actions, is a few hundred KB of JSON, so the limit leaves
+/// ample room while keeping a faulty or hostile endpoint from filling the memory of Gateway.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
 /// AI provider behind an [`AiClient`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
@@ -213,7 +219,9 @@ impl AiClient {
     /// An answer cut short by the output token limit or the context window is [`Error::Truncated`], because no purpose
     /// can use a partial answer.
     /// A refusal is [`Error::Refused`], so that no purpose reads it as an empty answer.
-    /// The `<think>` blocks some models write before their answer are removed.
+    /// An answer larger than [`MAX_RESPONSE_BYTES`], without a choice or content, or that ended for another reason is
+    /// [`Error::InvalidResponse`].
+    /// The `<think>` blocks some models write at the start of their answer are removed.
     pub(crate) async fn complete(&self, prompt: &Prompt<'_>) -> Result<Response<String>, Error> {
         debug!(
             provider = ?self.provider,
@@ -244,14 +252,25 @@ impl AiClient {
 
         let status = response.status();
         let retry_after = error::retry_after(response.headers());
-        let body = response
-            .bytes()
+        let body = read_body(response)
             .await
             .map_err(|error| error::transport(&error, api_key))?;
 
         if !status.is_success() {
-            return Err(error::status(status, retry_after, &body, api_key));
+            // An error body over the limit is not parsed, so the error holds the reason phrase of the status.
+            return Err(error::status(
+                status,
+                retry_after,
+                body.as_deref().unwrap_or_default(),
+                api_key,
+            ));
         }
+
+        let Some(body) = body else {
+            return Err(Error::InvalidResponse {
+                reason: format!("answer is larger than {MAX_RESPONSE_BYTES} bytes"),
+            });
+        };
 
         let completion = match api {
             Api::OpenAiChat(_) => openai::parse(&body)?,
@@ -287,31 +306,53 @@ impl AiClient {
     }
 }
 
+/// Reads the body of an answer, or returns `None` as soon as it is larger than [`MAX_RESPONSE_BYTES`].
+///
+/// A body whose `Content-Length` is over the limit is not read at all.
+async fn read_body(mut response: reqwest::Response) -> reqwest::Result<Option<Vec<u8>>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+    {
+        return Ok(None);
+    }
+
+    let mut body = Vec::new();
+
+    // INVARIANT: body.len() <= MAX_RESPONSE_BYTES
+    while let Some(chunk) = response.chunk().await? {
+        if chunk.len() > MAX_RESPONSE_BYTES - body.len() {
+            return Ok(None);
+        }
+
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(Some(body))
+}
+
 /// Removes the `<think>…</think>` blocks that some models write before their answer; an unclosed block runs to the end.
-fn strip_think_blocks(text: String) -> String {
+///
+/// Only blocks at the start of the answer are removed, so tag text inside the answer, such as in a command, is kept.
+fn strip_think_blocks(mut text: String) -> String {
     const OPEN: &str = "<think>";
     const CLOSE: &str = "</think>";
 
-    if find_ignore_ascii_case(&text, OPEN).is_none() {
-        return text;
-    }
-
-    let mut stripped = String::with_capacity(text.len());
     let mut rest = text.as_str();
 
-    while let Some(open) = find_ignore_ascii_case(rest, OPEN) {
-        stripped.push_str(&rest[..open]);
-
-        let inside = &rest[open + OPEN.len()..];
-        let Some(close) = find_ignore_ascii_case(inside, CLOSE) else {
-            return stripped;
-        };
-
-        rest = &inside[close + CLOSE.len()..];
+    while let Some(inside) = strip_prefix_ignore_ascii_case(rest.trim_start(), OPEN) {
+        rest = find_ignore_ascii_case(inside, CLOSE).map_or("", |close| &inside[close + CLOSE.len()..]);
     }
 
-    stripped.push_str(rest);
-    stripped
+    let removed = text.len() - rest.len();
+    text.replace_range(..removed, "");
+    text
+}
+
+fn strip_prefix_ignore_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let (head, tail) = text.split_at_checked(prefix.len())?;
+
+    head.eq_ignore_ascii_case(prefix).then_some(tail)
 }
 
 // The needle is ASCII, so a match always starts on a character boundary.
@@ -358,16 +399,34 @@ mod tests {
     }
 
     #[test]
-    fn think_blocks_are_removed() {
+    fn leading_think_blocks_are_removed() {
         for (text, expected) in [
             ("answer", "answer"),
+            ("  answer", "  answer"),
             ("<think>plan</think>answer", "answer"),
             ("<THINK>\nplan\n</Think>\nanswer\n", "\nanswer\n"),
-            ("a<think>1</think>b<think>2</think>c", "abc"),
-            ("é<think>plan", "é"),
-            ("</think>answer", "</think>answer"),
+            (" \n<think>1</think>\n<think>2</think>answer", "answer"),
+            ("<think>plan", ""),
+            ("<think>1</think><think>2", ""),
+            (
+                "<think>plan</think>{\"parameters\":{\"Command\":\"<think>x</think>\"}}",
+                "{\"parameters\":{\"Command\":\"<think>x</think>\"}}",
+            ),
         ] {
             assert_eq!(strip_think_blocks(text.to_owned()), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn think_tags_after_the_start_are_kept() {
+        for text in [
+            "a<think>1</think>b",
+            "é<think>plan",
+            "</think>answer",
+            "{\"description\":\"Searched notes\",\"parameters\":{\"Command\":\"grep '<think>x</think>' notes\"}}",
+            "{\"offsetSeconds\":1,\"description\":\"Listed files\"}\n<think>plan</think>\n",
+        ] {
+            assert_eq!(strip_think_blocks(text.to_owned()), text, "{text:?}");
         }
     }
 

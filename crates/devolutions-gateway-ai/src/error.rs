@@ -24,8 +24,8 @@ pub enum Error {
         /// Time the provider asks to wait before sending again, from a `Retry-After` header in seconds.
         retry_after: Option<Duration>,
     },
-    /// The provider answered with a body that is not in the format of its API, or reported a failure instead of an
-    /// answer.
+    /// The provider answered with a body that is too large or not in the format of its API, or with an answer that
+    /// has no content, reports a failure, or ended for an unexpected reason.
     #[error("AI provider answer is not valid: {reason}")]
     InvalidResponse { reason: String },
     /// The answer reached the output token limit or filled the context window, so its end is missing: send a shorter
@@ -54,7 +54,7 @@ impl Error {
             // Request timeout, conflict, rate limit, and server errors, including Anthropic's 529 "overloaded".
             // The Anthropic SDKs retry a conflict too.
             Self::Status { status, code, .. } => {
-                matches!(*status, 408 | 409 | 429 | 500..)
+                matches!(*status, 408 | 409 | 429 | 500..=599)
                     && !code.as_deref().is_some_and(|code| SPENT_QUOTA_CODES.contains(&code))
             }
             Self::InvalidResponse { .. }
@@ -233,6 +233,7 @@ mod tests {
             status_error(500, None),
             status_error(503, None),
             status_error(529, None),
+            status_error(599, None),
         ] {
             assert!(error.is_transient(), "{error:?}");
         }
@@ -242,6 +243,8 @@ mod tests {
             status_error(401, None),
             status_error(403, None),
             status_error(404, None),
+            status_error(600, None),
+            status_error(999, None),
             Error::InvalidResponse {
                 reason: "syntax error".to_owned(),
             },
