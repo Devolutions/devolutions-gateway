@@ -3,6 +3,8 @@
 //! The provisioner sends them with the API key in the body of `POST /jet/tasks`.
 //! [`AiSettings`] is the part persisted with the task; the API key stays in memory as the task secret.
 
+use core::fmt;
+
 use devolutions_gateway_ai::{AiClient, BuildError, Provider};
 use secrecy::SecretString;
 use url::Url;
@@ -50,8 +52,8 @@ pub struct AiSettings {
 
 impl AiSettings {
     /// Checks the settings before the task is recorded.
-    pub fn check(&self, api_key: &SecretString, state: &DgwState) -> Result<(), TaskErrorCode> {
-        match self.build_client(api_key, state) {
+    pub fn check(&self, state: &DgwState, api_key: &SecretString) -> Result<(), TaskErrorCode> {
+        match self.build_client(state, api_key) {
             Ok(_) => Ok(()),
             Err(ClientError::Build(error)) => {
                 let code = build_error_code(&error);
@@ -66,12 +68,12 @@ impl AiSettings {
     }
 
     /// Builds the client of a task run, through the proxy configured for Gateway.
-    pub fn client(&self, api_key: &SecretString, state: &DgwState) -> Result<AiClient, TaskError> {
-        self.build_client(api_key, state)
-            .map_err(|error| TaskError::Permanent(error.message()))
+    pub fn client(&self, state: &DgwState, api_key: &SecretString) -> Result<AiClient, TaskError> {
+        self.build_client(state, api_key)
+            .map_err(|error| TaskError::Permanent(error.to_string()))
     }
 
-    fn build_client(&self, api_key: &SecretString, state: &DgwState) -> Result<AiClient, ClientError> {
+    fn build_client(&self, state: &DgwState, api_key: &SecretString) -> Result<AiClient, ClientError> {
         let provider = Provider::from(self.provider);
 
         let mut builder = AiClient::builder()
@@ -116,11 +118,11 @@ enum ClientError {
     HttpClient(reqwest::Error),
 }
 
-impl ClientError {
-    fn message(&self) -> String {
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ClientError::Build(error) => error.to_string(),
-            ClientError::HttpClient(error) => format!("failed to build the HTTP client: {error}"),
+            ClientError::Build(error) => fmt::Display::fmt(error, f),
+            ClientError::HttpClient(error) => write!(f, "failed to build the HTTP client: {error}"),
         }
     }
 }

@@ -55,7 +55,7 @@ pub(crate) async fn start_task(
         TaskKind::AiLog { jet_aid } => {
             state
                 .tasks
-                .start_ephemeral::<AiLogTask>(AiLogTarget { session_id: jet_aid }, &body, claims.jti, &state.gateway)
+                .start_ephemeral::<AiLogTask>(&state.gateway, AiLogTarget { session_id: jet_aid }, &body, claims.jti)
                 .await?
         }
     };

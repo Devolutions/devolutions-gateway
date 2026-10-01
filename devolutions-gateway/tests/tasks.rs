@@ -1,5 +1,5 @@
 #![allow(unused_crate_dependencies)]
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
 use std::io;
 use std::net::SocketAddr;

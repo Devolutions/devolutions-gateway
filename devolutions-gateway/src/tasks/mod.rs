@@ -62,8 +62,6 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    pub const NO_RETRY: Self = Self { max_attempts: 1 };
-
     pub const JOB_QUEUE: Self = Self {
         max_attempts: TASK_MAX_ATTEMPTS,
     };
@@ -94,7 +92,7 @@ pub trait TaskKind: Sized + Send + Sync + 'static {
 /// A task whose inputs are all persisted, so it resumes after a restart.
 pub trait DurableTask: TaskKind {
     /// Checks the request before the task is recorded.
-    fn prepare(target: &Self::Target, params: &Self::Params, state: &DgwState) -> Result<(), TaskErrorCode>;
+    fn prepare(state: &DgwState, target: &Self::Target, params: &Self::Params) -> Result<(), TaskErrorCode>;
 }
 
 /// A task that needs secrets, kept in memory only until the task finishes.
@@ -106,9 +104,9 @@ pub trait EphemeralTask: TaskKind {
 
     /// Checks the request and splits it into the persisted parameters and the secrets.
     fn prepare(
+        state: &DgwState,
         target: &Self::Target,
         request: Self::Request,
-        state: &DgwState,
     ) -> Result<(Self::Params, Self::Secrets), TaskErrorCode>;
 }
 
@@ -119,13 +117,13 @@ pub trait EphemeralTask: TaskKind {
 pub enum TaskErrorCode {
     /// The body is not valid JSON or does not match the parameters of the task kind.
     InvalidParams,
-    /// `ai-log`: the model is empty.
+    /// The AI model is empty.
     MissingModel,
-    /// `ai-log`: the API key is empty.
+    /// The AI API key is empty.
     MissingApiKey,
-    /// `ai-log`: the provider has no default base URL, so the request must give one.
+    /// The AI provider has no default base URL, so the request must give one.
     MissingBaseUrl,
-    /// `ai-log`: the AI settings are invalid for another reason.
+    /// The AI settings are invalid for another reason.
     InvalidAiSettings,
     /// `ai-log`: the session is still recording.
     RecordingActive,
@@ -336,37 +334,37 @@ impl TaskService {
     /// Parses the request of an ephemeral task, records the task and queues its job.
     pub async fn start_ephemeral<K: EphemeralTask>(
         &self,
+        state: &DgwState,
         target: K::Target,
         body: &[u8],
         token_jti: Uuid,
-        state: &DgwState,
     ) -> Result<TaskSnapshot, TaskErrorCode> {
         let request = parse_body::<K, K::Request>(body)?;
-        let (params, secrets) = K::prepare(&target, request, state)?;
-        self.create::<K>(&target, &params, token_jti, Some(Arc::new(secrets)), state)
+        let (params, secrets) = K::prepare(state, &target, request)?;
+        self.create::<K>(state, &target, &params, token_jti, Some(Arc::new(secrets)))
             .await
     }
 
     /// Parses the parameters of a durable task, records the task and queues its job.
     pub async fn start_durable<K: DurableTask>(
         &self,
+        state: &DgwState,
         target: K::Target,
         body: &[u8],
         token_jti: Uuid,
-        state: &DgwState,
     ) -> Result<TaskSnapshot, TaskErrorCode> {
         let params = parse_body::<K, K::Params>(body)?;
-        K::prepare(&target, &params, state)?;
-        self.create::<K>(&target, &params, token_jti, None, state).await
+        K::prepare(state, &target, &params)?;
+        self.create::<K>(state, &target, &params, token_jti, None).await
     }
 
     async fn create<K: TaskKind>(
         &self,
+        state: &DgwState,
         target: &K::Target,
         params: &K::Params,
         token_jti: Uuid,
         secrets: Option<Arc<dyn Any + Send + Sync>>,
-        state: &DgwState,
     ) -> Result<TaskSnapshot, TaskErrorCode> {
         let id = Uuid::new_v4();
 
@@ -428,11 +426,11 @@ impl TaskService {
         })
     }
 
-    async fn execute_ephemeral<K: EphemeralTask>(&self, def: TaskJobDef, state: &DgwState) -> anyhow::Result<()> {
+    async fn execute_ephemeral<K: EphemeralTask>(&self, state: &DgwState, def: TaskJobDef) -> anyhow::Result<()> {
         let secrets = self.inner.secrets.lock().get(&def.task_id).cloned();
 
         match secrets {
-            Some(secrets) => self.execute::<K>(def, state, Some(secrets)).await,
+            Some(secrets) => self.execute::<K>(state, def, Some(secrets)).await,
             None => {
                 warn!(task.id = %def.task_id, task.kind = K::KIND, "Background task secrets are gone");
                 self.fail(def.task_id, SECRETS_LOST_ERROR).await;
@@ -442,15 +440,15 @@ impl TaskService {
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "no durable task kind exists yet"))]
-    async fn execute_durable<K: DurableTask>(&self, def: TaskJobDef, state: &DgwState) -> anyhow::Result<()> {
-        self.execute::<K>(def, state, None).await
+    async fn execute_durable<K: DurableTask>(&self, state: &DgwState, def: TaskJobDef) -> anyhow::Result<()> {
+        self.execute::<K>(state, def, None).await
     }
 
     /// Runs one attempt; an error asks the job queue to try again later.
     async fn execute<K: TaskKind>(
         &self,
-        def: TaskJobDef,
         state: &DgwState,
+        def: TaskJobDef,
         secrets: Option<Arc<dyn Any + Send + Sync>>,
     ) -> anyhow::Result<()> {
         let id = def.task_id;
@@ -617,7 +615,7 @@ impl job_queue::Job for TaskJob {
         match def.kind.as_str() {
             ai_log::AiLogTask::KIND => {
                 self.tasks
-                    .execute_ephemeral::<ai_log::AiLogTask>(def, &self.state)
+                    .execute_ephemeral::<ai_log::AiLogTask>(&self.state, def)
                     .await
             }
             kind => {

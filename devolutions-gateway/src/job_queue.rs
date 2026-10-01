@@ -219,6 +219,9 @@ impl Task for JobRunnerTask {
 
 #[instrument(skip_all)]
 async fn job_runner_task(ctx: JobRunnerTask, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    /// Number of Gateway jobs running at the same time.
+    const MAX_CONCURRENT_JOBS: usize = 16;
+
     debug!("Task started");
 
     let JobRunnerTask {
@@ -227,7 +230,15 @@ async fn job_runner_task(ctx: JobRunnerTask, shutdown_signal: ShutdownSignal) ->
         queue,
     } = ctx;
 
-    run_jobs(queue, &DgwJobReader, notify_runner, runner_waker, 16, shutdown_signal).await;
+    run_jobs(
+        queue,
+        &DgwJobReader,
+        notify_runner,
+        runner_waker,
+        MAX_CONCURRENT_JOBS,
+        shutdown_signal,
+    )
+    .await;
 
     debug!("Task terminated");
 
