@@ -127,6 +127,10 @@
       },
       "description": "Array of plugin paths."
     },
+    "ProvisionerTasksDatabase": {
+      "type": "string",
+      "description": "(Unstable) Path to the SQLite database file for the tasks started by the provisioner."
+    },
     "__debug__": {
       "$ref": "#/definitions/DebugConf",
       "description": "Debug configuration."

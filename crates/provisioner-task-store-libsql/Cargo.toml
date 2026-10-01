@@ -1,0 +1,20 @@
+[package]
+name = "provisioner-task-store-libsql"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+libsql = { version = "0.9", default-features = false, features = ["core"] }
+tracing = "0.1"
+uuid = "1.23"
+
+[dev-dependencies]
+tempfile = "3.24"
+tokio = { version = "1", features = ["time", "macros", "rt", "rt-multi-thread"] }
+uuid = { version = "1.23", features = ["v4"] }

@@ -899,6 +899,101 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/tasks:
+    post:
+      tags:
+      - Tasks
+      summary: Starts a background task.
+      description: |-
+        The task kind and its target come from the TASK token.
+        The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.
+
+        This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+      operationId: StartTask
+      requestBody:
+        description: Kind-specific task parameters, such as `AiLogParams` for `ai-log`
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '202':
+          description: Task was accepted and runs in the background
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfo'
+        '400':
+          description: Invalid task parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '409':
+          description: The task target is busy, such as a session that is still recording
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+      security:
+      - task_token: []
+  /jet/tasks/{id}:
+    get:
+      tags:
+      - Tasks
+      summary: Gets the status of a background task.
+      description: |-
+        Task records are kept forever, including across Gateway restarts.
+
+        This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+      operationId: GetTask
+      parameters:
+      - name: id
+        in: path
+        description: Task ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: No task with this ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskErrorResponse'
+      security:
+      - scope_token:
+        - gateway.tasks.read
   /jet/traffic/ack:
     post:
       tags:
@@ -1326,6 +1421,7 @@ components:
       - gateway.net.monitor.drain
       - gateway.agent.delete
       - gateway.agent.read
+      - gateway.tasks.read
     AckRequest:
       type: object
       required:
@@ -1402,6 +1498,52 @@ components:
       - offline
       - online
       - unresponsive
+    AiLogParams:
+      type: object
+      description: 'AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.'
+      required:
+      - provider
+      - model
+      - apiKey
+      properties:
+        apiKey:
+          type: string
+          description: Kept in memory for this task only.
+        baseUrl:
+          type: string
+          description: Overrides the provider default; required for `openai-compatible`.
+          nullable: true
+        maxOutputTokens:
+          type: integer
+          format: int32
+          description: Upper bound of tokens in each AI answer.
+          nullable: true
+          minimum: 0
+        model:
+          type: string
+          description: Model identifier, passed to the provider as is.
+        provider:
+          $ref: '#/components/schemas/AiProvider'
+      additionalProperties: false
+    AiLogSubstate:
+      oneOf:
+      - type: object
+        required:
+        - step
+        properties:
+          step:
+            type: string
+            enum:
+            - preparing
+      description: Progress of a running `ai-log` task.
+    AiProvider:
+      type: string
+      enum:
+      - openai
+      - anthropic
+      - mistral
+      - gemini
+      - openai-compatible
     AppCredential:
       type: object
       required:
@@ -2392,6 +2534,66 @@ components:
 
             Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
           nullable: true
+    TaskErrorCode:
+      type: string
+      description: Stable code telling a client why a task request failed; safe to show.
+      enum:
+      - invalid_params
+      - missing_model
+      - missing_api_key
+      - missing_base_url
+      - invalid_ai_settings
+      - recording_active
+      - task_not_found
+      - internal
+    TaskErrorResponse:
+      type: object
+      description: Why a task request failed.
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/TaskErrorCode'
+    TaskInfo:
+      type: object
+      description: |-
+        A background task and its status.
+
+        `substate` is set only when `state` is `running`, `result` only when it is `success`, and `error` only when it is `failed`.
+        Both `substate` and `result` are kind-specific: for `ai-log`, `substate` is an `AiLogSubstate`.
+      required:
+      - id
+      - kind
+      - state
+      properties:
+        error:
+          type: string
+          description: Why the task failed.
+          nullable: true
+        id:
+          type: string
+          format: uuid
+          description: Task ID.
+        kind:
+          type: string
+          description: Task kind, as in the `jet_tk` claim of the TASK token.
+        result:
+          type: object
+          description: Result of a successful task.
+          nullable: true
+        state:
+          $ref: '#/components/schemas/TaskState'
+        substate:
+          type: object
+          description: Progress of a running task.
+          nullable: true
+    TaskState:
+      type: string
+      enum:
+      - not-started
+      - running
+      - success
+      - failed
     TrafficEventResponse:
       type: object
       required:
@@ -2510,6 +2712,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing a single HTTP request for a specific scope
+    task_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token authorizing one kind of background task on a specific target
     web_app_custom_auth:
       type: http
       scheme: basic

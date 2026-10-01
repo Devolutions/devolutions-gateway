@@ -9,6 +9,10 @@ docs/AgentApi.md
 docs/AgentDomainAdvertisement.md
 docs/AgentInfo.md
 docs/AgentStatus.md
+docs/AiLogParams.md
+docs/AiLogSubstate.md
+docs/AiLogSubstateOneOf.md
+docs/AiProvider.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -70,6 +74,11 @@ docs/SetUpdateScheduleRequest.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
 docs/TargetConnectionOptions.md
+docs/TaskErrorCode.md
+docs/TaskErrorResponse.md
+docs/TaskInfo.md
+docs/TaskState.md
+docs/TasksApi.md
 docs/TrafficApi.md
 docs/TrafficEventResponse.md
 docs/TransportProtocolResponse.md
@@ -88,6 +97,7 @@ src/Devolutions.Gateway.Client/Api/NetApi.cs
 src/Devolutions.Gateway.Client/Api/NetworkMonitoringApi.cs
 src/Devolutions.Gateway.Client/Api/PreflightApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
+src/Devolutions.Gateway.Client/Api/TasksApi.cs
 src/Devolutions.Gateway.Client/Api/TrafficApi.cs
 src/Devolutions.Gateway.Client/Api/UpdateApi.cs
 src/Devolutions.Gateway.Client/Api/WebAppApi.cs
@@ -117,6 +127,10 @@ src/Devolutions.Gateway.Client/Model/AddressFamily.cs
 src/Devolutions.Gateway.Client/Model/AgentDomainAdvertisement.cs
 src/Devolutions.Gateway.Client/Model/AgentInfo.cs
 src/Devolutions.Gateway.Client/Model/AgentStatus.cs
+src/Devolutions.Gateway.Client/Model/AiLogParams.cs
+src/Devolutions.Gateway.Client/Model/AiLogSubstate.cs
+src/Devolutions.Gateway.Client/Model/AiLogSubstateOneOf.cs
+src/Devolutions.Gateway.Client/Model/AiProvider.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -168,6 +182,10 @@ src/Devolutions.Gateway.Client/Model/SetUpdateScheduleRequest.cs
 src/Devolutions.Gateway.Client/Model/SubProvisionerKey.cs
 src/Devolutions.Gateway.Client/Model/Subscriber.cs
 src/Devolutions.Gateway.Client/Model/TargetConnectionOptions.cs
+src/Devolutions.Gateway.Client/Model/TaskErrorCode.cs
+src/Devolutions.Gateway.Client/Model/TaskErrorResponse.cs
+src/Devolutions.Gateway.Client/Model/TaskInfo.cs
+src/Devolutions.Gateway.Client/Model/TaskState.cs
 src/Devolutions.Gateway.Client/Model/TrafficEventResponse.cs
 src/Devolutions.Gateway.Client/Model/TransportProtocolResponse.cs
 src/Devolutions.Gateway.Client/Model/UpdateProductInfo.cs

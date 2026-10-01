@@ -267,6 +267,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .await
             .context("failed to initialize traffic audit manager")?;
 
+    let provisioner_tasks = devolutions_gateway::tasks::TaskService::open_if_enabled(&conf)
+        .await
+        .context("failed to initialize provisioner tasks")?;
+
     let provisioning = devolutions_gateway::provisioning::ProvisioningStore::new();
     let synthetic_kdc_registry = devolutions_gateway::credential_injection::SyntheticKdcRegistry::new();
 
@@ -340,6 +344,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
+        tasks: provisioner_tasks.clone(),
     };
 
     for listener in &conf.listeners {
@@ -405,6 +410,14 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     ));
 
     tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
+
+    if let Some(provisioner_tasks) = provisioner_tasks {
+        tasks.register(devolutions_gateway::tasks::TaskRunnerTask::new(
+            provisioner_tasks,
+            state.clone(),
+        ));
+    }
+
     tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);

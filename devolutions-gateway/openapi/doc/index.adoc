@@ -47,6 +47,11 @@ Protocol-aware fine-grained relay server
 
 
 
+
+* *Bearer* Authentication `task_token`
+
+
+
 * *HTTP Basic* Authentication `web_app_custom_auth`
 
 
@@ -1278,6 +1283,10 @@ Retrieves a recording file for a given session
 
 ===== Content Type
 
+* video/webm
+* application/x-asciicast
+* application/x-ndjson
+* application/json
 * application/octet-stream
 
 ===== Responses
@@ -2517,6 +2526,222 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Tasks]
+=== Tasks
+
+
+[.getTask]
+==== getTask
+
+`GET /jet/tasks/{id}`
+
+Gets the status of a background task.
+
+===== Description
+
+Task records are kept forever, including across Gateway restarts.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+
+
+// markup not found, no include::{specDir}jet/tasks/\{id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| id
+| Task ID 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+<<TaskInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Task status
+|  <<TaskInfo>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| No task with this ID
+|  <<TaskErrorResponse>>
+
+
+| 500
+| Unexpected server error
+|  <<TaskErrorResponse>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/\{id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.startTask]
+==== startTask
+
+`POST /jet/tasks`
+
+Starts a background task.
+
+===== Description
+
+The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+
+
+// markup not found, no include::{specDir}jet/tasks/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `task_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| body
+| Kind-specific task parameters, such as `AiLogParams` for `ai-log` <<object>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<TaskInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 202
+| Task was accepted and runs in the background
+|  <<TaskInfo>>
+
+
+| 400
+| Invalid task parameters
+|  <<TaskErrorResponse>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 409
+| The task target is busy, such as a session that is still recording
+|  <<TaskErrorResponse>>
+
+
+| 500
+| Unexpected server error
+|  <<TaskErrorResponse>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Traffic]
 === Traffic
 
@@ -3371,6 +3596,7 @@ endif::internal-generation[]
 | gateway.net.monitor.drain
 | gateway.agent.delete
 | gateway.agent.read
+| gateway.tasks.read
 
 |===
 
@@ -3540,6 +3766,122 @@ endif::internal-generation[]
 | offline
 | online
 | unresponsive
+
+|===
+
+
+[#AiLogParams]
+=== _AiLogParams_ 
+
+AI settings used by an &#x60;ai-log&#x60; task: the body of &#x60;POST /jet/tasks&#x60; for a TASK token of kind &#x60;ai-log&#x60;.
+
+
+[.fields-AiLogParams]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| apiKey
+| X
+| 
+|   String  
+| Kept in memory for this task only.
+|     
+
+| baseUrl
+| 
+| X
+|   String  
+| Overrides the provider default; required for `openai-compatible`.
+|     
+
+| maxOutputTokens
+| 
+| X
+|   Integer  
+| Upper bound of tokens in each AI answer.
+| int32    
+
+| model
+| X
+| 
+|   String  
+| Model identifier, passed to the provider as is.
+|     
+
+| provider
+| X
+| 
+|  <<AiProvider>>  
+| 
+|    openai, anthropic, mistral, gemini, openai-compatible,  
+
+|===
+
+
+
+[#AiLogSubstate]
+=== _AiLogSubstate_ 
+
+Progress of a running &#x60;ai-log&#x60; task.
+
+
+[.fields-AiLogSubstate]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| step
+| X
+| 
+|  <<String>>  
+| 
+|  _Enum:_ preparing,  
+
+|===
+
+
+
+[#AiLogSubstateOneOf]
+=== _AiLogSubstateOneOf_ 
+
+
+
+
+[.fields-AiLogSubstateOneOf]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| step
+| X
+| 
+|  <<String>>  
+| 
+|  _Enum:_ preparing,  
+
+|===
+
+
+
+[#AiProvider]
+=== _AiProvider_ 
+
+
+
+
+
+
+[.fields-AiProvider]
+[cols="1"]
+|===
+| Enum Values
+
+| openai
+| anthropic
+| mistral
+| gemini
+| openai-compatible
 
 |===
 
@@ -5562,6 +5904,134 @@ Subscriber configuration
 
 |===
 
+
+
+[#TaskErrorCode]
+=== _TaskErrorCode_ 
+
+Stable code telling a client why a task request failed; safe to show.
+
+
+
+
+[.fields-TaskErrorCode]
+[cols="1"]
+|===
+| Enum Values
+
+| invalid_params
+| missing_model
+| missing_api_key
+| missing_base_url
+| invalid_ai_settings
+| recording_active
+| task_not_found
+| internal
+
+|===
+
+
+[#TaskErrorResponse]
+=== _TaskErrorResponse_ 
+
+Why a task request failed.
+
+
+[.fields-TaskErrorResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| error
+| X
+| 
+|  <<TaskErrorCode>>  
+| 
+|    invalid_params, missing_model, missing_api_key, missing_base_url, invalid_ai_settings, recording_active, task_not_found, internal,  
+
+|===
+
+
+
+[#TaskInfo]
+=== _TaskInfo_ 
+
+A background task and its status.
+
+&#x60;substate&#x60; is set only when &#x60;state&#x60; is &#x60;running&#x60;, &#x60;result&#x60; only when it is &#x60;success&#x60;, and &#x60;error&#x60; only when it is &#x60;failed&#x60;.
+Both &#x60;substate&#x60; and &#x60;result&#x60; are kind-specific: for &#x60;ai-log&#x60;, &#x60;substate&#x60; is an &#x60;AiLogSubstate&#x60;.
+
+
+[.fields-TaskInfo]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| error
+| 
+| X
+|   String  
+| Why the task failed.
+|     
+
+| id
+| X
+| 
+|   UUID  
+| Task ID.
+| uuid    
+
+| kind
+| X
+| 
+|   String  
+| Task kind, as in the `jet_tk` claim of the TASK token.
+|     
+
+| result
+| 
+| X
+|   Object  
+| Result of a successful task.
+|     
+
+| state
+| X
+| 
+|  <<TaskState>>  
+| 
+|    not-started, running, success, failed,  
+
+| substate
+| 
+| X
+|   Object  
+| Progress of a running task.
+|     
+
+|===
+
+
+
+[#TaskState]
+=== _TaskState_ 
+
+
+
+
+
+
+[.fields-TaskState]
+[cols="1"]
+|===
+| Enum Values
+
+| not-started
+| running
+| success
+| failed
+
+|===
 
 
 [#TrafficEventResponse]

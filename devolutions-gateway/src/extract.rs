@@ -8,7 +8,7 @@ use crate::DgwState;
 use crate::http::HttpError;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, EnrollmentTokenClaims, JmuxTokenClaims,
-    JrecTokenClaims, JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
+    JrecTokenClaims, JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, TaskTokenClaims, WebAppTokenClaims,
 };
 
 #[derive(Clone)]
@@ -449,6 +449,24 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct TasksReadScope;
+
+impl<S> FromRequestParts<S> for TasksReadScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::TasksRead => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
 /// Grants read access to agent management endpoints.
 ///
 /// Accepts a scope token with `AgentRead` or `Wildcard` scope.
@@ -576,6 +594,24 @@ where
             Ok(Self(claims))
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected ENROLLMENT token)"))
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TaskToken(pub TaskTokenClaims);
+
+impl<S> FromRequestParts<S> for TaskToken
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let AccessTokenClaims::Task(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
+            Ok(Self(claims))
+        } else {
+            Err(HttpError::forbidden().msg("token not allowed (expected TASK)"))
         }
     }
 }

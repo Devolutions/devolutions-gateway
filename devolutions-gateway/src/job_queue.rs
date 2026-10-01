@@ -218,7 +218,10 @@ impl Task for JobRunnerTask {
 }
 
 #[instrument(skip_all)]
-async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+async fn job_runner_task(ctx: JobRunnerTask, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    /// Number of Gateway jobs running at the same time.
+    const MAX_CONCURRENT_JOBS: usize = 16;
+
     debug!("Task started");
 
     let JobRunnerTask {
@@ -227,8 +230,30 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         queue,
     } = ctx;
 
-    let reader = DgwJobReader;
+    run_jobs(
+        queue,
+        &DgwJobReader,
+        notify_runner,
+        runner_waker,
+        MAX_CONCURRENT_JOBS,
+        shutdown_signal,
+    )
+    .await;
 
+    debug!("Task terminated");
+
+    Ok(())
+}
+
+/// Runs the jobs of `queue`, at most `max_batch_size` at the same time, until shutdown.
+pub(crate) async fn run_jobs(
+    queue: DynJobQueue,
+    reader: &dyn JobReader,
+    notify_runner: Arc<Notify>,
+    runner_waker: RunnerWaker,
+    max_batch_size: usize,
+    mut shutdown_signal: ShutdownSignal,
+) {
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
             let result = ctx.job.run().await;
@@ -260,23 +285,19 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
 
     let runner = JobRunner {
         queue,
-        reader: &reader,
+        reader,
         spawn: &spawn,
         sleep: &sleep,
         wait_notified: &wait_notified,
         wait_notified_timeout: &wait_notified_timeout,
         waker: runner_waker,
-        max_batch_size: 16,
+        max_batch_size,
     };
 
     tokio::select! {
         () = runner.run() => {}
         () = shutdown_signal.wait() => {}
     }
-
-    debug!("Task terminated");
-
-    Ok(())
 }
 
 struct DgwJobReader;

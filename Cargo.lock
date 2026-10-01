@@ -1843,6 +1843,7 @@ dependencies = [
  "cfg-if",
  "chacha20poly1305",
  "devolutions-agent-shared",
+ "devolutions-gateway-ai",
  "devolutions-gateway-generators",
  "devolutions-gateway-task",
  "devolutions-log",
@@ -1880,6 +1881,7 @@ dependencies = [
  "picky-krb",
  "pin-project-lite 0.2.17",
  "proptest",
+ "provisioner-task-store-libsql",
  "rand 0.10.2",
  "reqwest",
  "rstest",
@@ -5991,6 +5993,18 @@ name = "protoc-bin-vendored-win32"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95067976aca6421a523e491fce939a3e65249bac4b977adee0ee9771568e8aa3"
+
+[[package]]
+name = "provisioner-task-store-libsql"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "libsql",
+ "tempfile",
+ "tokio 1.52.3",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "proxy-generators"

@@ -516,6 +516,8 @@ pub enum AccessScope {
     AgentDelete,
     #[serde(rename = "gateway.agent.read")]
     AgentRead,
+    #[serde(rename = "gateway.tasks.read")]
+    TasksRead,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

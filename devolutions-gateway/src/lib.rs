@@ -41,6 +41,7 @@ pub mod streaming;
 pub mod subscriber;
 pub mod target_addr;
 pub(crate) mod target_connection_options;
+pub mod tasks;
 pub mod tls;
 pub mod token;
 pub mod traffic_audit;
@@ -68,6 +69,8 @@ pub struct DgwState {
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
+    /// Set only when the unstable task system is enabled.
+    pub tasks: Option<tasks::TaskService>,
 }
 
 #[doc(hidden)]
@@ -110,6 +113,7 @@ impl DgwState {
             synthetic_kdc_registry,
             monitoring_state,
             agent_tunnel_handle: None,
+            tasks: None,
         };
 
         let handles = MockHandles {
