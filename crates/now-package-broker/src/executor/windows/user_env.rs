@@ -1,6 +1,7 @@
 //! Target user environment used to resolve package manager executables.
 
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
 use std::marker::PhantomData;
 use std::path::Path;
 
@@ -12,7 +13,7 @@ use windows::Win32::Security::{
     ImpersonateLoggedOnUser, RevertToSelf, SecurityImpersonation, TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
 };
 
-use crate::policy_security::is_plain_local_drive_path;
+use crate::policy_security::{PathOpener, VerifiedExecutable, is_plain_local_drive_path};
 
 /// Environment variables of the target user, with filesystem lookups performed as that user.
 ///
@@ -73,28 +74,53 @@ impl<'a> UserEnv<'a> {
         self.lookup(path, Path::is_file)
     }
 
+    /// Pin an environment-derived executable, opening it as the target user.
+    ///
+    /// The returned guard holds the file and exposes its final local path, which the service
+    /// account can then open without being redirected while the guard is alive.
+    pub(super) fn pin_executable(&self, path: &Path) -> anyhow::Result<VerifiedExecutable> {
+        crate::policy_security::pin_executable(self, path, &format!("executable '{}'", path.display()))
+    }
+
     fn lookup(&self, path: &Path, check: fn(&Path) -> bool) -> bool {
         if !path.to_str().is_some_and(is_plain_local_drive_path) {
             debug!(path = %path.display(), "Skipped non-local environment-derived path");
             return false;
         }
 
-        let Some(token) = &self.lookup_token else {
-            return check(path);
-        };
-
-        let _impersonation = match ThreadImpersonation::enter(token) {
-            Ok(impersonation) => impersonation,
+        match self.as_user(|| check(path)) {
+            Ok(found) => found,
             Err(error) => {
                 warn!(
                     error = format!("{error:#}"),
                     "Failed to impersonate the target user for a path lookup"
                 );
-                return false;
+                false
             }
+        }
+    }
+
+    /// Run `f` while impersonating the target user, when a lookup token is configured.
+    fn as_user<T>(&self, f: impl FnOnce() -> T) -> anyhow::Result<T> {
+        let Some(token) = &self.lookup_token else {
+            return Ok(f());
         };
 
-        check(path)
+        let _impersonation = ThreadImpersonation::enter(token)?;
+        Ok(f())
+    }
+}
+
+impl PathOpener for UserEnv<'_> {
+    fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File> {
+        if !path.to_str().is_some_and(is_plain_local_drive_path) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("'{}' is not a plain local drive path", path.display()),
+            ));
+        }
+
+        self.as_user(|| options.open(path)).map_err(std::io::Error::other)?
     }
 }
 
@@ -207,6 +233,67 @@ mod tests {
             r"C:\Windows\System32\cmd.exe:stream",
         ] {
             assert!(!env.exists(&PathBuf::from(path)), "{path}");
+        }
+        assert_thread_not_impersonating();
+    }
+
+    #[test]
+    fn pinned_executables_are_opened_as_the_user_and_resolve_to_a_local_final_path() {
+        let vars = HashMap::new();
+        let token = current_process_token();
+        let env = UserEnv::for_user(&vars, &token).expect("prepare user lookups");
+        let exe = std::env::current_exe().expect("current exe");
+
+        let root = tempfile::tempdir().expect("create pin test directory");
+        let junction = root.path().join("bin-link");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(exe.parent().expect("exe parent"))
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("spawn mklink");
+        assert!(status.success(), "create junction");
+
+        let pinned = env
+            .pin_executable(&junction.join(exe.file_name().expect("exe file name")))
+            .expect("pin through a local junction");
+        assert_thread_not_impersonating();
+        let expected = crate::policy_security::final_path_from_handle(&File::open(&exe).expect("open exe"))
+            .expect("exe final path");
+        assert!(
+            crate::policy_security::windows_paths_equal(pinned.path(), &expected),
+            "pinned path {} must be the final path of the target",
+            pinned.path().display()
+        );
+        let error = OpenOptions::new()
+            .write(true)
+            .open(&exe)
+            .expect_err("a pinned executable cannot be opened for writing");
+        assert_eq!(error.raw_os_error(), Some(32), "{error}");
+
+        drop(pinned);
+        std::fs::remove_dir(&junction).expect("remove junction");
+    }
+
+    #[test]
+    fn pinning_rejects_non_local_paths_without_opening_them() {
+        let vars = HashMap::new();
+        let token = current_process_token();
+        let env = UserEnv::for_user(&vars, &token).expect("prepare user lookups");
+
+        for path in [
+            r"\\server\share\tool.exe",
+            r"\\?\UNC\server\share\tool.exe",
+            r"\\.\C:\Windows\System32\cmd.exe",
+        ] {
+            let error = env
+                .pin_executable(Path::new(path))
+                .expect_err("non-local paths must be rejected");
+            assert!(
+                format!("{error:#}").contains("not a plain local drive path"),
+                "{path}: {error:#}"
+            );
         }
         assert_thread_not_impersonating();
     }

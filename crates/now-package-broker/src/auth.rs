@@ -147,7 +147,7 @@ impl PipeClient {
         let (_image_address, mapped_executable_path) = process
             .main_image_mapped_path()
             .with_context(|| format!("failed to query pipe client process {process_id} mapped executable image"))?;
-        if !is_supported_local_image_path(&mapped_executable_path) {
+        if !crate::policy_security::is_local_volume_device_path(&mapped_executable_path) {
             bail!("pipe client process {process_id} mapped executable is not on a supported local volume");
         }
         let executable_file = Arc::new(open_native_executable_file(&mapped_executable_path).with_context(|| {
@@ -417,13 +417,6 @@ fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
     let mut global_root_path = OsString::from(r"\\?\GLOBALROOT");
     global_root_path.push(native_path.as_os_str());
     open_executable_file(Path::new(&global_root_path))
-}
-
-/// Accept only local volume devices because remote providers cannot satisfy local
-/// trusted-writer and ancestor-pinning guarantees.
-fn is_supported_local_image_path(path: &Path) -> bool {
-    let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
-    path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
 }
 
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
@@ -789,10 +782,10 @@ mod tests {
 
     #[test]
     fn mapped_image_path_rejects_network_and_non_volume_devices() {
-        assert!(is_supported_local_image_path(Path::new(
+        assert!(crate::policy_security::is_local_volume_device_path(Path::new(
             r"\Device\HarddiskVolume3\Program Files\Devolutions\client.exe"
         )));
-        assert!(is_supported_local_image_path(Path::new(
+        assert!(crate::policy_security::is_local_volume_device_path(Path::new(
             r"\Device\Volume{01234567-89ab-cdef-0123-456789abcdef}\client.exe"
         )));
 
@@ -803,7 +796,10 @@ mod tests {
             r"\??\UNC\server\share\client.exe",
             r"\\server\share\client.exe",
         ] {
-            assert!(!is_supported_local_image_path(Path::new(path)), "{path}");
+            assert!(
+                !crate::policy_security::is_local_volume_device_path(Path::new(path)),
+                "{path}"
+            );
         }
     }
 

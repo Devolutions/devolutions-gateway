@@ -1079,7 +1079,11 @@ fn resolve_trusted_chocolatey_executable(
         );
     }
 
-    let guard = policy_security::verify_elevated_executable_security(&executable, requires_elevation)?;
+    let opener: &dyn policy_security::PathOpener = match user_env {
+        Some(env) => env,
+        None => &policy_security::ServiceOpener,
+    };
+    let guard = policy_security::verify_elevated_executable_security(opener, &executable, requires_elevation)?;
     let executable = guard.as_ref().map_or(executable, |g| g.path().to_owned());
 
     Ok((executable, install_root, guard))
@@ -1104,7 +1108,7 @@ fn resolve_winget_executable(
         let candidate = PathBuf::from(dir).join("winget.exe");
         if is_trusted_winget_path(&candidate, env) && env.exists(&candidate) {
             // Trust verification of the resolved path runs as the broker service account.
-            let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
+            let guard = policy_security::verify_elevated_executable_security(env, &candidate, requires_elevation)?;
             let candidate = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
             return Ok((candidate, guard));
         }

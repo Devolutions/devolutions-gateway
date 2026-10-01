@@ -57,7 +57,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
     FILE_WRITE_EA, FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
+    GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, VOLUME_NAME_NT, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -205,6 +205,13 @@ pub(crate) fn verify_policy_file_path(file: &File, path: &Path) -> anyhow::Resul
 /// Compare Windows paths using the operating system's ordinal case folding.
 pub(crate) fn windows_paths_equal(left: &Path, right: &Path) -> bool {
     os_strings_match_case_insensitive(left.as_os_str(), right.as_os_str())
+}
+
+/// Accept only local volume devices because remote providers cannot satisfy local
+/// trusted-writer and ancestor-pinning guarantees.
+pub(crate) fn is_local_volume_device_path(path: &Path) -> bool {
+    let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
+    path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
 }
 
 /// Accepts only plain drive-letter paths such as `C:\dir\client.exe`.
@@ -571,11 +578,12 @@ pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
     Ok(info.NumberOfLinks)
 }
 
-/// A package-manager executable that was verified for elevated execution.
+/// A package-manager executable pinned at its final local path, and verified when it runs elevated.
 ///
-/// The held file handle was opened without write or delete sharing, so the verified file
-/// object cannot be written, deleted, or renamed while the guard is alive. Callers must
-/// execute [`VerifiedExecutable::path()`] (the final path resolved from the verified
+/// The held file handle was opened without write or delete sharing, so the file object
+/// cannot be written, deleted, or renamed, and none of its ancestor directories can be
+/// renamed, while the guard is alive. Callers must
+/// execute [`VerifiedExecutable::path()`] (the final path resolved from the pinned
 /// handle) and keep the guard alive until the spawned process — or the script embedding
 /// the path — has finished running, closing the TOCTOU window between verification and
 /// image load.
@@ -583,6 +591,71 @@ pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
 pub(crate) struct VerifiedExecutable {
     _file: File,
     path: PathBuf,
+}
+
+/// Opens filesystem paths on behalf of the broker.
+///
+/// Paths derived from a user environment must be opened with that user's identity and
+/// device map, so that the service account never resolves them itself.
+pub(crate) trait PathOpener {
+    fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File>;
+}
+
+/// Opens paths as the broker service account.
+///
+/// Only for paths that are not derived from a user environment.
+pub(crate) struct ServiceOpener;
+
+impl PathOpener for ServiceOpener {
+    fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File> {
+        options.open(path)
+    }
+}
+
+/// Pin the executable at `path` and return its final local path.
+///
+/// The file is opened through `opener` without write or delete sharing, which also keeps
+/// every ancestor directory from being renamed while the guard is alive. The final path
+/// must be on a local disk volume and have a drive letter, so the broker can later open it
+/// as the service account without being redirected.
+pub(crate) fn pin_executable(
+    opener: &dyn PathOpener,
+    path: &Path,
+    subject: &str,
+) -> anyhow::Result<VerifiedExecutable> {
+    let mut options = OpenOptions::new();
+    options.read(true).share_mode(FILE_SHARE_READ.0);
+    let file = opener
+        .open(&options, path)
+        .with_context(|| format!("failed to open {subject}"))?;
+
+    let final_path = verify_local_final_path(&file).with_context(|| format!("failed to pin {subject}"))?;
+
+    Ok(VerifiedExecutable {
+        _file: file,
+        path: final_path,
+    })
+}
+
+/// Return the final drive-letter path of `file`, requiring it to be on a local disk volume.
+fn verify_local_final_path(file: &File) -> anyhow::Result<PathBuf> {
+    let handle = HANDLE(file.as_raw_handle());
+    let device_path = final_path_name(
+        handle,
+        GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_NT.0),
+    )
+    .context("GetFinalPathNameByHandleW failed for the device path")?;
+    let device_path = PathBuf::from(OsString::from_wide(&device_path));
+    if !is_local_volume_device_path(&device_path) {
+        bail!("file is not on a local disk volume: '{}'", device_path.display());
+    }
+
+    let final_path = final_path_from_handle(file)?;
+    if !final_path.to_str().is_some_and(is_plain_local_drive_path) {
+        bail!("file has no plain local drive path: '{}'", final_path.display());
+    }
+
+    Ok(final_path)
 }
 
 impl VerifiedExecutable {
@@ -655,7 +728,12 @@ pub(crate) fn verify_retained_executable_security(
 /// - Every ancestor directory of the final path (resolved from the verified handle) must
 ///   not allow untrusted principals to rename or delete path components, so the name used
 ///   for execution cannot be redirected to a different file.
+///
+/// `opener` performs the initial opens of `path` and of an alias target, so that a
+/// user-derived path is never resolved by the service account. Later checks only use the
+/// pinned handle and its final local path.
 pub(crate) fn verify_elevated_executable_security(
+    opener: &dyn PathOpener,
     path: &Path,
     requires_elevation: bool,
 ) -> anyhow::Result<Option<VerifiedExecutable>> {
@@ -672,7 +750,7 @@ pub(crate) fn verify_elevated_executable_security(
     // The alias reparse data lives in a user-writable location, so its content is
     // untrusted: the target is only substituted after `validate_app_exec_alias` has bound
     // it to the executable and package family expected for the alias (fail closed).
-    let alias_target = match resolve_app_exec_alias(path) {
+    let alias_target = match resolve_app_exec_alias(opener, path) {
         Some(alias) => Some(validate_app_exec_alias(path, alias)?),
         None => None,
     };
@@ -681,17 +759,11 @@ pub(crate) fn verify_elevated_executable_security(
 
     // Share only read access: while this handle is alive the file cannot be opened for
     // write or delete (rename), and this open fails if such a handle already exists.
-    let file = OpenOptions::new()
-        .read(true)
-        .share_mode(FILE_SHARE_READ.0)
-        .open(path)
-        .with_context(|| format!("failed to open {subject}"))?;
-
-    // Resolve the path from the handle itself: if `path` traversed a reparse point
-    // (symlink, junction, ...), this yields the real target, which is the very object
-    // pinned by the guard handle.
-    let final_path =
-        final_path_from_handle(&file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+    // The final path resolved from the handle is the very object pinned by the guard.
+    let VerifiedExecutable {
+        _file: file,
+        path: final_path,
+    } = pin_executable(opener, path, &subject)?;
 
     verify_handle_security(
         &file,
@@ -715,6 +787,30 @@ pub(crate) fn verify_elevated_executable_security(
     }))
 }
 
+/// Pin an executable the broker launches directly, verifying it when it runs elevated.
+///
+/// App execution aliases are resolved and validated first, because they cannot be opened
+/// for read. The returned guard must stay alive until the process has been created.
+pub(crate) fn pin_launch_executable(
+    opener: &dyn PathOpener,
+    path: &Path,
+    requires_elevation: bool,
+) -> anyhow::Result<VerifiedExecutable> {
+    if let Some(verified) = verify_elevated_executable_security(opener, path, requires_elevation)? {
+        return Ok(verified);
+    }
+
+    let target = match resolve_app_exec_alias(opener, path) {
+        Some(alias) => validate_app_exec_alias(path, alias)?,
+        None => path.to_owned(),
+    };
+    pin_executable(
+        opener,
+        &target,
+        &format!("package-manager executable '{}'", target.display()),
+    )
+}
+
 /// A parsed Microsoft Store app execution alias.
 #[derive(Debug, PartialEq, Eq)]
 struct AppExecAlias {
@@ -730,16 +826,16 @@ struct AppExecAlias {
 /// Returns `None` when `path` is not an `IO_REPARSE_TAG_APPEXECLINK` reparse point
 /// (including when it cannot be opened at all; the caller's regular open then reports
 /// the actual error).
-fn resolve_app_exec_alias(path: &Path) -> Option<AppExecAlias> {
+fn resolve_app_exec_alias(opener: &dyn PathOpener, path: &Path) -> Option<AppExecAlias> {
     use windows::Win32::System::IO::DeviceIoControl;
     use windows::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
 
-    let link = OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
         .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0 | FILE_FLAG_BACKUP_SEMANTICS.0)
-        .open(path)
-        .ok()?;
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0 | FILE_FLAG_BACKUP_SEMANTICS.0);
+    let link = opener.open(&options, path).ok()?;
 
     let mut buffer = vec![0u8; MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
     let mut returned = 0u32;
@@ -1268,6 +1364,59 @@ mod tests {
     }
 
     #[test]
+    fn pinning_rejects_objects_outside_local_disk_volumes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        let pipe_name = format!(r"\\.\pipe\now-package-broker-pin-test-{}", std::process::id());
+        let _server = runtime.block_on(async {
+            tokio::net::windows::named_pipe::ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&pipe_name)
+                .expect("create pipe")
+        });
+
+        let error = pin_executable(&ServiceOpener, Path::new(&pipe_name), "test object")
+            .expect_err("objects outside local disk volumes must fail closed");
+        assert!(
+            format!("{error:#}").contains("failed to pin test object"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn local_volume_device_paths_are_classified() {
+        assert!(is_local_volume_device_path(Path::new(
+            r"\Device\HarddiskVolume3\tools\a.exe"
+        )));
+        assert!(is_local_volume_device_path(Path::new(
+            r"\Device\Volume{01234567-89ab-cdef-0123-456789abcdef}\a.exe"
+        )));
+        for path in [
+            r"\Device\Mup\server\share\a.exe",
+            r"\Device\LanmanRedirector\server\share\a.exe",
+            r"\Device\WebDavRedirector\server\share\a.exe",
+            r"\Device\NamedPipe\pipe",
+            r"\Device\CdRom0\a.exe",
+        ] {
+            assert!(!is_local_volume_device_path(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn pinning_returns_the_local_final_path() {
+        let executable = std::env::current_exe().expect("current executable");
+        let pinned = pin_executable(&ServiceOpener, &executable, "test executable").expect("pin current executable");
+        assert!(pinned.path().to_str().is_some_and(is_plain_local_drive_path));
+        assert!(windows_paths_equal(
+            pinned.path(),
+            &final_path_from_handle(&File::open(&executable).expect("open current executable"))
+                .expect("resolve current executable path")
+        ));
+    }
+
+    #[test]
     fn final_path_resolves_current_executable_on_mounted_volume() {
         let executable = std::env::current_exe().expect("current executable");
         let file = File::open(&executable).expect("open current executable");
@@ -1712,7 +1861,7 @@ mod tests {
     #[test]
     fn regular_file_is_not_an_app_exec_alias() {
         let exe = std::env::current_exe().expect("current exe");
-        assert!(resolve_app_exec_alias(&exe).is_none());
+        assert!(resolve_app_exec_alias(&ServiceOpener, &exe).is_none());
     }
 
     #[test]
@@ -1726,7 +1875,7 @@ mod tests {
             return;
         }
 
-        let alias = resolve_app_exec_alias(&alias_path).expect("winget alias must resolve");
+        let alias = resolve_app_exec_alias(&ServiceOpener, &alias_path).expect("winget alias must resolve");
         assert!(alias.target.is_absolute());
         assert!(
             alias
@@ -1750,10 +1899,10 @@ mod tests {
         if !alias.exists() {
             return;
         }
-        let resolved = resolve_app_exec_alias(&alias).expect("winget alias must resolve");
+        let resolved = resolve_app_exec_alias(&ServiceOpener, &alias).expect("winget alias must resolve");
         let resolved_target = resolved.target.display().to_string();
 
-        match verify_elevated_executable_security(&alias, true) {
+        match verify_elevated_executable_security(&ServiceOpener, &alias, true) {
             Ok(guard) => {
                 let guard = guard.expect("a guard must be produced for elevated execution");
                 assert_ne!(guard.path(), alias);
@@ -2116,7 +2265,7 @@ mod tests {
         let everyone = Sid::from_well_known(WinWorldSid, None).unwrap();
         set_security(&exe, None, &[grant(GENERIC_ALL.0, everyone)]).unwrap();
 
-        let error = verify_elevated_executable_security(&exe, true).unwrap_err();
+        let error = verify_elevated_executable_security(&ServiceOpener, &exe, true).unwrap_err();
         assert!(
             error.to_string().contains("elevated package-manager executable"),
             "unexpected error: {error}"
@@ -2128,7 +2277,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("does-not-exist.exe");
 
-        let error = verify_elevated_executable_security(&missing, true).unwrap_err();
+        let error = verify_elevated_executable_security(&ServiceOpener, &missing, true).unwrap_err();
         assert!(
             error.to_string().contains("failed to open"),
             "unexpected error: {error}"
@@ -2141,7 +2290,7 @@ mod tests {
         let exe = temp_dir.path().join("fake.exe");
         std::fs::write(&exe, b"").unwrap();
 
-        let guard = verify_elevated_executable_security(&exe, false).unwrap();
+        let guard = verify_elevated_executable_security(&ServiceOpener, &exe, false).unwrap();
         assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
@@ -2153,7 +2302,7 @@ mod tests {
         let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         let cmd = Path::new(&system_root).join("System32").join("cmd.exe");
 
-        let guard = verify_elevated_executable_security(&cmd, true)
+        let guard = verify_elevated_executable_security(&ServiceOpener, &cmd, true)
             .expect("a protected System32 executable must be accepted")
             .expect("a guard must be produced for elevated executions");
 
