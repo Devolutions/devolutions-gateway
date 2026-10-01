@@ -61,9 +61,16 @@ pub(super) fn package_identifiers_match(
 /// Bun protocols other than `npm:` (`github:`, `file:`), and any embedded name that is not a
 /// registry name (`name` or `@scope/name`).
 fn has_unknown_identity(manager: ManagerName, identifier: &str) -> bool {
-    let is_registry_name = |name: &str| match name.strip_prefix('@') {
-        Some(scoped) => scoped.split('/').count() == 2,
-        None => !name.contains('/'),
+    // npm registry names are `name` or `@scope/name` and cannot start with `.` or `_`.
+    let is_registry_name = |name: &str| {
+        let (scope_is_valid, base) = match name.strip_prefix('@') {
+            Some(scoped) => match scoped.split_once('/') {
+                Some((scope, base)) => (!scope.is_empty(), base),
+                None => (false, scoped),
+            },
+            None => (true, name),
+        };
+        scope_is_valid && !base.is_empty() && !base.contains('/') && !base.starts_with(['.', '_'])
     };
 
     match manager {
@@ -387,6 +394,12 @@ mod tests {
             (ManagerName::Bun, "github:owner/repo"),
             (ManagerName::Bun, "file:../local"),
             (ManagerName::Bun, "alias@github:owner/repo"),
+            (ManagerName::Npm, "."),
+            (ManagerName::Npm, ".."),
+            (ManagerName::Bun, ".."),
+            (ManagerName::Npm, "_private"),
+            (ManagerName::Npm, "@/pkg"),
+            (ManagerName::Npm, "@scope/.hidden"),
         ];
         for (manager, value) in unknown {
             assert!(has_unknown_identity(manager, value), "{value}");
