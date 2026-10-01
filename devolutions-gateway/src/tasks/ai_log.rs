@@ -60,7 +60,7 @@ impl TaskKind for AiLogTask {
             return Err(TaskError::Permanent(SECRETS_LOST_ERROR.to_owned()));
         };
 
-        let _client = ctx.params.client(api_key, &ctx.state)?;
+        let _client = ctx.params.client(&ctx.state, api_key)?;
 
         Err(TaskError::Permanent("ai-log task not implemented yet".to_owned()))
     }
@@ -71,9 +71,9 @@ impl EphemeralTask for AiLogTask {
     type Request = AiLogParams;
 
     fn prepare(
+        state: &DgwState,
         target: &AiLogTarget,
         request: AiLogParams,
-        state: &DgwState,
     ) -> Result<(AiSettings, SecretString), TaskErrorCode> {
         if state.recordings.active_recordings.contains(target.session_id) {
             return Err(TaskErrorCode::RecordingActive);
@@ -94,7 +94,7 @@ impl EphemeralTask for AiLogTask {
             max_output_tokens,
         };
 
-        settings.check(&api_key, state)?;
+        settings.check(state, &api_key)?;
 
         Ok((settings, api_key))
     }
@@ -135,7 +135,7 @@ mod tests {
         let target = target();
         state.recordings.active_recordings.insert(target.session_id);
 
-        let error = AiLogTask::prepare(&target, params(), &state).expect_err("session is busy");
+        let error = AiLogTask::prepare(&state, &target, params()).expect_err("session is busy");
 
         assert_eq!(error, TaskErrorCode::RecordingActive);
     }
@@ -147,7 +147,7 @@ mod tests {
         let params = params();
         assert!(!format!("{params:?}").contains(API_KEY));
 
-        let (settings, api_key) = AiLogTask::prepare(&target(), params, &state).expect("valid task");
+        let (settings, api_key) = AiLogTask::prepare(&state, &target(), params).expect("valid task");
 
         let persisted = serde_json::to_string(&settings).expect("serializable settings");
         assert_eq!(
@@ -164,7 +164,7 @@ mod tests {
         let mut params = params();
         params.model = " ".to_owned();
 
-        let error = AiLogTask::prepare(&target(), params, &state).expect_err("empty model");
+        let error = AiLogTask::prepare(&state, &target(), params).expect_err("empty model");
 
         assert_eq!(error, TaskErrorCode::MissingModel);
     }

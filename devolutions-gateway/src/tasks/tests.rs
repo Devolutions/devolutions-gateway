@@ -55,7 +55,7 @@ impl<const N: u32> TaskKind for Scripted<N> {
 }
 
 impl<const N: u32> DurableTask for Scripted<N> {
-    fn prepare(_: &(), _: &Outcome, _: &DgwState) -> Result<(), TaskErrorCode> {
+    fn prepare(_: &DgwState, _: &(), _: &Outcome) -> Result<(), TaskErrorCode> {
         Ok(())
     }
 }
@@ -93,7 +93,7 @@ impl TaskKind for LosesStore {
 }
 
 impl DurableTask for LosesStore {
-    fn prepare(_: &String, _: &Outcome, _: &DgwState) -> Result<(), TaskErrorCode> {
+    fn prepare(_: &DgwState, _: &String, _: &Outcome) -> Result<(), TaskErrorCode> {
         Ok(())
     }
 }
@@ -153,7 +153,7 @@ impl Harness {
 
         let snapshot = self
             .tasks
-            .start_durable::<Scripted<N>>((), &body, Uuid::new_v4(), &self.state)
+            .start_durable::<Scripted<N>>(&self.state, (), &body, Uuid::new_v4())
             .await
             .expect("task starts");
 
@@ -162,7 +162,7 @@ impl Harness {
 
     async fn run_scripted<const N: u32>(&self, job: &TaskJob) -> anyhow::Result<()> {
         self.tasks
-            .execute_durable::<Scripted<N>>(job.def.clone(), &self.state)
+            .execute_durable::<Scripted<N>>(&self.state, job.def.clone())
             .await
     }
 
@@ -173,7 +173,7 @@ impl Harness {
         };
 
         self.tasks
-            .start_ephemeral::<AiLogTask>(target, body.as_bytes(), Uuid::new_v4(), &self.state)
+            .start_ephemeral::<AiLogTask>(&self.state, target, body.as_bytes(), Uuid::new_v4())
             .await
             .expect("task starts")
     }
@@ -330,14 +330,14 @@ async fn final_state_is_not_run_again_when_its_record_cannot_be_written() {
 
         let snapshot = harness
             .tasks
-            .start_durable::<LosesStore>(harness.db_path.clone(), &body, Uuid::new_v4(), &harness.state)
+            .start_durable::<LosesStore>(&harness.state, harness.db_path.clone(), &body, Uuid::new_v4())
             .await
             .expect("task starts");
         let job = harness.queued_job(snapshot.id).await;
 
         harness
             .tasks
-            .execute_durable::<LosesStore>(job.def.clone(), &harness.state)
+            .execute_durable::<LosesStore>(&harness.state, job.def.clone())
             .await
             .unwrap_or_else(|error| panic!("{outcome:?} run is retried: {error:#}"));
     }
