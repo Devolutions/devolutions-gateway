@@ -54,3 +54,8 @@ workspace = true
 name = "vpx_reencode"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "stream_session"
+harness = false
+required-features = ["bench"]

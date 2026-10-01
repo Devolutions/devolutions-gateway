@@ -23,11 +23,7 @@ where
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        let result = tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(&mut self.writer), cx, buf);
-        if matches!(&result, Poll::Ready(Ok(written)) if *written > 0) {
-            self.notify.notify_one();
-        }
-        result
+        tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(&mut self.writer), cx, buf)
     }
 
     fn poll_flush(
@@ -38,7 +34,7 @@ where
             return Poll::Pending;
         };
 
-        self.notify.notify_one();
+        self.notify.notify_waiters();
         Poll::Ready(res)
     }
 

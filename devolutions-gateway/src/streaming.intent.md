@@ -9,6 +9,7 @@ This includes:
 - streamability decisions
 - streaming implementation selection
 - terminal input-format selection
+
 They do not define the following:
 
 - JREC push behaviour
@@ -28,13 +29,15 @@ Only WebM, asciicast, and TRP recording artifacts are accepted by the `/shadow` 
 | `TRP` | `.trp` | Terminal streaming using TRP input |
 | `SessionRecordingLog` | `.slog` | Explicitly rejected by the `/shadow` streaming path |
 
-- A recognised`RecordingFileType` is not automatically supported by `/shadow` streaming. Each recognised recording file type must have explicitly defined behaviour for the `/shadow` streaming path.
-- Files with missing or unrecognised extensions must be rejected before WebSocket streaming begins.
+- A recognised `RecordingFileType` is not automatically supported by `/shadow` streaming.
+- Each recognised recording file type must have explicitly defined behaviour for the `/shadow` streaming path.
+- Files with missing or unrecognised extensions must be rejected before WebSocket streaming begins, with close code 4002.
 
 ## Architectural invariants
 
 - Recording artifact streaming must use the canonical `RecordingFileType` extension mapping as its source of truth.
-- A recording file must be classified once. The resulting `RecordingFileType` must determine:
+- A recording file must be classified once.
+- The resulting `RecordingFileType` must determine:
     - if the artifact is supported by the `/shadow` streaming path
     - which streaming implementation is used (when applicable)
     - which terminal input format is used (when applicable)
@@ -42,7 +45,27 @@ Only WebM, asciicast, and TRP recording artifacts are accepted by the `/shadow` 
 - Streaming validation, streamer selection, and terminal input selection must not maintain separate extension mappings or independently compare known recording extensions as raw strings.
 - Adding a new `RecordingFileType` requires an explicit decision about whether it is supported by the `/shadow` streaming path and, if supported, how it is streamed.
 - A new or unsupported recording file type must not silently fall back to an existing streaming implementation or terminal input format.
+
+## Close codes
+
+Gateway accepts the upgrade and closes it with a code when it can’t stream:
+
+| Code | When |
+| --- | --- |
+| 4001 | The recording is not running, has ended, or (terminal recordings only) has no clip receiving data |
+| 4002 | Gateway can’t stream it: the recording manager is unavailable, the XMF library is not loaded, or the last clip can’t be streamed |
+| 4003 | The token is for another session |
+| 1011 | A WebM stream failed after it started (it may be preceded by an `Error` message) |
+
+- Gateway must subscribe to the recording once and decide from that single view, so that the outcome does not depend on timing.
+
+## Terminal recordings
+
+- A terminal viewer follows the last clip only, so it must be rejected with 4001 when the producer is disconnected.
+- The terminal stream replays the clip, follows its new data, and closes with 1000 when the clip ends or Gateway shuts down.
+
 ## Component boundaries
+
 JREC artifact handling, storage, download content types, and consumer-side rendering are outside the scope of this document.
 
 
@@ -110,6 +133,7 @@ Client 2:                              +[===============][^^^^^^^^^^^^^^^^]
 ```
 
 - Each client must begin at its own live edge.
+- A client that joins while the producer is disconnected must wait for the next input clip and start at its beginning.
 - Each output segment must contain exactly one frame size.
 - RDM input clip boundaries and browser frame-size changes must produce the same output shape.
 - Each client must have its own output segment sequence, starting at zero.
@@ -169,3 +193,9 @@ Pull  -> StreamEnded    (only after the session ended and the last output segmen
 - A v1 stream ends at the first segment boundary, so a v1 viewer gets `StreamEnded` when the source disconnects or the frame size changes.
 - Before shadow protocol v2, a browser source that changed its frame size made Gateway close the stream with 1011, so ending a v1 stream at that boundary is an improvement for v1 viewers.
 - Each output segment is a complete WebM document, so a v2 client must start a new decoder pipeline on `SegmentStarted`.
+
+### Session end
+
+- A recording session ends when its producer stays disconnected for the whole reconnect window of its push token (`jet_reuse`), or right away when the token does not allow reconnection.
+- Viewers must learn about the end at that moment, not after the extra time Gateway keeps the recording to accept a late reconnection.
+- A reconnection that switches the recording to a non-WebM format must end the WebM stream with `StreamEnded` instead of failing it.

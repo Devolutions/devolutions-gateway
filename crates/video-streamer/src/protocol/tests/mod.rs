@@ -15,7 +15,7 @@ use super::segments::SessionSegments;
 use super::transport::CodecTransport;
 use super::*;
 use crate::normalizer::{SegmentEvent, SegmentInfo};
-use crate::session::{RecordingEvent, RecordingSource, ShadowProtocolVersion};
+use crate::session::{RecordingEvent, ShadowProtocolVersion};
 
 struct ChannelTransport {
     incoming: mpsc::UnboundedReceiver<Result<Bytes, std::io::Error>>,
@@ -81,29 +81,16 @@ async fn receive_response(receiver: &mut mpsc::UnboundedReceiver<Bytes>) -> Byte
         .expect("server response channel closed")
 }
 
-struct TestRecordingSource<F>(F);
-
-fn recording_source<F>(start: F) -> TestRecordingSource<F> {
-    TestRecordingSource(start)
+/// Keeps the test sources readable: a source is the closure that starts it.
+fn recording_source<F>(start: F) -> F {
+    start
 }
 
-impl<F, Fut, S> RecordingSource for TestRecordingSource<F>
+fn spawn_v2_session<F, Fut, S>(transport: ChannelTransport, source: F) -> tokio::task::JoinHandle<anyhow::Result<()>>
 where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<S>> + Send + 'static,
     S: Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static,
-{
-    type Stream = S;
-    type Start = Fut;
-
-    fn start(self) -> Self::Start {
-        self.0()
-    }
-}
-
-fn spawn_v2_session<S>(transport: ChannelTransport, source: S) -> tokio::task::JoinHandle<anyhow::Result<()>>
-where
-    S: RecordingSource,
 {
     tokio::spawn(stream_segments(
         transport,
@@ -136,7 +123,7 @@ where
     E: Error + Send + Sync + 'static,
     S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
 {
-    let mut transport = SessionTransport::new(CodecTransport::new(transport));
+    let mut transport = CodecTransport::new(transport);
     let mut segments = SessionSegments::new(crate::normalizer::test_session(source), version);
     receive_expected_request(&mut transport, ClientMessage::Start)
         .await?
@@ -601,7 +588,7 @@ fn client_messages_require_one_complete_transport_message() {
 #[tokio::test]
 async fn transport_adapts_typed_messages_at_the_wire_boundary() {
     let (transport, client_sender, mut client_receiver) = channel_transport();
-    let mut transport = SessionTransport::new(CodecTransport::new(transport));
+    let mut transport = CodecTransport::new(transport);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     assert_eq!(

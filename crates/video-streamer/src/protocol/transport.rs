@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use bytes::Bytes;
-use futures_util::{Sink, SinkExt as _, Stream, StreamExt as _};
+use futures_util::{Sink, SinkExt, Stream, StreamExt as _};
 
 use super::message::{ClientMessage, ServerMessage, UserFriendlyError, decode_client_message, encode_server_message};
 
@@ -14,6 +14,7 @@ pub(super) enum ReceiveError<E> {
     Decode(anyhow::Error),
 }
 
+/// Decodes client requests from, and encodes server responses to, a byte-message transport.
 pub(super) struct CodecTransport<T> {
     inner: T,
 }
@@ -21,6 +22,29 @@ pub(super) struct CodecTransport<T> {
 impl<T> CodecTransport<T> {
     pub(super) fn new(inner: T) -> Self {
         Self { inner }
+    }
+}
+
+impl<T, E> CodecTransport<T>
+where
+    T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
+    E: Error + Send + Sync + 'static,
+{
+    pub(super) async fn recv(&mut self) -> Option<Result<ClientMessage, ReceiveError<E>>> {
+        self.next().await
+    }
+
+    pub(super) async fn send(&mut self, message: ServerMessage) -> anyhow::Result<()> {
+        SinkExt::send(self, message)
+            .await
+            .map_err(anyhow::Error::new)
+            .context("write server stream message")
+    }
+
+    pub(super) async fn reject(&mut self) {
+        let _ = self
+            .send(ServerMessage::Error(UserFriendlyError::UnexpectedError))
+            .await;
     }
 }
 
@@ -62,45 +86,5 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_close(cx)
-    }
-}
-
-pub(super) struct SessionTransport<T> {
-    inner: T,
-}
-
-impl<T> SessionTransport<T> {
-    pub(super) fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-impl<T, E> SessionTransport<T>
-where
-    T: Stream<Item = Result<ClientMessage, ReceiveError<E>>> + Unpin,
-    E: Error + Send + Sync + 'static,
-{
-    pub(super) async fn recv(&mut self) -> Option<Result<ClientMessage, ReceiveError<E>>> {
-        self.inner.next().await
-    }
-}
-
-impl<T, E> SessionTransport<T>
-where
-    T: Sink<ServerMessage, Error = E> + Unpin,
-    E: Error + Send + Sync + 'static,
-{
-    pub(super) async fn send(&mut self, message: ServerMessage) -> anyhow::Result<()> {
-        self.inner
-            .send(message)
-            .await
-            .map_err(anyhow::Error::new)
-            .context("write server stream message")
-    }
-
-    pub(super) async fn reject(&mut self) {
-        let _ = self
-            .send(ServerMessage::Error(UserFriendlyError::UnexpectedError))
-            .await;
     }
 }

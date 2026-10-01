@@ -23,7 +23,6 @@ macro_rules! perf_debug {
     ($($tt:tt)*) => {};
 }
 
-pub mod config;
 pub mod debug;
 mod decoder;
 mod normalizer;
@@ -36,8 +35,6 @@ pub(crate) mod streamer;
 extern crate tracing;
 
 #[rustfmt::skip]
-pub use config::StreamingConfig;
-#[rustfmt::skip]
 pub use streamer::reopenable_file::ReOpenableFile;
 #[rustfmt::skip]
 pub use streamer::signal_writer::SignalWriter;
@@ -45,7 +42,7 @@ pub use streamer::signal_writer::SignalWriter;
 pub use streamer::webm_stream;
 #[rustfmt::skip]
 pub use session::{
-    RecordingClip, RecordingEvent, RecordingSource, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
     stream_session,
 };
 

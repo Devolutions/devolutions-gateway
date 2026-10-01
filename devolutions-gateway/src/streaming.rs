@@ -1,10 +1,7 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use axum::body::Body;
 use axum::extract::ws::{CloseFrame, Utf8Bytes, WebSocket};
 use axum::response::Response;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal};
@@ -14,45 +11,89 @@ use tokio::fs::{File, OpenOptions};
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 use video_streamer::{
-    RecordingClip, RecordingEvent, RecordingSource, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
-    stream_session,
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt, stream_session,
 };
 
-use crate::recording::{RecordingMessageSender, RecordingStreamState};
+use crate::recording::{RecordingStreamState, StreamLifecycle};
 use crate::token::RecordingFileType;
 
-pub(crate) async fn stream_recording(
+/// WebSocket close codes of the `/shadow` endpoint.
+///
+/// Codes from 4000 to 4999 are reserved for private use: <https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code>.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ShadowCloseCode {
+    /// The recording is not running, or it ended.
+    StreamingEnded = 4001,
+    InternalError = 4002,
+    Forbidden = 4003,
+}
+
+/// Accepts the upgrade only to close it with `code`, so that the client sees why it was rejected.
+pub(crate) fn reject_shadow(ws: axum::extract::WebSocketUpgrade, code: ShadowCloseCode) -> Response {
+    // Echo an offered shadow protocol so that browsers open the socket and see the close code.
+    let (ws, _) = negotiate_shadow_protocol(ws);
+    ws.on_upgrade(move |mut socket| async move {
+        let _ = socket
+            .send(axum::extract::ws::Message::Close(Some(CloseFrame {
+                code: code as u16,
+                reason: Utf8Bytes::from_static(""),
+            })))
+            .await;
+    })
+}
+
+/// Streams the recording that `stream_state` describes, or closes the upgrade with the reason it can’t.
+pub(crate) fn stream_recording(
     ws: axum::extract::WebSocketUpgrade,
     shutdown_signal: ShutdownSignal,
-    recordings: RecordingMessageSender,
+    stream_state: watch::Receiver<RecordingStreamState>,
     recording_id: Uuid,
-) -> anyhow::Result<Response<Body>> {
-    let stream_state = recordings.subscribe_to_stream(recording_id).await?;
-    let (path, clip_sequence) = {
+) -> Response {
+    let (path, index, lifecycle) = {
         let state = stream_state.borrow();
-        let clip = state.clips.last().context("recording has no clips")?;
-        (clip.path.clone(), clip.sequence)
+        (
+            state.clips.last().cloned(),
+            state.clips.len().saturating_sub(1),
+            state.lifecycle,
+        )
     };
-    let streaming_type = validate_streaming_file(&path).await?;
-    let upgrade_result = match streaming_type {
+
+    if lifecycle == StreamLifecycle::Ended {
+        return reject_shadow(ws, ShadowCloseCode::StreamingEnded);
+    }
+
+    let Some(path) = path else {
+        warn!(%recording_id, "Shadow recording rejected: no recording files found");
+        return reject_shadow(ws, ShadowCloseCode::InternalError);
+    };
+
+    let streaming_type = match validate_streaming_file(&path) {
+        Ok(streaming_type) => streaming_type,
+        Err(error) => {
+            warn!(%recording_id, %error, "Shadow recording rejected: the recording can’t be streamed");
+            return reject_shadow(ws, ShadowCloseCode::InternalError);
+        }
+    };
+
+    match streaming_type {
         StreamingType::Terminal(input_type) => {
-            let when_new_chunk_appended = move || {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                recordings.add_new_chunk_listener(recording_id, tx);
-                rx
-            };
-            let path = Arc::new(path);
+            // A terminal viewer follows one clip only, so a disconnected recording has nothing live to show.
+            if !stream_state.borrow().is_active(index) {
+                return reject_shadow(ws, ShadowCloseCode::StreamingEnded);
+            }
+
             ws.on_upgrade(move |socket| async move {
                 let shutdown_notify = Arc::new(Notify::new());
                 let notify = Arc::clone(&shutdown_notify);
+                let data_appended = stream_state.clone();
                 let _shutdown_bridge = ChildTask::spawn(async move {
-                    wait_for_terminal_stream_end(stream_state, clip_sequence, shutdown_signal).await;
+                    wait_for_terminal_stream_end(stream_state, index, shutdown_signal).await;
                     notify.notify_one();
                 });
-                if let Err(e) =
-                    setup_terminal_streaming(&path, input_type, socket, shutdown_notify, when_new_chunk_appended).await
+                if let Err(error) =
+                    setup_terminal_streaming(&path, input_type, socket, shutdown_notify, data_appended).await
                 {
-                    error!(error = ?e, "Terminal streaming failed");
+                    error!(error = format!("{error:#}"), "Terminal streaming failed");
                 }
             })
         }
@@ -60,14 +101,12 @@ pub(crate) async fn stream_recording(
             let (ws, version) = negotiate_shadow_protocol(ws);
             debug!(%recording_id, ?version, "Negotiated shadow protocol");
             ws.on_upgrade(move |socket| async move {
-                if let Err(e) = setup_webm_streaming(stream_state, socket, shutdown_signal, version).await {
-                    error!(error = ?e, "WebM streaming failed");
+                if let Err(error) = setup_webm_streaming(stream_state, socket, shutdown_signal, version).await {
+                    error!(error = format!("{error:#}"), "WebM streaming failed");
                 }
             })
         }
-    };
-
-    Ok(upgrade_result)
+    }
 }
 
 /// Selects shadow protocol V2 when the client offers its WebSocket subprotocol, and V1 otherwise.
@@ -114,7 +153,7 @@ enum StreamingType {
 
 /// Determines streamability from recording type, which is stricter than pull MIME handling.
 /// A file may be downloadable but still rejected here when there is no streaming backend.
-async fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
+fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
     let path_extension = path
         .extension()
         .context("no extension found in the recording file path")?;
@@ -139,7 +178,7 @@ async fn setup_terminal_streaming(
     input_type: terminal_streamer::InputStreamType,
     socket: WebSocket,
     shutdown_notify: Arc<Notify>,
-    when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()> + Send + 'static,
+    data_appended: watch::Receiver<RecordingStreamState>,
 ) -> anyhow::Result<()> {
     #[cfg(windows)]
     const FILE_SHARE_READ: u32 = 0x00000001;
@@ -164,7 +203,7 @@ async fn setup_terminal_streaming(
         streaming_file,
         shutdown_notify,
         input_type,
-        when_new_chunk_appended,
+        data_appended,
     )
     .await
     .inspect_err(|e| error!(error = format!("{e:#}"), "Streaming file failed"))?;
@@ -172,28 +211,18 @@ async fn setup_terminal_streaming(
     Ok(())
 }
 
-async fn wait_for_recording_clip_end(mut stream_state: watch::Receiver<RecordingStreamState>, clip_sequence: u64) {
-    loop {
-        if stream_state
-            .borrow()
-            .active
-            .is_none_or(|active| active.sequence != clip_sequence)
-        {
-            return;
-        }
-        if stream_state.changed().await.is_err() {
-            return;
-        }
-    }
+/// Returns once the clip at `index` can no longer receive data.
+async fn wait_for_recording_clip_end(mut stream_state: watch::Receiver<RecordingStreamState>, index: usize) {
+    let _ = stream_state.wait_for(|state| !state.is_active(index)).await;
 }
 
 async fn wait_for_terminal_stream_end(
     stream_state: watch::Receiver<RecordingStreamState>,
-    clip_sequence: u64,
+    index: usize,
     mut shutdown_signal: ShutdownSignal,
 ) {
     tokio::select! {
-        () = wait_for_recording_clip_end(stream_state, clip_sequence) => {}
+        () = wait_for_recording_clip_end(stream_state, index) => {}
         () = shutdown_signal.wait() => {}
     }
 }
@@ -204,15 +233,15 @@ async fn setup_webm_streaming(
     shutdown_signal: ShutdownSignal,
     version: ShadowProtocolVersion,
 ) -> anyhow::Result<()> {
-    let source = WebmRecordingSource { stream_state };
     let mut session_shutdown = shutdown_signal.clone();
     let (websocket_stream, close_handle) = crate::ws::handle_messages(
         socket,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(45),
     );
+    let start_source = move || async move { Ok(recording_event_stream(stream_state)) };
     let streaming_result = tokio::select! {
-        result = stream_session(source, websocket_stream, SessionConfig::default(), version) => result,
+        result = stream_session(start_source, websocket_stream, SessionConfig::default(), version) => result,
         () = session_shutdown.wait() => return Ok(()),
     };
 
@@ -229,24 +258,12 @@ async fn setup_webm_streaming(
     }
 }
 
-struct WebmRecordingSource {
-    stream_state: watch::Receiver<RecordingStreamState>,
-}
-
-impl RecordingSource for WebmRecordingSource {
-    type Stream = Pin<Box<dyn Stream<Item = anyhow::Result<RecordingEvent>> + Send>>;
-    type Start = Pin<Box<dyn Future<Output = anyhow::Result<Self::Stream>> + Send>>;
-
-    fn start(self) -> Self::Start {
-        Box::pin(async move { recording_event_stream(self.stream_state) })
-    }
-}
-
 struct CurrentRecordingClip {
-    sequence: u64,
+    index: usize,
     caught_up: bool,
 }
 
+/// Turns the recording manager’s view of one recording session into the events `video_streamer` consumes.
 struct RecordingEventSource {
     stream_state: watch::Receiver<RecordingStreamState>,
     next_clip: usize,
@@ -256,27 +273,25 @@ struct RecordingEventSource {
 }
 
 impl RecordingEventSource {
-    fn new(mut stream_state: watch::Receiver<RecordingStreamState>) -> anyhow::Result<Self> {
-        let state = stream_state.borrow_and_update().clone();
-        let (next_clip, next_start_at) = match state.active {
-            Some(active) => (
-                usize::try_from(active.sequence).context("recording sequence does not fit in usize")?,
-                if active.ready {
-                    StartAt::LiveEdge
-                } else {
-                    StartAt::Beginning
-                },
-            ),
-            None => (state.clips.len(), StartAt::Beginning),
+    fn new(mut stream_state: watch::Receiver<RecordingStreamState>) -> Self {
+        let (next_clip, next_start_at) = {
+            let state = stream_state.borrow_and_update();
+            let last = state.clips.len().saturating_sub(1);
+            match state.lifecycle {
+                StreamLifecycle::Recording => (last, StartAt::LiveEdge),
+                StreamLifecycle::Opening => (last, StartAt::Beginning),
+                // The next clip, if any, starts with a reconnection.
+                StreamLifecycle::Disconnected | StreamLifecycle::Ended => (state.clips.len(), StartAt::Beginning),
+            }
         };
 
-        Ok(Self {
+        Self {
             stream_state,
             next_clip,
             current_clip: None,
             next_start_at,
             ended: false,
-        })
+        }
     }
 
     async fn next_event(&mut self) -> anyhow::Result<Option<RecordingEvent>> {
@@ -285,59 +300,40 @@ impl RecordingEventSource {
         }
 
         loop {
-            let state = self.stream_state.borrow().clone();
-
             if let Some(current_clip) = self.current_clip.as_mut() {
                 if !current_clip.caught_up {
                     current_clip.caught_up = true;
                     return Ok(Some(RecordingEvent::CaughtUp));
                 }
 
-                if state
-                    .active
-                    .is_some_and(|active| active.sequence == current_clip.sequence)
-                {
-                    if self.stream_state.has_changed()? {
-                        let latest = self.stream_state.borrow_and_update().clone();
-                        if latest
-                            .active
-                            .is_some_and(|active| active.sequence == current_clip.sequence)
-                        {
-                            return Ok(Some(RecordingEvent::DataAvailable));
-                        }
-                        continue;
-                    }
-                    self.stream_state
-                        .changed()
-                        .await
-                        .context("recording stream state closed")?;
-                    if self
-                        .stream_state
-                        .borrow()
-                        .active
-                        .is_some_and(|active| active.sequence == current_clip.sequence)
-                    {
-                        return Ok(Some(RecordingEvent::DataAvailable));
-                    }
-                    continue;
+                let index = current_clip.index;
+
+                // Any change either appended data to this clip or ended it.
+                self.stream_state
+                    .changed()
+                    .await
+                    .context("recording stream state closed")?;
+                if self.stream_state.borrow_and_update().is_active(index) {
+                    return Ok(Some(RecordingEvent::DataAvailable));
                 }
 
                 self.current_clip = None;
-                self.next_clip = self.next_clip.checked_add(1).context("recording clip index overflow")?;
+                self.next_clip = index.checked_add(1).context("recording clip index overflow")?;
                 return Ok(Some(RecordingEvent::ClipEnded));
             }
 
-            if let Some(clip) = state.clips.get(self.next_clip) {
-                let expected_sequence =
-                    u64::try_from(self.next_clip).context("recording clip index does not fit in u64")?;
-                if clip.sequence != expected_sequence {
-                    anyhow::bail!("recording clip sequence is not contiguous");
-                }
+            let (next_path, opening, lifecycle) = {
+                let state = self.stream_state.borrow_and_update();
+                (
+                    state.clips.get(self.next_clip).cloned(),
+                    state.is_opening(self.next_clip),
+                    state.lifecycle,
+                )
+            };
 
-                if state
-                    .active
-                    .is_some_and(|active| active.sequence == clip.sequence && !active.ready)
-                {
+            if let Some(path) = next_path {
+                if opening {
+                    // Wait until the clip has data, so that a replay starts from a readable header.
                     self.stream_state
                         .changed()
                         .await
@@ -345,27 +341,31 @@ impl RecordingEventSource {
                     continue;
                 }
 
-                if clip.path.extension() != Some(RecordingFileType::WebM.extension()) {
-                    anyhow::bail!("recording clip is not WebM");
+                if path.extension() != Some(RecordingFileType::WebM.extension()) {
+                    // A reconnection may switch to another format; the WebM stream ends there instead of failing.
+                    debug!(%path, "Recording switched to a non-WebM clip; ending the WebM stream");
+                    self.ended = true;
+                    return Ok(Some(RecordingEvent::SessionEnded));
                 }
 
-                let file = File::open(&clip.path)
+                let file = File::open(&path)
                     .await
-                    .with_context(|| format!("failed to open recording clip: {}", clip.path))?;
+                    .with_context(|| format!("failed to open recording clip: {path}"))?;
                 let file = file.into_std().await;
                 let start_at = std::mem::replace(&mut self.next_start_at, StartAt::Beginning);
+                let sequence = u64::try_from(self.next_clip).context("recording clip index does not fit in u64")?;
                 self.current_clip = Some(CurrentRecordingClip {
-                    sequence: clip.sequence,
+                    index: self.next_clip,
                     caught_up: false,
                 });
                 return Ok(Some(RecordingEvent::ClipStarted {
-                    sequence: clip.sequence,
+                    sequence,
                     start_at,
                     clip: RecordingClip::new(file),
                 }));
             }
 
-            if state.ended {
+            if lifecycle == StreamLifecycle::Ended {
                 self.ended = true;
                 return Ok(Some(RecordingEvent::SessionEnded));
             }
@@ -380,16 +380,10 @@ impl RecordingEventSource {
 
 fn recording_event_stream(
     stream_state: watch::Receiver<RecordingStreamState>,
-) -> anyhow::Result<Pin<Box<dyn Stream<Item = anyhow::Result<RecordingEvent>> + Send>>> {
-    let source = RecordingEventSource::new(stream_state)?;
-    Ok(Box::pin(stream::unfold(Some(source), |source| async move {
-        let mut source = source?;
-        match source.next_event().await {
-            Ok(Some(event)) => Some((Ok(event), Some(source))),
-            Ok(None) => None,
-            Err(error) => Some((Err(error), None)),
-        }
-    })))
+) -> impl Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static {
+    stream::try_unfold(RecordingEventSource::new(stream_state), |mut source| async move {
+        Ok(source.next_event().await?.map(|event| (event, source)))
+    })
 }
 
 #[cfg(test)]
@@ -397,7 +391,6 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::recording::{ActiveRecordingStreamClip, RecordingStreamClip};
 
     struct ScratchDirectory(camino::Utf8PathBuf);
 
@@ -407,12 +400,38 @@ mod tests {
         }
     }
 
-    /// Performs a raw WebSocket handshake against `negotiate_shadow_protocol`.
+    fn scratch_directory() -> ScratchDirectory {
+        let scratch = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join("streaming-tests")
+            .join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&scratch).expect("create test directory");
+        ScratchDirectory(scratch)
+    }
+
+    /// What the `/shadow` handshake route under test does.
+    #[derive(Clone, Copy)]
+    enum ShadowRoute {
+        /// Negotiates, then sends the selected version as a text message.
+        Negotiate,
+        /// Rejects with `ShadowCloseCode::Forbidden`.
+        Reject,
+    }
+
+    struct ShadowHandshake {
+        /// The `Sec-WebSocket-Protocol` response header.
+        echoed: Option<String>,
+        /// The first frame’s opcode.
+        opcode: u8,
+        payload: Vec<u8>,
+    }
+
+    /// Performs a raw WebSocket handshake against `route` and reads the first frame.
     ///
-    /// Returns the `Sec-WebSocket-Protocol` response header and the version the server selected.
     /// The handshake is written by hand because tungstenite rejects a response without a subprotocol when one was offered,
-    /// although RFC 6455, browsers, and .NET accept it.
-    async fn shadow_handshake(offered_protocols: Option<&str>) -> (Option<String>, String) {
+    /// although RFC 6455 and .NET accept it.
+    async fn shadow_handshake(offered_protocols: Option<&str>, route: ShadowRoute) -> ShadowHandshake {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         use tower::Service as _;
 
@@ -424,17 +443,22 @@ mod tests {
                 axum::Router::new()
                     .route(
                         "/shadow",
-                        axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async move {
-                            let (ws, version) = negotiate_shadow_protocol(ws);
-                            let version = match version {
-                                ShadowProtocolVersion::V1 => "v1",
-                                ShadowProtocolVersion::V2 => "v2",
-                            };
-                            ws.on_upgrade(move |mut socket| async move {
-                                let _ = socket
-                                    .send(axum::extract::ws::Message::Text(Utf8Bytes::from_static(version)))
-                                    .await;
-                            })
+                        axum::routing::get(move |ws: axum::extract::WebSocketUpgrade| async move {
+                            match route {
+                                ShadowRoute::Negotiate => {
+                                    let (ws, version) = negotiate_shadow_protocol(ws);
+                                    let version = match version {
+                                        ShadowProtocolVersion::V1 => "v1",
+                                        ShadowProtocolVersion::V2 => "v2",
+                                    };
+                                    ws.on_upgrade(move |mut socket| async move {
+                                        let _ = socket
+                                            .send(axum::extract::ws::Message::Text(Utf8Bytes::from_static(version)))
+                                            .await;
+                                    })
+                                }
+                                ShadowRoute::Reject => reject_shadow(ws, ShadowCloseCode::Forbidden),
+                            }
                         }),
                     )
                     .call(request)
@@ -472,89 +496,98 @@ mod tests {
                 .then(|| value.trim().to_owned())
         });
 
-        // The server sends one short, unmasked text frame: FIN + opcode, payload length, payload.
+        // The server sends one short, unmasked frame: FIN + opcode, payload length, payload.
         let mut frame = received[header_end..].to_vec();
         while frame.len() < 2 || frame.len() < 2 + usize::from(frame[1]) {
             let mut buffer = [0; 64];
             let read = client.read(&mut buffer).await.expect("read frame");
-            assert!(0 < read, "server closed before sending the version");
+            assert!(0 < read, "server closed before sending a frame");
             frame.extend_from_slice(&buffer[..read]);
         }
-        assert_eq!(frame[0], 0x81, "expected a final text frame");
-        let selected = String::from_utf8(frame[2..2 + usize::from(frame[1])].to_vec()).expect("UTF-8 version");
 
         drop(client);
         let _ = server.await;
-        (echoed, selected)
+        ShadowHandshake {
+            echoed,
+            opcode: frame[0] & 0x0F,
+            payload: frame[2..2 + usize::from(frame[1])].to_vec(),
+        }
+    }
+
+    async fn negotiated_version(offered_protocols: Option<&str>) -> (Option<String>, String) {
+        let handshake = shadow_handshake(offered_protocols, ShadowRoute::Negotiate).await;
+        assert_eq!(handshake.opcode, 0x1, "expected a text frame");
+        let selected = String::from_utf8(handshake.payload).expect("UTF-8 version");
+        (handshake.echoed, selected)
     }
 
     #[tokio::test]
     async fn client_offering_jrec_shadow_v2_gets_v2() {
-        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v2")).await;
+        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v2")).await;
         assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
         assert_eq!(selected, "v2");
     }
 
     #[tokio::test]
     async fn client_offering_v2_among_other_protocols_gets_v2() {
-        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v3, jrec-shadow.v2")).await;
+        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v3, jrec-shadow.v2")).await;
         assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
         assert_eq!(selected, "v2");
     }
 
     #[tokio::test]
     async fn client_without_subprotocol_gets_v1_and_no_echo() {
-        let (echoed, selected) = shadow_handshake(None).await;
+        let (echoed, selected) = negotiated_version(None).await;
         assert_eq!(echoed, None);
         assert_eq!(selected, "v1");
     }
 
     #[tokio::test]
     async fn client_offering_an_unknown_subprotocol_gets_v1_and_no_echo() {
-        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v3")).await;
+        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v3")).await;
         assert_eq!(echoed, None);
         assert_eq!(selected, "v1");
     }
 
     #[tokio::test]
-    async fn validates_streaming_behavior_from_file_extension() {
-        let webm_type = validate_streaming_file(camino::Utf8Path::new("recording-0.webm"))
-            .await
-            .expect("webm should be accepted");
+    async fn rejection_echoes_the_offer_so_browsers_see_the_close_code() {
+        let handshake = shadow_handshake(Some("jrec-shadow.v2"), ShadowRoute::Reject).await;
+
+        assert_eq!(handshake.echoed.as_deref(), Some("jrec-shadow.v2"));
+        assert_eq!(handshake.opcode, 0x8, "expected a close frame");
+        assert_eq!(handshake.payload[..2], 4003u16.to_be_bytes());
+    }
+
+    #[test]
+    fn validates_streaming_behavior_from_file_extension() {
+        let webm_type =
+            validate_streaming_file(camino::Utf8Path::new("recording-0.webm")).expect("webm should be accepted");
         assert!(matches!(webm_type, StreamingType::WebM));
 
-        let cast_type = validate_streaming_file(camino::Utf8Path::new("recording-0.cast"))
-            .await
-            .expect("cast should be accepted");
+        let cast_type =
+            validate_streaming_file(camino::Utf8Path::new("recording-0.cast")).expect("cast should be accepted");
         assert!(matches!(
             cast_type,
             StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)
         ));
 
-        let trp_type = validate_streaming_file(camino::Utf8Path::new("recording-0.trp"))
-            .await
-            .expect("trp should be accepted");
+        let trp_type =
+            validate_streaming_file(camino::Utf8Path::new("recording-0.trp")).expect("trp should be accepted");
         assert!(matches!(
             trp_type,
             StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)
         ));
 
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0.slog"))
-                .await
-                .is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0.slog")).is_err(),
             "slog should be rejected for streaming"
         );
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0.bin"))
-                .await
-                .is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0.bin")).is_err(),
             "unknown extension should be rejected"
         );
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0"))
-                .await
-                .is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0")).is_err(),
             "missing extension should be rejected"
         );
     }
@@ -581,14 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_clip_end_is_retained_before_waiting() {
-        let state = RecordingStreamState::for_test(
-            Vec::new(),
-            Some(ActiveRecordingStreamClip {
-                sequence: 0,
-                ready: true,
-            }),
-            false,
-        );
+        let state = RecordingStreamState::for_test(vec!["recording-0.cast".into()], StreamLifecycle::Recording);
         let (sender, receiver) = watch::channel(state);
         sender.send_modify(RecordingStreamState::mark_disconnected);
 
@@ -597,48 +623,36 @@ mod tests {
             .expect("clip end should already be visible");
     }
 
+    /// Simulates the recording manager’s reconnection: the clip list grows and the new clip opens.
+    fn reconnect(sender: &watch::Sender<RecordingStreamState>, path: camino::Utf8PathBuf) {
+        sender.send_modify(|state| {
+            let mut clips = state.clips.as_ref().clone();
+            clips.push(path);
+            *state = RecordingStreamState::for_test(clips, StreamLifecycle::Opening);
+        });
+    }
+
+    fn clip_started(event: Option<RecordingEvent>) -> (u64, StartAt) {
+        match event {
+            Some(RecordingEvent::ClipStarted { sequence, start_at, .. }) => (sequence, start_at),
+            event => panic!("expected a clip start, got {event:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn reconnect_waits_for_the_next_clip_before_ending_the_session() {
-        let scratch = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("target")
-            .join("streaming-tests")
-            .join(Uuid::new_v4().to_string());
-        fs::create_dir_all(&scratch).expect("create test directory");
-        let _cleanup = ScratchDirectory(scratch.clone());
-
-        let first_path = scratch.join("recording-0.webm");
-        let second_path = scratch.join("recording-1.webm");
+        let scratch = scratch_directory();
+        let first_path = scratch.0.join("recording-0.webm");
+        let second_path = scratch.0.join("recording-1.webm");
         fs::write(&first_path, b"first").expect("write first clip");
         fs::write(&second_path, b"second").expect("write second clip");
 
-        let first_clip = RecordingStreamClip {
-            sequence: 0,
-            path: first_path,
-        };
-        let state = RecordingStreamState::for_test(
-            vec![first_clip],
-            Some(ActiveRecordingStreamClip {
-                sequence: 0,
-                ready: true,
-            }),
-            false,
-        );
+        let state = RecordingStreamState::for_test(vec![first_path], StreamLifecycle::Recording);
         let (sender, receiver) = watch::channel(state);
-        let mut source = RecordingEventSource::new(receiver).expect("create recording event source");
+        let mut source = RecordingEventSource::new(receiver);
 
-        match source.next_event().await.expect("read first start") {
-            Some(RecordingEvent::ClipStarted {
-                sequence,
-                start_at,
-                clip,
-            }) => {
-                assert_eq!(sequence, 0);
-                assert_eq!(start_at, StartAt::LiveEdge);
-                drop(clip);
-            }
-            event => panic!("unexpected first start event: {event:?}"),
-        }
+        let first = source.next_event().await.expect("read first start");
+        assert_eq!(clip_started(first), (0, StartAt::LiveEdge));
         assert!(matches!(
             source.next_event().await.expect("catch up first clip"),
             Some(RecordingEvent::CaughtUp)
@@ -661,29 +675,16 @@ mod tests {
             "a reconnectable disconnect must not emit SessionEnded"
         );
 
-        sender.send_modify(|state| {
-            Arc::make_mut(&mut state.clips).push(RecordingStreamClip {
-                sequence: 1,
-                path: second_path,
-            });
-            state.active = Some(ActiveRecordingStreamClip {
-                sequence: 1,
-                ready: true,
-            });
-            state.ended = false;
-        });
-        match source.next_event().await.expect("read second start") {
-            Some(RecordingEvent::ClipStarted {
-                sequence,
-                start_at,
-                clip,
-            }) => {
-                assert_eq!(sequence, 1);
-                assert_eq!(start_at, StartAt::Beginning);
-                drop(clip);
-            }
-            event => panic!("unexpected second start event: {event:?}"),
-        }
+        reconnect(&sender, second_path);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), source.next_event())
+                .await
+                .is_err(),
+            "a clip without data must not start"
+        );
+        sender.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
+        let second = source.next_event().await.expect("read second start");
+        assert_eq!(clip_started(second), (1, StartAt::Beginning));
         assert!(matches!(
             source.next_event().await.expect("catch up second clip"),
             Some(RecordingEvent::CaughtUp)
@@ -703,27 +704,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn catch_up_precedes_coalesced_append_markers() {
-        let scratch = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("target")
-            .join("streaming-tests")
-            .join(Uuid::new_v4().to_string());
-        fs::create_dir_all(&scratch).expect("create test directory");
-        let _cleanup = ScratchDirectory(scratch.clone());
+    async fn reconnect_to_another_format_ends_the_webm_stream_normally() {
+        let scratch = scratch_directory();
+        let webm_path = scratch.0.join("recording-0.webm");
+        fs::write(&webm_path, b"webm").expect("write WebM clip");
 
-        let path = scratch.join("recording-0.webm");
-        fs::write(&path, b"recording").expect("write clip");
-        let state = RecordingStreamState::for_test(
-            vec![RecordingStreamClip { sequence: 0, path }],
-            Some(ActiveRecordingStreamClip {
-                sequence: 0,
-                ready: true,
-            }),
-            false,
-        );
+        let state = RecordingStreamState::for_test(vec![webm_path], StreamLifecycle::Recording);
         let (sender, receiver) = watch::channel(state);
-        let mut source = RecordingEventSource::new(receiver).expect("create recording event source");
+        let mut source = RecordingEventSource::new(receiver);
+
+        assert_eq!(
+            clip_started(source.next_event().await.expect("read clip start")),
+            (0, StartAt::LiveEdge)
+        );
+        assert!(matches!(
+            source.next_event().await.expect("catch up"),
+            Some(RecordingEvent::CaughtUp)
+        ));
+        sender.send_modify(RecordingStreamState::mark_disconnected);
+        assert!(matches!(
+            source.next_event().await.expect("end WebM clip"),
+            Some(RecordingEvent::ClipEnded)
+        ));
+
+        reconnect(&sender, scratch.0.join("recording-1.slog"));
+        sender.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
+        assert!(matches!(
+            source.next_event().await.expect("end the WebM stream"),
+            Some(RecordingEvent::SessionEnded)
+        ));
+        assert!(source.next_event().await.expect("finish source").is_none());
+    }
+
+    #[tokio::test]
+    async fn catch_up_precedes_coalesced_append_markers() {
+        let scratch = scratch_directory();
+        let path = scratch.0.join("recording-0.webm");
+        fs::write(&path, b"recording").expect("write clip");
+        let state = RecordingStreamState::for_test(vec![path], StreamLifecycle::Recording);
+        let (sender, receiver) = watch::channel(state);
+        let mut source = RecordingEventSource::new(receiver);
 
         assert!(matches!(
             source.next_event().await.expect("read clip start"),

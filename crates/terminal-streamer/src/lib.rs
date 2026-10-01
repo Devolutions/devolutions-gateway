@@ -8,7 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 pub trait TerminalStreamSocket {
     fn send(&mut self, value: String) -> impl Future<Output = anyhow::Result<()>> + Send;
@@ -20,13 +20,16 @@ pub enum InputStreamType {
     Trp,
 }
 
+/// Streams a terminal recording, then follows it as it grows until `shutdown_signal` fires.
+///
+/// Every change of `data_appended` means new bytes may be readable from `input_stream`.
 #[tracing::instrument(skip_all)]
-pub async fn terminal_stream(
+pub async fn terminal_stream<T>(
     mut websocket: impl TerminalStreamSocket,
     input_stream: impl AsyncRead + Unpin + Send + 'static,
     shutdown_signal: Arc<Notify>,
     input_type: InputStreamType,
-    when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
+    mut data_appended: watch::Receiver<T>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
 
@@ -61,7 +64,12 @@ pub async fn terminal_stream(
 
     loop {
         tokio::select! {
-            _ = when_new_chunk_appended() => {
+            changed = data_appended.changed() => {
+                if changed.is_err() {
+                    // The recording is gone, so no more data will be appended.
+                    shutdown_signal.notified().await;
+                    break;
+                }
                 loop {
                     match lines.next_line().await {
                         Ok(Some(line)) => {

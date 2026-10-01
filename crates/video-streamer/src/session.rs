@@ -44,28 +44,50 @@ impl fmt::Debug for RecordingClip {
 }
 
 /// A structural event from one append-only recording session.
+///
+/// A session is a sequence of input clips. A source must emit, in this order:
+///
+/// - for each clip: `ClipStarted`, then `DataAvailable` any number of times with exactly one `CaughtUp` among them,
+///   then `ClipEnded`;
+/// - after the last clip: `SessionEnded`, then nothing.
+///
+/// Clips follow one another with nothing in between, and `SessionEnded` may also come before any clip.
+/// The stream must not end before `SessionEnded`, and any other order fails the session.
 #[derive(Debug)]
 pub enum RecordingEvent {
+    /// Starts the next input clip and hands over its reader.
     ClipStarted {
+        /// The clip’s position in the recording session, for diagnostics.
         sequence: u64,
+        /// Where viewing starts within this clip.
         start_at: StartAt,
         clip: RecordingClip,
     },
+    /// More bytes may be readable from the current clip.
     DataAvailable,
+    /// Every byte the clip held when the viewer joined is now readable; later bytes are live.
     CaughtUp,
+    /// The current clip gets no more bytes.
     ClipEnded,
+    /// The session gets no more clips.
     SessionEnded,
 }
 
+/// Where viewing starts within an input clip.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StartAt {
+    /// From the first frame.
     Beginning,
+    /// From the latest decodable group of pictures before `CaughtUp`, then live.
     LiveEdge,
 }
 
+/// Encoder settings for the normalized output.
 #[derive(Clone, Copy, Debug)]
 pub struct SessionConfig {
+    /// Threads the VP8 encoder may use.
     pub encoder_threads: u32,
+    /// When `true`, the encoder skips frames while it falls behind real time, lowering the output frame rate.
     pub adaptive_frame_skip: bool,
 }
 
@@ -76,14 +98,6 @@ impl Default for SessionConfig {
             adaptive_frame_skip: true,
         }
     }
-}
-
-/// Produces structural events and transfers each clip reader to the consumer once.
-pub trait RecordingSource: Send + 'static {
-    type Stream: Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static;
-    type Start: Future<Output = anyhow::Result<Self::Stream>> + Send + 'static;
-
-    fn start(self) -> Self::Start;
 }
 
 /// WebSocket subprotocol a client offers to get [`ShadowProtocolVersion::V2`].
@@ -102,18 +116,21 @@ pub enum ShadowProtocolVersion {
 
 /// Converts a recording session into independent VP8 WebM segments over one pull-driven stream.
 ///
+/// `start_source` runs once, after the client sent a valid `Start`, and returns the session’s [`RecordingEvent`]s.
 /// Each segment has one resolution, and output sequence numbers remain contiguous across input clips.
 /// With [`ShadowProtocolVersion::V1`], the stream ends after the first segment.
-pub async fn stream_session<S, T, E>(
-    source: S,
+pub async fn stream_session<F, Fut, S, T, E>(
+    start_source: F,
     transport: T,
     config: SessionConfig,
     version: ShadowProtocolVersion,
 ) -> anyhow::Result<()>
 where
-    S: RecordingSource,
+    F: FnOnce() -> Fut + Send,
+    Fut: Future<Output = anyhow::Result<S>> + Send,
+    S: Stream<Item = anyhow::Result<RecordingEvent>> + Send + 'static,
     T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
     E: Error + Send + Sync + 'static,
 {
-    crate::protocol::stream_segments(transport, source, config, version).await
+    crate::protocol::stream_segments(transport, start_source, config, version).await
 }
