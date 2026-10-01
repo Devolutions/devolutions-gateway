@@ -207,6 +207,23 @@ pub(crate) fn windows_paths_equal(left: &Path, right: &Path) -> bool {
     os_strings_match_case_insensitive(left.as_os_str(), right.as_os_str())
 }
 
+/// Accepts only plain drive-letter paths such as `C:\dir\client.exe`.
+///
+/// UNC, device, and namespace-prefixed paths, drive-relative paths, forward slashes,
+/// alternate data streams, and control characters are rejected.
+pub(crate) fn is_plain_local_drive_path(path: &str) -> bool {
+    let [drive, b':', b'\\', rest @ ..] = path.as_bytes() else {
+        return false;
+    };
+
+    // Multi-byte UTF-8 sequences never contain ASCII bytes, so a byte scan is sufficient.
+    drive.is_ascii_alphabetic()
+        && !rest.is_empty()
+        && !rest
+            .iter()
+            .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
+}
+
 pub(crate) fn paths_match_case_insensitive(left: &Path, right: &Path) -> bool {
     windows_paths_equal(left, right)
 }

@@ -29,7 +29,7 @@ use windows::Win32::System::Threading::{
     PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
 };
 
-use crate::policy_security::RetainedExecutableSecurity;
+use crate::policy_security::{RetainedExecutableSecurity, is_plain_local_drive_path};
 
 const PROCESS_SYNCHRONIZE: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(0x0010_0000);
 const PROCESS_IDENTITY_ACCESS: PROCESS_ACCESS_RIGHTS = PROCESS_ACCESS_RIGHTS(
@@ -424,23 +424,6 @@ fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
 fn is_supported_local_image_path(path: &Path) -> bool {
     let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
     path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
-}
-
-/// Accepts only plain drive-letter paths such as `C:\dir\client.exe`.
-///
-/// UNC, device, and namespace-prefixed paths, drive-relative paths, forward slashes,
-/// alternate data streams, and control characters are rejected.
-fn is_plain_local_drive_path(path: &str) -> bool {
-    let [drive, b':', b'\\', rest @ ..] = path.as_bytes() else {
-        return false;
-    };
-
-    // Multi-byte UTF-8 sequences never contain ASCII bytes, so a byte scan is sufficient.
-    drive.is_ascii_alphabetic()
-        && !rest.is_empty()
-        && !rest
-            .iter()
-            .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
 }
 
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.

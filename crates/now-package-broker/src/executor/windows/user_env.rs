@@ -1,0 +1,221 @@
+//! Target user environment used to resolve package manager executables.
+
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::path::Path;
+
+use anyhow::Context as _;
+use tracing::{debug, error, warn};
+use win_api_wrappers::handle::HandleWrapper as _;
+use win_api_wrappers::token::Token;
+use windows::Win32::Security::{
+    ImpersonateLoggedOnUser, RevertToSelf, SecurityImpersonation, TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
+};
+
+use crate::policy_security::is_plain_local_drive_path;
+
+/// Environment variables of the target user, with filesystem lookups performed as that user.
+///
+/// Paths derived from the environment are only looked up when they are plain local drive paths,
+/// and lookups run while impersonating the target user instead of the broker service account.
+pub(super) struct UserEnv<'a> {
+    vars: &'a HashMap<String, String>,
+    lookup_token: Option<Token>,
+}
+
+impl<'a> UserEnv<'a> {
+    /// Use `token`, a token of the target user, for filesystem lookups.
+    pub(super) fn for_user(vars: &'a HashMap<String, String>, token: &Token) -> anyhow::Result<Self> {
+        let lookup_token = token
+            .duplicate(
+                TOKEN_QUERY | TOKEN_IMPERSONATE,
+                None,
+                SecurityImpersonation,
+                TokenImpersonation,
+            )
+            .context("failed to duplicate the target user token for impersonation")?;
+
+        Ok(Self {
+            vars,
+            lookup_token: Some(lookup_token),
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn without_impersonation(vars: &'a HashMap<String, String>) -> Self {
+        Self {
+            vars,
+            lookup_token: None,
+        }
+    }
+
+    pub(super) fn var(&self, key: &str) -> Option<&'a str> {
+        self.vars
+            .iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Trimmed, non-empty `PATH` entries.
+    pub(super) fn path_dirs(&self) -> impl Iterator<Item = &'a str> {
+        self.var("PATH")
+            .unwrap_or_default()
+            .split(';')
+            .map(str::trim)
+            .filter(|dir| !dir.is_empty())
+    }
+
+    pub(super) fn exists(&self, path: &Path) -> bool {
+        self.lookup(path, Path::exists)
+    }
+
+    pub(super) fn is_file(&self, path: &Path) -> bool {
+        self.lookup(path, Path::is_file)
+    }
+
+    fn lookup(&self, path: &Path, check: fn(&Path) -> bool) -> bool {
+        if !path.to_str().is_some_and(is_plain_local_drive_path) {
+            debug!(path = %path.display(), "Skipped non-local environment-derived path");
+            return false;
+        }
+
+        let Some(token) = &self.lookup_token else {
+            return check(path);
+        };
+
+        let _impersonation = match ThreadImpersonation::enter(token) {
+            Ok(impersonation) => impersonation,
+            Err(error) => {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Failed to impersonate the target user for a path lookup"
+                );
+                return false;
+            }
+        };
+
+        check(path)
+    }
+}
+
+/// Impersonates a token on the current thread until dropped.
+///
+/// Blocking-pool threads are reused, so a failed revert aborts the process
+/// instead of letting the thread keep running under the impersonated identity.
+struct ThreadImpersonation {
+    // Impersonation is per thread, so the guard must not move to another thread.
+    _not_send: PhantomData<*const ()>,
+}
+
+impl ThreadImpersonation {
+    fn enter(token: &Token) -> anyhow::Result<Self> {
+        // SAFETY: `token` is a live impersonation token opened with TOKEN_QUERY | TOKEN_IMPERSONATE.
+        unsafe { ImpersonateLoggedOnUser(token.handle().raw()) }.context("ImpersonateLoggedOnUser failed")?;
+
+        Ok(Self { _not_send: PhantomData })
+    }
+}
+
+impl Drop for ThreadImpersonation {
+    fn drop(&mut self) {
+        // SAFETY: RevertToSelf has no preconditions.
+        if let Err(error) = unsafe { RevertToSelf() } {
+            error!(%error, "Failed to revert thread impersonation");
+            std::process::abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use win_api_wrappers::process::Process;
+    use win_api_wrappers::thread::Thread;
+    use windows::Win32::Foundation::ERROR_NO_TOKEN;
+    use windows::Win32::Security::TOKEN_ALL_ACCESS;
+
+    use super::*;
+
+    fn current_process_token() -> Token {
+        Process::current_process()
+            .token(TOKEN_ALL_ACCESS)
+            .expect("open current process token")
+    }
+
+    fn assert_thread_not_impersonating() {
+        let Err(error) = Thread::current().token(TOKEN_QUERY, true) else {
+            panic!("the thread must not keep an impersonation token");
+        };
+        let code = error
+            .downcast_ref::<windows::core::Error>()
+            .map(windows::core::Error::code);
+        assert_eq!(code, Some(ERROR_NO_TOKEN.to_hresult()), "{error:#}");
+    }
+
+    #[test]
+    fn lookups_impersonate_and_always_revert() {
+        let vars = HashMap::new();
+        let token = current_process_token();
+        let env = UserEnv::for_user(&vars, &token).expect("prepare user lookups");
+        let exe = std::env::current_exe().expect("current exe");
+
+        assert!(env.is_file(&exe));
+        assert!(env.exists(exe.parent().expect("exe parent")));
+        assert!(!env.is_file(&exe.with_file_name("missing-broker-test.exe")));
+        assert_thread_not_impersonating();
+    }
+
+    #[test]
+    fn impersonation_guard_reverts_on_panic() {
+        let token = current_process_token()
+            .duplicate(
+                TOKEN_QUERY | TOKEN_IMPERSONATE,
+                None,
+                SecurityImpersonation,
+                TokenImpersonation,
+            )
+            .expect("duplicate impersonation token");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _impersonation = ThreadImpersonation::enter(&token).expect("impersonate");
+            Thread::current()
+                .token(TOKEN_QUERY, true)
+                .expect("the thread is impersonating inside the guard");
+            panic!("lookup panicked");
+        }));
+
+        assert!(result.is_err());
+        assert_thread_not_impersonating();
+    }
+
+    #[test]
+    fn non_local_paths_are_skipped_without_lookup() {
+        let vars = HashMap::new();
+        let token = current_process_token();
+        let env = UserEnv::for_user(&vars, &token).expect("prepare user lookups");
+
+        for path in [
+            r"\\server\share\tool.exe",
+            r"\\server@80\share\tool.exe",
+            r"\\?\C:\Windows\System32\cmd.exe",
+            r"\\.\C:\Windows\System32\cmd.exe",
+            r"\??\C:\Windows\System32\cmd.exe",
+            r"//server/share/tool.exe",
+            r"C:Windows\System32\cmd.exe",
+            r"tool.exe",
+            r"C:\Windows\System32\cmd.exe:stream",
+        ] {
+            assert!(!env.exists(&PathBuf::from(path)), "{path}");
+        }
+        assert_thread_not_impersonating();
+    }
+
+    #[test]
+    fn path_dirs_are_trimmed_and_skip_empty_entries() {
+        let vars = HashMap::from([("Path".to_owned(), r" C:\a ;;C:\b;  ;".to_owned())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        assert_eq!(env.path_dirs().collect::<Vec<_>>(), [r"C:\a", r"C:\b"]);
+    }
+}
