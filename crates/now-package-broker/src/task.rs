@@ -70,7 +70,7 @@ impl Task for BrokerTask {
         // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.
         let shutdown = CancellationToken::new();
         state.tracker.clone().spawn_eviction_task(shutdown.clone());
-        crate::audit::spawn_denial_summary_task(shutdown.clone());
+        let denial_summary_handle = crate::audit::spawn_denial_summary_task(shutdown.clone());
 
         // Spawn policy watcher task.
         let watcher_shutdown = shutdown.clone();
@@ -112,6 +112,7 @@ impl Task for BrokerTask {
             Err(error) => Err(error).context("broker server task panicked"),
         };
         let _ = monitor_handle.await;
+        let _ = denial_summary_handle.await;
         crate::audit::drain();
 
         result

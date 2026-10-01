@@ -28,10 +28,10 @@ const DENIAL_SUMMARY_INTERVAL: std::time::Duration = std::time::Duration::from_s
 /// How often the counted denials whose interval elapsed are summarized.
 const DENIAL_SUMMARY_TICK: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Callers whose denials are counted separately.
+/// Caller and reason pairs whose denials are counted separately.
 ///
-/// The denials of further callers share one window per reason, so requests from many accounts
-/// cannot grow the tracking map.
+/// The denials of further pairs share one window per reason, so requests from many accounts cannot
+/// grow the tracking map.
 const MAX_DENIAL_WINDOWS: usize = 64;
 
 /// The caller recorded in the summary of the shared overflow windows.
@@ -685,8 +685,9 @@ pub(crate) fn write_denied(actor_sid: &Sid, actor_exe: &Path, path: &Path, reaso
 
 /// Periodically logs the summaries of the denial intervals that elapsed, until `shutdown`.
 ///
-/// [`drain`] logs the summaries still pending when the broker stops.
-pub(crate) fn spawn_denial_summary_task(shutdown: CancellationToken) {
+/// [`drain`] logs the summaries still pending when the broker stops, so the returned task must be
+/// awaited before it, or a summary taken by a last tick could be recorded after the queue closed.
+pub(crate) fn spawn_denial_summary_task(shutdown: CancellationToken) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -696,7 +697,7 @@ pub(crate) fn spawn_denial_summary_task(shutdown: CancellationToken) {
                 }
             }
         }
-    });
+    })
 }
 
 fn record_denials(entries: Vec<Entry>) {
