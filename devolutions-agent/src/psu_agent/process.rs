@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -46,21 +47,30 @@ struct ProcessRegistryInner {
 struct StreamEntry {
     stdin: mpsc::Sender<StreamData>,
     stop: mpsc::Sender<StopRequest>,
+    overflowed: Arc<AtomicBool>,
+}
+
+/// The receiving side of a stream: stdin frames for the child process.
+#[derive(Debug)]
+pub(super) struct StreamInput {
+    frames: mpsc::Receiver<StreamData>,
+    /// Set by the registry, under its lock, when frames were dropped because the buffer was full.
+    overflowed: Arc<AtomicBool>,
 }
 
 impl ProcessRegistry {
-    pub(super) async fn register_stream(
-        &self,
-        stream_id: &str,
-        stop: mpsc::Sender<StopRequest>,
-    ) -> mpsc::Receiver<StreamData> {
-        let (stdin, rx) = mpsc::channel(STDIN_BUFFER_FRAMES);
-        self.inner
-            .lock()
-            .await
-            .streams
-            .insert(stream_id.to_owned(), StreamEntry { stdin, stop });
-        rx
+    pub(super) async fn register_stream(&self, stream_id: &str, stop: mpsc::Sender<StopRequest>) -> StreamInput {
+        let (stdin, frames) = mpsc::channel(STDIN_BUFFER_FRAMES);
+        let overflowed = Arc::new(AtomicBool::new(false));
+        self.inner.lock().await.streams.insert(
+            stream_id.to_owned(),
+            StreamEntry {
+                stdin,
+                stop,
+                overflowed: Arc::clone(&overflowed),
+            },
+        );
+        StreamInput { frames, overflowed }
     }
 
     /// Queues a frame for the child process stdin without waiting.
@@ -82,6 +92,7 @@ impl ProcessRegistry {
             Ok(()) | Err(TrySendError::Closed(_)) => {}
             Err(TrySendError::Full(_)) => {
                 warn!(%stream_id, "PSU gRPC child process is not consuming stdin; stopping it");
+                entry.overflowed.store(true, Ordering::Relaxed);
                 let _ = entry.stop.try_send(StopRequest::StdinOverflow);
             }
         }
@@ -128,7 +139,7 @@ impl ProcessRegistry {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_process(
     request: StartProcess,
-    incoming_rx: mpsc::Receiver<StreamData>,
+    input: StreamInput,
     control_rx: mpsc::Receiver<StopRequest>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     registry: ProcessRegistry,
@@ -141,9 +152,10 @@ pub(super) async fn run_process(
 
     let result = run_process_inner(
         request,
-        incoming_rx,
+        input,
         control_rx,
         outgoing_tx,
+        &registry,
         agent_id,
         connection_id,
         default_executable,
@@ -159,13 +171,19 @@ pub(super) async fn run_process(
 #[allow(clippy::too_many_arguments)]
 async fn run_process_inner(
     request: StartProcess,
-    incoming_rx: mpsc::Receiver<StreamData>,
+    input: StreamInput,
     mut control_rx: mpsc::Receiver<StopRequest>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
+    registry: &ProcessRegistry,
     agent_id: String,
     connection_id: String,
     default_executable: String,
 ) -> anyhow::Result<()> {
+    let StreamInput {
+        frames: incoming_rx,
+        overflowed,
+    } = input;
+
     let executable = if request.executable.trim().is_empty() {
         default_executable
     } else {
@@ -255,7 +273,6 @@ async fn run_process_inner(
     let mut stdin_closed_from_end_of_stream = false;
     let mut stdin_task_completed = false;
     let mut canceled = false;
-    let mut stdin_overflow = false;
 
     let status = loop {
         tokio::select! {
@@ -272,8 +289,7 @@ async fn run_process_inner(
             stop_request = control_rx.recv() => {
                 match stop_request {
                     Some(stop @ (StopRequest::Kill | StopRequest::StdinOverflow)) => {
-                        stdin_overflow = stop == StopRequest::StdinOverflow;
-                        if stdin_overflow {
+                        if stop == StopRequest::StdinOverflow {
                             warn!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process because it stopped consuming stdin");
                         } else {
                             info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
@@ -305,6 +321,13 @@ async fn run_process_inner(
 
     await_pump_task(stdout_task, process_id, "stdout").await;
     await_pump_task(stderr_task, process_id, "stderr").await;
+
+    // The overflow notification may still be queued if the child process exited first. Closing the stream takes
+    // the registry lock that dispatch holds while recording an overflow, so any overflow recorded so far is visible
+    // here, and none can be recorded afterwards.
+    registry.close_stream(&request.stream_id).await;
+    let stdin_overflow = overflowed.load(Ordering::Relaxed);
+    canceled |= stdin_overflow;
 
     let exit_code = status.code().unwrap_or(-1);
     let expected_pwsh_exit = stdin_closed_from_end_of_stream && exit_code == PWSH_STDIN_CLOSED_EXIT_CODE;
@@ -613,9 +636,72 @@ mod tests {
         assert_eq!(stalled_stop_rx.try_recv().ok(), Some(StopRequest::StdinOverflow));
         assert!(!registry.inner.lock().await.streams.contains_key("stalled"));
 
-        assert_eq!(healthy_stdin_rx.try_recv().expect("healthy frame").data, b"data");
+        assert_eq!(healthy_stdin_rx.frames.try_recv().expect("healthy frame").data, b"data");
         assert!(healthy_stop_rx.try_recv().is_err());
         assert!(registry.inner.lock().await.streams.contains_key("healthy"));
+    }
+
+    #[tokio::test]
+    async fn stdin_overflow_is_reported_when_the_child_exits_successfully_first() {
+        let registry = ProcessRegistry::default();
+        let (control_tx, mut control_rx) = mpsc::channel(8);
+        let input = registry.register_stream("stream-id", control_tx).await;
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(64);
+
+        for sequence in 0..=u64::try_from(STDIN_BUFFER_FRAMES).expect("buffer size fits in u64") {
+            registry
+                .dispatch_stream_data(stream_data("stream-id".to_owned(), sequence, b"data".to_vec(), false))
+                .await;
+        }
+
+        // Consume the notification to model a child process that exits before the stop request is read.
+        assert_eq!(control_rx.try_recv().ok(), Some(StopRequest::StdinOverflow));
+
+        let (executable, arguments) = if cfg!(windows) {
+            ("cmd", vec!["/C".to_owned(), "exit 0".to_owned()])
+        } else {
+            ("true", Vec::new())
+        };
+
+        run_process(
+            StartProcess {
+                correlation_id: "correlation-id".to_owned(),
+                stream_id: "stream-id".to_owned(),
+                executable: executable.to_owned(),
+                arguments,
+                working_directory: String::new(),
+                environment: HashMap::new(),
+                metadata: HashMap::new(),
+            },
+            input,
+            control_rx,
+            outgoing_tx,
+            registry,
+            "agent-id".to_owned(),
+            "connection-id".to_owned(),
+            "pwsh".to_owned(),
+        )
+        .await
+        .expect("run process");
+
+        let mut stream_closed = None;
+        let mut process_completed = None;
+        while let Some(message) = outgoing_rx.recv().await {
+            match message.payload {
+                Some(AgentPayload::StreamClosed(closed)) => stream_closed = Some(closed),
+                Some(AgentPayload::ProcessCompleted(completed)) => process_completed = Some(completed),
+                _ => {}
+            }
+        }
+
+        let stream_closed = stream_closed.expect("stream closed message");
+        assert!(stream_closed.error);
+        assert!(
+            stream_closed.reason.contains("stopped consuming stdin"),
+            "unexpected reason: {}",
+            stream_closed.reason
+        );
+        assert!(process_completed.expect("process completed message").canceled);
     }
 
     #[tokio::test]
