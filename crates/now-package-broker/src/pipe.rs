@@ -29,9 +29,15 @@ pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1"
 ///
 /// Connection setup performs unauthenticated work (client process identity lookups)
 /// before any signature gate, so a connection flood could otherwise trigger unbounded
-/// work and task spawning. While all slots are taken, no pipe instance is listening and
-/// further clients fail to connect until a slot frees up.
+/// work and task spawning. While all slots are taken, further clients are accepted and
+/// immediately disconnected, so a server instance keeps listening on the pipe name.
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+/// Initial delay before retrying after a pipe instance could not be created or recycled.
+const INSTANCE_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Maximum delay between pipe instance retries.
+const INSTANCE_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Deadline for serving a single pipe connection, from accept to response completion.
 ///
@@ -60,15 +66,14 @@ pub async fn run_pipe_server(state: Arc<BrokerState>, shutdown: CancellationToke
     // as soon as this function returns, so a connection that outlives it must be known to the
     // recorder. Each connection holds an audit lease for as long as it can record, which keeps its
     // terminal event from being rejected. The accept loop runs in its own function, so that every
-    // one of its exit paths, including a failure to create the next pipe instance, reaches the
-    // drain below instead of returning straight out.
+    // one of its exit paths reaches the drain below instead of returning straight out.
     let mut connections = tokio::task::JoinSet::new();
     let result = accept_connections(&state, &shutdown, &mut connections).await;
 
     drain_after_accept_loop(&mut connections, CONNECTION_SHUTDOWN_GRACE, result).await
 }
 
-/// Accept connections until `shutdown` is cancelled or the next pipe instance cannot be created.
+/// Accept connections until `shutdown` is cancelled.
 async fn accept_connections(
     state: &Arc<BrokerState>,
     shutdown: &CancellationToken,
@@ -77,86 +82,202 @@ async fn accept_connections(
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
-    let connection_permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+    accept_loop(
+        &pipe_name,
+        shutdown,
+        MAX_CONCURRENT_CONNECTIONS,
+        &create_pipe_instance,
+        |server, permit| {
+            // Reap the connections that already finished, so completed tasks do not accumulate here
+            // for the lifetime of the process.
+            while connections.try_join_next().is_some() {}
 
-    let mut first_instance = true;
-    loop {
-        // Reap the connections that already finished, so completed tasks do not accumulate here
-        // for the lifetime of the process.
-        while connections.try_join_next().is_some() {}
+            let state = Arc::clone(state);
+            let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
+            connections.spawn(async move {
+                // Serving this connection can commit a policy and record its terminal
+                // event, which is blocking work the shutdown cannot interrupt, so the
+                // lease keeps the recorder from closing the queue under that event.
+                let _audit_lease = crate::audit::AuditLease::acquire();
 
-        // Wait for a free connection slot before exposing a new pipe instance,
-        // bounding the number of concurrently served connections.
-        let permit = tokio::select! {
-            permit = Arc::clone(&connection_permits).acquire_owned() => {
-                permit.expect("the semaphore is never closed")
-            }
-            _ = shutdown.cancelled() => break,
-        };
+                let serve = async move {
+                    // Keep blocking unauthenticated capture off the accept loop and
+                    // retain the connection slot until the work actually completes.
+                    let capture = spawn_bounded_capture(permit, move || {
+                        let client = PipeClient::from_connected_pipe(&server);
+                        (server, client)
+                    });
+                    let (_permit, server, client) = match capture.await {
+                        Ok((permit, (server, Ok(client)))) => (permit, server, client),
+                        Ok((_permit, (_server, Err(error)))) => {
+                            warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                            return;
+                        }
+                        Err(error) => {
+                            error!(
+                                error = format!("{error:#}"),
+                                "Named pipe client identity capture task failed"
+                            );
+                            return;
+                        }
+                    };
 
-        // Create a new pipe instance for each connection.
-        let server = create_pipe_instance(&pipe_name, first_instance)?;
-        first_instance = false;
+                    info!("Client connected to named pipe");
+                    let router = build_router_for_client(state, client);
+                    serve_connection(server, router).await;
+                    info!("Client disconnected from named pipe");
+                };
 
-        tokio::select! {
-            result = server.connect() => {
-                match result {
-                    Ok(()) => {
-                        let state = Arc::clone(state);
-                        let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
-                        connections.spawn(async move {
-                            // Serving this connection can commit a policy and record its terminal
-                            // event, which is blocking work the shutdown cannot interrupt, so the
-                            // lease keeps the recorder from closing the queue under that event.
-                            let _audit_lease = crate::audit::AuditLease::acquire();
-
-                            let serve = async move {
-                                // Keep blocking unauthenticated capture off the accept loop and
-                                // retain the connection slot until the work actually completes.
-                                let capture = spawn_bounded_capture(permit, move || {
-                                    let client = PipeClient::from_connected_pipe(&server);
-                                    (server, client)
-                                });
-                                let (_permit, server, client) = match capture.await {
-                                    Ok((permit, (server, Ok(client)))) => (permit, server, client),
-                                    Ok((_permit, (_server, Err(error)))) => {
-                                        warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                                        return;
-                                    }
-                                    Err(error) => {
-                                        error!(
-                                            error = format!("{error:#}"),
-                                            "Named pipe client identity capture task failed"
-                                        );
-                                        return;
-                                    }
-                                };
-
-                                info!("Client connected to named pipe");
-                                let router = build_router_for_client(state, client);
-                                serve_connection(server, router).await;
-                                info!("Client disconnected from named pipe");
-                            };
-
-                            // Enforce a deadline so idle or slow clients cannot pin
-                            // a connection slot indefinitely.
-                            if tokio::time::timeout_at(connection_deadline, serve).await.is_err() {
-                                warn!("Closed named pipe connection: deadline exceeded");
-                            }
-                        });
-                    }
-                    Err(error) => {
-                        error!(%error, "Failed to accept pipe connection");
-                    }
+                // Enforce a deadline so idle or slow clients cannot pin
+                // a connection slot indefinitely.
+                if tokio::time::timeout_at(connection_deadline, serve).await.is_err() {
+                    warn!("Closed named pipe connection: deadline exceeded");
                 }
-            }
-            _ = shutdown.cancelled() => break,
-        }
-    }
+            });
+        },
+    )
+    .await;
 
     info!("Pipe server shutting down");
 
     Ok(())
+}
+
+/// Accept clients on `pipe_name` until `shutdown` is cancelled, handing each one to `dispatch`.
+///
+/// The pipe name always keeps a listening server instance owned by this loop:
+/// the next instance is created before a connected one is handed off, and a client
+/// that cannot be served is disconnected so that its instance listens again.
+/// Instance failures are retried with backoff instead of ending the loop.
+async fn accept_loop(
+    pipe_name: &str,
+    shutdown: &CancellationToken,
+    max_connections: usize,
+    create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+    mut dispatch: impl FnMut(NamedPipeServer, OwnedSemaphorePermit),
+) {
+    let connection_permits = Arc::new(Semaphore::new(max_connections));
+    let mut retry = RetryDelay::default();
+
+    // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
+    let mut server = loop {
+        match create_instance(pipe_name, true) {
+            Ok(server) => break server,
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    %pipe_name,
+                    "Failed to create the first named pipe instance; retrying"
+                );
+                if !retry.wait(shutdown).await {
+                    return;
+                }
+            }
+        }
+    };
+    retry.reset();
+
+    loop {
+        let result = tokio::select! {
+            result = server.connect() => result,
+            _ = shutdown.cancelled() => return,
+        };
+
+        if let Err(error) = result {
+            error!(%error, "Failed to accept pipe connection");
+            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                return;
+            }
+            continue;
+        }
+
+        let Ok(permit) = Arc::clone(&connection_permits).try_acquire_owned() else {
+            warn!("Rejected named pipe client: too many concurrent connections");
+            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                return;
+            }
+            continue;
+        };
+
+        // Create the next listening instance before handing off the connected one.
+        let next = match create_instance(pipe_name, false) {
+            Ok(next) => next,
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Failed to create the next named pipe instance; disconnecting the client"
+                );
+                drop(permit);
+                recycle_instance(pipe_name, &mut server, create_instance);
+                if !retry.wait(shutdown).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        retry.reset();
+
+        dispatch(std::mem::replace(&mut server, next), permit);
+    }
+}
+
+/// Make `server` listen again after a client that is not served.
+///
+/// Disconnects the client and reuses the instance. If that fails, the instance is replaced
+/// by a new one created before the old one closes. Returns `false` when neither worked.
+fn recycle_instance(
+    pipe_name: &str,
+    server: &mut NamedPipeServer,
+    create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+) -> bool {
+    let Err(error) = server.disconnect() else {
+        return true;
+    };
+
+    warn!(%error, "Failed to disconnect named pipe instance; replacing it");
+    match create_instance(pipe_name, false) {
+        Ok(next) => {
+            *server = next;
+            true
+        }
+        Err(error) => {
+            error!(
+                error = format!("{error:#}"),
+                "Failed to create a replacement named pipe instance"
+            );
+            false
+        }
+    }
+}
+
+/// Exponential backoff between pipe instance retries.
+struct RetryDelay {
+    next: std::time::Duration,
+}
+
+impl Default for RetryDelay {
+    fn default() -> Self {
+        Self {
+            next: INSTANCE_RETRY_INITIAL_DELAY,
+        }
+    }
+}
+
+impl RetryDelay {
+    fn reset(&mut self) {
+        self.next = INSTANCE_RETRY_INITIAL_DELAY;
+    }
+
+    /// Sleep for the current delay, then double it. Returns `false` when `shutdown` is cancelled first.
+    async fn wait(&mut self, shutdown: &CancellationToken) -> bool {
+        let delay = self.next;
+        self.next = (self.next * 2).min(INSTANCE_RETRY_MAX_DELAY);
+
+        tokio::select! {
+            () = tokio::time::sleep(delay) => true,
+            () = shutdown.cancelled() => false,
+        }
+    }
 }
 
 /// Drain the connections the accept loop spawned, then report what the loop returned.
@@ -244,7 +365,7 @@ fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security
 }
 
 fn build_security_attributes(
-    admins_sid: Option<Sid>,
+    full_control_sid: Option<Sid>,
     client_sid: Sid,
 ) -> anyhow::Result<win_api_wrappers::security::attributes::SecurityAttributes> {
     let system_sid = Sid::from_well_known(Security::WinLocalSystemSid, None).context("failed to create SYSTEM SID")?;
@@ -255,12 +376,12 @@ fn build_security_attributes(
         inheritance: Security::ACE_FLAGS(0),
         trustee: Trustee::Sid(system_sid),
     }];
-    if let Some(admins_sid) = admins_sid {
+    if let Some(full_control_sid) = full_control_sid {
         entries.push(ExplicitAccess {
             access_permissions: GENERIC_ALL.0,
             access_mode: SET_ACCESS,
             inheritance: Security::ACE_FLAGS(0),
-            trustee: Trustee::Sid(admins_sid),
+            trustee: Trustee::Sid(full_control_sid),
         });
     }
     entries.push(ExplicitAccess {
@@ -336,6 +457,177 @@ mod tests {
         .expect("create first pipe instance")
     }
 
+    /// Open a broker pipe client with the access the broker grants to standard users.
+    fn open_client(pipe_name: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use std::os::windows::io::IntoRawHandle as _;
+
+        use windows::Win32::Foundation::GENERIC_READ;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, SECURITY_IDENTIFICATION};
+
+        let file = std::fs::OpenOptions::new()
+            .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
+            .custom_flags(FILE_FLAG_OVERLAPPED.0)
+            .security_qos_flags(SECURITY_IDENTIFICATION.0)
+            .open(pipe_name)?;
+
+        // SAFETY: The handle is a freshly opened, exclusively owned overlapped named pipe client handle.
+        unsafe { tokio::net::windows::named_pipe::NamedPipeClient::from_raw_handle(file.into_raw_handle()) }
+    }
+
+    /// Open a client, waiting while the pipe does not exist yet or its instance is not listening.
+    async fn open_client_when_listening(pipe_name: &str) -> tokio::net::windows::named_pipe::NamedPipeClient {
+        use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY};
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match open_client(pipe_name) {
+                Ok(client) => return client,
+                Err(error)
+                    if Instant::now() < deadline
+                        && (error.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed())
+                            || error.raw_os_error() == Some(ERROR_FILE_NOT_FOUND.0.cast_signed())) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("failed to open {pipe_name}: {error}"),
+            }
+        }
+    }
+
+    type Dispatched = (NamedPipeServer, OwnedSemaphorePermit);
+
+    /// Create an instance with the broker client ACE, plus full control for the current user
+    /// so that a non-elevated test process can create additional instances like the service does.
+    fn create_owned_test_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result<NamedPipeServer> {
+        let users_sid = Sid::from_well_known(Security::WinBuiltinUsersSid, None).context("Users SID")?;
+        let security_attributes = build_security_attributes(Some(current_user_sid()), users_sid)?;
+
+        // SAFETY: `security_attributes` owns a valid `SECURITY_ATTRIBUTES` that outlives the call.
+        let server = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first_instance)
+                .create_with_security_attributes_raw(pipe_name, security_attributes.as_mut_ptr().cast())
+        }?;
+
+        Ok(server)
+    }
+
+    fn spawn_accept_loop(
+        pipe_name: &str,
+        max_connections: usize,
+    ) -> (
+        CancellationToken,
+        tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
+        JoinHandle<()>,
+    ) {
+        let shutdown = CancellationToken::new();
+        let (dispatched_tx, dispatched_rx) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn({
+            let pipe_name = pipe_name.to_owned();
+            let shutdown = shutdown.clone();
+            async move {
+                accept_loop(
+                    &pipe_name,
+                    &shutdown,
+                    max_connections,
+                    &create_owned_test_instance,
+                    move |server, permit| {
+                        dispatched_tx.send((server, permit)).expect("test holds the receiver");
+                    },
+                )
+                .await;
+            }
+        });
+        (shutdown, dispatched_rx, task)
+    }
+
+    async fn next_dispatched(dispatched: &mut tokio::sync::mpsc::UnboundedReceiver<Dispatched>) -> Dispatched {
+        tokio::time::timeout(Duration::from_secs(10), dispatched.recv())
+            .await
+            .expect("a connection is dispatched")
+            .expect("the accept loop is running")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_loop_keeps_a_listening_instance_while_connections_are_held() {
+        use tokio::io::AsyncReadExt as _;
+
+        let pipe_name = unique_pipe_name("listen");
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 2);
+
+        let _first_client = open_client_when_listening(&pipe_name).await;
+        let first = next_dispatched(&mut dispatched).await;
+
+        // The next instance exists before the connected one is handed off, so no wait is needed.
+        let _second_client = open_client(&pipe_name).expect("a listening instance follows each handoff");
+        let _second = next_dispatched(&mut dispatched).await;
+
+        // Over the limit, the client is accepted and disconnected, and the loop keeps listening.
+        let mut rejected = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let mut buffer = [0u8; 1];
+        let read = tokio::time::timeout(Duration::from_secs(10), rejected.read(&mut buffer))
+            .await
+            .expect("an over-limit client is disconnected promptly");
+        assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
+        assert!(
+            dispatched.try_recv().is_err(),
+            "an over-limit client must not be dispatched"
+        );
+
+        drop(first);
+        let _third_client = open_client_when_listening(&pipe_name).await;
+        let _third = next_dispatched(&mut dispatched).await;
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the accept loop stops on shutdown")
+            .expect("the accept loop does not panic");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_loop_retries_until_it_owns_the_first_instance() {
+        let pipe_name = unique_pipe_name("retry");
+        let squatter = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .expect("create the competing first instance");
+
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 1);
+        tokio::time::sleep(INSTANCE_RETRY_INITIAL_DELAY * 3).await;
+        assert!(!task.is_finished(), "a failed first instance must be retried");
+        drop(squatter);
+
+        let _client = open_client_when_listening(&pipe_name).await;
+        let _connection = next_dispatched(&mut dispatched).await;
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the accept loop stops on shutdown")
+            .expect("the accept loop does not panic");
+    }
+
+    #[tokio::test]
+    async fn retry_delay_doubles_up_to_the_maximum_and_resets() {
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let mut retry = RetryDelay::default();
+
+        let mut delays = Vec::new();
+        for _ in 0..12 {
+            delays.push(retry.next);
+            assert!(!retry.wait(&shutdown).await, "a cancelled shutdown interrupts the wait");
+        }
+
+        assert_eq!(delays[0], INSTANCE_RETRY_INITIAL_DELAY);
+        assert_eq!(delays[1], INSTANCE_RETRY_INITIAL_DELAY * 2);
+        assert_eq!(*delays.last().expect("delays"), INSTANCE_RETRY_MAX_DELAY);
+        retry.reset();
+        assert_eq!(retry.next, INSTANCE_RETRY_INITIAL_DELAY);
+    }
+
     #[test]
     fn pipe_client_access_never_includes_pipe_instance_creation() {
         use windows::Win32::Storage::FileSystem::{FILE_APPEND_DATA, FILE_CREATE_PIPE_INSTANCE, FILE_GENERIC_WRITE};
@@ -361,24 +653,12 @@ mod tests {
 
     #[tokio::test]
     async fn client_access_allows_read_and_write_data_clients() {
-        use std::os::windows::fs::OpenOptionsExt as _;
-        use std::os::windows::io::IntoRawHandle as _;
-
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-        use tokio::net::windows::named_pipe::NamedPipeClient;
-        use windows::Win32::Foundation::GENERIC_READ;
 
         let pipe_name = unique_pipe_name("client");
         let mut server = create_client_access_pipe(&pipe_name);
 
-        let file = std::fs::OpenOptions::new()
-            .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
-            .custom_flags(windows::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED.0)
-            .security_qos_flags(windows::Win32::Storage::FileSystem::SECURITY_IDENTIFICATION.0)
-            .open(&pipe_name)
-            .expect("open the pipe with GENERIC_READ | FILE_WRITE_DATA");
-        // SAFETY: The handle is a freshly opened, exclusively owned named pipe client handle.
-        let mut client = unsafe { NamedPipeClient::from_raw_handle(file.into_raw_handle()) }.expect("wrap client");
+        let mut client = open_client(&pipe_name).expect("open the pipe with GENERIC_READ | FILE_WRITE_DATA");
         server.connect().await.expect("accept the client");
 
         client.write_all(b"ping").await.expect("client write");
