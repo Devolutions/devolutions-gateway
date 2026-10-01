@@ -145,8 +145,12 @@ mod tests {
 
         let slog = write(1_787_255_035, 90, &actions);
 
+        let session_start = format!(
+            r#"{{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"{PROMPT_VERSION}"}}"#
+        );
+
         let expected = [
-            r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-1"}"#,
+            session_start.as_str(),
             r#"{"timestamp":"2026-08-20T19:43:56.500Z","seq":1,"event":"session.action","description":"Listed files","object":"/var/log","parameters":{"Command":"ls /var/log"}}"#,
             r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell"}"#,
             r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended"}"#,
