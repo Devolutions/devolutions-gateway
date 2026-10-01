@@ -48,6 +48,17 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void JmuxClaimsWithExplicitAgent()
+    {
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_agent_id":"4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11"}""";
+
+        var claims = new JmuxClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId);
+        claims.AgentId = Guid.Parse("4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11");
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void JmuxClaimsWithAdditionalDestinations()
     {
         const string EXPECTED = """{"dst_hst":"tcp://hello.world","dst_addl":["udp://farewell","tcp://and-yet-another-one"],"jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";

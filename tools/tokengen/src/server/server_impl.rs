@@ -196,6 +196,7 @@ pub(crate) async fn jmux_handler(
             jet_ttl: request.jet_ttl,
             jet_aid: request.jet_aid,
             jet_rec: request.jet_rec,
+            jet_agent_id: request.jet_agent_id,
         },
     )
     .await
@@ -352,6 +353,7 @@ pub(crate) struct JmuxRequest {
     jet_ttl: Option<u64>,
     jet_aid: Option<Uuid>,
     jet_rec: bool,
+    jet_agent_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

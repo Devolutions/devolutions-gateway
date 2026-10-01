@@ -597,6 +597,12 @@ pub struct JmuxTokenClaims {
 
     /// JWT "JWT ID" claim, the unique ID for this token
     pub jti: Uuid,
+
+    /// Optional agent ID for routing connections through an enrolled agent tunnel.
+    ///
+    /// When set, the Gateway proxies every stream of this session through the specified agent
+    /// and fails the stream instead of connecting directly to the target.
+    pub jet_agent_id: Option<Uuid>,
 }
 
 // ----- jrec claims ----- //
@@ -1530,6 +1536,8 @@ mod serde_impl {
         jet_ttl: SessionTtl,
         exp: i64,
         jti: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jet_agent_id: Option<Uuid>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -1729,6 +1737,7 @@ mod serde_impl {
                 jet_ttl: self.jet_ttl,
                 exp: self.exp,
                 jti: self.jti,
+                jet_agent_id: self.jet_agent_id,
             }
             .serialize(serializer)
         }
@@ -1765,6 +1774,7 @@ mod serde_impl {
                 jet_ttl: claims.jet_ttl,
                 exp: claims.exp,
                 jti: claims.jti,
+                jet_agent_id: claims.jet_agent_id,
             });
 
             // -- local helper -- //
@@ -1912,6 +1922,43 @@ mod tests {
 
         assert_ne!(claims.jti, Uuid::nil());
         assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
+    }
+
+    #[test]
+    fn jmux_claims_without_agent_id_keep_route_matching() {
+        let claims: JmuxTokenClaims = serde_json::from_value(serde_json::json!({
+            "dst_hst": "tcp://10.0.0.5:3389",
+            "jet_aid": Uuid::new_v4(),
+            "exp": 0,
+            "jti": Uuid::new_v4(),
+        }))
+        .expect("JMUX token without jet_agent_id should still deserialize");
+
+        assert_eq!(claims.jet_agent_id, None);
+
+        let serialized = serde_json::to_value(&claims).expect("JMUX claims serialize");
+        assert!(serialized.get("jet_agent_id").is_none());
+    }
+
+    #[test]
+    fn jmux_claims_keep_explicit_agent_id() {
+        let agent_id = "4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11";
+        let claims: JmuxTokenClaims = serde_json::from_value(serde_json::json!({
+            "dst_hst": "tcp://10.0.0.5:3389",
+            "jet_aid": Uuid::new_v4(),
+            "exp": 0,
+            "jti": Uuid::new_v4(),
+            "jet_agent_id": agent_id,
+        }))
+        .expect("JMUX token with jet_agent_id should deserialize");
+
+        assert_eq!(
+            claims.jet_agent_id,
+            Some(Uuid::parse_str(agent_id).expect("valid UUID"))
+        );
+
+        let serialized = serde_json::to_value(&claims).expect("JMUX claims serialize");
+        assert_eq!(serialized["jet_agent_id"], agent_id);
     }
 
     #[test]

@@ -28,6 +28,13 @@ pub async fn handle(
         RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
     }
 
+    if let Some(agent_id) = claims.jet_agent_id {
+        anyhow::ensure!(
+            agent_tunnel_handle.is_some(),
+            "agent {agent_id} specified in token requires agent tunnel routing, but agent tunnel is not enabled"
+        );
+    }
+
     let (reader, writer) = tokio::io::split(stream);
     let reader = Box::new(reader) as ErasedRead;
     let writer = Box::new(writer) as ErasedWrite;
@@ -38,6 +45,7 @@ pub async fn handle(
     debug!(?config, "JMUX config");
 
     let session_id = claims.jet_aid;
+    let explicit_agent_id = claims.jet_agent_id;
 
     let info = SessionInfo::builder()
         .id(session_id)
@@ -125,10 +133,9 @@ pub async fn handle(
                 .context("invalid JMUX target")?;
                 let route_target = route_target_from_target_addr(&target);
 
-                let routed = agent_tunnel::routing::try_route(
-                    Some(agent_tunnel_handle.as_ref()),
-                    // TODO: Pass `jet_agent_id` after JMUX consumers start issuing it.
-                    None,
+                let routed = agent_tunnel::routing::route(
+                    &agent_tunnel_handle,
+                    explicit_agent_id,
                     &route_target,
                     session_id,
                     target.as_addr(),

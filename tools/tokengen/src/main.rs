@@ -112,6 +112,7 @@ fn sign(
             jet_ttl,
             jet_aid,
             jet_rec,
+            jet_agent_id,
         } => SubCommandArgs::Jmux {
             jet_ap,
             dst_hst,
@@ -119,6 +120,7 @@ fn sign(
             jet_ttl,
             jet_aid,
             jet_rec,
+            jet_agent_id,
         },
         SignSubCommand::Jrec {
             jet_rop,
@@ -265,6 +267,8 @@ enum SignSubCommand {
         jet_aid: Option<Uuid>,
         #[clap(long)]
         jet_rec: bool,
+        #[clap(long)]
+        jet_agent_id: Option<Uuid>,
     },
     Jrec {
         #[clap(long)]

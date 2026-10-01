@@ -108,6 +108,21 @@ pub async fn try_route(
         };
     };
 
+    route(handle, explicit_agent_id, target, session_id, target_addr).await
+}
+
+/// Route a connection through a configured agent tunnel.
+///
+/// Returns `Ok(Some(stream))` if routed through an agent, `Ok(None)` if no agent matches
+/// and the caller may connect directly, or `Err` if an explicit agent was specified
+/// but not found (or all candidates failed).
+pub async fn route(
+    handle: &AgentTunnelHandle,
+    explicit_agent_id: Option<Uuid>,
+    target: &RouteTarget,
+    session_id: Uuid,
+    target_addr: &str,
+) -> Result<Option<(TunnelStream, Arc<AgentPeer>)>> {
     match resolve_route(handle.registry(), explicit_agent_id, target).await {
         RoutingDecision::ExplicitAgentNotFound(id) => {
             Err(anyhow!("agent {id} specified in token not found in registry"))

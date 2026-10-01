@@ -273,6 +273,8 @@ pub struct JmuxClaims {
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_id: Option<Uuid>,
 }
 
 pub fn any_jmux_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = JmuxClaims> {
@@ -283,17 +285,21 @@ pub fn any_jmux_claims(now: i64, validity_duration: i64) -> impl Strategy<Value 
         alternate_hosts(),
         application_protocol(),
         uuid_typed(),
+        option::of(uuid_typed()),
     )
-        .prop_map(move |(jet_aid, jet_rec, dst_hst, dst_addl, jet_ap, jti)| JmuxClaims {
-            jet_aid,
-            jet_rec,
-            dst_hst,
-            dst_addl,
-            jet_ap,
-            jti,
-            nbf: now,
-            exp: now + validity_duration,
-        })
+        .prop_map(
+            move |(jet_aid, jet_rec, dst_hst, dst_addl, jet_ap, jti, jet_agent_id)| JmuxClaims {
+                jet_aid,
+                jet_rec,
+                dst_hst,
+                dst_addl,
+                jet_ap,
+                jti,
+                nbf: now,
+                exp: now + validity_duration,
+                jet_agent_id,
+            },
+        )
 }
 
 #[derive(Debug, Clone, Serialize)]
