@@ -3,20 +3,23 @@
 use std::cmp::Ordering;
 
 use now_policy::{Decision, VersionCondition, VersionRange};
-use now_policy_api::{CustomParameterString, ManagerName, Operation, PackageRequest};
+use now_policy_api::{CustomParameterString, ManagerName, PackageRequest};
 use semver::{Prerelease, Version};
 
 use super::identifier::identifier_may_select_version;
 
-/// Returns the package version selected by the request, or `None` when it is unknown before execution.
+/// Returns the package version selected by an install or update request, or `None` when it is
+/// unknown before execution.
 ///
 /// The version is unknown when the request omits it, letting the package manager choose one;
-/// for uninstall requests, which the package managers do not pin to the requested version;
 /// when custom parameters or a decorated package identifier may select a version on the
 /// package manager command line; and when the manager resolves the requested version as a range.
+/// Clients that want requests to pass rules with a version condition should send the resolved,
+/// concrete version.
+///
+/// Uninstall requests never reach version conditions: rules with a version condition do not apply to them.
 pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
-    if request.operation == Operation::Uninstall
-        || custom_parameters_may_select_version(request.manager, &request.options.custom_parameters)
+    if custom_parameters_may_select_version(request.manager, &request.options.custom_parameters)
         || identifier_may_select_version(&request.package.id.0)
     {
         return None;
@@ -50,12 +53,14 @@ fn release_component_count(version: &str) -> usize {
     release.split('.').count()
 }
 
-/// Whether a rule's version condition matches the requested version.
+/// Whether a rule's version condition matches the requested version of an install or update request.
 ///
 /// Both decisions fail closed when the version is in doubt.
 /// An Allow rule does not match unknown or nonsemantic versions in ranges, and compares exact versions literally.
 /// A Deny rule matches unknown and unparseable versions, equivalent spellings of exact versions
 /// (`1.2.3`, `v1.2.3` and `1.2.3.0`), and pre-release versions within the range bounds.
+/// This is intentional: an install or update without a concrete version is denied by any matching
+/// Deny rule with a version condition, because the version the manager resolves is unknown.
 pub(super) fn version_condition_matches(
     version: Option<&str>,
     condition: &VersionCondition,

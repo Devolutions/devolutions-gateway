@@ -443,22 +443,99 @@ fn version_selecting_custom_parameters_make_the_version_unknown() {
 }
 
 #[test]
-fn uninstall_and_decorated_identifier_versions_are_unknown() {
-    let mut request = versioned_request(Some("3.0.0"));
-    request.operation = api::Operation::Uninstall;
+fn version_conditions_do_not_apply_to_uninstall() {
+    for version in [None, Some("1.0.0"), Some("3.0.0")] {
+        let mut request = versioned_request(version);
+        request.operation = api::Operation::Uninstall;
 
-    let result = evaluate(&deny_range_policy(), &request);
-    assert_eq!(result.decision, Decision::Deny);
+        let result = evaluate(&deny_range_policy(), &request);
+        assert_eq!(result.decision, Decision::Allow, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+        let result = evaluate(&allow_exact_version_policy(), &request);
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+    }
+
+    // An install without a concrete version stays denied by a Deny rule with a version condition.
+    let result = evaluate(&deny_range_policy(), &versioned_request(None));
     assert_eq!(result.rule_id, "deny-old");
-    let result = evaluate(&allow_exact_version_policy(), &request);
-    assert_eq!(result.rule_id, "<default>");
+}
 
+#[test]
+fn decorated_identifier_versions_are_unknown() {
     let mut request = versioned_request(Some("3.0.0"));
     request.manager = api::ManagerName::Npm;
     request.package.id = api::PackageIdentifier("Contoso.Tool@1.0.0".to_owned());
     let result = evaluate(&deny_range_policy(), &request);
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "deny-old");
+}
+
+#[test]
+fn unacceptable_install_locations_are_denied_before_rule_matching() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 1, Decision::Allow, PolicyMatch::default())],
+    );
+
+    for location in [
+        r"C:\Tools\..\Windows\System32",
+        "C:/Tools/../Windows",
+        r"\\server\share",
+        "Tools",
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_install_location = Some(location.to_owned());
+
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Deny, "{location}");
+        assert_eq!(result.rule_id, "<validation-failure>", "{location}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_install_location = Some("C:/Tools/Contoso/".to_owned());
+    assert_eq!(evaluate(&policy, &request).rule_id, "allow-any");
+}
+
+#[test]
+fn deterministic_scope_and_architecture_defaults_are_matched() {
+    let deny_machine_x64 = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-machine-x64",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                scopes: BTreeSet::from([now_policy::Scope::Machine]),
+                architectures: BTreeSet::from([now_policy::Architecture::X64]),
+                ..Default::default()
+            },
+        )],
+    );
+    let allow_user_neutral = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-user-neutral",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                scopes: BTreeSet::from([now_policy::Scope::User]),
+                architectures: BTreeSet::from([now_policy::Architecture::Neutral]),
+                ..Default::default()
+            },
+        )],
+    );
+
+    // npm always runs per user with architecture-neutral packages.
+    let mut request = make_request(api::Operation::Install, "contoso-tool");
+    request.manager = api::ManagerName::Npm;
+    assert_eq!(evaluate(&deny_machine_x64, &request).rule_id, "<default>");
+    assert_eq!(evaluate(&allow_user_neutral, &request).rule_id, "allow-user-neutral");
+
+    // WinGet leaves scope and architecture to the installer.
+    let request = make_request(api::Operation::Install, "Contoso.Tool");
+    assert_eq!(evaluate(&deny_machine_x64, &request).rule_id, "deny-machine-x64");
+    assert_eq!(evaluate(&allow_user_neutral, &request).rule_id, "<default>");
 }
 
 #[test]

@@ -52,32 +52,25 @@ pub(super) fn package_identifiers_match(
 /// Package names embedded in a decorated identifier.
 ///
 /// - npm aliases (`alias:@scope/target@1.0.0`) name both the alias and the target package.
-/// - Bun aliases (`alias@npm:target`) name both packages; a protocol prefix (`npm:`, `file:`, `github:`) is not a package name.
+/// - Bun specifiers (`alias@npm:target`, `npm:target`, `github:owner/repo`) name the optional alias
+///   before the protocol and the target after it; the protocol itself is not a package name.
 /// - vcpkg qualifies a port with features and a triplet (`port[feature]:triplet`).
 /// - Other managers may accept a versioned specifier (`name@1.2.3`).
 ///
 /// A leading `@` is kept as part of an npm scope.
 pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> Vec<&str> {
-    const BUN_PROTOCOLS: &[&str] = &[
-        "npm",
-        "file",
-        "link",
-        "workspace",
-        "git",
-        "git+ssh",
-        "git+https",
-        "github",
-        "http",
-        "https",
-    ];
-
     match manager {
         ManagerName::Npm => identifier.split(':').map(strip_version_suffix).collect(),
-        ManagerName::Bun => identifier
-            .split(':')
-            .map(strip_version_suffix)
-            .filter(|name| !BUN_PROTOCOLS.iter().any(|protocol| name.eq_ignore_ascii_case(protocol)))
-            .collect(),
+        ManagerName::Bun => match identifier.split_once(':') {
+            None => vec![strip_version_suffix(identifier)],
+            Some((prefix, target)) => {
+                let alias = prefix
+                    .rfind('@')
+                    .filter(|index| *index > 0)
+                    .map(|index| &prefix[..index]);
+                alias.into_iter().chain([strip_version_suffix(target)]).collect()
+            }
+        },
         ManagerName::Vcpkg => vec![identifier.split(['[', ':']).next().unwrap_or(identifier)],
         _ => vec![strip_version_suffix(identifier)],
     }
@@ -111,21 +104,22 @@ fn identifier_key(manager: ManagerName, identifier: &str, decision: Decision) ->
 /// - pip normalizes names per PEP 503: letter case is ignored and runs of `-`, `_` and `.` are equivalent.
 /// - Cargo (crates.io) ignores letter case and treats `-` and `_` as equivalent.
 /// - PowerShell repositories, Chocolatey, NuGet (`dotnet tool`), Scoop and vcpkg ignore letter case.
+/// - WinGet identifiers are compared ignoring letter case. The broker passes `--exact`, so
+///   WinGet itself requires the exact case and a case variant cannot select another package.
 ///
-/// Other identifiers are case-sensitive: the broker resolves WinGet identifiers with `--exact`,
-/// and npm treats legacy mixed-case names as distinct packages.
+/// npm and Bun identifiers are case-sensitive because legacy mixed-case names are distinct packages.
 pub(super) fn canonical_identifier(manager: ManagerName, identifier: &str) -> Cow<'_, str> {
     match manager {
         ManagerName::Pip => Cow::Owned(pep503_normalize(identifier)),
         ManagerName::Cargo => Cow::Owned(identifier.to_ascii_lowercase().replace('_', "-")),
-        ManagerName::PowerShell
+        ManagerName::Winget
+        | ManagerName::PowerShell
         | ManagerName::PowerShell7
         | ManagerName::Chocolatey
         | ManagerName::Dotnet
         | ManagerName::Scoop
         | ManagerName::Vcpkg => Cow::Owned(identifier.to_ascii_lowercase()),
-        ManagerName::Winget
-        | ManagerName::Npm
+        ManagerName::Npm
         | ManagerName::Bun
         | ManagerName::Apt
         | ManagerName::Dnf
@@ -194,8 +188,21 @@ mod tests {
             "az.accounts"
         );
         assert_eq!(canonical_identifier(ManagerName::Chocolatey, "Git"), "git");
-        assert_eq!(canonical_identifier(ManagerName::Winget, "Git.Git"), "Git.Git");
+        assert_eq!(canonical_identifier(ManagerName::Winget, "Git.Git"), "git.git");
         assert_eq!(canonical_identifier(ManagerName::Npm, "JSONStream"), "JSONStream");
+    }
+
+    #[test]
+    fn winget_identifiers_ignore_case_for_both_decisions() {
+        for decision in [Decision::Allow, Decision::Deny] {
+            assert!(matches(ManagerName::Winget, "git.git", &exact(&["Git.Git"]), decision));
+            assert!(matches(
+                ManagerName::Winget,
+                "microsoft.vscode",
+                &patterns(&["Microsoft.*"]),
+                decision
+            ));
+        }
     }
 
     #[test]
@@ -231,31 +238,15 @@ mod tests {
 
     #[test]
     fn deny_identifiers_ignore_case_for_case_sensitive_managers() {
-        assert!(matches(
-            ManagerName::Winget,
-            "git.git",
-            &exact(&["Git.Git"]),
-            Decision::Deny
-        ));
-        assert!(matches(
-            ManagerName::Npm,
-            "jsonstream",
-            &exact(&["JSONStream"]),
-            Decision::Deny
-        ));
-
-        assert!(!matches(
-            ManagerName::Winget,
-            "git.git",
-            &exact(&["Git.Git"]),
-            Decision::Allow
-        ));
-        assert!(!matches(
-            ManagerName::Npm,
-            "jsonstream",
-            &exact(&["JSONStream"]),
-            Decision::Allow
-        ));
+        for manager in [ManagerName::Npm, ManagerName::Bun] {
+            assert!(matches(manager, "jsonstream", &exact(&["JSONStream"]), Decision::Deny));
+            assert!(!matches(
+                manager,
+                "jsonstream",
+                &exact(&["JSONStream"]),
+                Decision::Allow
+            ));
+        }
     }
 
     #[test]
@@ -307,31 +298,10 @@ mod tests {
 
     #[test]
     fn allow_patterns_preserve_case_for_case_sensitive_managers() {
-        assert!(!matches(
-            ManagerName::Npm,
-            "jsonstream",
-            &patterns(&["JSON*"]),
-            Decision::Allow
-        ));
-        assert!(!matches(
-            ManagerName::Winget,
-            "microsoft.vscode",
-            &patterns(&["Microsoft.*"]),
-            Decision::Allow
-        ));
-
-        assert!(matches(
-            ManagerName::Npm,
-            "jsonstream",
-            &patterns(&["JSON*"]),
-            Decision::Deny
-        ));
-        assert!(matches(
-            ManagerName::Winget,
-            "microsoft.vscode",
-            &patterns(&["Microsoft.*"]),
-            Decision::Deny
-        ));
+        for manager in [ManagerName::Npm, ManagerName::Bun] {
+            assert!(!matches(manager, "jsonstream", &patterns(&["JSON*"]), Decision::Allow));
+            assert!(matches(manager, "jsonstream", &patterns(&["JSON*"]), Decision::Deny));
+        }
     }
 
     #[test]
@@ -369,6 +339,14 @@ mod tests {
             embedded_package_names(ManagerName::Bun, "alias@npm:react@18.0.0"),
             ["alias", "react"]
         );
+        assert_eq!(
+            embedded_package_names(ManagerName::Bun, "npm@npm:react"),
+            ["npm", "react"]
+        );
+        for shortcut in ["gitlab", "bitbucket", "gist", "sourcehut", "github", "file"] {
+            let value = format!("{shortcut}:owner/repo");
+            assert_eq!(embedded_package_names(ManagerName::Bun, &value), ["owner/repo"]);
+        }
         assert!(!matches(
             ManagerName::Bun,
             "npm:react",

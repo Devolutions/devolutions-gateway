@@ -4,7 +4,8 @@ use now_policy::PolicyConstraints;
 use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
-use super::wildcard::wildcard_any_vec;
+use super::install_location::normalize_install_location_pattern;
+use super::wildcard::{wildcard_any_vec, wildcard_match};
 
 pub(super) fn constraints_pass(
     constraints: &Option<PolicyConstraints>,
@@ -44,12 +45,19 @@ pub(super) fn constraints_pass(
         return false;
     }
 
-    // Check install location patterns.
-    if flags.has_custom_install_location
-        && !c.allowed_install_location_patterns.is_empty()
-        && !wildcard_any_vec(&flags.custom_install_location, &c.allowed_install_location_patterns)
-    {
-        return false;
+    // Check install location patterns against the normalized location, failing closed on unacceptable locations.
+    if flags.has_custom_install_location {
+        let Some(location) = flags.custom_install_location.as_deref() else {
+            return false;
+        };
+        if !c.allowed_install_location_patterns.is_empty()
+            && !c
+                .allowed_install_location_patterns
+                .iter()
+                .any(|pattern| wildcard_match(location, &normalize_install_location_pattern(pattern.as_ref())))
+        {
+            return false;
+        }
     }
 
     // Check custom parameters.
@@ -132,7 +140,7 @@ mod tests {
             has_kill_before_operation: false,
             has_uninstall_previous: false,
             no_upgrade: false,
-            custom_install_location: String::new(),
+            custom_install_location: None,
             custom_parameters: Vec::new(),
         }
     }
@@ -158,22 +166,43 @@ mod tests {
     #[test]
     fn install_location_must_match_allowed_patterns_when_present() {
         let constraints = PolicyConstraints {
-            allowed_install_location_patterns: vec![StringPattern("C:\\Tools\\*".to_owned())],
+            allowed_install_location_patterns: vec![StringPattern("C:/tools/*".to_owned())],
             ..Default::default()
         };
+        let location_flags = |location: &str| {
+            let mut flags = flags();
+            flags.has_custom_install_location = true;
+            flags.custom_install_location = crate::evaluator::install_location::normalize_install_location(location);
+            flags
+        };
 
-        let mut matching_flags = flags();
-        matching_flags.has_custom_install_location = true;
-        matching_flags.custom_install_location = "C:\\Tools\\Contoso".to_owned();
-        assert!(constraints_pass(
-            &Some(constraints.clone()),
+        for location in [r"C:\Tools\Contoso", "c:/TOOLS//Contoso/"] {
+            assert!(
+                constraints_pass(&Some(constraints.clone()), &request(), &location_flags(location)),
+                "{location}"
+            );
+        }
+        for location in [
+            r"D:\Temp\Contoso",
+            r"C:\Tools\..\Windows\System32",
+            "C:/Tools/../Windows/System32",
+            r"C:\Tools",
+        ] {
+            assert!(
+                !constraints_pass(&Some(constraints.clone()), &request(), &location_flags(location)),
+                "{location}"
+            );
+        }
+
+        let permissive = PolicyConstraints {
+            allow_custom_install_location: true,
+            ..Default::default()
+        };
+        assert!(!constraints_pass(
+            &Some(permissive),
             &request(),
-            &matching_flags
+            &location_flags(r"C:\Tools\..\Windows")
         ));
-
-        let mut non_matching_flags = matching_flags;
-        non_matching_flags.custom_install_location = "D:\\Temp\\Contoso".to_owned();
-        assert!(!constraints_pass(&Some(constraints), &request(), &non_matching_flags));
     }
 
     #[test]

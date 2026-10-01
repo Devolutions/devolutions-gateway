@@ -1,18 +1,26 @@
 //! Policy evaluation engine.
 //!
 //! Implements the broker flow described in the package broker policies spec:
-//! 1. Match enabled rules against request
-//! 2. Sort by priority (lowest wins), deny wins on tie
-//! 3. Fall back to `enforcement.defaultDecision`
+//! 1. Deny requests whose custom install location is not a plain local drive path
+//! 2. Match enabled rules against request
+//! 3. Sort by priority (lowest wins), deny wins on tie
+//! 4. Fall back to `enforcement.defaultDecision`
 //!
 //! Matching fails closed for both decisions: when a request characteristic is in doubt,
-//! such as an unknown package version, Deny rules match and Allow rules do not.
+//! such as an unknown package version, scope or architecture, Deny rules match and Allow rules do not.
+//! Scope and architecture are unknown only when the package manager chooses them at execution time.
+//!
+//! Version conditions apply to install and update requests only; a rule with a version condition never
+//! matches an uninstall request.
+//! An install or update without a concrete version matches Deny rules with a version condition,
+//! so clients should send the resolved version to pass them.
 
 use now_policy::{Decision, PolicyDocument};
 use now_policy_api::{Elevation, PackageRequest, Scope};
 
 mod constraints;
 mod identifier;
+mod install_location;
 mod matching;
 mod version;
 mod wildcard;
@@ -37,7 +45,8 @@ struct RequestFlags {
     has_kill_before_operation: bool,
     has_uninstall_previous: bool,
     no_upgrade: bool,
-    custom_install_location: String,
+    /// Normalized custom install location, or `None` when absent or not a plain local drive path.
+    custom_install_location: Option<String>,
     custom_parameters: Vec<String>,
 }
 
@@ -55,7 +64,11 @@ impl RequestFlags {
             has_kill_before_operation: !request.options.kill_before_operation.is_empty(),
             has_uninstall_previous: request.options.uninstall_previous,
             no_upgrade: request.options.no_upgrade,
-            custom_install_location: request.options.custom_install_location.clone().unwrap_or_default(),
+            custom_install_location: request
+                .options
+                .custom_install_location
+                .as_deref()
+                .and_then(install_location::normalize_install_location),
             custom_parameters: request
                 .options
                 .custom_parameters
@@ -72,6 +85,16 @@ impl RequestFlags {
 /// This function performs the rule-matching logic only.
 pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDecision {
     let flags = RequestFlags::from_request(request);
+
+    if flags.has_custom_install_location && flags.custom_install_location.is_none() {
+        return PolicyDecision {
+            decision: Decision::Deny,
+            rule_id: "<validation-failure>".to_owned(),
+            reason: "Custom install location must be an absolute local drive path without relative segments."
+                .to_owned(),
+        };
+    }
+
     let requested_version = version::requested_version(request);
 
     let mut matched_rules: Vec<(&str, u32, Decision, &str)> = Vec::new();

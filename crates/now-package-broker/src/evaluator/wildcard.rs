@@ -42,7 +42,7 @@ pub(crate) fn has_powershell_wildcard_syntax(value: &str) -> bool {
     value.contains(['*', '?', '[', ']', '`'])
 }
 
-fn wildcard_match(value: &str, pattern: &str) -> bool {
+pub(super) fn wildcard_match(value: &str, pattern: &str) -> bool {
     wildcard_match_with_case(value, pattern, true)
 }
 
