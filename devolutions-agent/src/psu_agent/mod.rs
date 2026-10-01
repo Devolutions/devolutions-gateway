@@ -99,7 +99,7 @@ impl Default for ConnectionSettings {
 
 /// An established agent stream.
 struct PsuConnection {
-    // Keeps the channel alive for the lifetime of the stream.
+    // Owned for the lifetime of the stream, matching the previous single-scope connection handling.
     _client: AgentControlClient<Channel>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     response_stream: Streaming<protocol::ServerMessage>,
@@ -228,13 +228,7 @@ impl PsuAgent {
         })
     }
 
-    async fn serve(&self, connection: PsuConnection, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
-        let PsuConnection {
-            outgoing_tx,
-            mut response_stream,
-            ..
-        } = connection;
-
+    async fn serve(&self, mut connection: PsuConnection, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
         let registry = ProcessRegistry::default();
         let mut process_tasks = JoinSet::new();
         let mut connection_id = String::new();
@@ -245,7 +239,7 @@ impl PsuAgent {
                     process_tasks.shutdown().await;
                     return Ok(());
                 }
-                message = response_stream.message() => {
+                message = connection.response_stream.message() => {
                     let Some(message) = message.context("failed to read PSU gRPC server message")? else {
                         bail!("PSU gRPC server closed the agent stream");
                     };
@@ -256,7 +250,7 @@ impl PsuAgent {
 
                     self.handle_server_message(
                         message,
-                        &outgoing_tx,
+                        &connection.outgoing_tx,
                         &registry,
                         &mut process_tasks,
                         &mut connection_id,
