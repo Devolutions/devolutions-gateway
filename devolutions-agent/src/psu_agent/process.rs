@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
@@ -14,10 +15,20 @@ use crate::psu_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted,
 use crate::psu_agent::{agent_message, diagnostic, stream_closed, stream_data};
 
 const PWSH_STDIN_CLOSED_EXIT_CODE: i32 = 160;
+const STDIN_BUFFER_FRAMES: usize = 256;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StopRequest {
+    /// Close stdin and let the child process exit on its own.
+    Graceful,
+    Kill,
+    /// The child process stopped consuming stdin and its buffer is full.
+    StdinOverflow,
+}
 
 #[derive(Debug)]
 pub(super) struct ProcessControl {
-    pub(super) stop: mpsc::Sender<bool>,
+    pub(super) stop: mpsc::Sender<StopRequest>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -27,29 +38,55 @@ pub(super) struct ProcessRegistry {
 
 #[derive(Debug, Default)]
 struct ProcessRegistryInner {
-    streams: HashMap<String, mpsc::Sender<StreamData>>,
+    streams: HashMap<String, StreamEntry>,
     processes: HashMap<String, ProcessControl>,
 }
 
+#[derive(Debug, Clone)]
+struct StreamEntry {
+    stdin: mpsc::Sender<StreamData>,
+    stop: mpsc::Sender<StopRequest>,
+}
+
 impl ProcessRegistry {
-    pub(super) async fn register_stream(&self, stream_id: &str) -> mpsc::Receiver<StreamData> {
-        let (tx, rx) = mpsc::channel(256);
-        self.inner.lock().await.streams.insert(stream_id.to_owned(), tx);
+    pub(super) async fn register_stream(
+        &self,
+        stream_id: &str,
+        stop: mpsc::Sender<StopRequest>,
+    ) -> mpsc::Receiver<StreamData> {
+        let (stdin, rx) = mpsc::channel(STDIN_BUFFER_FRAMES);
+        self.inner
+            .lock()
+            .await
+            .streams
+            .insert(stream_id.to_owned(), StreamEntry { stdin, stop });
         rx
     }
 
+    /// Queues a frame for the child process stdin without waiting.
+    ///
+    /// All streams share the server connection, so waiting for one child process to drain its stdin would stall
+    /// every other stream and control message. A child process whose stdin buffer is full is stopped instead.
     pub(super) async fn dispatch_stream_data(&self, stream_data: StreamData) {
-        let sender = self.inner.lock().await.streams.get(&stream_data.stream_id).cloned();
-        if let Some(sender) = sender {
-            let end_of_stream = stream_data.end_of_stream;
-            let stream_id = stream_data.stream_id.clone();
-            // Close the stream when it is the last frame, or when the receiver is
-            // gone (send failed), so the mapping is never leaked in the registry.
-            let send_failed = sender.send(stream_data).await.is_err();
-            if end_of_stream || send_failed {
-                self.close_stream(&stream_id).await;
+        let mut inner = self.inner.lock().await;
+        let Some(entry) = inner.streams.get(&stream_data.stream_id).cloned() else {
+            return;
+        };
+        let stream_id = stream_data.stream_id.clone();
+        let end_of_stream = stream_data.end_of_stream;
+
+        // Close the stream when it is the last frame, when the receiver is gone, or when the buffer overflows,
+        // so the mapping is never leaked in the registry.
+        match entry.stdin.try_send(stream_data) {
+            Ok(()) if !end_of_stream => return,
+            Ok(()) | Err(TrySendError::Closed(_)) => {}
+            Err(TrySendError::Full(_)) => {
+                warn!(%stream_id, "PSU gRPC child process is not consuming stdin; stopping it");
+                let _ = entry.stop.try_send(StopRequest::StdinOverflow);
             }
         }
+
+        inner.streams.remove(&stream_id);
     }
 
     pub(super) async fn close_stream(&self, stream_id: &str) {
@@ -70,8 +107,16 @@ impl ProcessRegistry {
             }
         };
 
-        if let Some(control) = control {
-            let _ = control.send(kill_process).await;
+        let request = if kill_process {
+            StopRequest::Kill
+        } else {
+            StopRequest::Graceful
+        };
+
+        // Never wait here: a full queue means the process is already being stopped, and a graceful stop
+        // escalates to a kill on its own.
+        if let Some(Err(error)) = control.map(|control| control.try_send(request)) {
+            debug!(correlation_id, %error, "PSU gRPC stop request not queued");
         }
     }
 
@@ -84,7 +129,7 @@ impl ProcessRegistry {
 pub(super) async fn run_process(
     request: StartProcess,
     incoming_rx: mpsc::Receiver<StreamData>,
-    control_rx: mpsc::Receiver<bool>,
+    control_rx: mpsc::Receiver<StopRequest>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     registry: ProcessRegistry,
     agent_id: String,
@@ -115,7 +160,7 @@ pub(super) async fn run_process(
 async fn run_process_inner(
     request: StartProcess,
     incoming_rx: mpsc::Receiver<StreamData>,
-    mut control_rx: mpsc::Receiver<bool>,
+    mut control_rx: mpsc::Receiver<StopRequest>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     agent_id: String,
     connection_id: String,
@@ -210,6 +255,7 @@ async fn run_process_inner(
     let mut stdin_closed_from_end_of_stream = false;
     let mut stdin_task_completed = false;
     let mut canceled = false;
+    let mut stdin_overflow = false;
 
     let status = loop {
         tokio::select! {
@@ -223,15 +269,20 @@ async fn run_process_inner(
                 canceled |= killed;
                 break exit_status;
             }
-            kill_process = control_rx.recv() => {
-                match kill_process {
-                    Some(true) => {
-                        info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
+            stop_request = control_rx.recv() => {
+                match stop_request {
+                    Some(stop @ (StopRequest::Kill | StopRequest::StdinOverflow)) => {
+                        stdin_overflow = stop == StopRequest::StdinOverflow;
+                        if stdin_overflow {
+                            warn!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process because it stopped consuming stdin");
+                        } else {
+                            info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
+                        }
                         child.start_kill().context("failed to kill PSU gRPC child process")?;
                         canceled = true;
                         break child.wait().await.context("failed to wait for killed PSU gRPC child process")?;
                     }
-                    Some(false) => {
+                    Some(StopRequest::Graceful) => {
                         info!(process_id, correlation_id = %request.correlation_id, "Gracefully stopping PSU gRPC child process by closing stdin");
                         canceled = true;
                         stdin_task.abort();
@@ -269,7 +320,9 @@ async fn run_process_inner(
     // Reflect the actual outcome so the server can distinguish success from
     // cancellation or a non-zero exit based on the StreamClosed message.
     let stream_error = canceled || (exit_code != 0 && !expected_pwsh_exit);
-    let stream_reason = if canceled {
+    let stream_reason = if stdin_overflow {
+        format!("child process stopped consuming stdin; more than {STDIN_BUFFER_FRAMES} frames were pending")
+    } else if canceled {
         "child process canceled".to_owned()
     } else if stream_error {
         format!("child process exited with code {exit_code}")
@@ -527,19 +580,49 @@ mod tests {
             .await;
 
         registry.stop_process("correlation-id", false).await;
-        assert_eq!(control_rx.recv().await, Some(false));
+        assert_eq!(control_rx.recv().await, Some(StopRequest::Graceful));
         assert!(registry.inner.lock().await.processes.contains_key("correlation-id"));
 
         registry.stop_process("correlation-id", true).await;
-        assert_eq!(control_rx.recv().await, Some(true));
+        assert_eq!(control_rx.recv().await, Some(StopRequest::Kill));
         assert!(!registry.inner.lock().await.processes.contains_key("correlation-id"));
+    }
+
+    #[tokio::test]
+    async fn stdin_overflow_stops_only_the_stalled_stream() {
+        let registry = ProcessRegistry::default();
+        let (stalled_stop_tx, mut stalled_stop_rx) = mpsc::channel(8);
+        let (healthy_stop_tx, mut healthy_stop_rx) = mpsc::channel(8);
+        let _stalled_stdin_rx = registry.register_stream("stalled", stalled_stop_tx).await;
+        let mut healthy_stdin_rx = registry.register_stream("healthy", healthy_stop_tx).await;
+
+        // Each dispatch must return immediately, even once the stalled stream buffer is full.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for sequence in 0..=u64::try_from(STDIN_BUFFER_FRAMES).expect("buffer size fits in u64") {
+                registry
+                    .dispatch_stream_data(stream_data("stalled".to_owned(), sequence, b"data".to_vec(), false))
+                    .await;
+            }
+            registry
+                .dispatch_stream_data(stream_data("healthy".to_owned(), 0, b"data".to_vec(), false))
+                .await;
+        })
+        .await
+        .expect("dispatch blocked on a stalled stream");
+
+        assert_eq!(stalled_stop_rx.try_recv().ok(), Some(StopRequest::StdinOverflow));
+        assert!(!registry.inner.lock().await.streams.contains_key("stalled"));
+
+        assert_eq!(healthy_stdin_rx.try_recv().expect("healthy frame").data, b"data");
+        assert!(healthy_stop_rx.try_recv().is_err());
+        assert!(registry.inner.lock().await.streams.contains_key("healthy"));
     }
 
     #[tokio::test]
     async fn run_process_cleans_registry_and_reports_spawn_failure() {
         let registry = ProcessRegistry::default();
-        let incoming_rx = registry.register_stream("stream-id").await;
         let (control_tx, control_rx) = mpsc::channel(8);
+        let incoming_rx = registry.register_stream("stream-id", control_tx.clone()).await;
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
         registry

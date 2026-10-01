@@ -12,6 +12,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{Stream, StreamExt as _};
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Streaming};
@@ -229,6 +230,23 @@ impl PsuAgent {
     }
 
     async fn serve(&self, mut connection: PsuConnection, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+        self.serve_messages(
+            &mut connection.response_stream,
+            &connection.outgoing_tx,
+            shutdown_signal,
+        )
+        .await
+    }
+
+    async fn serve_messages<S>(
+        &self,
+        messages: &mut S,
+        outgoing_tx: &mpsc::Sender<AgentMessage>,
+        shutdown_signal: &mut ShutdownSignal,
+    ) -> anyhow::Result<()>
+    where
+        S: Stream<Item = Result<protocol::ServerMessage, tonic::Status>> + Unpin,
+    {
         let registry = ProcessRegistry::default();
         let mut process_tasks = JoinSet::new();
         let mut connection_id = String::new();
@@ -239,22 +257,35 @@ impl PsuAgent {
                     process_tasks.shutdown().await;
                     return Ok(());
                 }
-                message = connection.response_stream.message() => {
-                    let Some(message) = message.context("failed to read PSU gRPC server message")? else {
+                message = messages.next() => {
+                    let Some(message) = message else {
                         bail!("PSU gRPC server closed the agent stream");
                     };
+                    let message = message.context("failed to read PSU gRPC server message")?;
 
                     if !message.connection_id.trim().is_empty() {
                         connection_id.clone_from(&message.connection_id);
                     }
 
-                    self.handle_server_message(
-                        message,
-                        &connection.outgoing_tx,
-                        &registry,
-                        &mut process_tasks,
-                        &mut connection_id,
-                    ).await?;
+                    // Shutdown must not wait for message handling to complete.
+                    let handled = tokio::select! {
+                        _ = shutdown_signal.wait() => None,
+                        result = self.handle_server_message(
+                            message,
+                            outgoing_tx,
+                            &registry,
+                            &mut process_tasks,
+                            &mut connection_id,
+                        ) => Some(result),
+                    };
+
+                    match handled {
+                        Some(result) => result?,
+                        None => {
+                            process_tasks.shutdown().await;
+                            return Ok(());
+                        }
+                    }
                 }
                 Some(result) = process_tasks.join_next(), if !process_tasks.is_empty() => {
                     match result {
@@ -281,8 +312,10 @@ impl PsuAgent {
                 info!(connection_id = %accepted.connection_id, "PSU gRPC agent registration accepted");
             }
             Some(ServerPayload::StartProcess(start_process)) => {
-                let incoming_rx = registry.register_stream(&start_process.stream_id).await;
                 let (control_tx, control_rx) = mpsc::channel(8);
+                let incoming_rx = registry
+                    .register_stream(&start_process.stream_id, control_tx.clone())
+                    .await;
                 registry
                     .register_process(
                         start_process.correlation_id.clone(),
@@ -721,5 +754,120 @@ mod tests {
         );
 
         server.abort();
+    }
+
+    fn server_message(payload: ServerPayload) -> protocol::ServerMessage {
+        protocol::ServerMessage {
+            request_id: String::new(),
+            connection_id: String::new(),
+            timestamp: None,
+            payload: Some(payload),
+        }
+    }
+
+    fn start_process(id: &str, executable: &str, arguments: &[&str]) -> protocol::ServerMessage {
+        server_message(ServerPayload::StartProcess(protocol::StartProcess {
+            correlation_id: id.to_owned(),
+            stream_id: id.to_owned(),
+            executable: executable.to_owned(),
+            arguments: arguments.iter().map(|&argument| argument.to_owned()).collect(),
+            working_directory: String::new(),
+            environment: HashMap::new(),
+            metadata: HashMap::new(),
+        }))
+    }
+
+    #[tokio::test]
+    async fn stalled_child_stdin_does_not_block_other_streams_or_shutdown() {
+        // The stalled child never reads stdin; the echo child copies stdin to stdout.
+        let (stalled, echo) = if cfg!(windows) {
+            (
+                start_process("stalled", "ping", &["-n", "60", "127.0.0.1"]),
+                start_process("echo", "findstr", &["^"]),
+            )
+        } else {
+            (
+                start_process("stalled", "sleep", &["60"]),
+                start_process("echo", "cat", &[]),
+            )
+        };
+
+        let agent = test_agent("http://127.0.0.1:9", "literal-token", ConnectionSettings::default());
+        let (server_tx, server_rx) = mpsc::channel::<Result<protocol::ServerMessage, tonic::Status>>(16);
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(1024);
+        let (shutdown_handle, mut shutdown_signal) = ShutdownHandle::new();
+
+        let serve = tokio::spawn(async move {
+            agent
+                .serve_messages(&mut ReceiverStream::new(server_rx), &outgoing_tx, &mut shutdown_signal)
+                .await
+        });
+
+        server_tx.send(Ok(stalled)).await.expect("send StartProcess");
+        server_tx.send(Ok(echo)).await.expect("send StartProcess");
+
+        // Large frames fill the OS pipe buffer quickly, so the agent-side stdin buffer for the stalled child fills too.
+        let flood = tokio::spawn({
+            let server_tx = server_tx.clone();
+            async move {
+                for sequence in 0..1024 {
+                    let frame = stream_data("stalled".to_owned(), sequence, vec![b'x'; 64 * 1024], false);
+                    if server_tx
+                        .send(Ok(server_message(ServerPayload::StreamData(frame))))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(10), flood)
+            .await
+            .expect("serve loop blocked on the stalled stream")
+            .expect("flood task panicked");
+
+        for (sequence, data, end_of_stream) in [(0, b"hello".to_vec(), false), (1, Vec::new(), true)] {
+            let frame = stream_data("echo".to_owned(), sequence, data, end_of_stream);
+            server_tx
+                .send(Ok(server_message(ServerPayload::StreamData(frame))))
+                .await
+                .expect("send StreamData");
+        }
+
+        let mut stalled_closed = None;
+        let mut echoed = false;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while stalled_closed.is_none() || !echoed {
+                let message = outgoing_rx.recv().await.expect("outgoing channel closed");
+                match message.payload {
+                    Some(AgentPayload::StreamClosed(closed)) if closed.stream_id == "stalled" => {
+                        stalled_closed = Some(closed);
+                    }
+                    Some(AgentPayload::StreamData(data)) if data.stream_id == "echo" && data.data == b"hello" => {
+                        echoed = true;
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("expected the stalled stream to be stopped and the echo stream to be served");
+
+        let stalled_closed = stalled_closed.expect("stalled stream closed");
+        assert!(stalled_closed.error);
+        assert!(
+            stalled_closed.reason.contains("stopped consuming stdin"),
+            "unexpected reason: {}",
+            stalled_closed.reason
+        );
+
+        shutdown_handle.signal();
+        tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("shutdown did not stop the serve loop")
+            .expect("serve task panicked")
+            .expect("serve failed");
     }
 }
