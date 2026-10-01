@@ -335,11 +335,19 @@ async fn final_state_is_not_run_again_when_its_record_cannot_be_written() {
             .expect("task starts");
         let job = harness.queued_job(snapshot.id).await;
 
+        // A durable task has no secrets; this placeholder checks that the path forgets them like the others.
+        harness.tasks.inner.secrets.lock().insert(snapshot.id, Arc::new(()));
+
         harness
             .tasks
             .execute_durable::<LosesStore>(&harness.state, job.def.clone())
             .await
             .unwrap_or_else(|error| panic!("{outcome:?} run is retried: {error:#}"));
+
+        assert!(
+            !harness.tasks.inner.secrets.lock().contains_key(&snapshot.id),
+            "{outcome:?} run keeps the secrets"
+        );
     }
 }
 
