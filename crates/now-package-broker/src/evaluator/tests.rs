@@ -665,3 +665,26 @@ fn explicitly_empty_install_location_is_denied() {
 
     assert_eq!(evaluate(&allow_any, &request).rule_id, "<validation-failure>");
 }
+
+#[test]
+fn winget_installer_arguments_leave_the_install_location_unknown() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-custom-location",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                has_custom_install_location: Some(true),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = vec![
+        api::CustomParameterString("--override".to_owned()),
+        api::CustomParameterString("/DIR=C:\\Windows".to_owned()),
+    ];
+
+    assert_eq!(evaluate(&policy, &request).rule_id, "deny-custom-location");
+}

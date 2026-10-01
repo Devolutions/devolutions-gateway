@@ -45,16 +45,15 @@ pub(super) fn constraints_pass(
         return false;
     }
 
-    // Check install location patterns against the normalized location, failing closed on unacceptable locations.
-    if flags.has_custom_install_location {
+    // Check install location patterns against the normalized location; an unknown location fails them.
+    if flags.has_custom_install_location && !c.allowed_install_location_patterns.is_empty() {
         let Some(location) = flags.custom_install_location.as_deref() else {
             return false;
         };
-        if !c.allowed_install_location_patterns.is_empty()
-            && !c
-                .allowed_install_location_patterns
-                .iter()
-                .any(|pattern| wildcard_match(location, &normalize_install_location_pattern(pattern.as_ref())))
+        if !c
+            .allowed_install_location_patterns
+            .iter()
+            .any(|pattern| wildcard_match(location, &normalize_install_location_pattern(pattern.as_ref())))
         {
             return false;
         }
@@ -138,6 +137,7 @@ mod tests {
             skip_hash_check: false,
             has_custom_parameters: false,
             has_custom_install_location: false,
+            has_unacceptable_install_location: false,
             has_pre_post_commands: false,
             has_kill_before_operation: false,
             has_uninstall_previous: false,
@@ -196,14 +196,23 @@ mod tests {
             );
         }
 
+        // Opaque installer arguments leave the location unknown.
+        let mut unknown_flags = flags();
+        unknown_flags.has_custom_install_location = true;
+        assert!(!constraints_pass(&Some(constraints), &request(), &unknown_flags));
+
         let permissive = PolicyConstraints {
             allow_custom_install_location: true,
             ..Default::default()
         };
+        assert!(constraints_pass(&Some(permissive), &request(), &unknown_flags));
         assert!(!constraints_pass(
-            &Some(permissive),
+            &Some(PolicyConstraints {
+                allow_custom_install_location: false,
+                ..Default::default()
+            }),
             &request(),
-            &location_flags(r"C:\Tools\..\Windows")
+            &unknown_flags
         ));
     }
 

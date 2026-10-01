@@ -45,14 +45,16 @@ struct RequestFlags {
     interactive: bool,
     skip_hash_check: bool,
     has_custom_parameters: bool,
-    /// Whether any install location is supplied, including an empty one.
+    /// Whether an install location may be selected: one is supplied (including an empty one), or
+    /// opaque installer arguments may select one.
     has_custom_install_location: bool,
+    /// Whether the supplied install locations are not a single plain local drive path.
+    has_unacceptable_install_location: bool,
     has_pre_post_commands: bool,
     has_kill_before_operation: bool,
     has_uninstall_previous: bool,
     no_upgrade: bool,
-    /// Normalized custom install location, or `None` when absent, supplied more than once, or not a
-    /// plain local drive path.
+    /// Normalized custom install location, or `None` when it is absent, unknown or unacceptable.
     custom_install_location: Option<String>,
     custom_parameters: Vec<String>,
 }
@@ -69,22 +71,25 @@ impl RequestFlags {
             .into_iter()
             .collect::<Vec<_>>();
         locations.extend(custom.locations.iter().copied());
-        let custom_install_location = match locations.as_slice() {
-            [Some(location)] => install_location::normalize_install_location(location),
-            _ => None,
+        let supplied_location = match locations.as_slice() {
+            [] => None,
+            [Some(location)] => Some(install_location::normalize_install_location(location)),
+            _ => Some(None),
         };
 
         Self {
             interactive: request.options.interactive || custom.interactive,
             skip_hash_check: request.options.skip_hash_check || custom.skip_hash_check,
             has_custom_parameters: !request.options.custom_parameters.is_empty(),
-            has_custom_install_location: !locations.is_empty(),
+            has_custom_install_location: supplied_location.is_some() || custom.installer_arguments,
+            has_unacceptable_install_location: matches!(supplied_location, Some(None)),
             has_pre_post_commands: request.options.pre_operation_command.is_some()
                 || request.options.post_operation_command.is_some(),
             has_kill_before_operation: !request.options.kill_before_operation.is_empty(),
             has_uninstall_previous: request.options.uninstall_previous || custom.uninstall_previous,
             no_upgrade: request.options.no_upgrade || custom.no_upgrade,
-            custom_install_location,
+            // Installer arguments may override a supplied location.
+            custom_install_location: supplied_location.flatten().filter(|_| !custom.installer_arguments),
             custom_parameters: request
                 .options
                 .custom_parameters
@@ -100,8 +105,7 @@ impl RequestFlags {
 /// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
 /// [`evaluate`] also denies them for direct callers.
 pub(crate) fn has_unacceptable_install_location(request: &PackageRequest) -> bool {
-    let flags = RequestFlags::from_request(request);
-    flags.has_custom_install_location && flags.custom_install_location.is_none()
+    RequestFlags::from_request(request).has_unacceptable_install_location
 }
 
 /// Evaluate a parsed request against a parsed policy document.
@@ -111,7 +115,7 @@ pub(crate) fn has_unacceptable_install_location(request: &PackageRequest) -> boo
 pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDecision {
     let flags = RequestFlags::from_request(request);
 
-    if flags.has_custom_install_location && flags.custom_install_location.is_none() {
+    if flags.has_unacceptable_install_location {
         return PolicyDecision {
             decision: Decision::Deny,
             rule_id: "<validation-failure>".to_owned(),

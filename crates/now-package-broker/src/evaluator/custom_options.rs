@@ -13,6 +13,9 @@ pub(super) struct CustomOptions<'a> {
     pub skip_hash_check: bool,
     pub no_upgrade: bool,
     pub uninstall_previous: bool,
+    /// Whether opaque installer arguments are passed (WinGet `--override` or `--custom`), which may
+    /// select an install location that cannot be determined.
+    pub installer_arguments: bool,
     /// Install location values; `None` when the value is missing.
     pub locations: Vec<Option<&'a str>>,
     /// Scope values; `None` when the value is missing or not recognized.
@@ -59,6 +62,8 @@ fn winget_options(parameters: &[CustomParameterString]) -> CustomOptions<'_> {
             options.architectures.push(value.and_then(parse_architecture));
         } else if is("interactive", Some("i")) {
             options.interactive = true;
+        } else if is("override", None) || is("custom", None) {
+            options.installer_arguments = true;
         } else if is("ignore-security-hash", None) || is("force", None) {
             options.skip_hash_check = true;
         } else if is("no-upgrade", None) {
@@ -73,7 +78,8 @@ fn winget_options(parameters: &[CustomParameterString]) -> CustomOptions<'_> {
 
 /// Parse Scoop options.
 ///
-/// Scoop accepts clustered short options (`-ks`), so every letter of a short option is considered.
+/// Scoop accepts clustered short options (`-ks`) and matches option names ignoring letter case,
+/// so every letter of a short option is considered.
 /// An architecture set here is treated as unrecognized because its value may be attached to the cluster.
 fn scoop_options(parameters: &[CustomParameterString]) -> CustomOptions<'_> {
     let mut options = CustomOptions::default();
@@ -82,11 +88,12 @@ fn scoop_options(parameters: &[CustomParameterString]) -> CustomOptions<'_> {
         let Some((name, is_long, _)) = split_option(&parameter.0) else {
             continue;
         };
+        let name = name.to_ascii_lowercase();
 
         if is_long {
-            if name.eq_ignore_ascii_case("skip-hash-check") {
+            if name == "skip-hash-check" {
                 options.skip_hash_check = true;
-            } else if name.eq_ignore_ascii_case("arch") {
+            } else if name == "arch" {
                 options.architectures.push(None);
             }
         } else {
@@ -197,6 +204,12 @@ mod tests {
 
         assert!(custom_options(ManagerName::Winget, &parameters(&["-i"])).interactive);
         assert!(custom_options(ManagerName::Winget, &parameters(&["--FORCE"])).skip_hash_check);
+        for values in [&["--override", "/DIR=C:\\Windows"][..], &["--Custom=/D=C:\\Windows"]] {
+            assert!(
+                custom_options(ManagerName::Winget, &parameters(values)).installer_arguments,
+                "{values:?}"
+            );
+        }
 
         let selectors = parameters(&["--scope", "Machine", "-a=x86", "--architecture", "arm"]);
         let options = custom_options(ManagerName::Winget, &selectors);
@@ -214,13 +227,24 @@ mod tests {
 
     #[test]
     fn scoop_policy_relevant_options_are_detected() {
-        for values in [&["--skip-hash-check"][..], &["-s"], &["-ks"]] {
+        for values in [
+            &["--skip-hash-check"][..],
+            &["-s"],
+            &["-ks"],
+            &["-S"],
+            &["--SKIP-HASH-CHECK"],
+        ] {
             assert!(
                 custom_options(ManagerName::Scoop, &parameters(values)).skip_hash_check,
                 "{values:?}"
             );
         }
-        for values in [&["--arch", "32bit"][..], &["-a", "64bit"], &["-ka32bit"]] {
+        for values in [
+            &["--arch", "32bit"][..],
+            &["-a", "64bit"],
+            &["-ka32bit"],
+            &["-A", "64bit"],
+        ] {
             assert_eq!(
                 custom_options(ManagerName::Scoop, &parameters(values)).architectures,
                 [None],
