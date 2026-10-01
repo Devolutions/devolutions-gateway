@@ -460,3 +460,64 @@ fn uninstall_and_decorated_identifier_versions_are_unknown() {
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "deny-old");
 }
+
+#[test]
+fn partial_npm_versions_are_unknown() {
+    let deny_exact = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-1.5.0",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("contoso-tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("1.5.0").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    );
+    let allow_partial = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-1",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("contoso-tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("1").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    );
+
+    for version in ["1", "1.5"] {
+        let mut request = make_request(api::Operation::Install, "contoso-tool");
+        request.manager = api::ManagerName::Npm;
+        request.package.version = Some(api::VersionString(version.to_owned()));
+
+        let result = evaluate(&deny_exact, &request);
+        assert_eq!(result.rule_id, "deny-1.5.0", "{version}");
+        let result = evaluate(&allow_partial, &request);
+        assert_eq!(result.rule_id, "<default>", "{version}");
+
+        // WinGet pins the exact version, padding missing components with zeros.
+        request.manager = api::ManagerName::Winget;
+        let result = evaluate(&deny_exact, &request);
+        let expected = if version == "1.5" {
+            Decision::Deny
+        } else {
+            Decision::Allow
+        };
+        assert_eq!(result.decision, expected, "{version}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "contoso-tool");
+    request.manager = api::ManagerName::Npm;
+    request.package.version = Some(api::VersionString("1.4.9".to_owned()));
+    let result = evaluate(&deny_exact, &request);
+    assert_eq!(result.rule_id, "<default>");
+}

@@ -12,8 +12,8 @@ use super::identifier::identifier_may_select_version;
 ///
 /// The version is unknown when the request omits it, letting the package manager choose one;
 /// for uninstall requests, which the package managers do not pin to the requested version;
-/// and when custom parameters or a decorated package identifier may select a version on the
-/// package manager command line.
+/// when custom parameters or a decorated package identifier may select a version on the
+/// package manager command line; and when the manager resolves the requested version as a range.
 pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
     if request.operation == Operation::Uninstall
         || custom_parameters_may_select_version(request.manager, &request.options.custom_parameters)
@@ -27,7 +27,27 @@ pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
         .version
         .as_ref()
         .map(|version| version.0.as_str())
-        .filter(|version| !version.is_empty())
+        .filter(|version| !version.is_empty() && !manager_resolves_as_range(request.manager, version))
+}
+
+/// Whether `manager` may resolve `version` to a range of versions rather than a single version.
+///
+/// npm and Bun resolve a partial version as a range (`1.2` selects the newest `1.2.x`).
+/// Cargo and `dotnet tool` may also read a partial version as a requirement or a NuGet minimum version.
+/// The other managers either pin an exact version, padding missing components with zeros, or reject partial versions.
+/// Range syntax such as `^1.2` or `1.*` is not a comparable version and is already unknown to Deny rules.
+fn manager_resolves_as_range(manager: ManagerName, version: &str) -> bool {
+    matches!(
+        manager,
+        ManagerName::Npm | ManagerName::Bun | ManagerName::Cargo | ManagerName::Dotnet
+    ) && release_component_count(version) < 3
+}
+
+fn release_component_count(version: &str) -> usize {
+    let version = version.trim();
+    let version = version.strip_prefix(['v', 'V']).unwrap_or(version);
+    let release = version.split(['-', '+']).next().unwrap_or(version);
+    release.split('.').count()
 }
 
 /// Whether a rule's version condition matches the requested version.
@@ -240,6 +260,32 @@ mod tests {
             .iter()
             .map(|value| CustomParameterString((*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn partial_versions_resolve_as_ranges_for_range_resolving_managers() {
+        for manager in [
+            ManagerName::Npm,
+            ManagerName::Bun,
+            ManagerName::Cargo,
+            ManagerName::Dotnet,
+        ] {
+            for version in ["1", "1.2", "v1.2", "1.2-beta", "1+build"] {
+                assert!(manager_resolves_as_range(manager, version), "{manager:?} {version}");
+            }
+            for version in ["1.2.3", "v1.2.3", "1.2.3-beta.1", "1.2.3+build.5", "1.2.3.4"] {
+                assert!(!manager_resolves_as_range(manager, version), "{manager:?} {version}");
+            }
+        }
+        for manager in [
+            ManagerName::Winget,
+            ManagerName::PowerShell,
+            ManagerName::PowerShell7,
+            ManagerName::Chocolatey,
+            ManagerName::Pip,
+        ] {
+            assert!(!manager_resolves_as_range(manager, "1.2"), "{manager:?}");
+        }
     }
 
     #[test]
