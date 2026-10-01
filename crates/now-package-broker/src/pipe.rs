@@ -87,6 +87,7 @@ async fn accept_connections(
         shutdown,
         MAX_CONCURRENT_CONNECTIONS,
         &create_pipe_instance,
+        RetryDelay::default(),
         |server, permit| {
             // Reap the connections that already finished, so completed tasks do not accumulate here
             // for the lifetime of the process.
@@ -149,15 +150,17 @@ async fn accept_connections(
 /// the next instance is created before a connected one is handed off, and a client
 /// that cannot be served is disconnected so that its instance listens again.
 /// Instance failures are retried with backoff instead of ending the loop.
+/// While a failed next-instance creation is backing off, the loop keeps listening and
+/// disconnects the clients that arrive in the meantime.
 async fn accept_loop(
     pipe_name: &str,
     shutdown: &CancellationToken,
     max_connections: usize,
     create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+    mut retry: RetryDelay,
     mut dispatch: impl FnMut(NamedPipeServer, OwnedSemaphorePermit),
 ) {
     let connection_permits = Arc::new(Semaphore::new(max_connections));
-    let mut retry = RetryDelay::default();
 
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
     let mut server = loop {
@@ -176,6 +179,7 @@ async fn accept_loop(
         }
     };
     retry.reset();
+    let mut next_instance_retry_at: Option<tokio::time::Instant> = None;
 
     loop {
         let result = tokio::select! {
@@ -199,6 +203,15 @@ async fn accept_loop(
             continue;
         };
 
+        if next_instance_retry_at.is_some_and(|retry_at| tokio::time::Instant::now() < retry_at) {
+            warn!("Rejected named pipe client: waiting to retry the next named pipe instance");
+            drop(permit);
+            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                return;
+            }
+            continue;
+        }
+
         // Create the next listening instance before handing off the connected one.
         let next = match create_instance(pipe_name, false) {
             Ok(next) => next,
@@ -208,14 +221,16 @@ async fn accept_loop(
                     "Failed to create the next named pipe instance; disconnecting the client"
                 );
                 drop(permit);
-                recycle_instance(pipe_name, &mut server, create_instance);
-                if !retry.wait(shutdown).await {
+                // Keep listening on this instance while the retry delay elapses.
+                next_instance_retry_at = Some(tokio::time::Instant::now() + retry.advance());
+                if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
                     return;
                 }
                 continue;
             }
         };
         retry.reset();
+        next_instance_retry_at = None;
 
         dispatch(std::mem::replace(&mut server, next), permit);
     }
@@ -252,26 +267,40 @@ fn recycle_instance(
 
 /// Exponential backoff between pipe instance retries.
 struct RetryDelay {
+    initial: std::time::Duration,
+    max: std::time::Duration,
     next: std::time::Duration,
 }
 
 impl Default for RetryDelay {
     fn default() -> Self {
-        Self {
-            next: INSTANCE_RETRY_INITIAL_DELAY,
-        }
+        Self::new(INSTANCE_RETRY_INITIAL_DELAY, INSTANCE_RETRY_MAX_DELAY)
     }
 }
 
 impl RetryDelay {
+    fn new(initial: std::time::Duration, max: std::time::Duration) -> Self {
+        Self {
+            initial,
+            max,
+            next: initial,
+        }
+    }
+
     fn reset(&mut self) {
-        self.next = INSTANCE_RETRY_INITIAL_DELAY;
+        self.next = self.initial;
+    }
+
+    /// Return the current delay and double the next one.
+    fn advance(&mut self) -> std::time::Duration {
+        let delay = self.next;
+        self.next = (self.next * 2).min(self.max);
+        delay
     }
 
     /// Sleep for the current delay, then double it. Returns `false` when `shutdown` is cancelled first.
     async fn wait(&mut self, shutdown: &CancellationToken) -> bool {
-        let delay = self.next;
-        self.next = (self.next * 2).min(INSTANCE_RETRY_MAX_DELAY);
+        let delay = self.advance();
 
         tokio::select! {
             () = tokio::time::sleep(delay) => true,
@@ -521,6 +550,24 @@ mod tests {
         tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
         JoinHandle<()>,
     ) {
+        spawn_accept_loop_with(
+            pipe_name,
+            max_connections,
+            create_owned_test_instance,
+            RetryDelay::default(),
+        )
+    }
+
+    fn spawn_accept_loop_with(
+        pipe_name: &str,
+        max_connections: usize,
+        create_instance: impl Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Send + Sync + 'static,
+        retry: RetryDelay,
+    ) -> (
+        CancellationToken,
+        tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
+        JoinHandle<()>,
+    ) {
         let shutdown = CancellationToken::new();
         let (dispatched_tx, dispatched_rx) = tokio::sync::mpsc::unbounded_channel();
         let task = tokio::spawn({
@@ -531,7 +578,8 @@ mod tests {
                     &pipe_name,
                     &shutdown,
                     max_connections,
-                    &create_owned_test_instance,
+                    &create_instance,
+                    retry,
                     move |server, permit| {
                         dispatched_tx.send((server, permit)).expect("test holds the receiver");
                     },
@@ -578,6 +626,66 @@ mod tests {
         drop(first);
         let _third_client = open_client_when_listening(&pipe_name).await;
         let _third = next_dispatched(&mut dispatched).await;
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the accept loop stops on shutdown")
+            .expect("the accept loop does not panic");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_loop_keeps_listening_while_next_instance_creation_backs_off() {
+        use std::sync::atomic::AtomicUsize;
+
+        use tokio::io::AsyncReadExt as _;
+
+        let pipe_name = unique_pipe_name("backoff");
+        let next_instance_attempts = Arc::new(AtomicUsize::new(0));
+        let (shutdown, mut dispatched, task) = spawn_accept_loop_with(
+            &pipe_name,
+            4,
+            {
+                let next_instance_attempts = Arc::clone(&next_instance_attempts);
+                move |pipe_name, first_instance| {
+                    if first_instance {
+                        create_owned_test_instance(pipe_name, true)
+                    } else {
+                        next_instance_attempts.fetch_add(1, Ordering::SeqCst);
+                        anyhow::bail!("injected next instance failure")
+                    }
+                }
+            },
+            // Long enough that every client below arrives during the backoff.
+            RetryDelay::new(Duration::from_secs(60), Duration::from_secs(60)),
+        );
+
+        for attempt in 0..3 {
+            // The instance must be listening again promptly, well before the retry delay ends.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut client = loop {
+                match open_client(&pipe_name) {
+                    Ok(client) => break client,
+                    Err(_) if Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(error) => panic!("no listening instance during backoff (attempt {attempt}): {error}"),
+                }
+            };
+            let mut buffer = [0u8; 1];
+            let read = tokio::time::timeout(Duration::from_secs(5), client.read(&mut buffer))
+                .await
+                .expect("the client is disconnected promptly");
+            assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
+        }
+
+        assert_eq!(
+            next_instance_attempts.load(Ordering::SeqCst),
+            1,
+            "next instance creation is not retried before the delay elapses"
+        );
+        assert!(
+            dispatched.try_recv().is_err(),
+            "no client is dispatched without a next instance"
+        );
 
         shutdown.cancel();
         tokio::time::timeout(Duration::from_secs(10), task)
