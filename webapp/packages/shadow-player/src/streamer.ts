@@ -273,6 +273,7 @@ export class ShadowPlayer extends HTMLElement {
 
     websocket.onopen(() => {
       if (this.websocket === websocket) {
+        this.dataset.shadowProtocol = websocket.shadowProtocolVersion();
         this.sendRequest(websocket, 'start');
       }
     });
@@ -671,6 +672,7 @@ export class ShadowPlayer extends HTMLElement {
     this.terminalOutcome = 'closed';
     this.streamEnded = false;
     websocket?.close(1000, 'Component cleanup');
+    delete this.dataset.shadowProtocol;
     for (const clip of this.clips) {
       clip.dispose();
     }

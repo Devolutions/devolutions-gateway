@@ -31,6 +31,7 @@ interface MockPlaybackClip {
 const mocks = vi.hoisted(() => ({
   sockets: [] as MockServerWebSocket[],
   clips: [] as MockPlaybackClip[],
+  protocolVersion: 'v2' as 'v1' | 'v2',
 }));
 
 vi.mock('./websocket', () => ({
@@ -69,6 +70,10 @@ vi.mock('./websocket', () => ({
 
     isOpen(): boolean {
       return true;
+    }
+
+    shadowProtocolVersion(): 'v1' | 'v2' {
+      return mocks.protocolVersion;
     }
 
     close(): void {}
@@ -213,6 +218,17 @@ describe('ShadowPlayer', () => {
 
   afterEach(() => {
     document.body.replaceChildren();
+    mocks.protocolVersion = 'v2';
+  });
+
+  it('exposes the negotiated shadow protocol for diagnostics', () => {
+    mocks.protocolVersion = 'v1';
+    const { player } = createPlayer();
+
+    expect(player.dataset.shadowProtocol).toBe('v1');
+
+    player.removeAttribute('src');
+    expect(player.dataset.shadowProtocol).toBeUndefined();
   });
 
   it('pulls only after segment and append work completes', async () => {
