@@ -138,7 +138,10 @@ fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
         bail!("PowerShell module names cannot contain wildcard characters");
     }
     validate_source_name("PowerShell", request.source.name.trim())?;
-    if let Some(version) = request.package.version.as_deref() {
+    // Uninstall ignores the version, so only versions that reach the command are restricted.
+    if request.operation != Operation::Uninstall
+        && let Some(version) = request.package.version.as_deref()
+    {
         // Only PSResourceGet's `-Version` accepts ranges; PowerShellGet's `-RequiredVersion` is exact.
         let extra = if request.manager == ManagerName::PowerShell7 {
             POWERSHELL7_VERSION_RANGE_CHARACTERS
@@ -356,6 +359,17 @@ mod tests {
                 script.contains(&format!("-Name 'Vendor{quote}{quote}Module'")),
                 "quote {quote:?} must be doubled: {script}"
             );
+        }
+    }
+
+    #[test]
+    fn powershell_uninstall_ignores_version_selectors() {
+        for manager in [ManagerName::PowerShell, ManagerName::PowerShell7] {
+            let mut request = make_request(manager);
+            request.operation = Operation::Uninstall;
+            request.package.version = Some(VersionString("[1.0, 2.0)".to_owned()));
+            let cmd = crate::command_builder::build_command(&request).expect("uninstall ignores the version");
+            assert!(!script_of(&cmd).contains("1.0"));
         }
     }
 

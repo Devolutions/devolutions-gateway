@@ -90,7 +90,10 @@ fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
     validate_npm_package_id(&request.package.id.0)?;
     if let Some(version) = request.package.version.as_deref() {
         validate_script_value("package version", version)?;
-        validate_package_version("npm", version, NPM_VERSION_EXTRA_CHARACTERS)?;
+        // Uninstall ignores the version, so only versions that reach npm are restricted.
+        if request.operation != Operation::Uninstall {
+            validate_package_version("npm", version, NPM_VERSION_EXTRA_CHARACTERS)?;
+        }
     }
 
     Ok(())
@@ -376,6 +379,17 @@ mod tests {
 
             assert!(error.to_string().contains("package version"), "{version}: {error:#}");
         }
+    }
+
+    #[test]
+    fn uninstall_ignores_version_selectors() {
+        let mut request = make_request();
+        request.operation = Operation::Uninstall;
+        request.package.version = Some(VersionString("^1.0 || 2.x".to_owned()));
+
+        let cmd = build_npm_command(&request).expect("uninstall ignores the version");
+
+        assert_eq!(script_of(&cmd), "npm uninstall 'contoso-tool' --global");
     }
 
     #[test]
