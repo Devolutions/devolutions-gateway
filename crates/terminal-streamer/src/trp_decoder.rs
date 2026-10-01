@@ -189,3 +189,144 @@ async fn send(sender: &mut tokio::sync::mpsc::Sender<anyhow::Result<String>>, mu
     sender.send(Ok(json)).await?;
     Ok(())
 }
+
+/// Terminal output written at `time`, in seconds since the start of the recording.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TerminalOutput {
+    pub time: f64,
+    pub text: String,
+}
+
+/// Reads the terminal output of a finished TRP recording one packet at a time.
+///
+/// A truncated last packet, as left by an interrupted recording, ends the output.
+pub struct TrpOutputReader<R> {
+    reader: R,
+    time: f64,
+}
+
+impl<R: std::io::Read> TrpOutputReader<R> {
+    pub fn new(reader: R) -> Self {
+        Self { reader, time: 0.0 }
+    }
+
+    fn read_packet(&mut self) -> std::io::Result<Option<(u16, Vec<u8>)>> {
+        let mut header = [0u8; 8];
+
+        if let Err(error) = self.reader.read_exact(&mut header) {
+            return eof_as_end(error);
+        }
+
+        let time_delta = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+        let event_type = u16::from_le_bytes([header[4], header[5]]);
+        let size = u16::from_le_bytes([header[6], header[7]]);
+
+        let mut payload = vec![0u8; usize::from(size)];
+
+        if let Err(error) = self.reader.read_exact(&mut payload) {
+            return eof_as_end(error);
+        }
+
+        self.time += f64::from(time_delta) / 1000.0;
+
+        Ok(Some((event_type, payload)))
+    }
+}
+
+fn eof_as_end<T>(error: std::io::Error) -> std::io::Result<Option<T>> {
+    if error.kind() == std::io::ErrorKind::UnexpectedEof {
+        Ok(None)
+    } else {
+        Err(error)
+    }
+}
+
+impl<R: std::io::Read> Iterator for TrpOutputReader<R> {
+    type Item = std::io::Result<TerminalOutput>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.read_packet() {
+                Ok(Some((0, payload))) => {
+                    return Some(Ok(TerminalOutput {
+                        time: self.time,
+                        text: String::from_utf8_lossy(&payload).into_owned(),
+                    }));
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(Err(error)),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn packet(time_delta: u32, event_type: u16, payload: &[u8]) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&time_delta.to_le_bytes());
+        packet.extend_from_slice(&event_type.to_le_bytes());
+        packet.extend_from_slice(&u16::try_from(payload.len()).expect("small payload").to_le_bytes());
+        packet.extend_from_slice(payload);
+        packet
+    }
+
+    #[test]
+    fn reads_the_timed_output_and_ignores_a_truncated_tail() {
+        let mut trp = Vec::new();
+        trp.extend(packet(0, 2, &[100, 0, 30, 0]));
+        trp.extend(packet(500, 0, b"$ "));
+        trp.extend(packet(0, 4, &[]));
+        trp.extend(packet(1000, 1, b"l"));
+        trp.extend(packet(250, 0, b"ls\r\n"));
+        trp.extend(&packet(10, 0, b"lost")[..9]);
+
+        let output = TrpOutputReader::new(trp.as_slice())
+            .collect::<std::io::Result<Vec<_>>>()
+            .expect("valid recording");
+
+        assert_eq!(
+            output,
+            [
+                TerminalOutput {
+                    time: 0.5,
+                    text: "$ ".to_owned()
+                },
+                TerminalOutput {
+                    time: 1.75,
+                    text: "ls\r\n".to_owned()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_one_packet_at_a_time() {
+        struct CountingReader<'a> {
+            data: &'a [u8],
+            read: std::rc::Rc<std::cell::Cell<usize>>,
+        }
+
+        impl std::io::Read for CountingReader<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = std::io::Read::read(&mut self.data, buf)?;
+                self.read.set(self.read.get() + n);
+                Ok(n)
+            }
+        }
+
+        let trp = (0..1000).flat_map(|_| packet(1, 0, b"x")).collect::<Vec<_>>();
+        let read = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut reader = TrpOutputReader::new(CountingReader {
+            data: &trp,
+            read: std::rc::Rc::clone(&read),
+        });
+
+        reader.next().expect("one packet").expect("valid packet");
+
+        assert_eq!(read.get(), 9);
+    }
+}

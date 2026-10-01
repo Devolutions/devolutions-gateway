@@ -30,6 +30,7 @@ model/agentStatus.ts
 model/aiLogParams.ts
 model/aiLogSubstate.ts
 model/aiLogSubstateOneOf.ts
+model/aiLogSubstateOneOf1.ts
 model/aiProvider.ts
 model/appCredential.ts
 model/appCredentialKind.ts

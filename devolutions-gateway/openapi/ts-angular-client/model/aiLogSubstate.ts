@@ -7,6 +7,7 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { AiLogSubstateOneOf1 } from './aiLogSubstateOneOf1';
 import { AiLogSubstateOneOf } from './aiLogSubstateOneOf';
 
 
@@ -18,5 +19,5 @@ import { AiLogSubstateOneOf } from './aiLogSubstateOneOf';
  * Progress of a running `ai-log` task.
  * @export
  */
-export type AiLogSubstate = AiLogSubstateOneOf;
+export type AiLogSubstate = AiLogSubstateOneOf | AiLogSubstateOneOf1;
 
