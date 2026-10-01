@@ -1256,7 +1256,7 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub traffic_audit_database: Option<Utf8PathBuf>,
 
-        /// (Unstable) Path to the SQLite database file for the records of the tasks started by the provisioner
+        /// (Unstable) Path to the SQLite database file for the tasks started by the provisioner
         #[serde(skip_serializing_if = "Option::is_none")]
         pub provisioner_tasks_database: Option<Utf8PathBuf>,
 
