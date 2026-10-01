@@ -60,7 +60,7 @@ impl<const N: u32> DurableTask for Scripted<N> {
     }
 }
 
-/// Durable test task that succeeds after making the task records unwritable.
+/// Durable test task that makes the task records unwritable, then succeeds or fails for good as its parameters say.
 struct LosesStore;
 
 impl TaskKind for LosesStore {
@@ -69,7 +69,7 @@ impl TaskKind for LosesStore {
 
     /// Path of the task database.
     type Target = String;
-    type Params = ();
+    type Params = Outcome;
     type Substate = Step;
     type Output = u32;
 
@@ -85,12 +85,15 @@ impl TaskKind for LosesStore {
             .await
             .expect("rename");
 
-        Ok(42)
+        match ctx.params {
+            Outcome::Succeed => Ok(42),
+            _ => Err(TaskError::Permanent("unauthorized".to_owned())),
+        }
     }
 }
 
 impl DurableTask for LosesStore {
-    fn prepare(_: &String, _: &(), _: &DgwState) -> Result<(), TaskErrorCode> {
+    fn prepare(_: &String, _: &Outcome, _: &DgwState) -> Result<(), TaskErrorCode> {
         Ok(())
     }
 }
@@ -320,21 +323,24 @@ async fn secrets_are_dropped_when_the_task_finishes() {
 }
 
 #[tokio::test]
-async fn success_is_not_run_again_when_its_record_cannot_be_written() {
-    let harness = Harness::new().await;
+async fn final_state_is_not_run_again_when_its_record_cannot_be_written() {
+    for outcome in [Outcome::Succeed, Outcome::Permanent] {
+        let harness = Harness::new().await;
+        let body = serde_json::to_vec(&outcome).expect("JSON");
 
-    let snapshot = harness
-        .tasks
-        .start_durable::<LosesStore>(harness.db_path.clone(), b"null", Uuid::new_v4(), &harness.state)
-        .await
-        .expect("task starts");
-    let job = harness.queued_job(snapshot.id).await;
+        let snapshot = harness
+            .tasks
+            .start_durable::<LosesStore>(harness.db_path.clone(), &body, Uuid::new_v4(), &harness.state)
+            .await
+            .expect("task starts");
+        let job = harness.queued_job(snapshot.id).await;
 
-    harness
-        .tasks
-        .execute_durable::<LosesStore>(job.def.clone(), &harness.state)
-        .await
-        .expect("a succeeded run is not retried");
+        harness
+            .tasks
+            .execute_durable::<LosesStore>(job.def.clone(), &harness.state)
+            .await
+            .unwrap_or_else(|error| panic!("{outcome:?} run is retried: {error:#}"));
+    }
 }
 
 #[tokio::test]

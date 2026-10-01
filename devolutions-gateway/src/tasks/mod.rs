@@ -514,7 +514,7 @@ impl TaskService {
             }
             Err(TaskError::Transient(error) | TaskError::Permanent(error)) => {
                 warn!(task.id = %id, task.kind = K::KIND, attempt, %error, "Background task failed");
-                store.fail(id, &error).await?;
+                self.fail(id, &error).await;
             }
         }
 
