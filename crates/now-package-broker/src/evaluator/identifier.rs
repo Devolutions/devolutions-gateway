@@ -5,12 +5,14 @@ use std::borrow::Cow;
 use now_policy::{Decision, PackageIdentifierCondition};
 use now_policy_api::ManagerName;
 
-use super::wildcard::wildcard_match;
+use super::wildcard::wildcard_match_with_case;
 
 /// Whether a rule's package identifier condition matches the requested identifier.
 ///
-/// Identifiers and patterns are compared in their [`canonical_identifier`] form.
-/// Deny rules fail closed and additionally ignore letter case for every manager.
+/// Identifiers and patterns are compared in their [`canonical_identifier`] form, so pattern
+/// letter case is significant exactly when the manager distinguishes it.
+/// Deny rules fail closed: they ignore letter case for every manager and also match the
+/// [`embedded_package_names`] of decorated identifiers.
 pub(super) fn package_identifiers_match(
     manager: ManagerName,
     value: &str,
@@ -20,19 +22,51 @@ pub(super) fn package_identifiers_match(
     let Some(condition) = condition else {
         return true;
     };
-    let value = identifier_key(manager, value, decision);
+
+    let mut candidates = vec![identifier_key(manager, value, decision)];
+    if decision == Decision::Deny {
+        candidates.extend(embedded_package_names(value).map(|name| identifier_key(manager, name, decision)));
+    }
 
     match condition {
-        PackageIdentifierCondition::Exact(identifiers) => identifiers
-            .iter()
-            .any(|identifier| identifier_key(manager, identifier.as_ref(), decision) == value),
+        PackageIdentifierCondition::Exact(identifiers) => identifiers.iter().any(|identifier| {
+            let identifier = identifier_key(manager, identifier.as_ref(), decision);
+            candidates.contains(&identifier)
+        }),
         PackageIdentifierCondition::Patterns(patterns) => {
             patterns.is_empty()
-                || patterns
-                    .iter()
-                    .any(|pattern| wildcard_match(&value, &identifier_key(manager, pattern.as_ref(), decision)))
+                || patterns.iter().any(|pattern| {
+                    let pattern = identifier_key(manager, pattern.as_ref(), decision);
+                    candidates
+                        .iter()
+                        .any(|candidate| wildcard_match_with_case(candidate, &pattern, false))
+                })
         }
     }
+}
+
+/// Package names embedded in a decorated identifier.
+///
+/// Some managers accept identifiers that carry more than a package name, such as npm
+/// aliases (`alias:@scope/target@1.0.0`), versioned specifiers (`name@1.2.3`), and vcpkg
+/// feature or triplet qualifiers (`port[feature]:triplet`).
+/// This yields each `:`-separated segment without its `[...]` features or `@version` suffix;
+/// a leading `@` is kept as part of an npm scope.
+pub(super) fn embedded_package_names(identifier: &str) -> impl Iterator<Item = &str> {
+    identifier.split(':').map(|segment| {
+        let segment = segment.split_once('[').map_or(segment, |(name, _features)| name);
+        segment
+            .rfind('@')
+            .filter(|index| *index > 0)
+            .map_or(segment, |index| &segment[..index])
+    })
+}
+
+/// Whether a decorated identifier may also select a package version, such as `name@1.2.3`.
+pub(super) fn identifier_may_select_version(identifier: &str) -> bool {
+    identifier
+        .split(':')
+        .any(|segment| segment.rfind('@').is_some_and(|index| index > 0))
 }
 
 fn identifier_key(manager: ManagerName, identifier: &str, decision: Decision) -> Cow<'_, str> {
@@ -213,12 +247,75 @@ mod tests {
             ));
             assert!(matches(
                 ManagerName::Winget,
-                "microsoft.vscode",
+                "Microsoft.VSCode",
                 &patterns(&["Microsoft.*"]),
+                decision
+            ));
+            assert!(matches(
+                ManagerName::PowerShell,
+                "az.accounts",
+                &patterns(&["Az.*"]),
                 decision
             ));
             assert!(!matches(ManagerName::Pip, "flask", &patterns(&["django-*"]), decision));
         }
+    }
+
+    #[test]
+    fn allow_patterns_preserve_case_for_case_sensitive_managers() {
+        assert!(!matches(
+            ManagerName::Npm,
+            "jsonstream",
+            &patterns(&["JSON*"]),
+            Decision::Allow
+        ));
+        assert!(!matches(
+            ManagerName::Winget,
+            "microsoft.vscode",
+            &patterns(&["Microsoft.*"]),
+            Decision::Allow
+        ));
+
+        assert!(matches(
+            ManagerName::Npm,
+            "jsonstream",
+            &patterns(&["JSON*"]),
+            Decision::Deny
+        ));
+        assert!(matches(
+            ManagerName::Winget,
+            "microsoft.vscode",
+            &patterns(&["Microsoft.*"]),
+            Decision::Deny
+        ));
+    }
+
+    #[test]
+    fn deny_rules_match_names_embedded_in_decorated_identifiers() {
+        let cases = [
+            (ManagerName::Npm, "alias:@babel/core@7.0.0", "@babel/core"),
+            (ManagerName::Npm, "alias@npm:react", "react"),
+            (ManagerName::Bun, "react@18.0.0", "react"),
+            (ManagerName::Vcpkg, "zlib:x64-windows", "zlib"),
+            (ManagerName::Vcpkg, "curl[ssl,http2]:x64-windows", "curl"),
+            (ManagerName::Scoop, "7zip@19.00", "7zip"),
+            (ManagerName::Dotnet, "dotnetsay@2.1.0", "dotnetsay"),
+        ];
+
+        for (manager, value, denied) in cases {
+            assert!(matches(manager, value, &exact(&[denied]), Decision::Deny), "{value}");
+            assert!(matches(manager, value, &patterns(&[denied]), Decision::Deny), "{value}");
+            assert!(!matches(manager, value, &exact(&[denied]), Decision::Allow), "{value}");
+        }
+    }
+
+    #[test]
+    fn embedded_names_keep_npm_scopes() {
+        assert_eq!(embedded_package_names("@scope/pkg").collect::<Vec<_>>(), ["@scope/pkg"]);
+        assert!(!identifier_may_select_version("@scope/pkg"));
+        assert!(identifier_may_select_version("@scope/pkg@1.0.0"));
+        assert!(identifier_may_select_version("alias:react@18"));
+        assert!(!identifier_may_select_version("alias:react"));
     }
 
     #[test]

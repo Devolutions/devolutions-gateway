@@ -3,15 +3,22 @@
 use std::cmp::Ordering;
 
 use now_policy::{Decision, VersionCondition, VersionRange};
-use now_policy_api::{CustomParameterString, ManagerName, PackageRequest};
+use now_policy_api::{CustomParameterString, ManagerName, Operation, PackageRequest};
 use semver::{Prerelease, Version};
+
+use super::identifier::identifier_may_select_version;
 
 /// Returns the package version selected by the request, or `None` when it is unknown before execution.
 ///
-/// The version is unknown when the request omits it, letting the package manager choose one,
-/// or when custom parameters may select a version on the package manager command line.
+/// The version is unknown when the request omits it, letting the package manager choose one;
+/// for uninstall requests, which the package managers do not pin to the requested version;
+/// and when custom parameters or a decorated package identifier may select a version on the
+/// package manager command line.
 pub(super) fn requested_version(request: &PackageRequest) -> Option<&str> {
-    if custom_parameters_may_select_version(request.manager, &request.options.custom_parameters) {
+    if request.operation == Operation::Uninstall
+        || custom_parameters_may_select_version(request.manager, &request.options.custom_parameters)
+        || identifier_may_select_version(&request.package.id.0)
+    {
         return None;
     }
 

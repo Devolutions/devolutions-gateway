@@ -441,3 +441,22 @@ fn version_selecting_custom_parameters_make_the_version_unknown() {
     let result = evaluate(&allow_exact_version_policy(), &request);
     assert_eq!(result.decision, Decision::Allow);
 }
+
+#[test]
+fn uninstall_and_decorated_identifier_versions_are_unknown() {
+    let mut request = versioned_request(Some("3.0.0"));
+    request.operation = api::Operation::Uninstall;
+
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-old");
+    let result = evaluate(&allow_exact_version_policy(), &request);
+    assert_eq!(result.rule_id, "<default>");
+
+    let mut request = versioned_request(Some("3.0.0"));
+    request.manager = api::ManagerName::Npm;
+    request.package.id = api::PackageIdentifier("Contoso.Tool@1.0.0".to_owned());
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-old");
+}

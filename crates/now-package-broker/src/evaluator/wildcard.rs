@@ -42,11 +42,16 @@ pub(crate) fn has_powershell_wildcard_syntax(value: &str) -> bool {
     value.contains(['*', '?', '[', ']', '`'])
 }
 
-pub(super) fn wildcard_match(value: &str, pattern: &str) -> bool {
+fn wildcard_match(value: &str, pattern: &str) -> bool {
+    wildcard_match_with_case(value, pattern, true)
+}
+
+/// Match `value` against a glob `pattern` where only `*` is special.
+pub(super) fn wildcard_match_with_case(value: &str, pattern: &str, case_insensitive: bool) -> bool {
     // Convert glob pattern to regex: escape everything except *, which becomes .*
     let regex_pattern = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
     regex::RegexBuilder::new(&regex_pattern)
-        .case_insensitive(true)
+        .case_insensitive(case_insensitive)
         .build()
         .is_ok_and(|re| re.is_match(value))
 }
@@ -58,6 +63,12 @@ mod tests {
     #[test]
     fn wildcard_match_is_case_insensitive() {
         assert!(wildcard_match("Microsoft.VisualStudioCode", "microsoft.*code"));
+    }
+
+    #[test]
+    fn case_sensitive_wildcard_match_preserves_case() {
+        assert!(wildcard_match_with_case("JSONStream", "JSON*", false));
+        assert!(!wildcard_match_with_case("jsonstream", "JSON*", false));
     }
 
     #[test]
