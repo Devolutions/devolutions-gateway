@@ -54,6 +54,8 @@ pub fn build_chocolatey_command(request: &PackageRequest) -> anyhow::Result<Vec<
 }
 
 fn validate_chocolatey_request(request: &PackageRequest) -> anyhow::Result<()> {
+    validate_chocolatey_package_id(&request.package.id.0)?;
+
     if request.source.url.is_some() {
         bail!("Chocolatey package sources with URLs are not supported by the broker");
     }
@@ -114,6 +116,37 @@ fn validate_chocolatey_request(request: &PackageRequest) -> anyhow::Result<()> {
         if let Some(version) = request.package.version.as_deref() {
             validate_package_version("Chocolatey", version, &[])?;
         }
+    }
+
+    Ok(())
+}
+
+/// Accept only NuGet-style package IDs.
+///
+/// Chocolatey gives `;`-separated lists, `.config` and `.nupkg` names, paths,
+/// and the `all` keyword special meaning instead of treating them as one package.
+fn validate_chocolatey_package_id(id: &str) -> anyhow::Result<()> {
+    const MAX_ID_LEN: usize = 100;
+
+    if id.is_empty() || id.len() > MAX_ID_LEN {
+        bail!("Chocolatey package id must be between 1 and {MAX_ID_LEN} bytes");
+    }
+    if id.starts_with(['-', '.']) {
+        bail!("Chocolatey package id cannot start with a hyphen or a period");
+    }
+    if !id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    {
+        bail!("Chocolatey package id contains unsupported characters");
+    }
+
+    let lower = id.to_ascii_lowercase();
+    if lower.ends_with(".config") || lower.ends_with(".nupkg") {
+        bail!("Chocolatey package id cannot name a packages.config or package file");
+    }
+    if lower == "all" {
+        bail!("Chocolatey package id cannot be 'all'");
     }
 
     Ok(())
@@ -297,8 +330,50 @@ mod tests {
         for metacharacter in crate::command_builder::BATCH_METACHARACTERS {
             let mut request = make_request();
             request.package.id = PackageIdentifier::from(format!("git{metacharacter}x"));
-            let error = build_chocolatey_command(&request).expect_err("metacharacter must be rejected");
-            assert!(error.to_string().contains("batch metacharacters"), "{error:#}");
+            build_chocolatey_command(&request).expect_err("metacharacter must be rejected");
+        }
+    }
+
+    #[test]
+    fn package_ids_with_special_chocolatey_meaning_are_rejected() {
+        for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
+            for id in [
+                "git;7zip",
+                "packages.config",
+                "Tools.CONFIG",
+                "git.nupkg",
+                "git.NuPkg",
+                r"C:\pkgs\git",
+                "pkgs/git",
+                "pkgs\\git",
+                "git:x",
+                "git x",
+                "all",
+                "ALL",
+                "-git",
+                ".git",
+                "",
+            ] {
+                let mut request = make_request();
+                request.operation = operation;
+                request.package.version = None;
+                request.options.skip_hash_check = false;
+                build_chocolatey_command(&request).expect("baseline request is valid");
+                request.package.id = PackageIdentifier::from(id.to_owned());
+                build_chocolatey_command(&request).expect_err(id);
+            }
+        }
+
+        for id in [
+            "git",
+            "Microsoft.VisualStudioCode",
+            "notepadplusplus.install",
+            "dotnet-sdk_8",
+            "allure",
+        ] {
+            let mut request = make_request();
+            request.package.id = PackageIdentifier::from(id.to_owned());
+            build_chocolatey_command(&request).expect(id);
         }
     }
 

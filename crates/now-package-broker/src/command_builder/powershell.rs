@@ -133,6 +133,10 @@ fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.source.name.trim().is_empty() {
         bail!("PowerShell package source name is required");
     }
+    // `Update-Module -Name` and PSResourceGet accept wildcard patterns.
+    if request.package.id.0.contains(['*', '?', '[', ']']) {
+        bail!("PowerShell module names cannot contain wildcard characters");
+    }
     validate_source_name("PowerShell", request.source.name.trim())?;
     if let Some(version) = request.package.version.as_deref() {
         // Only PSResourceGet's `-Version` accepts ranges; PowerShellGet's `-RequiredVersion` is exact.
@@ -352,6 +356,19 @@ mod tests {
                 script.contains(&format!("-Name 'Vendor{quote}{quote}Module'")),
                 "quote {quote:?} must be doubled: {script}"
             );
+        }
+    }
+
+    #[test]
+    fn powershell_module_names_reject_wildcards() {
+        for name in ["Pester*", "Pest?r", "[Pp]ester", "Pester]"] {
+            for manager in [ManagerName::PowerShell, ManagerName::PowerShell7] {
+                let mut request = make_request(manager);
+                request.operation = Operation::Update;
+                request.package.id = PackageIdentifier::from(name.to_owned());
+                let error = crate::command_builder::build_command(&request).expect_err("wildcards must be rejected");
+                assert!(error.to_string().contains("wildcard"), "{name}: {error:#}");
+            }
         }
     }
 

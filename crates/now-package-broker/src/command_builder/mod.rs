@@ -112,6 +112,46 @@ pub(crate) fn validate_batch_arguments(manager: &str, command: &[String]) -> any
     Ok(())
 }
 
+/// Validate an npm registry package name, either `name` or `@scope/name`.
+///
+/// Rejects specifiers that npm resolves outside the registry, such as GitHub shorthands,
+/// URLs, Git and file specifiers, tarballs, and local paths.
+pub(crate) fn validate_npm_package_name(manager: &str, name: &str) -> anyhow::Result<()> {
+    const MAX_NAME_LEN: usize = 214;
+
+    fn is_valid_part(part: &str) -> bool {
+        !part.is_empty()
+            && !part.starts_with(['.', '_', '-'])
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
+    }
+
+    if name.is_empty() || name.len() > MAX_NAME_LEN {
+        bail!("{manager} package name must be between 1 and {MAX_NAME_LEN} bytes");
+    }
+
+    let is_valid = match name.strip_prefix('@') {
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, package)| is_valid_part(scope) && is_valid_part(package)),
+        None => is_valid_part(name),
+    };
+    if !is_valid {
+        bail!("{manager} package name must be a registry package name such as 'name' or '@scope/name'");
+    }
+
+    let lower = name.to_ascii_lowercase();
+    if [".tgz", ".tar", ".tar.gz"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+    {
+        bail!("{manager} package name cannot be a tarball file name");
+    }
+
+    Ok(())
+}
+
 /// Append `--flag value` to command if value is `Some` and non-empty.
 pub(crate) fn set_if_specified(command: &mut Vec<String>, flag: &str, value: Option<&str>) {
     if let Some(v) = value
@@ -199,6 +239,47 @@ mod tests {
             "win$get",
         ] {
             validate_source_name("test", name).expect_err(name);
+        }
+    }
+
+    #[test]
+    fn npm_package_name_rules() {
+        for name in [
+            "typescript",
+            "@babel/core",
+            "lodash.merge",
+            "JSONStream",
+            "a~b",
+            "left-pad_2",
+        ] {
+            validate_npm_package_name("test", name).expect(name);
+        }
+        for name in [
+            "",
+            "user/repo",
+            "@scope",
+            "@scope/",
+            "@/name",
+            "@scope/name/extra",
+            "https://example.test/pkg.tgz",
+            "git+https://example.test/repo.git",
+            "github:user/repo",
+            "file:../pkg",
+            "pkg.tgz",
+            "pkg.tar.gz",
+            "pkg.TAR",
+            "./pkg",
+            "../pkg",
+            "/pkg",
+            r"C:\pkg",
+            ".hidden",
+            "_private",
+            "-flag",
+            "name%PATH%",
+            "name@1.0.0",
+            "name with space",
+        ] {
+            validate_npm_package_name("test", name).expect_err(name);
         }
     }
 

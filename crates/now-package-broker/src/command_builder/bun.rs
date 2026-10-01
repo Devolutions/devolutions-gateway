@@ -10,6 +10,8 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
+use super::validate_npm_package_name;
+
 const BUN_SOURCE_NAME: &str = "Bun";
 const BUN_SOURCE_URL: &str = "https://www.npmjs.com";
 
@@ -97,6 +99,8 @@ fn validate_bun_request(request: &PackageRequest) -> anyhow::Result<()> {
     if let Some(param) = request.options.custom_parameters.iter().find(|param| !param.is_empty()) {
         bail!("Bun custom parameters are not supported by the broker: {}", param.0);
     }
+
+    validate_npm_package_name("Bun", &request.package.id.0)?;
 
     if request.options.uninstall_previous {
         bail!("Bun uninstall-previous operations are not supported by the broker");
