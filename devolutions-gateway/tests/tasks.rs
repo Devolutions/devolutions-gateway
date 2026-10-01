@@ -15,6 +15,7 @@ use base64::Engine as _;
 use devolutions_gateway::recording::RecordingManagerTask;
 use devolutions_gateway::tasks::{SECRETS_LOST_ERROR, TaskRunnerTask, TaskService};
 use devolutions_gateway::{DgwState, MockHandles};
+use devolutions_gateway_ai::session_actions::PROMPT_VERSION;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, Task as _};
 use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
@@ -785,8 +786,12 @@ async fn recording_ai_analysis_task_appends_a_generated_log_to_the_session() {
         "the requested model is sent as is"
     );
 
+    let session_start = format!(
+        r#"{{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test-2026-09-30","promptVersion":"{PROMPT_VERSION}"}}"#
+    );
+
     let expected = [
-        r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test-2026-09-30","promptVersion":"session-actions-1"}"#,
+        session_start.as_str(),
         r#"{"timestamp":"2026-08-20T19:43:55.500Z","seq":1,"event":"session.action","description":"Checked the current user","parameters":{"Command":"whoami"}}"#,
         r#"{"timestamp":"2026-08-20T19:44:05.000Z","seq":2,"event":"session.end","description":"Session ended"}"#,
     ]
