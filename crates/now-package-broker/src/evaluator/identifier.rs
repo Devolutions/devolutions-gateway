@@ -11,8 +11,9 @@ use super::wildcard::wildcard_match_with_case;
 ///
 /// Identifiers and patterns are compared in their [`canonical_identifier`] form, so pattern
 /// letter case is significant exactly when the manager distinguishes it.
-/// Deny rules fail closed: they ignore letter case for every manager and also match the
-/// [`embedded_package_names`] of decorated identifiers.
+/// Deny rules fail closed: they ignore letter case for every manager, also match the
+/// [`embedded_package_names`] of decorated identifiers, and match every identifier whose
+/// registry identity is unknown (see [`has_unknown_identity`]).
 pub(super) fn package_identifiers_match(
     manager: ManagerName,
     value: &str,
@@ -22,6 +23,10 @@ pub(super) fn package_identifiers_match(
     let Some(condition) = condition else {
         return true;
     };
+
+    if decision == Decision::Deny && has_unknown_identity(manager, value) {
+        return true;
+    }
 
     let mut candidates = vec![identifier_key(manager, value, decision)];
     if decision == Decision::Deny {
@@ -46,6 +51,38 @@ pub(super) fn package_identifiers_match(
                         .any(|candidate| wildcard_match_with_case(candidate, &pattern, decision == Decision::Deny))
                 })
         }
+    }
+}
+
+/// Whether npm or Bun may resolve the identifier from a Git repository, URL or path rather than
+/// from the registry, so its package identity is unknown before execution.
+///
+/// This covers URLs (`git+https://...`), GitHub shorthand (`owner/repo`), Git references (`#v1`),
+/// Bun protocols other than `npm:` (`github:`, `file:`), and any embedded name that is not a
+/// registry name (`name` or `@scope/name`).
+fn has_unknown_identity(manager: ManagerName, identifier: &str) -> bool {
+    let is_registry_name = |name: &str| match name.strip_prefix('@') {
+        Some(scoped) => scoped.split('/').count() == 2,
+        None => !name.contains('/'),
+    };
+
+    match manager {
+        ManagerName::Npm | ManagerName::Bun => {
+            identifier.contains(['#', '\\'])
+                || identifier.contains("://")
+                || (manager == ManagerName::Bun
+                    && identifier.split_once(':').is_some_and(|(prefix, _)| {
+                        let protocol = prefix
+                            .rfind('@')
+                            .filter(|index| *index > 0)
+                            .map_or(prefix, |index| &prefix[index + 1..]);
+                        !protocol.eq_ignore_ascii_case("npm")
+                    }))
+                || !embedded_package_names(manager, identifier)
+                    .into_iter()
+                    .all(is_registry_name)
+        }
+        _ => false,
     }
 }
 
@@ -338,6 +375,45 @@ mod tests {
         assert!(identifier_may_select_version("@scope/pkg@1.0.0"));
         assert!(identifier_may_select_version("alias:react@18"));
         assert!(!identifier_may_select_version("alias:react"));
+    }
+
+    #[test]
+    fn unknown_npm_and_bun_identities_match_every_deny_identifier_rule() {
+        let unknown = [
+            (ManagerName::Npm, "owner/repo"),
+            (ManagerName::Npm, "owner/repo#v1"),
+            (ManagerName::Npm, "git+https://github.com/owner/repo.git#v1"),
+            (ManagerName::Bun, "git+https://github.com/owner/repo.git#v1"),
+            (ManagerName::Bun, "github:owner/repo"),
+            (ManagerName::Bun, "file:../local"),
+            (ManagerName::Bun, "alias@github:owner/repo"),
+        ];
+        for (manager, value) in unknown {
+            assert!(has_unknown_identity(manager, value), "{value}");
+            assert!(matches(manager, value, &exact(&["lodash"]), Decision::Deny), "{value}");
+            assert!(
+                !matches(manager, value, &exact(&["lodash"]), Decision::Allow),
+                "{value}"
+            );
+        }
+
+        let known = [
+            (ManagerName::Npm, "lodash"),
+            (ManagerName::Npm, "@scope/pkg"),
+            (ManagerName::Npm, "alias:@babel/core@7.0.0"),
+            (ManagerName::Bun, "npm:react"),
+            (ManagerName::Bun, "alias@npm:react@18.0.0"),
+            (ManagerName::Winget, "Owner/Repo#1"),
+        ];
+        for (manager, value) in known {
+            assert!(!has_unknown_identity(manager, value), "{value}");
+        }
+        assert!(!matches(
+            ManagerName::Bun,
+            "npm:react",
+            &exact(&["lodash"]),
+            Decision::Deny
+        ));
     }
 
     #[test]

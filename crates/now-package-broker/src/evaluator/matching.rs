@@ -156,6 +156,8 @@ fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
 ///
 /// Mirrors the command builders:
 /// - PowerShell packages are architecture-neutral; the builders ignore the requested architecture.
+/// - `dotnet tool` `Neutral` and Chocolatey `X64` add no command-line option, so the manager picks the
+///   architecture from the host and the package.
 /// - Otherwise, a requested architecture is used as is.
 /// - npm, pip, Cargo and Bun packages are architecture-neutral.
 /// - vcpkg encodes the architecture in the triplet source name (`x64-windows`).
@@ -163,11 +165,11 @@ fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
 fn effective_architecture(request: &PackageRequest) -> Option<now_policy_api::Architecture> {
     use now_policy_api::{Architecture as A, ManagerName as M};
 
-    if matches!(request.manager, M::PowerShell | M::PowerShell7) {
-        return Some(A::Neutral);
-    }
-    if let Some(architecture) = request.package.architecture {
-        return Some(architecture);
+    match (request.manager, request.package.architecture) {
+        (M::PowerShell | M::PowerShell7, _) => return Some(A::Neutral),
+        (M::Dotnet, Some(A::Neutral)) | (M::Chocolatey, Some(A::X64)) => return None,
+        (_, Some(architecture)) => return Some(architecture),
+        (_, None) => {}
     }
 
     match request.manager {
@@ -457,6 +459,17 @@ mod tests {
         request.options.scope = Some(S::User);
         assert_eq!(effective_scope(&request), None);
         assert_eq!(effective_architecture(&request), Some(A::Neutral));
+
+        // These values add no architecture option, so the manager decides.
+        request.operation = O::Install;
+        for (manager, architecture) in [(M::Dotnet, A::Neutral), (M::Chocolatey, A::X64)] {
+            request.manager = manager;
+            request.package.architecture = Some(architecture);
+            assert_eq!(effective_architecture(&request), None, "{manager:?}");
+        }
+        request.manager = M::Chocolatey;
+        request.package.architecture = Some(A::X86);
+        assert_eq!(effective_architecture(&request), Some(A::X86));
     }
 
     #[test]
