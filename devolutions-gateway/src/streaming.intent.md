@@ -52,7 +52,7 @@ Gateway accepts the upgrade and closes it with a code when it can’t stream:
 
 | Code | When |
 | --- | --- |
-| 4001 | The recording is not running, has ended, or (terminal recordings only) has no clip receiving data |
+| 4001 | The recording is not running, has ended, or (terminal recordings only) its producer is disconnected |
 | 4002 | Gateway can’t stream it: the recording manager is unavailable, the XMF library is not loaded, or the last clip can’t be streamed |
 | 4003 | The token is for another session |
 | 1011 | A WebM stream failed after it started (it may be preceded by an `Error` message) |
@@ -69,7 +69,8 @@ Gateway accepts the upgrade and closes it with a code when it can’t stream:
 JREC artifact handling, storage, download content types, and consumer-side rendering are outside the scope of this document.
 
 
-> **Boundary:** Session Recording Log artifacts are supported elsewhere in Gateway through the JREC recording flow. Their rejection by `/shadow` applies only to the WebSocket streaming path covered by this document.
+> **Boundary:** Session Recording Log artifacts are supported elsewhere in Gateway through the JREC recording flow.
+> Their rejection by `/shadow` applies only to the WebSocket streaming path covered by this document.
 
 ## Multi-clip, size-variant WebM streaming
 

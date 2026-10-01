@@ -49,12 +49,15 @@ pub(crate) fn stream_recording(
     stream_state: watch::Receiver<RecordingStreamState>,
     recording_id: Uuid,
 ) -> Response {
-    let (path, index, lifecycle) = {
+    // One read decides everything below, so a concurrent reconnection can’t mix two states.
+    let (path, index, lifecycle, active) = {
         let state = stream_state.borrow();
+        let index = state.clips.len().saturating_sub(1);
         (
             state.clips.last().cloned(),
-            state.clips.len().saturating_sub(1),
+            index,
             state.lifecycle,
+            state.is_active(index),
         )
     };
 
@@ -70,7 +73,7 @@ pub(crate) fn stream_recording(
     let streaming_type = match validate_streaming_file(&path) {
         Ok(streaming_type) => streaming_type,
         Err(error) => {
-            warn!(%recording_id, %error, "Shadow recording rejected: the recording can’t be streamed");
+            warn!(%recording_id, error = format!("{error:#}"), "Shadow recording rejected: the recording can’t be streamed");
             return reject_shadow(ws, ShadowCloseCode::InternalError);
         }
     };
@@ -78,7 +81,7 @@ pub(crate) fn stream_recording(
     match streaming_type {
         StreamingType::Terminal(input_type) => {
             // A terminal viewer follows one clip only, so a disconnected recording has nothing live to show.
-            if !stream_state.borrow().is_active(index) {
+            if !active {
                 return reject_shadow(ws, ShadowCloseCode::StreamingEnded);
             }
 
@@ -248,7 +251,6 @@ async fn setup_webm_streaming(
     match streaming_result {
         Err(error) => {
             close_handle.server_error("webm streaming failure".to_owned()).await;
-            error!(error = format!("{error:#}"), "WebM streaming failed");
             Err(error)
         }
         Ok(()) => {
@@ -294,6 +296,13 @@ impl RecordingEventSource {
         }
     }
 
+    async fn wait_for_change(&mut self) -> anyhow::Result<()> {
+        self.stream_state
+            .changed()
+            .await
+            .context("recording stream state closed")
+    }
+
     async fn next_event(&mut self) -> anyhow::Result<Option<RecordingEvent>> {
         if self.ended {
             return Ok(None);
@@ -309,10 +318,7 @@ impl RecordingEventSource {
                 let index = current_clip.index;
 
                 // Any change either appended data to this clip or ended it.
-                self.stream_state
-                    .changed()
-                    .await
-                    .context("recording stream state closed")?;
+                self.wait_for_change().await?;
                 if self.stream_state.borrow_and_update().is_active(index) {
                     return Ok(Some(RecordingEvent::DataAvailable));
                 }
@@ -333,11 +339,8 @@ impl RecordingEventSource {
 
             if let Some(path) = next_path {
                 if opening {
-                    // Wait until the clip has data, so that a replay starts from a readable header.
-                    self.stream_state
-                        .changed()
-                        .await
-                        .context("recording stream state closed")?;
+                    // Wait until the producer opened the clip file, so that it exists and was truncated.
+                    self.wait_for_change().await?;
                     continue;
                 }
 
@@ -370,10 +373,7 @@ impl RecordingEventSource {
                 return Ok(Some(RecordingEvent::SessionEnded));
             }
 
-            self.stream_state
-                .changed()
-                .await
-                .context("recording stream state closed")?;
+            self.wait_for_change().await?;
         }
     }
 }
@@ -680,7 +680,7 @@ mod tests {
             tokio::time::timeout(Duration::from_millis(25), source.next_event())
                 .await
                 .is_err(),
-            "a clip without data must not start"
+            "a clip whose file is not open must not start"
         );
         sender.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
         let second = source.next_event().await.expect("read second start");

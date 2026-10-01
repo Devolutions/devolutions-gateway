@@ -70,7 +70,7 @@ where
                         height = info.height,
                         "Segment begin"
                     );
-                    if info.sequence > 0 {
+                    if 0 < info.sequence {
                         return Ok(ServerMessage::SegmentStarted);
                     }
                 }

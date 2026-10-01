@@ -125,9 +125,10 @@ where
 {
     let mut transport = CodecTransport::new(transport);
     let mut segments = SessionSegments::new(crate::normalizer::test_session(source), version);
-    receive_expected_request(&mut transport, ClientMessage::Start)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("test transport closed before Start"))?;
+    anyhow::ensure!(
+        receive_expected_request(&mut transport, ClientMessage::Start).await?,
+        "test transport closed before Start"
+    );
 
     let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;

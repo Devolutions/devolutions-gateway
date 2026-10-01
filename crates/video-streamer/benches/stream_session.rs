@@ -105,7 +105,7 @@ fn bench_stream_session(c: &mut Criterion) {
         let _ = writeln!(io::stdout(), "DGATEWAY_LIB_XMF_PATH not set; skipping benchmarks");
         return;
     };
-    // SAFETY: This is how the project loads XMF elsewhere.
+    // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
     if let Err(error) = unsafe { cadeau::xmf::init(&path) } {
         let _ = writeln!(io::stdout(), "failed to initialize XMF from {path}: {error:#}");
         return;
