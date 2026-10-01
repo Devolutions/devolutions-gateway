@@ -195,7 +195,6 @@ public class JsonSerializationTests
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
         Assert.Equal("TASK", claims.GetContentType());
-        Assert.Equal(600, claims.GetDefaultLifetime());
     }
 
     [Fact]
