@@ -392,4 +392,117 @@ mod tests {
 
         assert!(matches!(result, Err(BuildError::InvalidApiKey)), "{result:?}");
     }
+
+    const PROVIDERS: [Provider; 5] = [
+        Provider::OpenAi,
+        Provider::Anthropic,
+        Provider::Mistral,
+        Provider::Gemini,
+        Provider::OpenAiCompatible,
+    ];
+
+    fn complete_builder(provider: Provider) -> AiClientBuilder {
+        AiClient::builder()
+            .provider(provider)
+            .model("gpt-test")
+            .api_key("sk-very-secret")
+            .base_url(Url::parse("http://127.0.0.1:1/v1/").expect("valid URL"))
+            .http_client(reqwest::Client::new())
+    }
+
+    #[test]
+    fn complete_settings_build() {
+        for provider in PROVIDERS {
+            let result = complete_builder(provider).build();
+            assert!(result.is_ok(), "{provider:?}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn build_requires_a_provider() {
+        let result = AiClient::builder()
+            .model("gpt-test")
+            .api_key("sk-very-secret")
+            .http_client(reqwest::Client::new())
+            .build();
+
+        assert!(matches!(result, Err(BuildError::MissingProvider)), "{result:?}");
+    }
+
+    #[test]
+    fn build_requires_a_model() {
+        for model in [None, Some("  ")] {
+            let mut builder = AiClient::builder()
+                .provider(Provider::OpenAi)
+                .api_key("sk-very-secret")
+                .http_client(reqwest::Client::new());
+            if let Some(model) = model {
+                builder = builder.model(model);
+            }
+
+            let result = builder.build();
+            assert!(matches!(result, Err(BuildError::MissingModel)), "{model:?}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn build_requires_an_api_key_for_every_provider() {
+        for provider in PROVIDERS {
+            let result = AiClient::builder()
+                .provider(provider)
+                .model("gpt-test")
+                .base_url(Url::parse("http://127.0.0.1:1/v1/").expect("valid URL"))
+                .http_client(reqwest::Client::new())
+                .build();
+            assert!(
+                matches!(result, Err(BuildError::MissingApiKey(missing)) if missing == provider),
+                "{provider:?}: {result:?}"
+            );
+
+            let result = complete_builder(provider).api_key("").build();
+            assert!(
+                matches!(result, Err(BuildError::MissingApiKey(missing)) if missing == provider),
+                "{provider:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_uses_the_default_base_url() {
+        for provider in PROVIDERS {
+            let result = AiClient::builder()
+                .provider(provider)
+                .model("gpt-test")
+                .api_key("sk-very-secret")
+                .http_client(reqwest::Client::new())
+                .build();
+
+            if provider == Provider::OpenAiCompatible {
+                assert!(
+                    matches!(result, Err(BuildError::MissingBaseUrl(Provider::OpenAiCompatible))),
+                    "{result:?}"
+                );
+            } else {
+                assert!(result.is_ok(), "{provider:?}: {result:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn build_requires_an_http_client() {
+        let result = AiClient::builder()
+            .provider(Provider::OpenAi)
+            .model("gpt-test")
+            .api_key("sk-very-secret")
+            .build();
+
+        assert!(matches!(result, Err(BuildError::MissingHttpClient)), "{result:?}");
+    }
+
+    #[test]
+    fn client_debug_hides_the_api_key() {
+        let client = complete_builder(Provider::Anthropic).build().expect("valid settings");
+
+        assert!(!format!("{client:?}").contains("sk-very-secret"));
+    }
 }

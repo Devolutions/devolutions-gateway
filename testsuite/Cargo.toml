@@ -35,10 +35,8 @@ agent-sysevent-codes.path = "../crates/agent-sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel", features = ["test-utils"] }
 agent-tunnel-libsql = { path = "../crates/agent-tunnel-libsql" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 base64 = "0.23"
 camino = "1"
-devolutions-gateway-ai.path = "../crates/devolutions-gateway-ai"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
@@ -49,7 +47,6 @@ mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
 nonempty = "0.12"
-parking_lot = "0.12"
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
@@ -65,7 +62,6 @@ sysevent-codes.path = "../crates/sysevent-codes"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
 tokio-rustls = { version = "0.26", features = ["ring"] }
-url = "2.5"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dev-dependencies]
