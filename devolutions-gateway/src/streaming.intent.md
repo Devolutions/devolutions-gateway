@@ -48,21 +48,27 @@ JREC artifact handling, storage, download content types, and consumer-side rende
 
 > **Boundary:** Session Recording Log artifacts are supported elsewhere in Gateway through the JREC recording flow. Their rejection by `/shadow` applies only to the WebSocket streaming path covered by this document.
 
+## Multi-clip, size-variant WebM streaming
 
-## Multi-clip, size variant streaming
+The `/shadow` WebM path must stream a recording session made of several input clips whose frame size may change.
+The recording manager in `recording.rs` owns the clip lifecycle; streaming must follow it rather than reading a single file.
 
-We would like to support streamings of multi-clip, size-variant source.
-See how we do recordings in `devolutions-gateway/src/recording.rs`. We now would like to support streaming as well for the same source.
+### Terms
 
-### The source
-We have two streaming sources that we currently support:
-1. RDM, which whenver size of a remote connecti session changes, it creates a new clip with consistent size in the header. 
-2. Chrome/Other browsers, chrome behaves differently, see `webapp/packages/web-recorder`, we use the media recorder API to record the session, the size changing behavior is not documented, but in experiencemnt and in practice, it will sliently change the size of the frame, the webm standard did not advise against this behavior, more lilely, it is undifined, and the client may or may not support it.
+- **Input clip**: one append-only WebM file pushed by a source; the recording session may gain more input clips when the source reconnects.
+- **Output segment**: one complete VP8 WebM document with its own headers and one fixed frame size.
+- **Segment boundary**: the point where one output segment ends and the next begins; it happens when an input clip ends or when the decoded frame size changes.
 
-### The normalizer
+### Sources
 
-Given the constrains above, we would like to unifiy the source and provide a single shape that the client can consume easily without breaking backward compatibility. 
-We would use the following model:
+Gateway must accept both known sources of size changes:
+
+1. RDM starts a new input clip whenever the remote session size changes, and each clip header carries that clip's size.
+2. Browsers record with the MediaRecorder API (`webapp/packages/web-recorder`) and change the frame size inside one input clip without a new header.
+
+### Normalized output
+
+Gateway must normalize both sources into one output shape:
 
 ```text
 Legend:
@@ -101,15 +107,65 @@ Client 1:          +[------------][======================][^^^^^^^^^^^^^^^^]
 Client 2:                              +[===============][^^^^^^^^^^^^^^^^]
                                        starts partway
                                        through size B
-
-
-Normalized client output:
-
-- Each client begins at its own live edge.
-- Each `[segment]` contains one fixed frame size.
-- RDM input clip boundaries and browser frame-size changes produce the same
-  normalized output shape.
-- Every client has an independent output sequence beginning at zero.
 ```
 
-The client always gets a guaranteed fixed size segment, for the first segment, we keep it backward compatible, the protocol will be extendned, such that, on new `pull` message, when the previous output segment ends, it will send a new `SegmentStarted` message.
+- Each client must begin at its own live edge.
+- Each output segment must contain exactly one frame size.
+- RDM input clip boundaries and browser frame-size changes must produce the same output shape.
+- Each client must have its own output segment sequence, starting at zero.
+
+### Protocol versions
+
+The client chooses the protocol version during the WebSocket handshake.
+
+- A client that offers the WebSocket subprotocol `jrec-shadow.v2` must get shadow protocol v2, and the upgrade response must echo `jrec-shadow.v2`.
+- A client that does not offer `jrec-shadow.v2` must get shadow protocol v1, and the upgrade response must not carry a subprotocol.
+- Only the WebM path negotiates a version; terminal streaming must ignore offered subprotocols.
+- A request rejected before streaming starts (close codes 4001, 4002, and 4003) must also echo an offered `jrec-shadow.v2`, so that browsers open the socket and see the close code.
+- Gateway must never send `SegmentStarted` to a v1 client, because v1 clients fail on unknown message types.
+- Browsers fail the handshake when an offered subprotocol is not echoed, and report it like any other connection failure; a browser client must therefore retry once without the offer to reach a Gateway that predates v2.
+
+### Wire contract
+
+Message codes:
+
+| Direction | Code | Message | Payload |
+| --- | --- | --- | --- |
+| Client to server | `0` | `Start` | none |
+| Client to server | `1` | `Pull` | none |
+| Server to client | `0` | `Chunk` | WebM bytes of the current output segment |
+| Server to client | `1` | `Metadata` | `{"codec":"vp8"}` |
+| Server to client | `2` | `Error` | `{"error":"UnexpectedError"}` |
+| Server to client | `3` | `StreamEnded` | none |
+| Server to client | `4` | `SegmentStarted` | `{"codec":"vp8"}`; v2 only |
+
+Request rules for both versions:
+
+- The client must send `Start` once, then one `Pull` for each further message it wants.
+- Gateway must answer `Start` with `Metadata`, and each `Pull` with exactly one message.
+- Gateway must answer an invalid or out-of-order request with `Error` and then stop the stream.
+- When the recording source or the normalizer fails, Gateway must answer the pending request with `Error` and then stop the stream.
+- After `Error`, Gateway must not send `StreamEnded`.
+
+Shadow protocol v1 transcript:
+
+```text
+Start -> Metadata
+Pull  -> Chunk          (first bytes of output segment 0)
+Pull  -> Chunk ...
+Pull  -> StreamEnded    (at the first segment boundary, or when the session ends first)
+```
+
+Shadow protocol v2 transcript:
+
+```text
+Start -> Metadata
+Pull  -> Chunk ...      (output segment 0; it has no SegmentStarted)
+Pull  -> SegmentStarted (output segment 1 begins; segment 0 ended implicitly)
+Pull  -> Chunk ...
+Pull  -> StreamEnded    (only after the session ended and the last output segment finished)
+```
+
+- A v1 stream ends at the first segment boundary, so a v1 viewer gets `StreamEnded` when the source disconnects or the frame size changes.
+- Before shadow protocol v2, a browser source that changed its frame size made Gateway close the stream with 1011, so ending a v1 stream at that boundary is an improvement for v1 viewers.
+- Each output segment is a complete WebM document, so a v2 client must start a new decoder pipeline on `SegmentStarted`.

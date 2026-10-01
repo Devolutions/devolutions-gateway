@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures_util::{Sink, Stream, StreamExt as _, stream};
 use tokio::sync::{mpsc, oneshot};
@@ -14,7 +15,7 @@ use super::segments::SessionSegments;
 use super::transport::CodecTransport;
 use super::*;
 use crate::normalizer::{SegmentEvent, SegmentInfo};
-use crate::session::{RecordingEvent, RecordingSource};
+use crate::session::{RecordingEvent, RecordingSource, ShadowProtocolVersion};
 
 struct ChannelTransport {
     incoming: mpsc::UnboundedReceiver<Result<Bytes, std::io::Error>>,
@@ -100,6 +101,18 @@ where
     }
 }
 
+fn spawn_v2_session<S>(transport: ChannelTransport, source: S) -> tokio::task::JoinHandle<anyhow::Result<()>>
+where
+    S: RecordingSource,
+{
+    tokio::spawn(stream_segments(
+        transport,
+        source,
+        SessionConfig::default(),
+        ShadowProtocolVersion::V2,
+    ))
+}
+
 fn segment_source(events: impl IntoIterator<Item = anyhow::Result<SegmentEvent>>) -> Vec<anyhow::Result<SegmentEvent>> {
     events.into_iter().collect()
 }
@@ -110,8 +123,21 @@ where
     E: Error + Send + Sync + 'static,
     S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
 {
+    stream_versioned_segment_source(transport, source, ShadowProtocolVersion::V2).await
+}
+
+async fn stream_versioned_segment_source<T, E, S>(
+    transport: T,
+    source: S,
+    version: ShadowProtocolVersion,
+) -> anyhow::Result<()>
+where
+    T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
+    E: Error + Send + Sync + 'static,
+    S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
+{
     let mut transport = SessionTransport::new(CodecTransport::new(transport));
-    let mut segments = SessionSegments::new(crate::normalizer::test_session(source));
+    let mut segments = SessionSegments::new(crate::normalizer::test_session(source), version);
     receive_expected_request(&mut transport, ClientMessage::Start)
         .await?
         .ok_or_else(|| anyhow::anyhow!("test transport closed before Start"))?;
@@ -157,7 +183,7 @@ async fn invalid_initial_request_does_not_start_or_poll_source() {
     client_sender
         .send(Bytes::from_static(b"\x01"))
         .expect("send invalid initial Pull");
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     assert_eq!(receive_response(&mut client_receiver).await[0], 2);
     assert!(task.await.expect("stream task panicked").is_err());
@@ -173,7 +199,7 @@ async fn undecodable_request_while_idle_sends_one_error() {
     client_sender
         .send(Bytes::from_static(b"\x00\x01"))
         .expect("send undecodable request");
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     assert_eq!(receive_response(&mut client_receiver).await[0], 2);
     assert!(task.await.expect("stream task panicked").is_err());
@@ -191,7 +217,7 @@ async fn transport_error_while_idle_returns_without_response() {
             "transport failed",
         ))
         .expect("send transport error");
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     assert!(task.await.expect("stream task panicked").is_err());
     assert!(client_receiver.try_recv().is_err());
@@ -231,7 +257,7 @@ async fn valid_start_launches_source_before_polling_the_underlying_source() {
         })
     };
     let (transport, client_sender, mut client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     assert_eq!(start_calls.load(Ordering::SeqCst), 0);
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
@@ -270,7 +296,7 @@ async fn aborting_running_session_drops_source() {
         }))
     });
     let (transport, client_sender, _client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     polled_receiver.await.expect("underlying source was polled");
@@ -376,7 +402,7 @@ async fn disconnect_before_start_does_not_start_source() {
     };
     let (transport, client_sender, _client_receiver) = channel_transport();
     drop(client_sender);
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     task.await
         .expect("stream task panicked")
@@ -395,7 +421,7 @@ async fn source_starts_once_after_valid_start() {
         })
     };
     let (transport, client_sender, mut client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     assert_eq!(
@@ -423,7 +449,7 @@ async fn pull_sent_during_launch_is_unread_after_stream_end() {
         Ok::<_, anyhow::Error>(stream::iter([Ok(RecordingEvent::SessionEnded)]))
     });
     let (transport, client_sender, mut client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     client_sender
@@ -460,7 +486,7 @@ async fn startup_failure_rejects_the_accepted_start_only() {
         Err::<stream::Empty<anyhow::Result<RecordingEvent>>, _>(anyhow::anyhow!("startup failed"))
     });
     let (transport, client_sender, mut client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     client_sender
@@ -528,7 +554,7 @@ async fn abort_during_startup_drops_pending_source() {
         Ok::<_, anyhow::Error>(stream::empty::<anyhow::Result<RecordingEvent>>())
     });
     let (transport, client_sender, _client_receiver) = channel_transport();
-    let task = tokio::spawn(stream_segments(transport, source, SessionConfig::default()));
+    let task = spawn_v2_session(transport, source);
 
     client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
     started_receiver.await.expect("startup was polled");
@@ -615,7 +641,7 @@ async fn segment_end_is_implicit_on_the_wire() {
         Ok(SegmentEvent::Data(Bytes::from_static(b"second"))),
         Ok(SegmentEvent::End),
     ];
-    let mut segments = SessionSegments::new(stream::iter(events));
+    let mut segments = SessionSegments::new(stream::iter(events), ShadowProtocolVersion::V2);
 
     assert_eq!(
         segments.next().await.expect("first data"),
@@ -672,6 +698,191 @@ async fn multi_segment_protocol_transcript_is_stable() {
     task.await
         .expect("stream task panicked")
         .expect("stream session failed");
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum V1ServerMessage {
+    Chunk(Vec<u8>),
+    Metadata(String),
+    Error(String),
+    StreamEnded,
+}
+
+/// Decodes a server message the way V1 clients do: any type code other than 0-3 is fatal.
+fn decode_v1_server_message(message: &[u8]) -> anyhow::Result<V1ServerMessage> {
+    let (&type_code, payload) = message.split_first().context("empty server message")?;
+    let text = |payload: &[u8]| String::from_utf8(payload.to_vec()).context("invalid UTF-8 payload");
+    match type_code {
+        0 => Ok(V1ServerMessage::Chunk(payload.to_vec())),
+        1 => Ok(V1ServerMessage::Metadata(text(payload)?)),
+        2 => Ok(V1ServerMessage::Error(text(payload)?)),
+        3 => {
+            anyhow::ensure!(payload.is_empty(), "invalid stream-ended message");
+            Ok(V1ServerMessage::StreamEnded)
+        }
+        _ => anyhow::bail!("unknown server message type {type_code}"),
+    }
+}
+
+fn two_segment_source() -> Vec<anyhow::Result<SegmentEvent>> {
+    segment_source([
+        Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 0,
+            width: 640,
+            height: 480,
+        })),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"first"))),
+        Ok(SegmentEvent::End),
+        Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 1,
+            width: 800,
+            height: 600,
+        })),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"second"))),
+        Ok(SegmentEvent::End),
+    ])
+}
+
+#[tokio::test]
+async fn v1_transcript_ends_at_the_first_segment_boundary() {
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let task = tokio::spawn(stream_versioned_segment_source(
+        transport,
+        stream::iter(two_segment_source()),
+        ShadowProtocolVersion::V1,
+    ));
+
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    let mut transcript = vec![receive_response(&mut client_receiver).await];
+    for _ in 0..2 {
+        client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+        transcript.push(receive_response(&mut client_receiver).await);
+    }
+    task.await
+        .expect("stream task panicked")
+        .expect("stream session failed");
+
+    let decoded = transcript
+        .iter()
+        .map(|message| decode_v1_server_message(message))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .expect("V1 clients decode every message");
+    assert_eq!(
+        decoded,
+        [
+            V1ServerMessage::Metadata(r#"{"codec":"vp8"}"#.to_owned()),
+            V1ServerMessage::Chunk(b"first".to_vec()),
+            V1ServerMessage::StreamEnded,
+        ]
+    );
+    assert!(client_receiver.recv().await.is_none(), "no message after StreamEnded");
+}
+
+#[tokio::test]
+async fn v1_transcript_without_segments_ends_after_metadata() {
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let task = tokio::spawn(stream_versioned_segment_source(
+        transport,
+        stream::iter(segment_source([])),
+        ShadowProtocolVersion::V1,
+    ));
+
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    let metadata = receive_response(&mut client_receiver).await;
+    client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+    let end = receive_response(&mut client_receiver).await;
+    task.await
+        .expect("stream task panicked")
+        .expect("stream session failed");
+
+    assert_eq!(
+        [&metadata, &end].map(|message| decode_v1_server_message(message).expect("V1 clients decode it")),
+        [
+            V1ServerMessage::Metadata(r#"{"codec":"vp8"}"#.to_owned()),
+            V1ServerMessage::StreamEnded,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn v1_failure_inside_a_segment_sends_error_without_stream_end() {
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let source = segment_source([
+        Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 0,
+            width: 640,
+            height: 480,
+        })),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"first"))),
+        Err(anyhow::anyhow!("test segment failure")),
+    ]);
+    let task = tokio::spawn(stream_versioned_segment_source(
+        transport,
+        stream::iter(source),
+        ShadowProtocolVersion::V1,
+    ));
+
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    let mut transcript = vec![receive_response(&mut client_receiver).await];
+    for _ in 0..2 {
+        client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+        transcript.push(receive_response(&mut client_receiver).await);
+    }
+    assert!(task.await.expect("stream task panicked").is_err());
+    assert_eq!(
+        client_receiver.recv().await,
+        None,
+        "error must not be followed by StreamEnded"
+    );
+
+    let decoded = transcript
+        .iter()
+        .map(|message| decode_v1_server_message(message))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .expect("V1 clients decode every message");
+    assert_eq!(
+        decoded,
+        [
+            V1ServerMessage::Metadata(r#"{"codec":"vp8"}"#.to_owned()),
+            V1ServerMessage::Chunk(b"first".to_vec()),
+            V1ServerMessage::Error(r#"{"error":"UnexpectedError"}"#.to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn v2_transcript_is_rejected_by_v1_clients() {
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let task = tokio::spawn(stream_segment_source(transport, stream::iter(two_segment_source())));
+
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    let mut transcript = vec![receive_response(&mut client_receiver).await];
+    for _ in 0..4 {
+        client_sender.send(Bytes::from_static(b"\x01")).expect("send Pull");
+        transcript.push(receive_response(&mut client_receiver).await);
+    }
+    task.await
+        .expect("stream task panicked")
+        .expect("stream session failed");
+
+    let error = transcript
+        .iter()
+        .map(|message| decode_v1_server_message(message))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .expect_err("SegmentStarted is unknown to V1 clients");
+    assert_eq!(error.to_string(), "unknown server message type 4");
+}
+
+#[tokio::test]
+async fn v1_segments_refuse_to_continue_after_the_stream_ended() {
+    let mut segments = SessionSegments::new(stream::iter(two_segment_source()), ShadowProtocolVersion::V1);
+
+    assert_eq!(
+        segments.next().await.expect("first data"),
+        ServerMessage::Chunk(Bytes::from_static(b"first"))
+    );
+    assert_eq!(segments.next().await.expect("stream end"), ServerMessage::StreamEnded);
+    assert!(segments.next().await.is_err());
 }
 
 #[tokio::test]
@@ -796,11 +1007,14 @@ async fn wrong_state_request_waits_for_current_media_and_sends_one_error() {
 
 #[tokio::test]
 async fn first_segment_sequence_must_be_zero() {
-    let mut segments = SessionSegments::new(stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
-        sequence: 1,
-        width: 640,
-        height: 480,
-    }))]));
+    let mut segments = SessionSegments::new(
+        stream::iter([Ok(SegmentEvent::Begin(SegmentInfo {
+            sequence: 1,
+            width: 640,
+            height: 480,
+        }))]),
+        ShadowProtocolVersion::V2,
+    );
 
     let error = segments.next().await.expect_err("nonzero first sequence must fail");
 
@@ -812,19 +1026,22 @@ async fn first_segment_sequence_must_be_zero() {
 
 #[tokio::test]
 async fn segment_sequence_gap_is_rejected() {
-    let mut segments = SessionSegments::new(stream::iter([
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 0,
-            width: 640,
-            height: 480,
-        })),
-        Ok(SegmentEvent::End),
-        Ok(SegmentEvent::Begin(SegmentInfo {
-            sequence: 2,
-            width: 800,
-            height: 600,
-        })),
-    ]));
+    let mut segments = SessionSegments::new(
+        stream::iter([
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 0,
+                width: 640,
+                height: 480,
+            })),
+            Ok(SegmentEvent::End),
+            Ok(SegmentEvent::Begin(SegmentInfo {
+                sequence: 2,
+                width: 800,
+                height: 600,
+            })),
+        ]),
+        ShadowProtocolVersion::V2,
+    );
 
     let error = segments.next().await.expect_err("segment sequence gap must fail");
 

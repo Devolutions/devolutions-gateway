@@ -5,26 +5,30 @@ use futures_util::{Stream, StreamExt as _};
 
 use super::message::ServerMessage;
 use crate::normalizer::SegmentEvent;
+use crate::session::ShadowProtocolVersion;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SegmentState {
     AwaitingBegin { next_sequence: u64 },
     Streaming { next_sequence: u64 },
+    Ended,
 }
 
 pub(super) struct SessionSegments<S> {
     inner: Pin<Box<S>>,
     state: SegmentState,
+    version: ShadowProtocolVersion,
 }
 
 impl<S> SessionSegments<S>
 where
     S: Stream<Item = anyhow::Result<SegmentEvent>>,
 {
-    pub(super) fn new(inner: S) -> Self {
+    pub(super) fn new(inner: S, version: ShadowProtocolVersion) -> Self {
         Self {
             inner: Box::pin(inner),
             state: SegmentState::AwaitingBegin { next_sequence: 0 },
+            version,
         }
     }
 
@@ -36,6 +40,8 @@ where
     }
 
     pub(super) async fn next(&mut self) -> anyhow::Result<ServerMessage> {
+        anyhow::ensure!(self.state != SegmentState::Ended, "segment stream already ended");
+
         loop {
             let Some(event) = self.inner.as_mut().next().await else {
                 anyhow::ensure!(
@@ -80,8 +86,13 @@ where
                     let SegmentState::Streaming { next_sequence } = self.state else {
                         anyhow::bail!("segment ended outside a segment");
                     };
-                    self.state = SegmentState::AwaitingBegin { next_sequence };
                     debug!("Segment end");
+                    if self.version == ShadowProtocolVersion::V1 {
+                        // A V1 client cannot switch to another output segment, so its stream ends at the first boundary.
+                        self.state = SegmentState::Ended;
+                        return Ok(ServerMessage::StreamEnded);
+                    }
+                    self.state = SegmentState::AwaitingBegin { next_sequence };
                 }
             }
         }

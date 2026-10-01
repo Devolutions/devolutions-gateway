@@ -4,7 +4,7 @@ use bytes::Bytes;
 use futures_util::{Sink, Stream};
 
 use crate::normalizer::NormalizedSession;
-use crate::session::{RecordingSource, SessionConfig};
+use crate::session::{RecordingSource, SessionConfig, ShadowProtocolVersion};
 
 mod message;
 mod segments;
@@ -14,7 +14,12 @@ use message::{ClientMessage, ServerMessage, response_kind};
 use segments::SessionSegments;
 use transport::{CodecTransport, ReceiveError, SessionTransport};
 
-pub(crate) async fn stream_segments<S, T, E>(transport: T, source: S, config: SessionConfig) -> anyhow::Result<()>
+pub(crate) async fn stream_segments<S, T, E>(
+    transport: T,
+    source: S,
+    config: SessionConfig,
+    version: ShadowProtocolVersion,
+) -> anyhow::Result<()>
 where
     S: RecordingSource,
     T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
@@ -32,7 +37,7 @@ where
             return Err(error);
         }
     };
-    let mut segments = SessionSegments::new(crate::normalizer::normalize(source_stream, config));
+    let mut segments = SessionSegments::new(crate::normalizer::normalize(source_stream, config), version);
     let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 

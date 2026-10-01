@@ -13,7 +13,10 @@ use terminal_streamer::terminal_stream;
 use tokio::fs::{File, OpenOptions};
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
-use video_streamer::{RecordingClip, RecordingEvent, RecordingSource, SessionConfig, StartAt, stream_session};
+use video_streamer::{
+    RecordingClip, RecordingEvent, RecordingSource, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
+    stream_session,
+};
 
 use crate::recording::{RecordingMessageSender, RecordingStreamState};
 use crate::token::RecordingFileType;
@@ -53,14 +56,33 @@ pub(crate) async fn stream_recording(
                 }
             })
         }
-        StreamingType::WebM => ws.on_upgrade(move |socket| async move {
-            if let Err(e) = setup_webm_streaming(stream_state, socket, shutdown_signal).await {
-                error!(error = ?e, "WebM streaming failed");
-            }
-        }),
+        StreamingType::WebM => {
+            let (ws, version) = negotiate_shadow_protocol(ws);
+            debug!(%recording_id, ?version, "Negotiated shadow protocol");
+            ws.on_upgrade(move |socket| async move {
+                if let Err(e) = setup_webm_streaming(stream_state, socket, shutdown_signal, version).await {
+                    error!(error = ?e, "WebM streaming failed");
+                }
+            })
+        }
     };
 
     Ok(upgrade_result)
+}
+
+/// Selects shadow protocol V2 when the client offers its WebSocket subprotocol, and V1 otherwise.
+///
+/// The upgrade response echoes the subprotocol only for V2, so V2 clients can tell which version they got.
+pub(crate) fn negotiate_shadow_protocol(
+    ws: axum::extract::WebSocketUpgrade,
+) -> (axum::extract::WebSocketUpgrade, ShadowProtocolVersion) {
+    let ws = ws.protocols([SHADOW_PROTOCOL_V2]);
+    let version = if ws.selected_protocol().is_some() {
+        ShadowProtocolVersion::V2
+    } else {
+        ShadowProtocolVersion::V1
+    };
+    (ws, version)
 }
 
 struct TerminalStreamSocketImpl(WebSocket);
@@ -180,6 +202,7 @@ async fn setup_webm_streaming(
     stream_state: watch::Receiver<RecordingStreamState>,
     socket: WebSocket,
     shutdown_signal: ShutdownSignal,
+    version: ShadowProtocolVersion,
 ) -> anyhow::Result<()> {
     let source = WebmRecordingSource { stream_state };
     let mut session_shutdown = shutdown_signal.clone();
@@ -189,7 +212,7 @@ async fn setup_webm_streaming(
         Duration::from_secs(45),
     );
     let streaming_result = tokio::select! {
-        result = stream_session(source, websocket_stream, SessionConfig::default()) => result,
+        result = stream_session(source, websocket_stream, SessionConfig::default(), version) => result,
         () = session_shutdown.wait() => return Ok(()),
     };
 
@@ -382,6 +405,115 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// Performs a raw WebSocket handshake against `negotiate_shadow_protocol`.
+    ///
+    /// Returns the `Sec-WebSocket-Protocol` response header and the version the server selected.
+    /// The handshake is written by hand because tungstenite rejects a response without a subprotocol when one was offered,
+    /// although RFC 6455, browsers, and .NET accept it.
+    async fn shadow_handshake(offered_protocols: Option<&str>) -> (Option<String>, String) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tower::Service as _;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let address = listener.local_addr().expect("local address");
+        let server = tokio::spawn(async move {
+            let (io, _) = listener.accept().await.expect("accept");
+            let service = hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+                axum::Router::new()
+                    .route(
+                        "/shadow",
+                        axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async move {
+                            let (ws, version) = negotiate_shadow_protocol(ws);
+                            let version = match version {
+                                ShadowProtocolVersion::V1 => "v1",
+                                ShadowProtocolVersion::V2 => "v2",
+                            };
+                            ws.on_upgrade(move |mut socket| async move {
+                                let _ = socket
+                                    .send(axum::extract::ws::Message::Text(Utf8Bytes::from_static(version)))
+                                    .await;
+                            })
+                        }),
+                    )
+                    .call(request)
+            });
+            let _ = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(hyper_util::rt::TokioIo::new(io), service)
+                .await;
+        });
+
+        let mut client = tokio::net::TcpStream::connect(address).await.expect("connect");
+        let protocol_header = offered_protocols
+            .map(|protocols| format!("Sec-WebSocket-Protocol: {protocols}\r\n"))
+            .unwrap_or_default();
+        let request = format!(
+            "GET /shadow HTTP/1.1\r\nHost: {address}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{protocol_header}\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write handshake");
+
+        let mut received = Vec::new();
+        let header_end = loop {
+            let mut buffer = [0; 1024];
+            let read = client.read(&mut buffer).await.expect("read handshake");
+            assert!(0 < read, "server closed during the handshake");
+            received.extend_from_slice(&buffer[..read]);
+            if let Some(position) = received.windows(4).position(|window| window == b"\r\n\r\n") {
+                break position + 4;
+            }
+        };
+        let head = std::str::from_utf8(&received[..header_end]).expect("ASCII response head");
+        assert!(head.starts_with("HTTP/1.1 101"), "unexpected response: {head}");
+        let echoed = head.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("sec-websocket-protocol")
+                .then(|| value.trim().to_owned())
+        });
+
+        // The server sends one short, unmasked text frame: FIN + opcode, payload length, payload.
+        let mut frame = received[header_end..].to_vec();
+        while frame.len() < 2 || frame.len() < 2 + usize::from(frame[1]) {
+            let mut buffer = [0; 64];
+            let read = client.read(&mut buffer).await.expect("read frame");
+            assert!(0 < read, "server closed before sending the version");
+            frame.extend_from_slice(&buffer[..read]);
+        }
+        assert_eq!(frame[0], 0x81, "expected a final text frame");
+        let selected = String::from_utf8(frame[2..2 + usize::from(frame[1])].to_vec()).expect("UTF-8 version");
+
+        drop(client);
+        let _ = server.await;
+        (echoed, selected)
+    }
+
+    #[tokio::test]
+    async fn client_offering_jrec_shadow_v2_gets_v2() {
+        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v2")).await;
+        assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
+        assert_eq!(selected, "v2");
+    }
+
+    #[tokio::test]
+    async fn client_offering_v2_among_other_protocols_gets_v2() {
+        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v3, jrec-shadow.v2")).await;
+        assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
+        assert_eq!(selected, "v2");
+    }
+
+    #[tokio::test]
+    async fn client_without_subprotocol_gets_v1_and_no_echo() {
+        let (echoed, selected) = shadow_handshake(None).await;
+        assert_eq!(echoed, None);
+        assert_eq!(selected, "v1");
+    }
+
+    #[tokio::test]
+    async fn client_offering_an_unknown_subprotocol_gets_v1_and_no_echo() {
+        let (echoed, selected) = shadow_handshake(Some("jrec-shadow.v3")).await;
+        assert_eq!(echoed, None);
+        assert_eq!(selected, "v1");
     }
 
     #[tokio::test]

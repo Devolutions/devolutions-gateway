@@ -1010,6 +1010,8 @@ async fn shadow_recording(
         .map_err(|_| HttpError::internal().msg("failed to stream file"));
 
     fn close_with_error(ws: WebSocketUpgrade, code: StreamerCloseCode) -> Result<Response, HttpError> {
+        // Echo an offered shadow protocol so that browsers open the socket and see the close code.
+        let (ws, _) = crate::streaming::negotiate_shadow_protocol(ws);
         Ok(ws.on_upgrade(move |mut ws| async move {
             let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
         }))

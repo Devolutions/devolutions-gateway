@@ -86,14 +86,34 @@ pub trait RecordingSource: Send + 'static {
     fn start(self) -> Self::Start;
 }
 
+/// WebSocket subprotocol a client offers to get [`ShadowProtocolVersion::V2`].
+pub const SHADOW_PROTOCOL_V2: &str = "jrec-shadow.v2";
+
+/// Shadow wire protocol version negotiated for one session stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShadowProtocolVersion {
+    /// The session stream carries one output segment and ends with `StreamEnded` at its first segment boundary.
+    ///
+    /// Clients that do not offer [`SHADOW_PROTOCOL_V2`] get this version, because they reject `SegmentStarted`.
+    V1,
+    /// The session stream carries every output segment, and `SegmentStarted` announces each one after the first.
+    V2,
+}
+
 /// Converts a recording session into independent VP8 WebM segments over one pull-driven stream.
 ///
 /// Each segment has one resolution, and output sequence numbers remain contiguous across input clips.
-pub async fn stream_session<S, T, E>(source: S, transport: T, config: SessionConfig) -> anyhow::Result<()>
+/// With [`ShadowProtocolVersion::V1`], the stream ends after the first segment.
+pub async fn stream_session<S, T, E>(
+    source: S,
+    transport: T,
+    config: SessionConfig,
+    version: ShadowProtocolVersion,
+) -> anyhow::Result<()>
 where
     S: RecordingSource,
     T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
     E: Error + Send + Sync + 'static,
 {
-    crate::protocol::stream_segments(transport, source, config).await
+    crate::protocol::stream_segments(transport, source, config, version).await
 }
