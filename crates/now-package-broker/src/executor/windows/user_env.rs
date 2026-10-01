@@ -13,7 +13,7 @@ use windows::Win32::Security::{
     ImpersonateLoggedOnUser, RevertToSelf, SecurityImpersonation, TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
 };
 
-use crate::policy_security::{PathOpener, VerifiedExecutable, is_plain_local_drive_path};
+use crate::policy_security::{PathOpener, is_plain_local_drive_path};
 
 /// Environment variables of the target user, with filesystem lookups performed as that user.
 ///
@@ -72,14 +72,6 @@ impl<'a> UserEnv<'a> {
 
     pub(super) fn is_file(&self, path: &Path) -> bool {
         self.lookup(path, Path::is_file)
-    }
-
-    /// Pin an environment-derived executable, opening it as the target user.
-    ///
-    /// The returned guard holds the file and exposes its final local path, which the service
-    /// account can then open without being redirected while the guard is alive.
-    pub(super) fn pin_executable(&self, path: &Path) -> anyhow::Result<VerifiedExecutable> {
-        crate::policy_security::pin_executable(self, path, &format!("executable '{}'", path.display()))
     }
 
     fn lookup(&self, path: &Path, check: fn(&Path) -> bool) -> bool {
@@ -255,9 +247,12 @@ mod tests {
             .expect("spawn mklink");
         assert!(status.success(), "create junction");
 
-        let pinned = env
-            .pin_executable(&junction.join(exe.file_name().expect("exe file name")))
-            .expect("pin through a local junction");
+        let pinned = crate::policy_security::pin_executable(
+            &env,
+            &junction.join(exe.file_name().expect("exe file name")),
+            "test executable",
+        )
+        .expect("pin through a local junction");
         assert_thread_not_impersonating();
         let expected = crate::policy_security::final_path_from_handle(&File::open(&exe).expect("open exe"))
             .expect("exe final path");
@@ -287,8 +282,7 @@ mod tests {
             r"\\?\UNC\server\share\tool.exe",
             r"\\.\C:\Windows\System32\cmd.exe",
         ] {
-            let error = env
-                .pin_executable(Path::new(path))
+            let error = crate::policy_security::pin_executable(&env, Path::new(path), "test executable")
                 .expect_err("non-local paths must be rejected");
             assert!(
                 format!("{error:#}").contains("not a plain local drive path"),
