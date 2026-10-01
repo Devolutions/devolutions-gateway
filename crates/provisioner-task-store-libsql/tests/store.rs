@@ -64,6 +64,29 @@ async fn migrations_leave_user_version_alone_and_are_idempotent() {
 }
 
 #[tokio::test]
+async fn failed_migration_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisioner_tasks.db");
+    let path = path.to_str().unwrap();
+
+    // Another table already uses the name of the index of the first migration, so it fails at its last statement.
+    let conn = connect(path).await;
+    conn.execute_batch("CREATE TABLE other (x INT); CREATE INDEX idx_task_kind_created_at ON other (x);")
+        .await
+        .unwrap();
+
+    assert!(LibSqlProvisionerTaskStore::init(conn.clone()).await.is_err());
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 0);
+
+    // Once the name is free, the migration applies in full, since the failed attempt left no table behind.
+    conn.execute("DROP INDEX idx_task_kind_created_at", ()).await.unwrap();
+
+    let store = LibSqlProvisionerTaskStore::init(conn.clone()).await.unwrap();
+    store.insert(new_task(Uuid::new_v4(), Uuid::new_v4())).await.unwrap();
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 1);
+}
+
+#[tokio::test]
 async fn insert_then_read_back() {
     let store = memory_store().await;
     let id = Uuid::new_v4();

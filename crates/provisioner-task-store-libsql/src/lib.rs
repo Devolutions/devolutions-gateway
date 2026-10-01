@@ -6,7 +6,7 @@
 extern crate tracing;
 
 use anyhow::Context as _;
-use libsql::{Connection, Row};
+use libsql::{Connection, Row, TransactionBehavior};
 use uuid::Uuid;
 
 // Released migrations are never modified; new ones are appended.
@@ -303,14 +303,27 @@ impl LibSqlProvisionerTaskStore {
                 for (sql_query, migration_id) in remaining.iter().zip(schema_version..MIGRATIONS.len()) {
                     trace!(migration_id, %sql_query, "Apply migration");
 
-                    self.conn
-                        .execute_batch(sql_query)
+                    // The migration and its version are committed together, so a crash never leaves a migration
+                    // applied but not recorded, which would make every later start fail.
+                    let tx = self
+                        .conn
+                        .transaction_with_behavior(TransactionBehavior::Immediate)
+                        .await
+                        .with_context(|| format!("failed to begin migration {migration_id}"))?;
+
+                    tx.execute_batch(sql_query)
                         .await
                         .with_context(|| format!("failed to execute migration {migration_id}"))?;
 
-                    self.update_schema_version(migration_id + 1)
+                    let version = i64::try_from(migration_id + 1).context("schema version is too big")?;
+
+                    tx.execute("INSERT INTO task_schema_version (version) VALUES (?1)", [version])
                         .await
                         .context("failed to update the schema version")?;
+
+                    tx.commit()
+                        .await
+                        .with_context(|| format!("failed to commit migration {migration_id}"))?;
                 }
 
                 info!("Migration complete");
@@ -348,17 +361,6 @@ impl LibSqlProvisionerTaskStore {
         let value = row.get::<u64>(0).context("failed to read the schema version")?;
 
         usize::try_from(value).context("schema version is too big")
-    }
-
-    async fn update_schema_version(&self, value: usize) -> anyhow::Result<()> {
-        let value = i64::try_from(value).context("schema version is too big")?;
-
-        self.conn
-            .execute("INSERT INTO task_schema_version (version) VALUES (?1)", [value])
-            .await
-            .context("failed to execute SQL query")?;
-
-        Ok(())
     }
 }
 
