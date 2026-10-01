@@ -7,7 +7,7 @@
 //! obtained.
 //!
 //! Behind each purpose, the crate owns everything about talking to the model:
-//! - the prompt and its version, which readers of the results can record;
+//! - the prompt and its version, which a consumer that stores the results should store with them;
 //! - the HTTP API of each provider and its quirks: OpenAI chat completions (also spoken by Mistral, Gemini and many
 //!   others) and Anthropic Messages;
 //! - the request limits: the output token limit, and a timeout, since requests are not streamed;

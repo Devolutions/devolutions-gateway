@@ -79,12 +79,11 @@ pub(crate) fn parse_error_body(body: &[u8]) -> ErrorBody {
 
 /// URL of an API path, such as `chat/completions`, under the path of the base URL.
 ///
-/// The query of the base URL is kept, for servers that need one on every request, such as the `api-version` of Azure
-/// OpenAI; its fragment is dropped.
+/// [`AiClientBuilder::build`](crate::AiClientBuilder::build) refuses a base URL with a query or a fragment, so only the
+/// path changes.
 fn endpoint(base_url: &Url, path: &str) -> Url {
     let mut endpoint = base_url.clone();
     endpoint.set_path(&format!("{}/{path}", base_url.path().trim_end_matches('/')));
-    endpoint.set_fragment(None);
     endpoint
 }
 
@@ -116,15 +115,6 @@ mod tests {
         for (base_url, expected) in [
             ("https://h/v1", "https://h/v1/chat/completions"),
             ("https://h/v1/", "https://h/v1/chat/completions"),
-            (
-                "https://h/v1?api-version=1",
-                "https://h/v1/chat/completions?api-version=1",
-            ),
-            (
-                "https://h/v1/?api-version=1",
-                "https://h/v1/chat/completions?api-version=1",
-            ),
-            ("https://h/v1/#frag", "https://h/v1/chat/completions"),
             ("https://h", "https://h/chat/completions"),
             ("http://127.0.0.1:8080/v1/", "http://127.0.0.1:8080/v1/chat/completions"),
         ] {

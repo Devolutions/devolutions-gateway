@@ -22,6 +22,7 @@ const USAGE: Usage = Usage {
     output_tokens: 20,
 };
 const ANSWER: &str = "{\"offsetSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\nnot an action\n{\"offsetSeconds\":4,\"description\":\"Opened a shell\"}";
+const NO_ACTIONS: &str = "{\"noActions\":true}";
 /// Largest answer body the client reads, the same as in the crate.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -520,13 +521,10 @@ async fn unexpected_answers_are_invalid_responses() {
 }
 
 #[tokio::test]
-async fn empty_answers_have_no_action() {
-    let mut anthropic = anthropic_response("");
-    anthropic["content"] = serde_json::json!([]);
-
+async fn no_actions_line_means_no_action() {
     for (provider, answer) in [
-        (Provider::OpenAi, openai_response("")),
-        (Provider::Anthropic, anthropic),
+        (Provider::OpenAi, openai_response(NO_ACTIONS)),
+        (Provider::Anthropic, anthropic_response(NO_ACTIONS)),
     ] {
         let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
 
@@ -537,6 +535,28 @@ async fn empty_answers_have_no_action() {
             .unwrap();
 
         assert!(response.output.is_empty(), "{provider:?}: {:?}", response.output);
+    }
+}
+
+#[tokio::test]
+async fn empty_answers_are_invalid_output() {
+    let mut anthropic = anthropic_response("");
+    anthropic["content"] = serde_json::json!([]);
+
+    for (provider, answer) in [
+        (Provider::OpenAi, openai_response("")),
+        (Provider::Anthropic, anthropic),
+    ] {
+        let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
+
+        let error = client(provider, base_url)
+            .describe_session_actions("[0.5] ")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, Error::InvalidOutput { .. }), "{provider:?}: {error:?}");
+        assert!(!error.is_transient());
     }
 }
 
@@ -726,30 +746,21 @@ async fn instructions_are_a_system_message() {
     }
 }
 
-#[tokio::test]
-async fn base_url_query_is_kept() {
-    for (provider, answer, expected_path) in [
-        (
-            Provider::OpenAiCompatible,
-            openai_response(ANSWER),
-            "/v1/chat/completions?api-version=1",
-        ),
-        (
-            Provider::Anthropic,
-            anthropic_response(ANSWER),
-            "/v1/messages?api-version=1",
-        ),
-    ] {
-        let (mut base_url, captured) = spawn_provider(StatusCode::OK, answer).await;
-        base_url.set_query(Some("api-version=1"));
+#[test]
+fn base_url_with_query_or_fragment_is_refused() {
+    for base_url in ["https://llm.example/v1/?api-version=1", "https://llm.example/v1/#part"] {
+        let result = AiClient::builder()
+            .provider(Provider::OpenAiCompatible)
+            .model(MODEL)
+            .api_key(API_KEY)
+            .base_url(Url::parse(base_url).unwrap())
+            .http_client(reqwest::Client::builder().no_proxy().build().unwrap())
+            .build();
 
-        client(provider, base_url)
-            .describe_session_actions("[1.5] ls")
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(take(&captured).path, expected_path, "{provider:?}");
+        assert!(
+            matches!(result, Err(devolutions_gateway_ai::BuildError::UnsupportedBaseUrl)),
+            "{base_url}: {result:?}"
+        );
     }
 }
 

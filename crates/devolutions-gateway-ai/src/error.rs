@@ -31,7 +31,7 @@ pub enum Error {
     /// The answer reached the output token limit or filled the context window, so its end is missing: send a shorter
     /// input instead.
     ///
-    /// The provider still counts the tokens of the request in `usage`.
+    /// `usage` holds the tokens the provider counted for the request, when it reports them.
     #[error("AI answer was cut short by the output token limit or the context window")]
     Truncated { usage: Option<Usage> },
     /// The provider refused to answer, such as when its content filter blocked the request.

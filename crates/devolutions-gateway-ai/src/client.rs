@@ -74,7 +74,8 @@ pub enum BuildError {
     InvalidApiKey,
     #[error("base URL is missing for AI provider {0:?}")]
     MissingBaseUrl(Provider),
-    #[error("base URL scheme must be http or https")]
+    /// The base URL is not http or https, or has a query or a fragment, so the API paths cannot be appended to it.
+    #[error("base URL must be http or https, without query or fragment")]
     UnsupportedBaseUrl,
     #[error("HTTP client is missing")]
     MissingHttpClient,
@@ -134,7 +135,10 @@ impl AiClientBuilder {
         self
     }
 
-    /// Checks every setting, so that no request of the client can fail because of them.
+    /// Checks the settings that can be checked without calling the provider.
+    ///
+    /// A model the provider does not know, a wrong API key, or an endpoint that cannot be reached still makes the
+    /// requests fail.
     pub fn build(self) -> Result<AiClient, BuildError> {
         let provider = self.provider.ok_or(BuildError::MissingProvider)?;
 
@@ -171,7 +175,7 @@ fn resolve_base_url(provider: Provider, base_url: Option<Url>) -> Result<Url, Bu
         .or_else(|| provider.default_base_url())
         .ok_or(BuildError::MissingBaseUrl(provider))?;
 
-    if !matches!(base_url.scheme(), "http" | "https") {
+    if !matches!(base_url.scheme(), "http" | "https") || base_url.query().is_some() || base_url.fragment().is_some() {
         return Err(BuildError::UnsupportedBaseUrl);
     }
 
@@ -440,13 +444,23 @@ mod tests {
     }
 
     #[test]
-    fn base_url_must_be_http() {
-        let url = Url::parse("ftp://files.example/v1/").expect("valid URL");
+    fn base_url_must_be_http_without_query_or_fragment() {
+        for url in [
+            "ftp://files.example/v1/",
+            "https://host.example/v1/?api-version=1",
+            "https://host.example/v1/?",
+            "https://host.example/v1/#part",
+        ] {
+            let url = Url::parse(url).expect("valid URL");
 
-        assert!(matches!(
-            resolve_base_url(Provider::OpenAiCompatible, Some(url)),
-            Err(BuildError::UnsupportedBaseUrl)
-        ));
+            assert!(
+                matches!(
+                    resolve_base_url(Provider::OpenAiCompatible, Some(url.clone())),
+                    Err(BuildError::UnsupportedBaseUrl)
+                ),
+                "{url}"
+            );
+        }
     }
 
     #[test]

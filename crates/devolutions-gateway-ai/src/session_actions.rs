@@ -12,8 +12,10 @@ use crate::{Error, Response};
 
 /// Version of the prompt of this purpose.
 ///
-/// Bump it whenever the prompt changes, so readers of the results know which prompt produced them.
-pub const PROMPT_VERSION: &str = "session-actions-1";
+/// Results do not carry it: a caller that stores results should store it with them, so readers know which prompt
+/// produced them.
+/// Bump it whenever the prompt changes.
+pub const PROMPT_VERSION: &str = "session-actions-2";
 
 const PROMPT: &str = r#"You read the transcript of a remote session and list what the user did.
 
@@ -33,7 +35,7 @@ Rules:
 - Write one line per meaningful user action, in time order. Merge the keystrokes of one command into one action.
 - Ignore noise, such as prompt redraws, cursor movement, and output that has no user action.
 - Never copy passwords, secrets, or tokens. Write "[redacted]" instead.
-- If the user did nothing, write nothing."#;
+- If the user did nothing, write only this line: {"noActions":true}"#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
 const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
@@ -86,15 +88,20 @@ impl fmt::Debug for DescribeSessionActions<'_> {
 
 impl DescribeSessionActions<'_> {
     /// Upper bound of tokens in the answer; the default is 16000.
+    ///
+    /// Some models accept less, such as older Claude models, and the provider then refuses the request: lower it for
+    /// them.
     pub fn max_output_tokens(mut self, max_output_tokens: u32) -> Self {
         self.max_output_tokens = max_output_tokens;
         self
     }
 
-    /// Returns the actions in the order of the answer.
+    /// Returns the actions in the order of the answer; the list is empty only when the model answered that the user did
+    /// nothing.
     ///
     /// Invalid lines in the answer are skipped with a warning.
-    /// The answer is [`Error::InvalidOutput`] only when it has lines but none of them is a valid action.
+    /// The answer is [`Error::InvalidOutput`] when it has no valid action and does not say that the user did nothing,
+    /// such as an empty answer.
     /// An answer cut short by the output token limit or the context window is [`Error::Truncated`]: send a shorter
     /// transcript instead.
     /// A refusal of the provider is [`Error::Refused`], never an empty list.
@@ -126,11 +133,17 @@ struct ActionLine {
 fn parse_actions(answer: &str) -> Result<Vec<Action>, Error> {
     let mut actions = Vec::new();
     let mut invalid_lines = 0usize;
+    let mut no_actions = false;
 
     for (index, line) in answer.lines().enumerate() {
         let line = line.trim();
 
         if line.is_empty() || line.starts_with("```") {
+            continue;
+        }
+
+        if is_no_actions_line(line) {
+            no_actions = true;
             continue;
         }
 
@@ -143,13 +156,40 @@ fn parse_actions(answer: &str) -> Result<Vec<Action>, Error> {
         }
     }
 
-    if actions.is_empty() && invalid_lines > 0 {
-        return Err(Error::InvalidOutput {
-            reason: format!("no valid action line, {invalid_lines} invalid lines"),
-        });
+    if !actions.is_empty() {
+        if no_actions {
+            warn!(
+                actions = actions.len(),
+                "AI answer has actions and says that the user did nothing"
+            );
+        }
+
+        return Ok(actions);
     }
 
-    Ok(actions)
+    if no_actions {
+        return Ok(actions);
+    }
+
+    let reason = if invalid_lines > 0 {
+        format!("no valid action line, {invalid_lines} invalid lines")
+    } else {
+        "empty answer, without the no-actions line".to_owned()
+    };
+
+    Err(Error::InvalidOutput { reason })
+}
+
+/// Tells whether `line` is the `{"noActions":true}` line the prompt asks for when the user did nothing, so that an empty
+/// answer is never read as an idle session.
+fn is_no_actions_line(line: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct NoActions {
+        no_actions: bool,
+    }
+
+    serde_json::from_str::<NoActions>(line).is_ok_and(|line| line.no_actions)
 }
 
 // The reason never quotes the line, because the line may contain session data.
@@ -227,9 +267,57 @@ mod tests {
     }
 
     #[test]
-    fn empty_answer_means_no_action() {
-        assert_eq!(parse_actions("").expect("empty answer"), Vec::new());
-        assert_eq!(parse_actions("\n```\n```\n").expect("only fences"), Vec::new());
+    fn no_actions_line_means_no_action() {
+        for answer in [
+            "{\"noActions\":true}",
+            "\n```jsonl\n{\"noActions\":true}\n```\n",
+            " { \"noActions\" : true } ",
+        ] {
+            assert_eq!(parse_actions(answer).expect("no actions"), Vec::new(), "{answer:?}");
+        }
+    }
+
+    #[test]
+    fn empty_answer_is_invalid_output() {
+        for answer in ["", "\n```\n```\n"] {
+            let error = parse_actions(answer).expect_err("empty answer");
+
+            assert!(matches!(error, Error::InvalidOutput { .. }), "{answer:?}: {error:?}");
+        }
+    }
+
+    #[test]
+    fn other_no_actions_lines_are_invalid() {
+        for line in [
+            "{\"noActions\":false}",
+            "{\"noActions\":true,\"extra\":1}",
+            "{\"noActions\":\"yes\"}",
+        ] {
+            let error = parse_actions(line).expect_err("not the no-actions line");
+
+            assert!(error.to_string().contains("1 invalid lines"), "{line}: {error}");
+        }
+    }
+
+    #[test]
+    fn actions_win_over_the_no_actions_line() {
+        let answer = "{\"noActions\":true}\n{\"offsetSeconds\":1,\"description\":\"Listed files\"}\n";
+
+        let actions = parse_actions(answer).expect("one action");
+
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn prompt_and_parser_agree_on_the_no_actions_line() {
+        let line = PROMPT
+            .lines()
+            .last()
+            .and_then(|rule| rule.split_once(": "))
+            .map(|(_, line)| line);
+
+        assert_eq!(line, Some(r#"{"noActions":true}"#));
+        assert!(is_no_actions_line(r#"{"noActions":true}"#));
     }
 
     #[test]
@@ -251,7 +339,14 @@ mod tests {
 
     #[test]
     fn prompt_asks_for_the_parsed_fields() {
-        for field in ["offsetSeconds", "description", "object", "parameters", "JSON Lines"] {
+        for field in [
+            "offsetSeconds",
+            "description",
+            "object",
+            "parameters",
+            "JSON Lines",
+            "noActions",
+        ] {
             assert!(PROMPT.contains(field), "prompt is missing {field}");
         }
     }
