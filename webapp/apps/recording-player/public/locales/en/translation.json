@@ -6,6 +6,17 @@
     "unknownError": "Unknown error, please try again",
     "protocolError": "An error occurred: {{error}}"
   },
+  "controls": {
+    "play": "Play",
+    "pause": "Pause",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volume": "Volume",
+    "timeline": "Recording timeline",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "clip": "Clip"
+  },
   "ui": {
     "close": "Close"
   }
