@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use chrono::Utc;
 use now_policy::{
     Decision, PackageIdentifier, PackageIdentifierCondition, PolicyDocument, PolicyEnforcement, PolicyFormatVersion,
-    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId, SourceName,
+    PolicyMatch, PolicyMetadata, PolicyRule, ResourceId, SemanticVersion, SourceName, VersionCondition, VersionRange,
+    VersionString,
 };
 use now_policy_api::{self as api, PackageRequest};
 
@@ -282,4 +283,439 @@ fn deny_wins_priority_ties() {
     let result = evaluate(&policy, &make_request(api::Operation::Install, "Some.Package"));
     assert_eq!(result.decision, Decision::Deny);
     assert_eq!(result.rule_id, "deny-tie");
+}
+
+fn rule(id: &str, priority: u32, decision: Decision, match_criteria: PolicyMatch) -> PolicyRule {
+    PolicyRule {
+        id: ResourceId::from(id),
+        enabled: true,
+        priority,
+        decision,
+        reason: None,
+        match_criteria,
+        constraints: None,
+    }
+}
+
+fn exact_identifier(identifier: &str) -> Option<PackageIdentifierCondition> {
+    Some(PackageIdentifierCondition::Exact(BTreeSet::from([
+        PackageIdentifier::parse(identifier).expect("valid identifier"),
+    ])))
+}
+
+fn deny_range_policy() -> PolicyDocument {
+    make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-old",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Contoso.Tool"),
+                version: Some(VersionCondition::Range(VersionRange {
+                    min_version: None,
+                    max_version: Some(SemanticVersion::parse("2.0.0").expect("valid version")),
+                    include_prerelease: false,
+                })),
+                ..Default::default()
+            },
+        )],
+    )
+}
+
+fn allow_exact_version_policy() -> PolicyDocument {
+    make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-pinned",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Contoso.Tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("3.0.0").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    )
+}
+
+fn versioned_request(version: Option<&str>) -> PackageRequest {
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.package.version = version.map(|version| api::VersionString(version.to_owned()));
+    request
+}
+
+#[test]
+fn deny_identifiers_match_case_variants() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-git",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("Git.Git"),
+                ..Default::default()
+            },
+        )],
+    );
+
+    let result = evaluate(&policy, &make_request(api::Operation::Install, "git.GIT"));
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-git");
+}
+
+#[test]
+fn identifiers_use_manager_name_equivalence() {
+    let policy = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-dateutil",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("python-dateutil"),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Python_DateUtil");
+    request.manager = api::ManagerName::Pip;
+
+    let result = evaluate(&policy, &request);
+    assert_eq!(result.decision, Decision::Allow);
+
+    request.manager = api::ManagerName::Npm;
+    let result = evaluate(&policy, &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn deny_version_conditions_match_unknown_or_equivalent_versions() {
+    let policy = deny_range_policy();
+
+    for version in [None, Some("latest"), Some("1.5.0.0"), Some("v1.5"), Some("2.0.0-beta")] {
+        let result = evaluate(&policy, &versioned_request(version));
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "deny-old", "{version:?}");
+    }
+
+    let result = evaluate(&policy, &versioned_request(Some("2.0.1")));
+    assert_eq!(result.decision, Decision::Allow);
+    assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn allow_version_conditions_require_the_exact_known_version() {
+    let policy = allow_exact_version_policy();
+
+    let result = evaluate(&policy, &versioned_request(Some("3.0.0")));
+    assert_eq!(result.decision, Decision::Allow);
+
+    for version in [None, Some("3.0.0.0"), Some("v3.0.0")] {
+        let result = evaluate(&policy, &versioned_request(version));
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+    }
+}
+
+#[test]
+fn version_selecting_custom_parameters_make_the_version_unknown() {
+    let mut request = versioned_request(Some("3.0.0"));
+    request.options.custom_parameters = vec![api::CustomParameterString("--version=1.0.0".to_owned())];
+
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-old");
+
+    let result = evaluate(&allow_exact_version_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "<default>");
+
+    request.options.custom_parameters = vec![api::CustomParameterString("--silent".to_owned())];
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Allow);
+    let result = evaluate(&allow_exact_version_policy(), &request);
+    assert_eq!(result.decision, Decision::Allow);
+}
+
+#[test]
+fn version_conditions_do_not_apply_to_uninstall() {
+    for version in [None, Some("1.0.0"), Some("3.0.0")] {
+        let mut request = versioned_request(version);
+        request.operation = api::Operation::Uninstall;
+
+        let result = evaluate(&deny_range_policy(), &request);
+        assert_eq!(result.decision, Decision::Allow, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+        let result = evaluate(&allow_exact_version_policy(), &request);
+        assert_eq!(result.decision, Decision::Deny, "{version:?}");
+        assert_eq!(result.rule_id, "<default>", "{version:?}");
+    }
+
+    // An install without a concrete version stays denied by a Deny rule with a version condition.
+    let result = evaluate(&deny_range_policy(), &versioned_request(None));
+    assert_eq!(result.rule_id, "deny-old");
+}
+
+#[test]
+fn decorated_identifier_versions_are_unknown() {
+    let mut request = versioned_request(Some("3.0.0"));
+    request.manager = api::ManagerName::Npm;
+    request.package.id = api::PackageIdentifier("Contoso.Tool@1.0.0".to_owned());
+    let result = evaluate(&deny_range_policy(), &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "deny-old");
+}
+
+#[test]
+fn unacceptable_install_locations_are_denied_before_rule_matching() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 1, Decision::Allow, PolicyMatch::default())],
+    );
+
+    for location in [
+        r"C:\Tools\..\Windows\System32",
+        "C:/Tools/../Windows",
+        r"\\server\share",
+        "Tools",
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_install_location = Some(location.to_owned());
+
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Deny, "{location}");
+        assert_eq!(result.rule_id, "<validation-failure>", "{location}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_install_location = Some("C:/Tools/Contoso/".to_owned());
+    assert_eq!(evaluate(&policy, &request).rule_id, "allow-any");
+}
+
+#[test]
+fn deterministic_scope_and_architecture_defaults_are_matched() {
+    let deny_machine_x64 = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-machine-x64",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                scopes: BTreeSet::from([now_policy::Scope::Machine]),
+                architectures: BTreeSet::from([now_policy::Architecture::X64]),
+                ..Default::default()
+            },
+        )],
+    );
+    let allow_user_neutral = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-user-neutral",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                scopes: BTreeSet::from([now_policy::Scope::User]),
+                architectures: BTreeSet::from([now_policy::Architecture::Neutral]),
+                ..Default::default()
+            },
+        )],
+    );
+
+    // npm always runs per user with architecture-neutral packages.
+    let mut request = make_request(api::Operation::Install, "contoso-tool");
+    request.manager = api::ManagerName::Npm;
+    assert_eq!(evaluate(&deny_machine_x64, &request).rule_id, "<default>");
+    assert_eq!(evaluate(&allow_user_neutral, &request).rule_id, "allow-user-neutral");
+
+    // WinGet leaves scope and architecture to the installer.
+    let request = make_request(api::Operation::Install, "Contoso.Tool");
+    assert_eq!(evaluate(&deny_machine_x64, &request).rule_id, "deny-machine-x64");
+    assert_eq!(evaluate(&allow_user_neutral, &request).rule_id, "<default>");
+}
+
+#[test]
+fn partial_npm_versions_are_unknown() {
+    let deny_exact = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-1.5.0",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                package_identifiers: exact_identifier("contoso-tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("1.5.0").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    );
+    let allow_partial = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-1",
+            100,
+            Decision::Allow,
+            PolicyMatch {
+                package_identifiers: exact_identifier("contoso-tool"),
+                version: Some(VersionCondition::Exact(BTreeSet::from([
+                    VersionString::parse("1").expect("valid version")
+                ]))),
+                ..Default::default()
+            },
+        )],
+    );
+
+    for version in ["1", "1.5"] {
+        let mut request = make_request(api::Operation::Install, "contoso-tool");
+        request.manager = api::ManagerName::Npm;
+        request.package.version = Some(api::VersionString(version.to_owned()));
+
+        let result = evaluate(&deny_exact, &request);
+        assert_eq!(result.rule_id, "deny-1.5.0", "{version}");
+        let result = evaluate(&allow_partial, &request);
+        assert_eq!(result.rule_id, "<default>", "{version}");
+
+        // WinGet pins the exact version, padding missing components with zeros.
+        request.manager = api::ManagerName::Winget;
+        let result = evaluate(&deny_exact, &request);
+        let expected = if version == "1.5" {
+            Decision::Deny
+        } else {
+            Decision::Allow
+        };
+        assert_eq!(result.decision, expected, "{version}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "contoso-tool");
+    request.manager = api::ManagerName::Npm;
+    request.package.version = Some(api::VersionString("1.4.9".to_owned()));
+    let result = evaluate(&deny_exact, &request);
+    assert_eq!(result.rule_id, "<default>");
+}
+
+#[test]
+fn winget_custom_parameters_apply_policy_relevant_options() {
+    let allow_any = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 100, Decision::Allow, PolicyMatch::default())],
+    );
+    let parameters = |values: &[&str]| {
+        values
+            .iter()
+            .map(|value| api::CustomParameterString((*value).to_owned()))
+            .collect::<Vec<_>>()
+    };
+
+    for values in [
+        &["--location", r"C:\Tools\..\Windows"][..],
+        &["-l=Tools"],
+        &["--location"],
+        &["--location", r"C:\Tools", "-l", r"D:\Tools"],
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_parameters = parameters(values);
+        assert_eq!(
+            evaluate(&allow_any, &request).rule_id,
+            "<validation-failure>",
+            "{values:?}"
+        );
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_install_location = Some(r"C:\Tools".to_owned());
+    request.options.custom_parameters = parameters(&["--location", r"D:\Tools"]);
+    assert_eq!(evaluate(&allow_any, &request).rule_id, "<validation-failure>");
+
+    let deny_skip_hash = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-skip-hash",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                skip_hash_check: Some(true),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = parameters(&["--Ignore-Security-Hash"]);
+    assert_eq!(evaluate(&deny_skip_hash, &request).rule_id, "deny-skip-hash");
+
+    // Other managers reject custom parameters, so their values are not interpreted.
+    request.manager = api::ManagerName::Npm;
+    assert_eq!(evaluate(&deny_skip_hash, &request).rule_id, "<default>");
+}
+
+#[test]
+fn explicitly_empty_install_location_is_denied() {
+    let allow_any = make_policy(
+        Decision::Allow,
+        vec![rule("allow-any", 100, Decision::Allow, PolicyMatch::default())],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.manager = api::ManagerName::Dotnet;
+    request.options.custom_install_location = Some(String::new());
+
+    assert_eq!(evaluate(&allow_any, &request).rule_id, "<validation-failure>");
+}
+
+#[test]
+fn winget_installer_arguments_leave_the_install_location_unknown() {
+    let policy = make_policy(
+        Decision::Allow,
+        vec![rule(
+            "deny-custom-location",
+            10,
+            Decision::Deny,
+            PolicyMatch {
+                has_custom_install_location: Some(true),
+                ..Default::default()
+            },
+        )],
+    );
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = vec![
+        api::CustomParameterString("--override".to_owned()),
+        api::CustomParameterString("/DIR=C:\\Windows".to_owned()),
+    ];
+
+    assert_eq!(evaluate(&policy, &request).rule_id, "deny-custom-location");
+}
+
+#[test]
+fn recommended_denied_custom_parameters_block_winget_installer_arguments() {
+    let mut allow = rule("allow-winget", 100, Decision::Allow, PolicyMatch::default());
+    allow.constraints = Some(now_policy::PolicyConstraints {
+        allow_custom_parameters: true,
+        denied_custom_parameters: vec![
+            now_policy::CustomParameterString("--override*".to_owned()),
+            now_policy::CustomParameterString("--custom*".to_owned()),
+        ],
+        ..Default::default()
+    });
+    let policy = make_policy(Decision::Deny, vec![allow]);
+
+    for values in [
+        &["--override", "/SILENT"][..],
+        &["--OVERRIDE=/SILENT"],
+        &["--Custom", "/DIR=C:\\Tools"],
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_parameters = values
+            .iter()
+            .map(|value| api::CustomParameterString((*value).to_owned()))
+            .collect();
+        assert_eq!(evaluate(&policy, &request).rule_id, "<default>", "{values:?}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = vec![api::CustomParameterString("--silent".to_owned())];
+    assert_eq!(evaluate(&policy, &request).rule_id, "allow-winget");
 }
