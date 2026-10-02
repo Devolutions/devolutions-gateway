@@ -563,16 +563,26 @@ impl UserAdmission {
         };
 
         let Some(user_slot) = self.user_slots.try_acquire(&user_sid) else {
-            if let Some(suppressed) = self.rejections.lock().record(std::time::Instant::now()) {
-                warn!(
-                    %user_sid,
-                    suppressed,
-                    "Replying busy to named pipe client: too many concurrent connections for the user"
-                );
-            }
             // Release the connection slot so the busy reply cannot hold it for other users.
             drop(permit);
-            if let Ok(busy_permit) = Arc::clone(&self.busy_replies).try_acquire_owned() {
+            let busy_permit = Arc::clone(&self.busy_replies).try_acquire_owned().ok();
+            let report = self.rejections.lock().record(std::time::Instant::now());
+            if let Some(suppressed) = report {
+                if busy_permit.is_some() {
+                    warn!(
+                        %user_sid,
+                        suppressed,
+                        "Replying busy to named pipe client: too many concurrent connections for the user"
+                    );
+                } else {
+                    warn!(
+                        %user_sid,
+                        suppressed,
+                        "Rejected named pipe client: too many concurrent connections for the user and busy replies"
+                    );
+                }
+            }
+            if let Some(busy_permit) = busy_permit {
                 send_busy_reply(server, busy_permit).await;
             }
             return;
