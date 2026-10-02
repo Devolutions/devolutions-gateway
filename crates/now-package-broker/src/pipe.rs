@@ -106,13 +106,14 @@ async fn accept_connections(
     info!(%pipe_name, "Starting named pipe server");
 
     let user_slots = Arc::new(UserConnectionSlots::new(MAX_CONCURRENT_CONNECTIONS_PER_USER));
+    let busy_replies = Arc::new(Semaphore::new(MAX_CONCURRENT_BUSY_REPLIES));
 
     accept_loop(
         &pipe_name,
         shutdown,
         AcceptLimits {
             max_connections: MAX_CONCURRENT_CONNECTIONS,
-            max_busy_replies: MAX_CONCURRENT_BUSY_REPLIES,
+            busy_replies: Arc::clone(&busy_replies),
         },
         &create_pipe_instance,
         RetryDelay::default(),
@@ -124,21 +125,14 @@ async fn accept_connections(
             let permit = match admission {
                 Admission::Serve(permit) => permit,
                 Admission::Busy(permit) => {
-                    connections.spawn(async move {
-                        let _permit = permit;
-                        if tokio::time::timeout(BUSY_REPLY_DEADLINE, serve_connection(server, build_busy_router()))
-                            .await
-                            .is_err()
-                        {
-                            debug!("Closed named pipe busy reply: deadline exceeded");
-                        }
-                    });
+                    connections.spawn(send_busy_reply(server, permit));
                     return;
                 }
             };
 
             let state = Arc::clone(state);
             let user_slots = Arc::clone(&user_slots);
+            let busy_replies = Arc::clone(&busy_replies);
             let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
             connections.spawn(async move {
                 // Serving this connection can commit a policy and record its terminal
@@ -153,7 +147,7 @@ async fn accept_connections(
                         let client = PipeClient::from_connected_pipe(&server);
                         (server, client)
                     });
-                    let (_permit, server, client) = match capture.await {
+                    let (permit, server, client) = match capture.await {
                         Ok((permit, (server, Ok(client)))) => (permit, server, client),
                         Ok((_permit, (_server, Err(error)))) => {
                             warn!(error = format!("{error:#}"), "Rejected named pipe client");
@@ -173,9 +167,14 @@ async fn accept_connections(
                             user_sid = %client.user_sid(),
                             "Rejected named pipe client: too many concurrent connections for the user"
                         );
-                        serve_connection(server, build_busy_router()).await;
+                        // Release the connection slot so the busy reply cannot hold it for other users.
+                        drop(permit);
+                        if let Ok(busy_permit) = Arc::clone(&busy_replies).try_acquire_owned() {
+                            send_busy_reply(server, busy_permit).await;
+                        }
                         return;
                     };
+                    let _permit = permit;
 
                     info!("Client connected to named pipe");
                     let router = build_router_for_client(state, client);
@@ -199,12 +198,22 @@ async fn accept_connections(
 }
 
 /// Concurrency limits applied by [`accept_loop`].
-#[derive(Clone, Copy)]
 struct AcceptLimits {
     /// Connections served concurrently.
     max_connections: usize,
-    /// Busy replies sent concurrently to clients over `max_connections`.
-    max_busy_replies: usize,
+    /// Slots for busy replies to clients over a connection limit, shared with the per-user limit.
+    busy_replies: Arc<Semaphore>,
+}
+
+/// Answer a client over a connection limit with a busy reply, holding a busy reply slot.
+async fn send_busy_reply(server: NamedPipeServer, permit: OwnedSemaphorePermit) {
+    let _permit = permit;
+    if tokio::time::timeout(BUSY_REPLY_DEADLINE, serve_connection(server, build_busy_router()))
+        .await
+        .is_err()
+    {
+        debug!("Closed named pipe busy reply: deadline exceeded");
+    }
 }
 
 /// How a connected client handed off by [`accept_loop`] must be handled.
@@ -234,7 +243,7 @@ async fn accept_loop(
     mut dispatch: impl FnMut(NamedPipeServer, Admission),
 ) {
     let connection_permits = Arc::new(Semaphore::new(limits.max_connections));
-    let busy_permits = Arc::new(Semaphore::new(limits.max_busy_replies));
+    let busy_permits = limits.busy_replies;
     let mut connect_failures = ConnectFailures::default();
 
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
@@ -759,7 +768,7 @@ mod tests {
     fn limits(max_connections: usize, max_busy_replies: usize) -> AcceptLimits {
         AcceptLimits {
             max_connections,
-            max_busy_replies,
+            busy_replies: Arc::new(Semaphore::new(max_busy_replies)),
         }
     }
 
