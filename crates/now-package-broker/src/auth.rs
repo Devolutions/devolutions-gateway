@@ -351,7 +351,10 @@ impl PipeClient {
 
     /// Match the request's executable path against the captured process image path.
     ///
-    /// The requested path is only compared as text and is never opened.
+    /// The path must be a plain local drive path, checked before any I/O. It is first compared
+    /// as text with the captured and final image paths. Otherwise it is opened for attribute
+    /// reads while impersonating the pipe client, never with the broker's identity, and must be
+    /// the retained image file on a local disk volume.
     fn validate_executable_path(&self, requested_executable_path: &str) -> anyhow::Result<()> {
         if !is_plain_local_drive_path(requested_executable_path) {
             bail!("request client executable path is not a plain local drive path");
