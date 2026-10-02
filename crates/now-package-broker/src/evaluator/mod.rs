@@ -14,6 +14,22 @@
 //! matches an uninstall request.
 //! An install or update without a concrete version matches Deny rules with a version condition,
 //! so clients should send the resolved version to pass them.
+//!
+//! # Custom parameters
+//!
+//! WinGet and Scoop custom parameters are passed to the package manager verbatim; the other managers
+//! reject them.
+//! Options that the policy model also expresses (install location, scope, architecture, interactivity,
+//! hash-check skipping, upgrade behavior) are read from custom parameters and matched like the typed
+//! request options.
+//!
+//! WinGet `--override` and `--custom` pass arbitrary arguments to the package installer, which the broker
+//! cannot interpret; they make the install location unknown but are otherwise allowed when a rule allows
+//! custom parameters.
+//! An Allow rule that permits unrestricted custom parameters for elevated WinGet operations therefore lets
+//! the caller pass arbitrary arguments to an installer running with administrator privileges.
+//! For elevated WinGet rules, set `AllowCustomParameters` to `false`, or list `--override*` and
+//! `--custom*` in `DeniedCustomParameters` (WinGet has no short forms for these options).
 
 use now_policy::{Decision, PolicyDocument};
 use now_policy_api::{Elevation, PackageRequest, Scope};

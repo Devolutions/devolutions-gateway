@@ -540,6 +540,7 @@ impl BrokerState {
     }
 
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
+        let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
 
         Ok(EvaluationResponse {
@@ -558,6 +559,7 @@ impl BrokerState {
     }
 
     async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+        let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
             let generated_operation_id = new_operation_id()?;
@@ -860,6 +862,22 @@ impl PackageRequestClientOwner for PackageRequest {
     fn client_owner_key(&self) -> String {
         self.client.owner_key()
     }
+}
+
+/// Normalize equivalent request spellings before policy evaluation and command building.
+///
+/// An empty or whitespace-only custom install location means "not set", so every component
+/// (policy evaluation, the command builders and operation tracking) sees `None`.
+fn normalize_request(mut request: PackageRequest) -> PackageRequest {
+    if request
+        .options
+        .custom_install_location
+        .as_deref()
+        .is_some_and(|location| location.trim().is_empty())
+    {
+        request.options.custom_install_location = None;
+    }
+    request
 }
 
 #[cfg(test)]
@@ -1416,15 +1434,51 @@ mod tests {
 
     #[test]
     fn unacceptable_install_location_is_rejected_even_under_permissive_policy() {
-        for location in [r"C:\Tools\..\Windows\System32", ""] {
+        let mut request = request();
+        request.options.custom_install_location = Some(r"C:\Tools\..\Windows\System32".to_owned());
+
+        let Err(error) = state().evaluate_request(&normalize_request(request)) else {
+            panic!("expected install location to be rejected");
+        };
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn empty_install_location_is_treated_as_unset() {
+        for location in ["", "  ", "\t"] {
             let mut request = request();
             request.options.custom_install_location = Some(location.to_owned());
+            let request = normalize_request(request);
+            assert_eq!(request.options.custom_install_location, None, "{location:?}");
 
-            let Err(error) = state().evaluate_request(&request) else {
-                panic!("expected install location {location:?} to be rejected");
+            let Ok(evaluated) = state().evaluate_request(&request) else {
+                panic!("expected install location {location:?} to be treated as unset");
             };
-            assert_eq!(error.code, ErrorCode::ValidationFailed);
+            assert!(evaluated.would_execute, "{location:?}");
         }
+    }
+
+    #[test]
+    fn dotnet_with_empty_install_location_installs_globally() {
+        let mut request = request();
+        request.manager = ManagerName::Dotnet;
+        request.source.name = "nuget.org".to_owned();
+        request.client.requested_elevation = Elevation::Standard;
+        request.options.custom_install_location = Some(String::new());
+
+        let Ok(evaluated) = state().evaluate_request(&normalize_request(request)) else {
+            panic!("expected dotnet request to be evaluated");
+        };
+        assert!(
+            evaluated.command.contains(&"--global".to_owned()),
+            "{:?}",
+            evaluated.command
+        );
+        assert!(
+            !evaluated.command.contains(&"--tool-path".to_owned()),
+            "{:?}",
+            evaluated.command
+        );
     }
 
     #[test]

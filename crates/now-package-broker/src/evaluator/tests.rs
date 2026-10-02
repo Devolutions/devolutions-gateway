@@ -688,3 +688,34 @@ fn winget_installer_arguments_leave_the_install_location_unknown() {
 
     assert_eq!(evaluate(&policy, &request).rule_id, "deny-custom-location");
 }
+
+#[test]
+fn recommended_denied_custom_parameters_block_winget_installer_arguments() {
+    let mut allow = rule("allow-winget", 100, Decision::Allow, PolicyMatch::default());
+    allow.constraints = Some(now_policy::PolicyConstraints {
+        allow_custom_parameters: true,
+        denied_custom_parameters: vec![
+            now_policy::CustomParameterString("--override*".to_owned()),
+            now_policy::CustomParameterString("--custom*".to_owned()),
+        ],
+        ..Default::default()
+    });
+    let policy = make_policy(Decision::Deny, vec![allow]);
+
+    for values in [
+        &["--override", "/SILENT"][..],
+        &["--OVERRIDE=/SILENT"],
+        &["--Custom", "/DIR=C:\\Tools"],
+    ] {
+        let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+        request.options.custom_parameters = values
+            .iter()
+            .map(|value| api::CustomParameterString((*value).to_owned()))
+            .collect();
+        assert_eq!(evaluate(&policy, &request).rule_id, "<default>", "{values:?}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = vec![api::CustomParameterString("--silent".to_owned())];
+    assert_eq!(evaluate(&policy, &request).rule_id, "allow-winget");
+}
