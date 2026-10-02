@@ -285,7 +285,9 @@ async fn accept_loop(
                 ),
                 None => {}
             }
-            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+            if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                && !retry.wait(shutdown).await
+            {
                 return;
             }
             if let Some(delay) = action.delay {
@@ -322,7 +324,9 @@ async fn accept_loop(
                             "Rejected named pipe client: too many concurrent connections and busy replies"
                         );
                     }
-                    if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                    if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                        && !retry.wait(shutdown).await
+                    {
                         return;
                     }
                     continue;
@@ -344,7 +348,9 @@ async fn accept_loop(
                 );
             }
             drop(admission);
-            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+            if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                && !retry.wait(shutdown).await
+            {
                 return;
             }
             continue;
@@ -622,10 +628,13 @@ impl UserAdmission {
 /// Make `server` listen again after a client that is not served.
 ///
 /// Disconnects the client and reuses the instance. If that fails, the instance is replaced
-/// by a new one created before the old one closes. Returns `false` when neither worked.
+/// by a new one created before the old one closes, or else by the spare, whose replacement
+/// is then retried with backoff. Returns `false` when none of these worked.
 fn recycle_instance(
     pipe_name: &str,
     server: &mut NamedPipeServer,
+    spare: &mut SpareInstance,
+    retry: &mut RetryDelay,
     create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
 ) -> bool {
     let Err(error) = server.disconnect() else {
@@ -643,7 +652,12 @@ fn recycle_instance(
                 error = format!("{error:#}"),
                 "Failed to create a replacement named pipe instance"
             );
-            false
+            let Some(next) = spare.instance.take() else {
+                return false;
+            };
+            *server = next;
+            spare.retry_at = Some(tokio::time::Instant::now() + retry.advance());
+            true
         }
     }
 }
