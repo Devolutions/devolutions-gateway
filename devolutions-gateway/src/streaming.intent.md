@@ -51,8 +51,8 @@ JREC artifact handling, storage, download content types, and consumer-side rende
 
 ## Multi-clip, size variant streaming
 
-We would like to support streamings of multi-clip, size-variant source.
-See how we do recordings in `devolutions-gateway/src/recording.rs`. We now would like to support streaming as well for the same source.
+We support streamings of multi-clip, size-variant source.
+See how we do multi-clip recordings in `devolutions-gateway/src/recording.rs`. We support streaming as well for the same source.
 
 ### The source
 We have two streaming sources that we currently support:
@@ -61,8 +61,8 @@ We have two streaming sources that we currently support:
 
 ### The normalizer
 
-Given the constrains above, we would like to unifiy the source and provide a single shape that the client can consume easily without breaking backward compatibility. 
-We would use the following model:
+Given the constrains above, we would like to unifiy the source and provide a single shape that the client can consume easily.
+We use the following model:
 
 ```text
 Legend:
@@ -112,4 +112,4 @@ Normalized client output:
 - Every client has an independent output sequence beginning at zero.
 ```
 
-We use Websocket subprotocols to implement backward compatibility, for the first version, which had no subprotocol, it will be treated as the first version of the streaming protocol. That is, no segment support. For the second version, we will introduce a new subprotocol `jrec-streaming.v2`, which fully takes advantage of the multi-clip protorol introduced above.
+We use Websocket subprotocols to implement backward compatibility, for the first version, which had no subprotocol, it will be treated as the first version of the streaming protocol. That is, no segment support. For the second version, we will introduce a new subprotocol `jrec-shadow.v2`, which fully takes advantage of the multi-clip protorol introduced above.
