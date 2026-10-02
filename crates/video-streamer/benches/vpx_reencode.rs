@@ -63,8 +63,8 @@ fn bench_reencode_first_500_tags(c: &mut Criterion) {
                 let stats =
                     video_streamer::bench_support::reencode_first_tags_from_path_until_deadline(
                         &input,
-                        video_streamer::StreamingConfig {
-                            encoder_threads: video_streamer::config::CpuCount::new(1),
+                        video_streamer::SessionConfig {
+                            encoder_threads: 1,
                             adaptive_frame_skip: false,
                         },
                         500,

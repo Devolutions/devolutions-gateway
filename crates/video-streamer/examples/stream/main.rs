@@ -12,8 +12,7 @@ use local_websocket::create_local_websocket;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
 use tracing::{error, info};
-use video_streamer::config::CpuCount;
-use video_streamer::{ReOpenableFile, StreamingConfig, webm_stream};
+use video_streamer::{ReOpenableFile, SessionConfig, webm_stream};
 
 pub struct TokioSignal {
     signal: tokio::sync::watch::Receiver<()>,
@@ -70,8 +69,8 @@ async fn main() -> anyhow::Result<()> {
             server,
             intermediate_file,
             notify,
-            StreamingConfig {
-                encoder_threads: CpuCount::default(),
+            SessionConfig {
+                encoder_threads: SessionConfig::default().encoder_threads,
                 adaptive_frame_skip: true,
             },
             || {
