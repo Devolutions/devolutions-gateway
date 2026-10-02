@@ -112,4 +112,4 @@ Normalized client output:
 - Every client has an independent output sequence beginning at zero.
 ```
 
-The client always gets a guaranteed fixed size segment, for the first segment, we keep it backward compatible, the protocol will be extendned, such that, on new `pull` message, when the previous output segment ends, it will send a new `SegmentStarted` message.
+We use Websocket subprotocols to implement backward compatibility, for the first version, which had no subprotocol, it will be treated as the first version of the streaming protocol. That is, no segment support. For the second version, we will introduce a new subprotocol `jrec-streaming.v2`, which fully takes advantage of the multi-clip protorol introduced above.
