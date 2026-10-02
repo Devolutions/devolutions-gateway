@@ -934,7 +934,7 @@ mod tests {
         let stalled_closed = stalled_closed.expect("stalled stream closed");
         assert!(stalled_closed.error);
         assert!(
-            stalled_closed.reason.contains("stdin backlog exceeded"),
+            stalled_closed.reason.contains("stdin backlog limit exceeded"),
             "unexpected reason: {}",
             stalled_closed.reason
         );

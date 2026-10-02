@@ -26,11 +26,18 @@ const MIB: usize = 1024 * 1024;
 /// Limits on stdin data buffered for a child process.
 ///
 /// Stdin frames are queued without waiting because all streams share one server connection. The server is expected
-/// to apply flow control to the input it sends, keeping each backlog well below `max_buffered_bytes`.
+/// to apply flow control to the input it sends, keeping backlogs well below `max_buffered_bytes` and
+/// `max_total_buffered_bytes`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StdinLimits {
-    /// A child process is considered stalled while at least this many bytes are pending and none are consumed.
+    /// A child process is considered stalled while at least this many bytes of its stdin are unread and none are
+    /// consumed.
     pub(super) stall_threshold_bytes: usize,
+    /// Upper bound assumed for stdin bytes written to the pipe but not read by the child process yet.
+    ///
+    /// Written bytes count as consumed, so they are not part of the pending backlog. Without this allowance, a
+    /// backlog just above the threshold could fall below it once the pipe buffer fills, and never time out.
+    pub(super) pipe_allowance_bytes: usize,
     /// How long a child process may stay stalled before it is stopped.
     ///
     /// Time during which the child process output is held back by the server connection does not count, because
@@ -38,14 +45,18 @@ pub(super) struct StdinLimits {
     pub(super) stall_timeout: Duration,
     /// Pending bytes beyond which the stream is failed immediately to bound memory usage.
     pub(super) max_buffered_bytes: usize,
+    /// Pending bytes across all streams beyond which the stream receiving input is failed immediately.
+    pub(super) max_total_buffered_bytes: usize,
 }
 
 impl Default for StdinLimits {
     fn default() -> Self {
         Self {
             stall_threshold_bytes: 16 * MIB,
+            pipe_allowance_bytes: MIB,
             stall_timeout: Duration::from_secs(30),
             max_buffered_bytes: 64 * MIB,
+            max_total_buffered_bytes: 256 * MIB,
         }
     }
 }
@@ -55,7 +66,7 @@ pub(super) enum StopRequest {
     /// Close stdin and let the child process exit on its own.
     Graceful,
     Kill,
-    /// The stdin backlog exceeded [`StdinLimits::max_buffered_bytes`].
+    /// The stdin backlog exceeded [`StdinLimits::max_buffered_bytes`] or [`StdinLimits::max_total_buffered_bytes`].
     StdinOverflow,
 }
 
@@ -98,9 +109,11 @@ const INPUT_OVERFLOWED: u8 = 1;
 const CHILD_EXITED: u8 = 2;
 
 /// Stdin backlog accounting shared by the registry, the stdin pump, and the stall watchdog.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct StdinBacklog {
     pending_bytes: AtomicUsize,
+    /// Pending bytes across all streams of the registry.
+    total_pending_bytes: Arc<AtomicUsize>,
     consumed_bytes: AtomicU64,
     /// Whether input was dropped before the child process exit was observed.
     ///
@@ -117,8 +130,24 @@ fn frame_charge(frame: &StreamData) -> usize {
 }
 
 impl StdinBacklog {
+    fn new(total_pending_bytes: Arc<AtomicUsize>) -> Self {
+        Self {
+            pending_bytes: AtomicUsize::new(0),
+            total_pending_bytes,
+            consumed_bytes: AtomicU64::new(0),
+            input_state: AtomicU8::new(INPUT_ACCEPTED),
+            end_of_stream: AtomicBool::new(false),
+        }
+    }
+
+    fn add_pending(&self, bytes: usize) {
+        self.pending_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.total_pending_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
     fn consume(&self, bytes: usize) {
         self.pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
+        self.total_pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
         self.consumed_bytes
             .fetch_add(u64::try_from(bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
     }
@@ -139,6 +168,14 @@ impl StdinBacklog {
         self.input_state
             .compare_exchange(INPUT_ACCEPTED, CHILD_EXITED, Ordering::AcqRel, Ordering::Acquire)
             .is_err_and(|state| state == INPUT_OVERFLOWED)
+    }
+}
+
+impl Drop for StdinBacklog {
+    fn drop(&mut self) {
+        // Frames that were never written to the child process are released with the backlog.
+        self.total_pending_bytes
+            .fetch_sub(*self.pending_bytes.get_mut(), Ordering::Relaxed);
     }
 }
 
@@ -228,7 +265,10 @@ impl StallWatchdog {
         self.last_consumed_bytes = consumed_bytes;
 
         let output_held_back = self.output.take_observed();
-        let backlog_full = self.backlog.pending_bytes.load(Ordering::Relaxed) >= self.limits.stall_threshold_bytes;
+
+        let pending_bytes = self.backlog.pending_bytes.load(Ordering::Relaxed);
+        let backlog_full =
+            pending_bytes > 0 && pending_bytes + self.limits.pipe_allowance_bytes >= self.limits.stall_threshold_bytes;
 
         if progressed || !backlog_full {
             self.stalled_for = Duration::ZERO;
@@ -244,6 +284,7 @@ impl StallWatchdog {
 pub(super) struct ProcessRegistry {
     inner: Arc<Mutex<ProcessRegistryInner>>,
     limits: StdinLimits,
+    total_pending_bytes: Arc<AtomicUsize>,
 }
 
 #[derive(Debug, Default)]
@@ -282,6 +323,7 @@ impl ProcessRegistry {
         Self {
             inner: Arc::default(),
             limits,
+            total_pending_bytes: Arc::default(),
         }
     }
 
@@ -305,7 +347,7 @@ impl ProcessRegistry {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
         let (control_tx, control_rx) = watch::channel(None);
         let control_tx = Arc::new(control_tx);
-        let backlog = Arc::new(StdinBacklog::default());
+        let backlog = Arc::new(StdinBacklog::new(Arc::clone(&self.total_pending_bytes)));
 
         inner.streams.insert(
             stream_id.to_owned(),
@@ -406,13 +448,16 @@ fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream
     let frame_bytes = frame_charge(&stream_data);
 
     let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
-    let keep_stream = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes {
+    let total_pending_bytes = entry.backlog.total_pending_bytes.load(Ordering::Relaxed);
+    let keep_stream = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes
+        || total_pending_bytes.saturating_add(frame_bytes) > limits.max_total_buffered_bytes
+    {
         if entry.backlog.record_overflow() {
             request_stop(&entry.stop, StopRequest::StdinOverflow);
         }
         false
     } else {
-        entry.backlog.pending_bytes.fetch_add(frame_bytes, Ordering::Relaxed);
+        entry.backlog.add_pending(frame_bytes);
         entry.stdin.send(stream_data).is_ok() && !end_of_stream
     };
 
@@ -593,7 +638,8 @@ async fn run_process_inner(
                         process_id,
                         correlation_id = %request.correlation_id,
                         max_buffered_bytes = limits.max_buffered_bytes,
-                        "Killing PSU gRPC child process because its stdin backlog exceeded the limit"
+                        max_total_buffered_bytes = limits.max_total_buffered_bytes,
+                        "Killing PSU gRPC child process because its stdin backlog exceeded a limit"
                     );
                     kill_reason = Some(KillReason::StdinOverflow);
                     break kill_process_tree(&mut child, &mut process_tree).await?;
@@ -678,14 +724,15 @@ async fn run_process_inner(
     let stream_error = canceled || (exit_code != 0 && !expected_pwsh_exit);
     let stream_reason = if kill_reason == Some(KillReason::StdinStalled) {
         format!(
-            "no stdin consumed for {:?} while at least {} was pending",
+            "no stdin consumed for {:?} while at least {} was unread",
             limits.stall_timeout,
             format_bytes(limits.stall_threshold_bytes)
         )
     } else if kill_reason == Some(KillReason::StdinOverflow) || stdin_overflowed {
         format!(
-            "stdin backlog exceeded the {} limit",
-            format_bytes(limits.max_buffered_bytes)
+            "stdin backlog limit exceeded ({} per job, {} for all jobs)",
+            format_bytes(limits.max_buffered_bytes),
+            format_bytes(limits.max_total_buffered_bytes)
         )
     } else if canceled {
         "child process canceled".to_owned()
@@ -957,8 +1004,10 @@ mod tests {
 
     const LIMITS_FOR_TESTS: StdinLimits = StdinLimits {
         stall_threshold_bytes: 64 * 1024,
+        pipe_allowance_bytes: 0,
         stall_timeout: Duration::from_millis(300),
         max_buffered_bytes: 64 * MIB,
+        max_total_buffered_bytes: 256 * MIB,
     };
 
     /// Writes a script that runs `windows` with cmd.exe on Windows, or `unix` with sh elsewhere.
@@ -1197,7 +1246,7 @@ mod tests {
 
         assert!(outcome.stream_closed.error);
         assert!(
-            outcome.stream_closed.reason.contains("stdin backlog exceeded"),
+            outcome.stream_closed.reason.contains("stdin backlog limit exceeded"),
             "unexpected reason: {}",
             outcome.stream_closed.reason
         );
@@ -1539,6 +1588,68 @@ mod tests {
         assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
         assert!(!outcome.completed.canceled);
     }
+    #[tokio::test]
+    async fn agent_wide_stdin_budget_fails_the_stream_that_exceeds_it() {
+        let registry = ProcessRegistry::new(StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        });
+        let mut first = registry.register("first", "first").await.expect("register");
+        let second = registry.register("second", "second").await.expect("register");
+
+        for sequence in 0..12 {
+            dispatch(&registry, "first", sequence, vec![b'x'; 1024], false).await;
+        }
+        for sequence in 0..6 {
+            dispatch(&registry, "second", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        // Each stream stays far below its own limit, but together they exceed the agent-wide budget.
+        assert!(first.control.borrow().is_none());
+        assert_eq!(*second.control.borrow(), Some(StopRequest::StdinOverflow));
+
+        // Input that was never written to a child process is released with its backlog.
+        let registration = second.registration;
+        drop(second);
+        registry.unregister("second", "second", registration).await;
+        while first.stdin.try_recv().is_ok() {}
+        let pending = first.backlog.pending_bytes.load(Ordering::Relaxed);
+        first.backlog.consume(pending);
+        assert_eq!(registry.total_pending_bytes.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn backlog_just_above_the_stall_threshold_still_times_out() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let limits = StdinLimits {
+            stall_threshold_bytes: MIB,
+            pipe_allowance_bytes: 256 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        // Part of the backlog fits in the stdin pipe and counts as consumed, bringing it below the threshold.
+        let frame = stream_data("job".to_owned(), 0, vec![b'x'; 1024], false);
+        let frames = limits.stall_threshold_bytes / frame_charge(&frame) + 1;
+        for sequence in 0..frames {
+            let mut frame = frame.clone();
+            frame.sequence = u64::try_from(sequence).expect("sequence");
+            registry.dispatch_stream_data(frame).await;
+        }
+
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        assert!(
+            outcome.stream_closed.reason.contains("no stdin consumed"),
+            "unexpected reason: {}",
+            outcome.stream_closed.reason
+        );
+        assert!(outcome.completed.canceled);
+    }
+
     #[tokio::test]
     async fn kill_is_not_lost_after_repeated_graceful_stops() {
         let registry = ProcessRegistry::default();
