@@ -128,7 +128,7 @@ fn validate_scoop_request(request: &PackageRequest) -> anyhow::Result<()> {
 fn scoop_package_ref(request: &PackageRequest) -> anyhow::Result<String> {
     let source = request.source.name.trim();
     validate_script_argument(source)?;
-    validate_script_argument(&request.package.id.0)?;
+    validate_package_id(&request.package.id.0)?;
 
     if source_is_direct_manifest(source) {
         Ok(request.package.id.0.clone())
@@ -140,6 +140,40 @@ fn scoop_package_ref(request: &PackageRequest) -> anyhow::Result<String> {
 fn source_is_direct_manifest(source: &str) -> bool {
     let lower = source.to_ascii_lowercase();
     source.contains("...") || source.contains(":\\") || lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+/// Accept only package ids that Scoop reads as one package name.
+///
+/// Wildcards select every installed app, and a leading hyphen is read as an option.
+fn validate_package_id(id: &str) -> anyhow::Result<()> {
+    validate_script_argument(id)?;
+    if id.trim().is_empty() {
+        bail!("Scoop package id is required");
+    }
+    if id.contains(['*', '?', '[', ']']) {
+        bail!("Scoop package ids cannot contain wildcard characters: {id}");
+    }
+    if id.starts_with('-') {
+        bail!("Scoop package ids cannot start with a hyphen: {id}");
+    }
+    Ok(())
+}
+
+/// Whether `param` selects all apps (`--all`, `-a` on update) or an architecture (`--arch`, `-a` on install).
+///
+/// Both are rejected for every operation: the request names exactly one package, and its
+/// architecture comes from the request field evaluated by the policy.
+fn is_all_or_architecture_parameter(param: &str) -> bool {
+    param.split_whitespace().any(|part| {
+        let part = part.to_ascii_lowercase();
+        if let Some(long_option) = part.strip_prefix("--") {
+            let name = long_option.split_once('=').map_or(long_option, |(name, _)| name);
+            return matches!(name, "all" | "arch");
+        }
+
+        part.strip_prefix('-')
+            .is_some_and(|short_options| short_options.contains('a'))
+    })
 }
 
 fn is_global_scope_parameter(param: &str) -> bool {
@@ -169,6 +203,12 @@ fn validate_custom_parameter(value: &str) -> anyhow::Result<()> {
     }
     if is_global_scope_parameter(value) {
         bail!("Scoop global scope custom parameters are not supported by the broker: {value}");
+    }
+    if is_all_or_architecture_parameter(value) {
+        bail!("Scoop all-apps and architecture custom parameters are not supported by the broker: {value}");
+    }
+    if value.chars().any(char::is_whitespace) {
+        bail!("Scoop custom parameters must be a single option: {value}");
     }
     Ok(())
 }
@@ -372,6 +412,56 @@ mod tests {
         let error = build_scoop_command(&request).expect_err("positional parameter should fail");
 
         assert!(error.to_string().contains("positional arguments"));
+    }
+
+    #[test]
+    fn all_packages_forms_are_rejected_for_every_operation() {
+        for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
+            for id in ["*", "7z*", "7zi?", "[7]zip", "-g", "--all"] {
+                let mut request = make_request();
+                request.operation = operation;
+                request.package.architecture = None;
+                request.package.id = PackageIdentifier::from(id.to_owned());
+                build_scoop_command(&request).expect_err(id);
+            }
+
+            for param in [
+                "--all",
+                "--ALL",
+                "--all=true",
+                "-a",
+                "-qa",
+                "-A",
+                "--arch",
+                "--arch=64bit",
+                "--quiet --all",
+                "--quiet extras/app",
+                "extras/app",
+                "*",
+            ] {
+                let mut request = make_request();
+                request.operation = operation;
+                request.package.architecture = None;
+                request.options.custom_parameters = vec![CustomParameterString(param.to_owned())];
+                build_scoop_command(&request).expect_err(param);
+            }
+        }
+    }
+
+    #[test]
+    fn single_package_forms_are_accepted() {
+        for (operation, param) in [
+            (Operation::Install, "--no-cache"),
+            (Operation::Update, "--quiet"),
+            (Operation::Update, "-fq"),
+            (Operation::Uninstall, "--purge"),
+        ] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.package.architecture = None;
+            request.options.custom_parameters = vec![CustomParameterString(param.to_owned())];
+            build_scoop_command(&request).expect(param);
+        }
     }
 
     #[test]
