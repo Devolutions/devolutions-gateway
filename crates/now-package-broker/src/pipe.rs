@@ -257,7 +257,9 @@ enum Admission {
 /// The pipe name always keeps a listening server instance owned by this loop.
 /// Two instances listen at once, so that a client can connect while the other one is
 /// handed off: the remaining instance keeps listening and a new spare is created right
-/// after the handoff.
+/// after the handoff. A burst of more simultaneous clients than listening instances can
+/// still briefly see `ERROR_PIPE_BUSY`, which clients wait out with `WaitNamedPipeW`,
+/// as `NamedPipeClientStream.Connect` does.
 /// A client that cannot be handed off is disconnected so that its instance listens again.
 /// Clients over the connection limit are handed off for a busy reply while busy reply
 /// slots remain. Instance failures are retried with backoff instead of ending the loop.
