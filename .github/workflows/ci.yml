@@ -355,7 +355,7 @@ jobs:
 
       - name: Test FIPS profile
         shell: pwsh
-        run: cargo test --locked --package devolutions-gateway --lib --target '${{ matrix.target }}' --no-default-features --features fips
+        run: cargo test --locked --package devolutions-gateway --target '${{ matrix.target }}' --no-default-features --features fips
 
       - name: Build FIPS profile
         shell: pwsh

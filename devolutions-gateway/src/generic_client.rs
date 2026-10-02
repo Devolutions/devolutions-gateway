@@ -22,6 +22,14 @@ use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::upstream::{self, ConnectedUpstream};
 
+fn ensure_recording_policy_supported(policy: RecordingPolicy) -> anyhow::Result<()> {
+    match policy {
+        RecordingPolicy::None => Ok(()),
+        RecordingPolicy::Stream if cfg!(feature = "standard") => Ok(()),
+        RecordingPolicy::Stream | RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
+    }
+}
+
 #[derive(TypedBuilder)]
 pub struct GenericClient<S> {
     conf: Arc<Conf>,
@@ -118,10 +126,7 @@ where
                 anyhow::bail!("TCP rendezvous not supported");
             }
             ConnectionMode::Fwd { targets } => {
-                match claims.jet_rec {
-                    RecordingPolicy::None | RecordingPolicy::Stream => (),
-                    RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
-                }
+                ensure_recording_policy_supported(claims.jet_rec)?;
 
                 #[cfg(feature = "standard")]
                 let credential_injection = {
@@ -244,5 +249,39 @@ where
                     .context("encountered a failure during upstream traffic proxying")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_recording_policy_is_supported() {
+        ensure_recording_policy_supported(RecordingPolicy::None).expect("no recording is always supported");
+    }
+
+    #[cfg(feature = "standard")]
+    #[test]
+    fn stream_recording_policy_is_supported_in_standard_profile() {
+        ensure_recording_policy_supported(RecordingPolicy::Stream)
+            .expect("stream recording is supported in the standard profile");
+    }
+
+    #[cfg(feature = "fips")]
+    #[test]
+    fn stream_recording_policy_is_rejected_in_fips_profile() {
+        let error = ensure_recording_policy_supported(RecordingPolicy::Stream)
+            .expect_err("stream recording is unavailable in the FIPS profile");
+
+        assert_eq!(error.to_string(), "can't meet recording policy");
+    }
+
+    #[test]
+    fn proxy_recording_policy_is_rejected() {
+        let error = ensure_recording_policy_supported(RecordingPolicy::Proxy)
+            .expect_err("proxy recording is unavailable to the generic client");
+
+        assert_eq!(error.to_string(), "can't meet recording policy");
     }
 }

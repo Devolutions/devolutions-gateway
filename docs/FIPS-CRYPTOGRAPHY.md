@@ -19,7 +19,8 @@ The approved boundary is `aws-lc-rs` with its `fips` feature and `aws-lc-fips-sy
 The profile routes TLS, RS256 token verification, X.509 operations, SHA-2 hashing, AES-256-GCM credential encryption, and secure random generation through that boundary.
 
 Gateway uses pinned Picky and IronRDP revisions that separate their standard cryptography from provider-backed or parser-only FIPS paths.
-The vendored rustls 0.23.43 patch preserves rustls FIPS behavior while preventing Cargo from resolving the unused non-FIPS `aws-lc-sys` bindings.
+The vendored rustls 0.23.43 and rustls-webpki 0.103.13 patches preserve FIPS behavior while preventing Cargo from resolving the unused non-FIPS `aws-lc-sys` bindings.
+Their manifest and build-script changes activate the AWS-LC modules only through `aws-lc-fips-sys`.
 
 `deny-fips.toml` is the authoritative list, rejecting alternate TLS providers, legacy algorithms, and standalone implementations of algorithms the validated provider already supplies.
 
@@ -31,6 +32,7 @@ The profile compiles unavailable subsystems out instead of relying only on runti
 The following functionality is unavailable:
 
 - WebSocket relay and WebSocket-based RDP, JMUX, network scan, and recording routes.
+- Tokens that require stream or proxy recording.
 - Agent Tunnel and its QUIC listener.
 - CredSSP credential injection, credential provisioning, NTLM, Kerberos, PKU2U, KDC proxying, and RDP credential interception.
 - The standalone WebApp, ngrok, native plugins, and debug-only options.

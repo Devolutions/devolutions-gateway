@@ -1,3 +1,4 @@
+#![cfg(feature = "standard")]
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::cast_possible_truncation, reason = "test code with known safe ranges")]
