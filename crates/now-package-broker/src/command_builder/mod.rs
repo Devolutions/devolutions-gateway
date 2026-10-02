@@ -27,7 +27,7 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::Cargo => cargo::build_cargo_command(request),
         ManagerName::Dotnet => dotnet::build_dotnet_command(request),
         ManagerName::Npm => npm::build_npm_command(request),
-        ManagerName::Winget => Ok(winget::build_winget_command(request)),
+        ManagerName::Winget => winget::build_winget_command(request),
         ManagerName::PowerShell => powershell::build_powershell5_command(request),
         ManagerName::PowerShell7 => powershell::build_powershell7_command(request),
         ManagerName::Chocolatey => chocolatey::build_chocolatey_command(request),
@@ -36,6 +36,120 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::Vcpkg => vcpkg::build_vcpkg_command(request),
         unsupported => bail!("package manager is not supported by the broker: {unsupported}"),
     }
+}
+
+/// Characters that cmd.exe may interpret in a generated batch script, even inside double quotes.
+pub(crate) const BATCH_METACHARACTERS: [char; 11] = ['"', '%', '!', '^', '&', '|', '<', '>', '\r', '\n', '\0'];
+
+/// Quote a value as a PowerShell single-quoted string literal.
+///
+/// PowerShell treats U+2018 through U+201B as single quotes too, so each of them is doubled
+/// along with the ASCII apostrophe, matching `CodeGeneration.EscapeSingleQuotedStringContent`.
+pub(crate) fn quote_powershell_literal(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            quoted.push(c);
+        }
+        quoted.push(c);
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// Validate a package version against a conservative allowlist.
+///
+/// ASCII alphanumerics, `.`, `-`, `+` and `_` are always accepted.
+/// `extra` lists additional characters a manager needs for its version syntax.
+pub(crate) fn validate_package_version(manager: &str, version: &str, extra: &[char]) -> anyhow::Result<()> {
+    const MAX_VERSION_LEN: usize = 128;
+
+    if version.is_empty() || version.len() > MAX_VERSION_LEN {
+        bail!("{manager} package version must be between 1 and {MAX_VERSION_LEN} bytes");
+    }
+    if version.starts_with('-') {
+        bail!("{manager} package version cannot start with a hyphen");
+    }
+    if !version
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_') || extra.contains(&c))
+    {
+        bail!("{manager} package version contains unsupported characters");
+    }
+
+    Ok(())
+}
+
+/// Validate a package source or repository name against a conservative allowlist.
+///
+/// Accepts ASCII alphanumerics, `.`, `-`, `_` and inner spaces, starting with an alphanumeric.
+pub(crate) fn validate_source_name(manager: &str, name: &str) -> anyhow::Result<()> {
+    const MAX_SOURCE_NAME_LEN: usize = 128;
+
+    if name.is_empty() || name.len() > MAX_SOURCE_NAME_LEN {
+        bail!("{manager} package source name must be between 1 and {MAX_SOURCE_NAME_LEN} bytes");
+    }
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) || name.ends_with(' ') {
+        bail!("{manager} package source name must start with an alphanumeric character and not end with a space");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+    {
+        bail!("{manager} package source name contains unsupported characters");
+    }
+
+    Ok(())
+}
+
+/// Reject command arguments that would be written into a generated batch script unsafely.
+pub(crate) fn validate_batch_arguments(manager: &str, command: &[String]) -> anyhow::Result<()> {
+    if command.iter().any(|arg| arg.contains(BATCH_METACHARACTERS)) {
+        bail!("{manager} command arguments cannot contain batch metacharacters");
+    }
+
+    Ok(())
+}
+
+/// Validate an npm registry package name, either `name` or `@scope/name`.
+///
+/// Rejects specifiers that npm resolves outside the registry, such as GitHub shorthands,
+/// URLs, Git and file specifiers, tarballs, and local paths.
+pub(crate) fn validate_npm_package_name(manager: &str, name: &str) -> anyhow::Result<()> {
+    const MAX_NAME_LEN: usize = 214;
+
+    fn is_valid_part(part: &str) -> bool {
+        !part.is_empty()
+            && !part.starts_with(['.', '_', '-'])
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
+    }
+
+    if name.is_empty() || name.len() > MAX_NAME_LEN {
+        bail!("{manager} package name must be between 1 and {MAX_NAME_LEN} bytes");
+    }
+
+    let is_valid = match name.strip_prefix('@') {
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, package)| is_valid_part(scope) && is_valid_part(package)),
+        None => is_valid_part(name),
+    };
+    if !is_valid {
+        bail!("{manager} package name must be a registry package name such as 'name' or '@scope/name'");
+    }
+
+    let lower = name.to_ascii_lowercase();
+    if [".tgz", ".tar", ".tar.gz"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+    {
+        bail!("{manager} package name cannot be a tarball file name");
+    }
+
+    Ok(())
 }
 
 /// Append `--flag value` to command if value is `Some` and non-empty.
@@ -52,5 +166,132 @@ pub(crate) fn set_if_specified(command: &mut Vec<String>, flag: &str, value: Opt
 pub(crate) fn set_if_true(command: &mut Vec<String>, flag: &str, value: bool) {
     if value {
         command.push(flag.to_owned());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn powershell_literal_doubles_every_single_quote_character() {
+        assert_eq!(quote_powershell_literal("plain"), "'plain'");
+        assert_eq!(quote_powershell_literal("a'b"), "'a''b'");
+        for quote in ['\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            assert_eq!(
+                quote_powershell_literal(&format!("a{quote}b")),
+                format!("'a{quote}{quote}b'")
+            );
+        }
+        assert_eq!(
+            quote_powershell_literal("\u{2018}'\u{201B}"),
+            "'\u{2018}\u{2018}''\u{201B}\u{201B}'"
+        );
+    }
+
+    #[test]
+    fn package_version_allowlist() {
+        for version in ["1.2.3", "1.2.3-beta.1+build_5", "v2", "latest"] {
+            validate_package_version("test", version, &[]).expect(version);
+        }
+        validate_package_version("test", "[1.0,2.0)", &['[', ']', '(', ')', ',']).expect("extra characters");
+
+        let too_long = "1".repeat(129);
+        for version in [
+            "",
+            too_long.as_str(),
+            "-1.0",
+            "1.0 beta",
+            "1.0'",
+            "1.0\u{2019}",
+            "1.0\"",
+            "1.0;x",
+            "1.0&x",
+            "1.0|x",
+            "1.0%x%",
+            "1.0$x",
+            "1.0`x",
+            "1.0\n",
+            "1.0é",
+        ] {
+            validate_package_version("test", version, &[]).expect_err(version);
+        }
+    }
+
+    #[test]
+    fn source_name_allowlist() {
+        for name in ["winget", "PSGallery", "my.repo-1_x", "Internal Repo"] {
+            validate_source_name("test", name).expect(name);
+        }
+        for name in [
+            "",
+            " winget",
+            "winget ",
+            "-winget",
+            "win'get",
+            "win\u{2018}get",
+            "win\"get",
+            "win&get",
+            "win/get",
+            "win\\get",
+            "win:get",
+            "win;get",
+            "win$get",
+        ] {
+            validate_source_name("test", name).expect_err(name);
+        }
+    }
+
+    #[test]
+    fn npm_package_name_rules() {
+        for name in [
+            "typescript",
+            "@babel/core",
+            "lodash.merge",
+            "JSONStream",
+            "a~b",
+            "left-pad_2",
+        ] {
+            validate_npm_package_name("test", name).expect(name);
+        }
+        for name in [
+            "",
+            "user/repo",
+            "@scope",
+            "@scope/",
+            "@/name",
+            "@scope/name/extra",
+            "https://example.test/pkg.tgz",
+            "git+https://example.test/repo.git",
+            "github:user/repo",
+            "file:../pkg",
+            "pkg.tgz",
+            "pkg.tar.gz",
+            "pkg.TAR",
+            "./pkg",
+            "../pkg",
+            "/pkg",
+            r"C:\pkg",
+            ".hidden",
+            "_private",
+            "-flag",
+            "name%PATH%",
+            "name@1.0.0",
+            "name with space",
+        ] {
+            validate_npm_package_name("test", name).expect_err(name);
+        }
+    }
+
+    #[test]
+    fn batch_arguments_reject_metacharacters() {
+        validate_batch_arguments(
+            "test",
+            &["winget.exe".to_owned(), "C:\\Program Files (x86)\\".to_owned()],
+        )
+        .expect("plain arguments");
+        for metacharacter in BATCH_METACHARACTERS {
+            validate_batch_arguments("test", &[format!("a{metacharacter}b")]).expect_err("metacharacter");
+        }
     }
 }

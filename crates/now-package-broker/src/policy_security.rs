@@ -57,7 +57,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
     FILE_WRITE_EA, FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, WRITE_DAC, WRITE_OWNER,
+    GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, VOLUME_NAME_NT, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
 
@@ -205,6 +205,30 @@ pub(crate) fn verify_policy_file_path(file: &File, path: &Path) -> anyhow::Resul
 /// Compare Windows paths using the operating system's ordinal case folding.
 pub(crate) fn windows_paths_equal(left: &Path, right: &Path) -> bool {
     os_strings_match_case_insensitive(left.as_os_str(), right.as_os_str())
+}
+
+/// Accept only local volume devices because remote providers cannot satisfy local
+/// trusted-writer and ancestor-pinning guarantees.
+pub(crate) fn is_local_volume_device_path(path: &Path) -> bool {
+    let path = path.as_os_str().to_string_lossy().to_ascii_lowercase();
+    path.starts_with(r"\device\harddiskvolume") || path.starts_with(r"\device\volume{")
+}
+
+/// Accepts only plain drive-letter paths such as `C:\dir\client.exe`.
+///
+/// UNC, device, and namespace-prefixed paths, drive-relative paths, forward slashes,
+/// alternate data streams, and control characters are rejected.
+pub(crate) fn is_plain_local_drive_path(path: &str) -> bool {
+    let [drive, b':', b'\\', rest @ ..] = path.as_bytes() else {
+        return false;
+    };
+
+    // Multi-byte UTF-8 sequences never contain ASCII bytes, so a byte scan is sufficient.
+    drive.is_ascii_alphabetic()
+        && !rest.is_empty()
+        && !rest
+            .iter()
+            .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
 }
 
 pub(crate) fn paths_match_case_insensitive(left: &Path, right: &Path) -> bool {
@@ -554,11 +578,12 @@ pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
     Ok(info.NumberOfLinks)
 }
 
-/// A package-manager executable that was verified for elevated execution.
+/// A package-manager executable pinned at its final local path, and verified when it runs elevated.
 ///
-/// The held file handle was opened without write or delete sharing, so the verified file
-/// object cannot be written, deleted, or renamed while the guard is alive. Callers must
-/// execute [`VerifiedExecutable::path()`] (the final path resolved from the verified
+/// The held file handle was opened without write or delete sharing, so the file object
+/// cannot be written, deleted, or renamed, and none of its ancestor directories can be
+/// renamed, while the guard is alive. Callers must
+/// execute [`VerifiedExecutable::path()`] (the final path resolved from the pinned
 /// handle) and keep the guard alive until the spawned process — or the script embedding
 /// the path — has finished running, closing the TOCTOU window between verification and
 /// image load.
@@ -566,6 +591,78 @@ pub(crate) fn file_link_count(file: &File) -> anyhow::Result<u32> {
 pub(crate) struct VerifiedExecutable {
     _file: File,
     path: PathBuf,
+}
+
+/// Opens filesystem paths on behalf of the broker.
+///
+/// Paths derived from a user environment must be opened with that user's identity and
+/// device map, so that the service account never resolves them itself.
+pub(crate) trait PathOpener {
+    fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File>;
+}
+
+/// Opens paths as the broker service account.
+///
+/// Only for paths that are not derived from a user environment.
+pub(crate) struct ServiceOpener;
+
+impl PathOpener for ServiceOpener {
+    fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File> {
+        options.open(path)
+    }
+}
+
+/// Pin the executable at `path` and return its final local path.
+///
+/// The file is opened through `opener` without write or delete sharing, which also keeps
+/// every ancestor directory from being renamed while the guard is alive. The final path
+/// must be on a local disk volume and have a drive letter, so the broker can later open it
+/// as the service account without being redirected.
+pub(crate) fn pin_executable(
+    opener: &dyn PathOpener,
+    path: &Path,
+    subject: &str,
+) -> anyhow::Result<VerifiedExecutable> {
+    let mut options = OpenOptions::new();
+    options.read(true).share_mode(FILE_SHARE_READ.0);
+    let file = opener
+        .open(&options, path)
+        .with_context(|| format!("failed to open {subject}"))?;
+
+    let final_path = verify_local_final_path(&file).with_context(|| format!("failed to pin {subject}"))?;
+
+    Ok(VerifiedExecutable {
+        _file: file,
+        path: final_path,
+    })
+}
+
+/// Return the final drive-letter path of `file`, requiring it to be on a local disk volume.
+fn verify_local_final_path(file: &File) -> anyhow::Result<PathBuf> {
+    verify_local_volume_file(file)?;
+
+    let final_path = final_path_from_handle(file)?;
+    if !final_path.to_str().is_some_and(is_plain_local_drive_path) {
+        bail!("file has no plain local drive path: '{}'", final_path.display());
+    }
+
+    Ok(final_path)
+}
+
+/// Require `file` to be on a local disk volume rather than a redirector or another device.
+pub(crate) fn verify_local_volume_file(file: &File) -> anyhow::Result<()> {
+    let handle = HANDLE(file.as_raw_handle());
+    let device_path = final_path_name(
+        handle,
+        GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_NT.0),
+    )
+    .context("GetFinalPathNameByHandleW failed for the device path")?;
+    let device_path = PathBuf::from(OsString::from_wide(&device_path));
+    if !is_local_volume_device_path(&device_path) {
+        bail!("file is not on a local disk volume: '{}'", device_path.display());
+    }
+
+    Ok(())
 }
 
 impl VerifiedExecutable {
@@ -638,7 +735,12 @@ pub(crate) fn verify_retained_executable_security(
 /// - Every ancestor directory of the final path (resolved from the verified handle) must
 ///   not allow untrusted principals to rename or delete path components, so the name used
 ///   for execution cannot be redirected to a different file.
+///
+/// `opener` performs the initial opens of `path` and of an alias target, so that a
+/// user-derived path is never resolved by the service account. Later checks only use the
+/// pinned handle and its final local path.
 pub(crate) fn verify_elevated_executable_security(
+    opener: &dyn PathOpener,
     path: &Path,
     requires_elevation: bool,
 ) -> anyhow::Result<Option<VerifiedExecutable>> {
@@ -655,8 +757,8 @@ pub(crate) fn verify_elevated_executable_security(
     // The alias reparse data lives in a user-writable location, so its content is
     // untrusted: the target is only substituted after `validate_app_exec_alias` has bound
     // it to the executable and package family expected for the alias (fail closed).
-    let alias_target = match resolve_app_exec_alias(path) {
-        Some(alias) => Some(validate_app_exec_alias(path, alias)?),
+    let alias_target = match resolve_app_exec_alias(opener, path) {
+        Some(alias) => Some(validate_app_exec_alias(path, alias, true)?),
         None => None,
     };
     let path = alias_target.as_deref().unwrap_or(path);
@@ -664,17 +766,11 @@ pub(crate) fn verify_elevated_executable_security(
 
     // Share only read access: while this handle is alive the file cannot be opened for
     // write or delete (rename), and this open fails if such a handle already exists.
-    let file = OpenOptions::new()
-        .read(true)
-        .share_mode(FILE_SHARE_READ.0)
-        .open(path)
-        .with_context(|| format!("failed to open {subject}"))?;
-
-    // Resolve the path from the handle itself: if `path` traversed a reparse point
-    // (symlink, junction, ...), this yields the real target, which is the very object
-    // pinned by the guard handle.
-    let final_path =
-        final_path_from_handle(&file).with_context(|| format!("failed to resolve final path of {subject}"))?;
+    // The final path resolved from the handle is the very object pinned by the guard.
+    let VerifiedExecutable {
+        _file: file,
+        path: final_path,
+    } = pin_executable(opener, path, &subject)?;
 
     verify_handle_security(
         &file,
@@ -698,6 +794,108 @@ pub(crate) fn verify_elevated_executable_security(
     }))
 }
 
+/// Pin an executable the broker launches directly, verifying it when it runs elevated.
+///
+/// App execution aliases are resolved and validated first, because they cannot be opened
+/// for read. The returned guard must stay alive until the process has been created.
+pub(crate) fn pin_launch_executable(
+    opener: &dyn PathOpener,
+    path: &Path,
+    requires_elevation: bool,
+) -> anyhow::Result<VerifiedExecutable> {
+    if let Some(verified) = verify_elevated_executable_security(opener, path, requires_elevation)? {
+        return Ok(verified);
+    }
+
+    let target = match resolve_app_exec_alias(opener, path) {
+        Some(alias) => validate_app_exec_alias(path, alias, false)?,
+        None => path.to_owned(),
+    };
+    pin_executable(
+        opener,
+        &target,
+        &format!("package-manager executable '{}'", target.display()),
+    )
+}
+
+/// Kind of Microsoft Store app execution alias found at a path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppExecAliasKind {
+    /// Alias of an installed app.
+    App,
+    /// Alias that opens the Microsoft Store to install the app, such as `python.exe` without Python.
+    StoreInstallerRedirect,
+}
+
+/// Executable that App Installer runs for the `python.exe` aliases of a system without Python.
+const STORE_PYTHON_REDIRECTOR: &str = "AppInstallerPythonRedirector.exe";
+
+/// Classify `path` as a Microsoft Store app execution alias, reading it through `opener`.
+///
+/// Returns `None` when `path` is not an alias.
+pub(crate) fn app_exec_alias_kind(opener: &dyn PathOpener, path: &Path) -> Option<AppExecAliasKind> {
+    let alias = resolve_app_exec_alias(opener, path)?;
+    let is_store_redirect = alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY)
+        && alias
+            .target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(STORE_PYTHON_REDIRECTOR));
+
+    Some(if is_store_redirect {
+        AppExecAliasKind::StoreInstallerRedirect
+    } else {
+        AppExecAliasKind::App
+    })
+}
+
+/// Create an app execution alias at `path`, for tests.
+#[cfg(test)]
+pub(crate) fn create_app_exec_alias_for_tests(path: &Path, package_family: &str, target: &Path) {
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
+
+    let mut strings: Vec<u16> = Vec::new();
+    for value in [
+        OsStr::new(package_family),
+        OsStr::new(&format!("{package_family}!App")),
+        target.as_os_str(),
+        OsStr::new("0"),
+    ] {
+        strings.extend(value.encode_wide());
+        strings.push(0);
+    }
+    let mut data = 3u32.to_le_bytes().to_vec();
+    for unit in strings {
+        data.extend(unit.to_le_bytes());
+    }
+    let mut buffer = IO_REPARSE_TAG_APPEXECLINK.to_le_bytes().to_vec();
+    buffer.extend(u16::try_from(data.len()).expect("alias data fits in u16").to_le_bytes());
+    buffer.extend(0u16.to_le_bytes());
+    buffer.extend(data);
+
+    std::fs::write(path, b"").expect("create alias file");
+    let file = OpenOptions::new()
+        .write(true)
+        .custom_flags((FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS).0)
+        .open(path)
+        .expect("open alias file");
+    // SAFETY: `file` is an open handle and `buffer` is a valid reparse data buffer for the call.
+    unsafe {
+        DeviceIoControl(
+            HANDLE(file.as_raw_handle()),
+            FSCTL_SET_REPARSE_POINT,
+            Some(buffer.as_ptr().cast()),
+            u32::try_from(buffer.len()).expect("reparse buffer size fits in u32"),
+            None,
+            0,
+            None,
+            None,
+        )
+    }
+    .expect("set app execution alias reparse point");
+}
+
 /// A parsed Microsoft Store app execution alias.
 #[derive(Debug, PartialEq, Eq)]
 struct AppExecAlias {
@@ -713,16 +911,16 @@ struct AppExecAlias {
 /// Returns `None` when `path` is not an `IO_REPARSE_TAG_APPEXECLINK` reparse point
 /// (including when it cannot be opened at all; the caller's regular open then reports
 /// the actual error).
-fn resolve_app_exec_alias(path: &Path) -> Option<AppExecAlias> {
+fn resolve_app_exec_alias(opener: &dyn PathOpener, path: &Path) -> Option<AppExecAlias> {
     use windows::Win32::System::IO::DeviceIoControl;
     use windows::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
 
-    let link = OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
         .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0 | FILE_FLAG_BACKUP_SEMANTICS.0)
-        .open(path)
-        .ok()?;
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0 | FILE_FLAG_BACKUP_SEMANTICS.0);
+    let link = opener.open(&options, path).ok()?;
 
     let mut buffer = vec![0u8; MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
     let mut returned = 0u32;
@@ -764,15 +962,21 @@ fn resolve_app_exec_alias(path: &Path) -> Option<AppExecAlias> {
 /// - The target file name must match the alias file name.
 /// - The target must live inside a package directory of that same family (a
 ///   `<name>_<version>_<arch>__<publisher-hash>` full-name component).
-fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias) -> anyhow::Result<PathBuf> {
+fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias, elevated: bool) -> anyhow::Result<PathBuf> {
     let alias_name = alias_path
         .file_name()
         .and_then(|name| name.to_str())
         .with_context(|| format!("app execution alias '{}' has no file name", alias_path.display()))?;
 
     if !alias_name.eq_ignore_ascii_case("winget.exe") {
+        if elevated {
+            bail!(
+                "Microsoft Store app execution alias '{}' is not supported for elevated execution",
+                alias_path.display()
+            );
+        }
         bail!(
-            "app execution alias '{}' is not supported for elevated execution",
+            "Microsoft Store app execution alias '{}' cannot be launched directly by the broker",
             alias_path.display()
         );
     }
@@ -1251,6 +1455,59 @@ mod tests {
     }
 
     #[test]
+    fn pinning_rejects_objects_outside_local_disk_volumes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        let pipe_name = format!(r"\\.\pipe\now-package-broker-pin-test-{}", std::process::id());
+        let _server = runtime.block_on(async {
+            tokio::net::windows::named_pipe::ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&pipe_name)
+                .expect("create pipe")
+        });
+
+        let error = pin_executable(&ServiceOpener, Path::new(&pipe_name), "test object")
+            .expect_err("objects outside local disk volumes must fail closed");
+        assert!(
+            format!("{error:#}").contains("failed to pin test object"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn local_volume_device_paths_are_classified() {
+        assert!(is_local_volume_device_path(Path::new(
+            r"\Device\HarddiskVolume3\tools\a.exe"
+        )));
+        assert!(is_local_volume_device_path(Path::new(
+            r"\Device\Volume{01234567-89ab-cdef-0123-456789abcdef}\a.exe"
+        )));
+        for path in [
+            r"\Device\Mup\server\share\a.exe",
+            r"\Device\LanmanRedirector\server\share\a.exe",
+            r"\Device\WebDavRedirector\server\share\a.exe",
+            r"\Device\NamedPipe\pipe",
+            r"\Device\CdRom0\a.exe",
+        ] {
+            assert!(!is_local_volume_device_path(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn pinning_returns_the_local_final_path() {
+        let executable = std::env::current_exe().expect("current executable");
+        let pinned = pin_executable(&ServiceOpener, &executable, "test executable").expect("pin current executable");
+        assert!(pinned.path().to_str().is_some_and(is_plain_local_drive_path));
+        assert!(windows_paths_equal(
+            pinned.path(),
+            &final_path_from_handle(&File::open(&executable).expect("open current executable"))
+                .expect("resolve current executable path")
+        ));
+    }
+
+    #[test]
     fn final_path_resolves_current_executable_on_mounted_volume() {
         let executable = std::env::current_exe().expect("current executable");
         let file = File::open(&executable).expect("open current executable");
@@ -1619,6 +1876,47 @@ mod tests {
     }
 
     #[test]
+    fn app_exec_aliases_are_classified_and_non_winget_aliases_are_not_launched_directly() {
+        let root = tempfile::tempdir().expect("create alias directory");
+        let app = root.path().join("python.exe");
+        create_app_exec_alias_for_tests(
+            &app,
+            "PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0",
+            Path::new(
+                r"C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.0.0_x64__qbz5n2kfra8p0\python3.12.exe",
+            ),
+        );
+        let redirect = root.path().join("python3.exe");
+        create_app_exec_alias_for_tests(
+            &redirect,
+            WINGET_PACKAGE_FAMILY,
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\AppInstallerPythonRedirector.exe",
+            ),
+        );
+        let plain = root.path().join("plain.exe");
+        std::fs::write(&plain, b"").expect("write plain file");
+
+        assert_eq!(app_exec_alias_kind(&ServiceOpener, &app), Some(AppExecAliasKind::App));
+        assert_eq!(
+            app_exec_alias_kind(&ServiceOpener, &redirect),
+            Some(AppExecAliasKind::StoreInstallerRedirect)
+        );
+        assert_eq!(app_exec_alias_kind(&ServiceOpener, &plain), None);
+
+        let error = pin_launch_executable(&ServiceOpener, &app, false).expect_err("aliases are not launched directly");
+        assert!(
+            error.to_string().contains("cannot be launched directly"),
+            "unexpected error: {error:#}"
+        );
+        let error = pin_launch_executable(&ServiceOpener, &app, true).expect_err("aliases are not launched elevated");
+        assert!(
+            error.to_string().contains("not supported for elevated execution"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
     fn winget_alias_with_expected_identity_is_validated() {
         let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
         let alias = AppExecAlias {
@@ -1627,7 +1925,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
             ),
         };
-        let target = validate_app_exec_alias(alias_path, alias).expect("valid winget alias must be accepted");
+        let target = validate_app_exec_alias(alias_path, alias, true).expect("valid winget alias must be accepted");
         assert!(target.ends_with("winget.exe"));
     }
 
@@ -1642,7 +1940,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Evil.FakeInstaller_1.0.0.0_x64__0000000000000\winget.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(
             error.to_string().contains("package family"),
             "unexpected error: {error}"
@@ -1660,7 +1958,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\AppInstallerCLI.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(
             error.to_string().contains("not a 'winget.exe' executable"),
             "unexpected error: {error}"
@@ -1675,7 +1973,7 @@ mod tests {
             package_family: WINGET_PACKAGE_FAMILY.to_owned(),
             target: PathBuf::from(r"C:\Users\user\Downloads\winget.exe"),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(error.to_string().contains("outside"), "unexpected error: {error}");
     }
 
@@ -1688,14 +1986,14 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(error.to_string().contains("not supported"), "unexpected error: {error}");
     }
 
     #[test]
     fn regular_file_is_not_an_app_exec_alias() {
         let exe = std::env::current_exe().expect("current exe");
-        assert!(resolve_app_exec_alias(&exe).is_none());
+        assert!(resolve_app_exec_alias(&ServiceOpener, &exe).is_none());
     }
 
     #[test]
@@ -1709,7 +2007,7 @@ mod tests {
             return;
         }
 
-        let alias = resolve_app_exec_alias(&alias_path).expect("winget alias must resolve");
+        let alias = resolve_app_exec_alias(&ServiceOpener, &alias_path).expect("winget alias must resolve");
         assert!(alias.target.is_absolute());
         assert!(
             alias
@@ -1733,10 +2031,10 @@ mod tests {
         if !alias.exists() {
             return;
         }
-        let resolved = resolve_app_exec_alias(&alias).expect("winget alias must resolve");
+        let resolved = resolve_app_exec_alias(&ServiceOpener, &alias).expect("winget alias must resolve");
         let resolved_target = resolved.target.display().to_string();
 
-        match verify_elevated_executable_security(&alias, true) {
+        match verify_elevated_executable_security(&ServiceOpener, &alias, true) {
             Ok(guard) => {
                 let guard = guard.expect("a guard must be produced for elevated execution");
                 assert_ne!(guard.path(), alias);
@@ -2099,7 +2397,7 @@ mod tests {
         let everyone = Sid::from_well_known(WinWorldSid, None).unwrap();
         set_security(&exe, None, &[grant(GENERIC_ALL.0, everyone)]).unwrap();
 
-        let error = verify_elevated_executable_security(&exe, true).unwrap_err();
+        let error = verify_elevated_executable_security(&ServiceOpener, &exe, true).unwrap_err();
         assert!(
             error.to_string().contains("elevated package-manager executable"),
             "unexpected error: {error}"
@@ -2111,7 +2409,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("does-not-exist.exe");
 
-        let error = verify_elevated_executable_security(&missing, true).unwrap_err();
+        let error = verify_elevated_executable_security(&ServiceOpener, &missing, true).unwrap_err();
         assert!(
             error.to_string().contains("failed to open"),
             "unexpected error: {error}"
@@ -2124,7 +2422,7 @@ mod tests {
         let exe = temp_dir.path().join("fake.exe");
         std::fs::write(&exe, b"").unwrap();
 
-        let guard = verify_elevated_executable_security(&exe, false).unwrap();
+        let guard = verify_elevated_executable_security(&ServiceOpener, &exe, false).unwrap();
         assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
 
@@ -2136,7 +2434,7 @@ mod tests {
         let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         let cmd = Path::new(&system_root).join("System32").join("cmd.exe");
 
-        let guard = verify_elevated_executable_security(&cmd, true)
+        let guard = verify_elevated_executable_security(&ServiceOpener, &cmd, true)
             .expect("a protected System32 executable must be accepted")
             .expect("a guard must be produced for elevated executions");
 

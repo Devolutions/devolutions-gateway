@@ -1,6 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::mem::size_of;
+use std::os::windows::fs::OpenOptionsExt as _;
+use std::os::windows::io::IntoRawHandle as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -8,14 +10,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, bail, ensure};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::net::windows::named_pipe::ClientOptions;
+use tokio::net::windows::named_pipe::NamedPipeClient;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL,
     TOKEN_QUERY, TokenIntegrityLevel, WinBuiltinAdministratorsSid, WinLocalSystemSid,
 };
+use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_WRITE_DATA, SECURITY_IDENTIFICATION};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
 
 const FULL_POLICY: &str = include_str!("../../now-package-broker/src/assets/samples/corporate-allowlist.policy.json");
@@ -407,6 +410,22 @@ async fn request(pipe_name: &str, method: &str, path: &str) -> anyhow::Result<Ht
     request_with_body(pipe_name, method, path, None, &[]).await
 }
 
+/// Open the broker pipe with only the access a client needs.
+///
+/// `GENERIC_WRITE` is not requested because it includes `FILE_CREATE_PIPE_INSTANCE`,
+/// which a client never needs.
+fn open_broker_pipe(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
+    let file = OpenOptions::new()
+        .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
+        .custom_flags(FILE_FLAG_OVERLAPPED.0)
+        .security_qos_flags(SECURITY_IDENTIFICATION.0)
+        .open(pipe_name)?;
+
+    // SAFETY: The handle is a freshly opened overlapped named pipe client handle whose ownership
+    // is transferred to the returned client.
+    unsafe { NamedPipeClient::from_raw_handle(file.into_raw_handle()) }
+}
+
 async fn request_with_body(
     pipe_name: &str,
     method: &str,
@@ -416,7 +435,7 @@ async fn request_with_body(
 ) -> anyhow::Result<HttpResponse> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut pipe = loop {
-        match ClientOptions::new().open(pipe_name) {
+        match open_broker_pipe(pipe_name) {
             Ok(pipe) => break pipe,
             Err(_) if Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(25)).await;

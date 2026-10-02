@@ -10,6 +10,11 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
+use super::{quote_powershell_literal, validate_npm_package_name, validate_package_version};
+
+/// npm version selectors that are inert when passed through the `npm.cmd` shim, such as `~1.2` or `1.x`.
+const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
+
 /// Build an npm command from a validated request.
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_npm_request(request)?;
@@ -82,8 +87,13 @@ fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
     }
 
     validate_script_value("package id", &request.package.id.0)?;
+    validate_npm_package_id(&request.package.id.0)?;
     if let Some(version) = request.package.version.as_deref() {
         validate_script_value("package version", version)?;
+        // Uninstall ignores the version, so only versions that reach npm are restricted.
+        if request.operation != Operation::Uninstall {
+            validate_package_version("npm", version, NPM_VERSION_EXTRA_CHARACTERS)?;
+        }
     }
 
     Ok(())
@@ -106,6 +116,22 @@ fn install_spec(request: &PackageRequest) -> anyhow::Result<String> {
 
     validate_script_value("package specifier", &spec)?;
     Ok(spec)
+}
+
+/// Accept a registry package name, or an alias `local:target` whose names are both registry names.
+fn validate_npm_package_id(id: &str) -> anyhow::Result<()> {
+    // The `npm.cmd` shim expands environment variable references.
+    if id.contains('%') {
+        bail!("npm package id cannot contain percent signs");
+    }
+
+    match alias_parts(id) {
+        Some((local_name, target_name)) => {
+            validate_npm_package_name("npm", &local_name)?;
+            validate_npm_package_name("npm", &target_name)
+        }
+        None => validate_npm_package_name("npm", id),
+    }
 }
 
 fn local_package_name(id: &str) -> String {
@@ -135,12 +161,7 @@ fn append_raw(script: &mut String, value: &str) {
 }
 
 fn append_value(script: &mut String, value: &str) {
-    append_raw(script, &quote_ps(value));
-}
-
-fn quote_ps(value: &str) -> String {
-    let escaped = value.replace('\'', "''");
-    format!("'{escaped}'")
+    append_raw(script, &quote_powershell_literal(value));
 }
 
 fn validate_script_value(name: &str, value: &str) -> anyhow::Result<()> {
@@ -346,5 +367,66 @@ mod tests {
         let error = build_npm_command(&request).expect_err("line separator should fail");
 
         assert!(error.to_string().contains("control line separators"));
+    }
+
+    #[test]
+    fn versions_with_unsupported_characters_are_rejected() {
+        for version in ["1.0'", "1.0\u{2019}", "1.0&x", "^1.0", "1.0 || 2.0", "-1.0"] {
+            let mut request = make_request();
+            request.package.version = Some(VersionString(version.to_owned()));
+
+            let error = build_npm_command(&request).expect_err("unsupported version should fail");
+
+            assert!(error.to_string().contains("package version"), "{version}: {error:#}");
+        }
+    }
+
+    #[test]
+    fn uninstall_ignores_version_selectors() {
+        let mut request = make_request();
+        request.operation = Operation::Uninstall;
+        request.package.version = Some(VersionString("^1.0 || 2.x".to_owned()));
+
+        let cmd = build_npm_command(&request).expect("uninstall ignores the version");
+
+        assert_eq!(script_of(&cmd), "npm uninstall 'contoso-tool' --global");
+    }
+
+    #[test]
+    fn package_ids_npm_resolves_outside_the_registry_are_rejected() {
+        for id in [
+            "user/repo",
+            "github:user/repo",
+            "git+https://example.test/repo.git",
+            "https://example.test/pkg.tgz",
+            "file:../pkg",
+            "pkg.tgz",
+            "./pkg",
+            "../pkg",
+            "/pkg",
+            r"C:\pkg",
+            "contoso%PATH%",
+            "contoso'tool",
+            "contoso\u{2019}tool",
+            "alias:user/repo",
+            "alias:file:../pkg",
+        ] {
+            let mut request = make_request();
+            request.package.version = None;
+            request.package.id = PackageIdentifier::from(id.to_owned());
+
+            build_npm_command(&request).expect_err(id);
+        }
+    }
+
+    #[test]
+    fn scoped_package_ids_are_accepted() {
+        let mut request = make_request();
+        request.package.version = None;
+        request.package.id = PackageIdentifier::from("@contoso/tool".to_owned());
+
+        let cmd = build_npm_command(&request).expect("build command");
+
+        assert_eq!(script_of(&cmd), "npm install '@contoso/tool' --global");
     }
 }
