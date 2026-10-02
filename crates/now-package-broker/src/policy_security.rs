@@ -758,7 +758,7 @@ pub(crate) fn verify_elevated_executable_security(
     // untrusted: the target is only substituted after `validate_app_exec_alias` has bound
     // it to the executable and package family expected for the alias (fail closed).
     let alias_target = match resolve_app_exec_alias(opener, path) {
-        Some(alias) => Some(validate_app_exec_alias(path, alias)?),
+        Some(alias) => Some(validate_app_exec_alias(path, alias, true)?),
         None => None,
     };
     let path = alias_target.as_deref().unwrap_or(path);
@@ -808,7 +808,7 @@ pub(crate) fn pin_launch_executable(
     }
 
     let target = match resolve_app_exec_alias(opener, path) {
-        Some(alias) => validate_app_exec_alias(path, alias)?,
+        Some(alias) => validate_app_exec_alias(path, alias, false)?,
         None => path.to_owned(),
     };
     pin_executable(
@@ -816,6 +816,84 @@ pub(crate) fn pin_launch_executable(
         &target,
         &format!("package-manager executable '{}'", target.display()),
     )
+}
+
+/// Kind of Microsoft Store app execution alias found at a path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppExecAliasKind {
+    /// Alias of an installed app.
+    App,
+    /// Alias that opens the Microsoft Store to install the app, such as `python.exe` without Python.
+    StoreInstallerRedirect,
+}
+
+/// Executable that App Installer runs for the `python.exe` aliases of a system without Python.
+const STORE_PYTHON_REDIRECTOR: &str = "AppInstallerPythonRedirector.exe";
+
+/// Classify `path` as a Microsoft Store app execution alias, reading it through `opener`.
+///
+/// Returns `None` when `path` is not an alias.
+pub(crate) fn app_exec_alias_kind(opener: &dyn PathOpener, path: &Path) -> Option<AppExecAliasKind> {
+    let alias = resolve_app_exec_alias(opener, path)?;
+    let is_store_redirect = alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY)
+        && alias
+            .target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(STORE_PYTHON_REDIRECTOR));
+
+    Some(if is_store_redirect {
+        AppExecAliasKind::StoreInstallerRedirect
+    } else {
+        AppExecAliasKind::App
+    })
+}
+
+/// Create an app execution alias at `path`, for tests.
+#[cfg(test)]
+pub(crate) fn create_app_exec_alias_for_tests(path: &Path, package_family: &str, target: &Path) {
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
+
+    let mut strings: Vec<u16> = Vec::new();
+    for value in [
+        OsStr::new(package_family),
+        OsStr::new(&format!("{package_family}!App")),
+        target.as_os_str(),
+        OsStr::new("0"),
+    ] {
+        strings.extend(value.encode_wide());
+        strings.push(0);
+    }
+    let mut data = 3u32.to_le_bytes().to_vec();
+    for unit in strings {
+        data.extend(unit.to_le_bytes());
+    }
+    let mut buffer = IO_REPARSE_TAG_APPEXECLINK.to_le_bytes().to_vec();
+    buffer.extend(u16::try_from(data.len()).expect("alias data fits in u16").to_le_bytes());
+    buffer.extend(0u16.to_le_bytes());
+    buffer.extend(data);
+
+    std::fs::write(path, b"").expect("create alias file");
+    let file = OpenOptions::new()
+        .write(true)
+        .custom_flags((FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS).0)
+        .open(path)
+        .expect("open alias file");
+    // SAFETY: `file` is an open handle and `buffer` is a valid reparse data buffer for the call.
+    unsafe {
+        DeviceIoControl(
+            HANDLE(file.as_raw_handle()),
+            FSCTL_SET_REPARSE_POINT,
+            Some(buffer.as_ptr().cast()),
+            u32::try_from(buffer.len()).expect("reparse buffer size fits in u32"),
+            None,
+            0,
+            None,
+            None,
+        )
+    }
+    .expect("set app execution alias reparse point");
 }
 
 /// A parsed Microsoft Store app execution alias.
@@ -884,15 +962,21 @@ fn resolve_app_exec_alias(opener: &dyn PathOpener, path: &Path) -> Option<AppExe
 /// - The target file name must match the alias file name.
 /// - The target must live inside a package directory of that same family (a
 ///   `<name>_<version>_<arch>__<publisher-hash>` full-name component).
-fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias) -> anyhow::Result<PathBuf> {
+fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias, elevated: bool) -> anyhow::Result<PathBuf> {
     let alias_name = alias_path
         .file_name()
         .and_then(|name| name.to_str())
         .with_context(|| format!("app execution alias '{}' has no file name", alias_path.display()))?;
 
     if !alias_name.eq_ignore_ascii_case("winget.exe") {
+        if elevated {
+            bail!(
+                "Microsoft Store app execution alias '{}' is not supported for elevated execution",
+                alias_path.display()
+            );
+        }
         bail!(
-            "app execution alias '{}' is not supported for elevated execution",
+            "Microsoft Store app execution alias '{}' cannot be launched directly by the broker",
             alias_path.display()
         );
     }
@@ -1792,6 +1876,47 @@ mod tests {
     }
 
     #[test]
+    fn app_exec_aliases_are_classified_and_non_winget_aliases_are_not_launched_directly() {
+        let root = tempfile::tempdir().expect("create alias directory");
+        let app = root.path().join("python.exe");
+        create_app_exec_alias_for_tests(
+            &app,
+            "PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0",
+            Path::new(
+                r"C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.0.0_x64__qbz5n2kfra8p0\python3.12.exe",
+            ),
+        );
+        let redirect = root.path().join("python3.exe");
+        create_app_exec_alias_for_tests(
+            &redirect,
+            WINGET_PACKAGE_FAMILY,
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\AppInstallerPythonRedirector.exe",
+            ),
+        );
+        let plain = root.path().join("plain.exe");
+        std::fs::write(&plain, b"").expect("write plain file");
+
+        assert_eq!(app_exec_alias_kind(&ServiceOpener, &app), Some(AppExecAliasKind::App));
+        assert_eq!(
+            app_exec_alias_kind(&ServiceOpener, &redirect),
+            Some(AppExecAliasKind::StoreInstallerRedirect)
+        );
+        assert_eq!(app_exec_alias_kind(&ServiceOpener, &plain), None);
+
+        let error = pin_launch_executable(&ServiceOpener, &app, false).expect_err("aliases are not launched directly");
+        assert!(
+            error.to_string().contains("cannot be launched directly"),
+            "unexpected error: {error:#}"
+        );
+        let error = pin_launch_executable(&ServiceOpener, &app, true).expect_err("aliases are not launched elevated");
+        assert!(
+            error.to_string().contains("not supported for elevated execution"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
     fn winget_alias_with_expected_identity_is_validated() {
         let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\winget.exe");
         let alias = AppExecAlias {
@@ -1800,7 +1925,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
             ),
         };
-        let target = validate_app_exec_alias(alias_path, alias).expect("valid winget alias must be accepted");
+        let target = validate_app_exec_alias(alias_path, alias, true).expect("valid winget alias must be accepted");
         assert!(target.ends_with("winget.exe"));
     }
 
@@ -1815,7 +1940,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Evil.FakeInstaller_1.0.0.0_x64__0000000000000\winget.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(
             error.to_string().contains("package family"),
             "unexpected error: {error}"
@@ -1833,7 +1958,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\AppInstallerCLI.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(
             error.to_string().contains("not a 'winget.exe' executable"),
             "unexpected error: {error}"
@@ -1848,7 +1973,7 @@ mod tests {
             package_family: WINGET_PACKAGE_FAMILY.to_owned(),
             target: PathBuf::from(r"C:\Users\user\Downloads\winget.exe"),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(error.to_string().contains("outside"), "unexpected error: {error}");
     }
 
@@ -1861,7 +1986,7 @@ mod tests {
                 r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\winget.exe",
             ),
         };
-        let error = validate_app_exec_alias(alias_path, alias).unwrap_err();
+        let error = validate_app_exec_alias(alias_path, alias, true).unwrap_err();
         assert!(error.to_string().contains("not supported"), "unexpected error: {error}");
     }
 

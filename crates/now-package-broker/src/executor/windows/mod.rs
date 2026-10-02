@@ -169,7 +169,11 @@ fn manager_is_available(manager: ManagerName, user_env: &UserEnv<'_>) -> bool {
         ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
         ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
         ManagerName::Dotnet => Path::new(&crate::command_builder::dotnet::trusted_dotnet_executable()).is_file(),
-        ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok(),
+        // The Microsoft Store installation shortcut stands in for `python.exe` when Python is not installed.
+        ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok_and(|python| {
+            policy_security::app_exec_alias_kind(user_env, &python)
+                != Some(policy_security::AppExecAliasKind::StoreInstallerRedirect)
+        }),
         // npm runs through the user PATH `npm` shim inside the trusted Windows PowerShell wrapper,
         // so both the shim and the host must exist.
         ManagerName::Npm => {
@@ -484,11 +488,11 @@ fn prepare_main_command_in(
     }
 
     if is_pip_python_command(command) {
-        return prepare_pip_command(command, temp_dir, user_env);
+        return prepare_pip_command(command, temp_dir, user_env, requires_elevation);
     }
 
     if command_is_bun(command) {
-        return prepare_bun_command(command, temp_dir, user_env);
+        return prepare_bun_command(command, temp_dir, user_env, requires_elevation);
     }
 
     Ok(PreparedCommand::raw(command))
@@ -780,18 +784,105 @@ fn prepare_cargo_script(
 
 fn prepare_pip_command(
     command: &[String],
-    _temp_dir: Option<&Path>,
+    temp_dir: Option<&Path>,
     user_env: Option<&UserEnv<'_>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let (executable, args) = command.split_first().context("empty pip command")?;
-    let executable = user_env
-        .context("target user environment is required to resolve python.exe")
-        .and_then(|env| resolve_python_executable(executable, env))?;
-    let mut prepared = Vec::with_capacity(command.len());
-    prepared.push(executable.display().to_string());
-    prepared.extend_from_slice(args);
+    let env = user_env.context("target user environment is required to resolve python.exe")?;
+    let executable = resolve_python_executable(executable, env)?;
 
-    Ok(PreparedCommand::raw(&prepared))
+    let alias = policy_security::app_exec_alias_kind(env, &executable);
+    prepare_user_executable("pip", &executable, args, alias, requires_elevation, temp_dir)
+}
+
+/// How a package-manager executable resolved from the target user environment is launched.
+#[derive(Debug, PartialEq, Eq)]
+enum UserExecutableLaunch {
+    /// Pinned by the broker and launched directly.
+    Pinned,
+    /// Launched through a batch script run by the target user, which resolves the executable itself.
+    UserBatch,
+}
+
+/// Choose how to launch a user-resolved executable, given whether it is an app execution alias.
+///
+/// Aliases cannot be opened and pinned, so the target user's own process resolves them.
+/// They are per-user Microsoft Store apps, so they are never launched elevated.
+fn user_executable_launch(
+    manager: &str,
+    executable: &Path,
+    alias: Option<policy_security::AppExecAliasKind>,
+    requires_elevation: bool,
+) -> anyhow::Result<UserExecutableLaunch> {
+    match alias {
+        None => Ok(UserExecutableLaunch::Pinned),
+        Some(_) if requires_elevation => bail!(
+            "Microsoft Store app execution aliases are not supported for elevated {manager} operations: {}",
+            executable.display()
+        ),
+        Some(policy_security::AppExecAliasKind::StoreInstallerRedirect) => bail!(
+            "{manager} executable '{}' is the Microsoft Store installation shortcut; install the package manager first",
+            executable.display()
+        ),
+        Some(policy_security::AppExecAliasKind::App) => Ok(UserExecutableLaunch::UserBatch),
+    }
+}
+
+fn prepare_user_executable(
+    manager: &str,
+    executable: &Path,
+    args: &[String],
+    alias: Option<policy_security::AppExecAliasKind>,
+    requires_elevation: bool,
+    temp_dir: Option<&Path>,
+) -> anyhow::Result<PreparedCommand> {
+    match user_executable_launch(manager, executable, alias, requires_elevation)? {
+        UserExecutableLaunch::Pinned => {
+            let mut prepared = Vec::with_capacity(args.len() + 1);
+            prepared.push(executable.display().to_string());
+            prepared.extend_from_slice(args);
+            Ok(PreparedCommand::raw(&prepared))
+        }
+        UserExecutableLaunch::UserBatch => prepare_user_batch_script(&executable.display().to_string(), args, temp_dir),
+    }
+}
+
+/// Run `executable` with `args` through a generated batch script under the target user's token.
+fn prepare_user_batch_script(
+    executable: &str,
+    args: &[String],
+    temp_dir: Option<&Path>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    append_batch_executable(&mut script, executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
 }
 
 fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
@@ -811,6 +902,7 @@ fn prepare_bun_command(
     command: &[String],
     temp_dir: Option<&Path>,
     user_env: Option<&UserEnv<'_>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let (executable, args) = command.split_first().context("empty Bun command")?;
     let executable = user_env.map_or_else(
@@ -826,11 +918,8 @@ fn prepare_bun_command(
         return prepare_bun_cmd_script(&executable.display().to_string(), args, temp_dir);
     }
 
-    let mut prepared = Vec::with_capacity(command.len());
-    prepared.push(executable.display().to_string());
-    prepared.extend_from_slice(args);
-
-    Ok(PreparedCommand::raw(&prepared))
+    let alias = user_env.and_then(|env| policy_security::app_exec_alias_kind(env, &executable));
+    prepare_user_executable("Bun", &executable, args, alias, requires_elevation, temp_dir)
 }
 
 fn prepare_bun_cmd_script(
@@ -1557,6 +1646,140 @@ mod tests {
             bun_path.display()
         )));
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn user_executable_launch_routes_aliases_through_user_batch_scripts() {
+        use crate::policy_security::AppExecAliasKind;
+
+        let python = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\python.exe");
+        assert_eq!(
+            super::user_executable_launch("pip", python, None, false).expect("plain executable"),
+            super::UserExecutableLaunch::Pinned
+        );
+        assert_eq!(
+            super::user_executable_launch("pip", python, Some(AppExecAliasKind::App), false).expect("app alias"),
+            super::UserExecutableLaunch::UserBatch
+        );
+
+        let error = super::user_executable_launch("pip", python, Some(AppExecAliasKind::App), true)
+            .expect_err("aliases are never launched elevated");
+        assert!(
+            error
+                .to_string()
+                .contains("Microsoft Store app execution aliases are not supported for elevated pip operations"),
+            "{error:#}"
+        );
+
+        let error = super::user_executable_launch("pip", python, Some(AppExecAliasKind::StoreInstallerRedirect), false)
+            .expect_err("the Store installation shortcut is not run");
+        assert!(
+            error.to_string().contains("Microsoft Store installation shortcut"),
+            "{error:#}"
+        );
+    }
+
+    fn pip_command() -> Vec<String> {
+        [
+            "python.exe",
+            "-m",
+            "pip",
+            "--isolated",
+            "install",
+            "requests==2.31.0",
+            "--user",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
+
+    #[test]
+    fn pip_through_an_app_execution_alias_runs_in_a_user_batch_script() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let alias_dir = temp_dir.path().join("100% WindowsApps");
+        std::fs::create_dir(&alias_dir).expect("create alias dir");
+        let python = alias_dir.join("python.exe");
+        crate::policy_security::create_app_exec_alias_for_tests(
+            &python,
+            "PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0",
+            Path::new(
+                r"C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.0.0_x64__qbz5n2kfra8p0\python3.12.exe",
+            ),
+        );
+        let vars = HashMap::from([("PATH".to_owned(), alias_dir.display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let command = prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false)
+            .expect("prepare pip command through an alias");
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(&command.args()[1..5], ["/D", "/V:OFF", "/Q", "/C"]);
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        let expected_executable = python.display().to_string().replace('%', "%%");
+        assert!(
+            script.contains(&format!(
+                "\"{expected_executable}\" \"-m\" \"pip\" \"--isolated\" \"install\" \"requests==2.31.0\" \"--user\""
+            )),
+            "{script}"
+        );
+
+        let error = match prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), true) {
+            Ok(_) => panic!("an elevated alias must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Microsoft Store app execution aliases are not supported for elevated pip operations"),
+            "{error:#}"
+        );
+
+        let mut metacharacter = pip_command();
+        metacharacter[5] = "requests&x".to_owned();
+        let error = match prepare_main_command_in(&metacharacter, Some(temp_dir.path()), Some(&env), false) {
+            Ok(_) => panic!("batch metacharacters must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("batch metacharacters"), "{error:#}");
+    }
+
+    #[test]
+    fn pip_through_the_store_installation_shortcut_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let python = temp_dir.path().join("python.exe");
+        crate::policy_security::create_app_exec_alias_for_tests(
+            &python,
+            "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\AppInstallerPythonRedirector.exe",
+            ),
+        );
+        let vars = HashMap::from([("PATH".to_owned(), temp_dir.path().display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let error = match prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false) {
+            Ok(_) => panic!("the Store installation shortcut must not be run"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("Microsoft Store installation shortcut"),
+            "{error:#}"
+        );
+        assert!(!super::manager_is_available(now_policy_api::ManagerName::Pip, &env));
+    }
+
+    #[test]
+    fn pip_with_a_regular_python_executable_is_launched_directly() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let python = temp_dir.path().join("python.exe");
+        std::fs::write(&python, b"").expect("write python placeholder");
+        let vars = HashMap::from([("PATH".to_owned(), temp_dir.path().display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let command = prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false)
+            .expect("prepare pip command");
+        assert_eq!(command.args()[0], python.display().to_string());
+        assert_eq!(&command.args()[1..], &pip_command()[1..]);
     }
 
     #[test]
