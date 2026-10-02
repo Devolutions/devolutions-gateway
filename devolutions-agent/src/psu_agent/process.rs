@@ -727,6 +727,16 @@ async fn run_process_inner(
         }
     };
 
+    // A stop request can be recorded while the child process exit is being selected; it still applies.
+    if kill_reason.is_none() {
+        match *control_rx.borrow_and_update() {
+            Some(StopRequest::Kill) => kill_reason = Some(KillReason::ServerRequest),
+            Some(StopRequest::StdinOverflow) => kill_reason = Some(KillReason::StdinOverflow),
+            Some(StopRequest::Graceful) => graceful_stop_requested = true,
+            None => {}
+        }
+    }
+
     // Input that arrives once the child process has exited could not be delivered anyway, so only an overflow
     // recorded before this point counts. This is decided atomically, before anything is awaited.
     let stdin_overflowed = backlog.record_child_exit();
@@ -1882,6 +1892,42 @@ mod tests {
         registry.stop_process("job", true).await;
         let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
         assert_eq!(outcome.stream_closed.reason, "child process canceled");
+    }
+
+    #[tokio::test]
+    async fn stop_requested_while_the_child_exits_still_applies() {
+        for kill in [false, true] {
+            let temp_dir = tempfile::tempdir().expect("create temp dir");
+            let marker = temp_dir.path().join("background-survived");
+            let background = write_script(
+                temp_dir.path(),
+                "background",
+                &format!("@ping -n 4 127.0.0.1 >nul\n@echo done> \"{}\"\n", marker.display()),
+                &format!("sleep 3\ntouch '{}'\n", marker.display()),
+            );
+            let script = write_script(
+                temp_dir.path(),
+                "exit",
+                &format!("@start \"\" /B \"{}\"\n@exit /b 0\n", background.display()),
+                &format!("sh '{}' &\nexit 0\n", background.display()),
+            );
+            let registry = ProcessRegistry::default();
+            let mut channels = registry.register("job", "job").await.expect("register");
+
+            // Mark the request as seen to model a child process exit selected before the stop request.
+            registry.stop_process("job", kill).await;
+            assert!(channels.control.borrow_and_update().is_some());
+
+            let (task, outgoing_rx) = spawn_with_channels(&registry, start_request("job", &script), channels, 64);
+            let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
+            assert!(outcome.completed.canceled, "kill: {kill}");
+
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            assert!(
+                !marker.exists(),
+                "a process started by a stopped job survived (kill: {kill})"
+            );
+        }
     }
 
     #[tokio::test]

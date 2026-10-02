@@ -21,7 +21,7 @@ use tonic::{Request, Streaming};
 use url::Url;
 use uuid::Uuid;
 
-use crate::config::{ConfHandle, PsuConf, dto};
+use crate::config::{ConfHandle, PsuConf, dto, redacted_url};
 use crate::psu_agent::powershell::{PowerShellWorker, app_token_secret_reference_name};
 use crate::psu_agent::process::ProcessRegistry;
 
@@ -115,7 +115,8 @@ struct PsuConnection {
 struct PsuAgent {
     conf: PsuConf,
     settings: ConnectionSettings,
-    server_url: String,
+    /// The server URL without credentials or query, for logs.
+    display_url: String,
     agent_id: String,
     display_name: String,
     machine_name: String,
@@ -124,7 +125,7 @@ struct PsuAgent {
 
 impl PsuAgent {
     fn new(conf: PsuConf) -> anyhow::Result<Self> {
-        let server_url = conf.server_url.to_string();
+        let display_url = redacted_url(&conf.server_url);
         let machine_name = machine_name();
         let agent_id = conf.agent_id.clone().unwrap_or_else(|| machine_name.clone());
         let display_name = conf.display_name.clone().unwrap_or_else(|| agent_id.clone());
@@ -135,7 +136,7 @@ impl PsuAgent {
         Ok(Self {
             conf,
             settings: ConnectionSettings::default(),
-            server_url,
+            display_url,
             agent_id,
             display_name,
             machine_name,
@@ -148,7 +149,7 @@ impl PsuAgent {
 
         if is_plaintext_to_remote_host(&self.conf.server_url) {
             warn!(
-                url = %self.server_url,
+                url = %self.display_url,
                 "PSU gRPC agent uses plaintext HTTP to a non-loopback host; the AppToken and job traffic are not encrypted"
             );
         }
@@ -175,7 +176,7 @@ impl PsuAgent {
                     match self.serve(connection, &mut shutdown_signal).await {
                         Ok(()) => return Ok(()),
                         Err(error) => {
-                            warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection lost")
+                            warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection lost")
                         }
                     }
 
@@ -184,7 +185,7 @@ impl PsuAgent {
                     }
                 }
                 Err(error) => {
-                    warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
+                    warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
                 }
             }
 
@@ -204,11 +205,11 @@ impl PsuAgent {
         // Resolved on every attempt so a secret vault that is not ready yet, or a rotated secret, is picked up.
         let app_token = self.resolve_app_token().await?;
 
-        let endpoint = psu_endpoint(&self.server_url, &self.settings)?;
+        let endpoint = psu_endpoint(self.conf.server_url.as_str(), &self.settings)?;
         let channel = tokio::time::timeout(self.settings.connect_timeout, endpoint.connect())
             .await
-            .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.server_url))?
-            .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.server_url))?;
+            .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.display_url))?
+            .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.display_url))?;
         let mut client = AgentControlClient::new(channel);
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(256);
@@ -225,7 +226,7 @@ impl PsuAgent {
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
 
-        info!(agent_id = %self.agent_id, url = %self.server_url, "Connected PSU gRPC agent");
+        info!(agent_id = %self.agent_id, url = %self.display_url, "Connected PSU gRPC agent");
 
         Ok(PsuConnection {
             _client: client,

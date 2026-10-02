@@ -230,7 +230,7 @@ pub struct PsuConf {
 impl std::fmt::Debug for PsuConf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PsuConf")
-            .field("server_url", &self.server_url)
+            .field("server_url", &format_args!("{}", redacted_url(&self.server_url)))
             .field("agent_id", &self.agent_id)
             .field("display_name", &self.display_name)
             .field("app_token", &REDACTED)
@@ -240,6 +240,15 @@ impl std::fmt::Debug for PsuConf {
 }
 
 const REDACTED: &str = "***REDACTED***";
+
+/// Formats a URL for logs with only its scheme, host, and port, leaving out credentials, path, and query.
+pub(crate) fn redacted_url(url: &Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
+    }
+}
 
 impl TryFrom<dto::PsuConf> for Option<PsuConf> {
     type Error = anyhow::Error;
@@ -752,7 +761,7 @@ pub mod dto {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("PsuConf")
                 .field("enabled", &self.enabled)
-                .field("server_url", &self.server_url)
+                .field("server_url", &self.server_url.as_ref().map(redacted_url))
                 .field("agent_id", &self.agent_id)
                 .field("display_name", &self.display_name)
                 .field("app_token", &self.app_token.as_ref().map(|_| REDACTED))
@@ -1300,11 +1309,11 @@ mod tests {
     }
 
     #[test]
-    fn psu_debug_output_redacts_app_token() {
+    fn psu_debug_output_redacts_secrets() {
         let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
             "PsuAgent": {
                 "Enabled": true,
-                "ServerUrl": "http://localhost:5000",
+                "ServerUrl": "https://url-user:url-password@psu.example.com:8443/base?token=url-query-token",
                 "AppToken": "super-secret-token"
             }
         }))
@@ -1315,8 +1324,28 @@ mod tests {
         let conf_debug = format!("{conf:?}");
 
         for debug in [conf_file_debug, conf_debug] {
-            assert!(!debug.contains("super-secret-token"), "AppToken leaked: {debug}");
+            for secret in ["super-secret-token", "url-user", "url-password", "url-query-token"] {
+                assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+            }
             assert!(debug.contains(REDACTED), "missing redaction marker: {debug}");
+            assert!(
+                debug.contains("https://psu.example.com:8443"),
+                "missing server URL: {debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn redacted_url_keeps_only_scheme_host_and_port() {
+        for (url, expected) in [
+            (
+                "http://user:password@localhost:5000/path?query=value#fragment",
+                "http://localhost:5000",
+            ),
+            ("https://psu.example.com", "https://psu.example.com"),
+            ("http://[::1]:5000", "http://[::1]:5000"),
+        ] {
+            assert_eq!(redacted_url(&url.parse().expect("parse URL")), expected);
         }
     }
 }
