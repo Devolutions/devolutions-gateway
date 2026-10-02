@@ -410,10 +410,10 @@ async fn request(pipe_name: &str, method: &str, path: &str) -> anyhow::Result<Ht
     request_with_body(pipe_name, method, path, None, &[]).await
 }
 
-/// Open the broker pipe with only the access a client needs.
+/// Open the broker pipe with the access the broker grants to clients.
 ///
-/// `GENERIC_WRITE` is not requested because it includes `FILE_CREATE_PIPE_INSTANCE`,
-/// which a client never needs.
+/// `GENERIC_WRITE` must not be requested because it includes `FILE_CREATE_PIPE_INSTANCE`,
+/// which the broker does not grant to non-administrators.
 fn open_broker_pipe(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
     let file = OpenOptions::new()
         .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
