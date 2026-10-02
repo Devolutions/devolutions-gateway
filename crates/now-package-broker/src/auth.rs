@@ -22,6 +22,7 @@ use widestring::U16CString;
 use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
+use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::{FILE_EXECUTE, FILE_READ_ATTRIBUTES, FILE_SHARE_READ};
@@ -63,6 +64,9 @@ pub(crate) struct PipeClient {
     is_elevated: bool,
     /// Enabled built-in Administrators membership, captured at connect.
     is_administrator: bool,
+    /// Impersonation token of the client process, used to open client-supplied paths
+    /// with the client's identity and device map instead of the broker's.
+    impersonation_token: Option<Arc<Token>>,
 }
 
 impl PipeClient {
@@ -187,6 +191,10 @@ impl PipeClient {
         let is_administrator = token
             .is_member(&administrators_sid)
             .with_context(|| format!("failed to query pipe client process {process_id} Administrators membership"))?;
+        let impersonation_token = Arc::new(
+            crate::impersonation::impersonation_token(&token)
+                .with_context(|| format!("failed to prepare pipe client process {process_id} token"))?,
+        );
         process
             .verify_image_file_mapping(&executable_file)
             .with_context(|| format!("pipe client process {process_id} executable image changed during capture"))?;
@@ -201,6 +209,7 @@ impl PipeClient {
             user_sid,
             is_elevated,
             is_administrator,
+            impersonation_token: Some(impersonation_token),
         })
     }
 
@@ -360,6 +369,14 @@ impl PipeClient {
             if crate::policy_security::windows_paths_equal(requested_path, &final_path) {
                 return Ok(());
             }
+
+            // Other spellings, such as paths through substituted drives, junctions, or mounted folders,
+            // are resolved with the client's own identity and device map, never the broker's.
+            if let Some(token) = &self.impersonation_token
+                && opens_as_retained_image(token, requested_path, executable_file)?
+            {
+                return Ok(());
+            }
         }
 
         bail!(
@@ -417,6 +434,36 @@ fn open_native_executable_file(native_path: &Path) -> anyhow::Result<File> {
     let mut global_root_path = OsString::from(r"\\?\GLOBALROOT");
     global_root_path.push(native_path.as_os_str());
     open_executable_file(Path::new(&global_root_path))
+}
+
+/// Open `requested_path` as the pipe client and check that it is the retained image file.
+///
+/// The file is opened for attribute reads only, and must be on a local disk volume.
+fn opens_as_retained_image(token: &Token, requested_path: &Path, retained: &File) -> anyhow::Result<bool> {
+    use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_WRITE};
+
+    let requested = {
+        let _impersonation =
+            crate::impersonation::ThreadImpersonation::enter(token).context("failed to impersonate the pipe client")?;
+        OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0)
+            .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+            .open(requested_path)
+    };
+    let Ok(requested) = requested else {
+        return Ok(false);
+    };
+
+    if crate::policy_security::verify_local_volume_file(&requested).is_err() {
+        return Ok(false);
+    }
+
+    let requested_identity = crate::policy_security::file_identity(&requested)
+        .context("failed to query request client executable identity")?;
+    let retained_identity = crate::policy_security::file_identity(retained)
+        .context("failed to query retained pipe client executable identity")?;
+
+    Ok(requested_identity == retained_identity)
 }
 
 /// Resolve an account name (`DOMAIN\user` or `user`) to its security identifier.
@@ -503,6 +550,7 @@ mod tests {
             user_sid: system_sid(),
             is_elevated: true,
             is_administrator: true,
+            impersonation_token: None,
         }
     }
 
@@ -704,32 +752,108 @@ mod tests {
     }
 
     #[test]
-    fn executable_path_rejects_equivalent_spellings_of_the_captured_path() {
+    fn executable_path_without_client_identity_only_matches_text() {
         let client = current_exe_client();
         let exe = &client.executable_path;
         let mut alternate = exe.parent().expect("exe parent").join(".");
         alternate.push(exe.file_name().expect("exe file name"));
         let error = client
             .validate_executable_path(alternate.to_str().expect("UTF-8 exe path"))
-            .expect_err("only the captured or final image path may match");
+            .expect_err("without a client identity, only the captured or final image path may match");
         assert!(error.to_string().contains("does not match"), "{error:#}");
     }
 
+    /// A client captured from the current process, with its retained image and impersonation token.
+    fn captured_current_process_client() -> PipeClient {
+        let client = PipeClient::from_current_process().expect("capture current process");
+        assert!(client.impersonation_token.is_some());
+        client
+    }
+
     #[test]
-    fn executable_path_does_not_follow_directory_reparse_points() {
-        let client = current_exe_client();
-        let exe = &client.executable_path;
+    fn executable_path_accepts_equivalent_spellings_opened_as_the_client() {
+        let client = captured_current_process_client();
+        let exe = client.executable_path.clone();
+
+        let mut dotted = exe.parent().expect("exe parent").join(".");
+        dotted.push(exe.file_name().expect("exe file name"));
+        client
+            .validate_executable_path(dotted.to_str().expect("UTF-8 path"))
+            .expect("a '.' spelling of the client image must match");
+
         let root = tempfile::tempdir().expect("create junction test directory");
         let junction = root.path().join("client-dir");
         create_directory_junction(&junction, exe.parent().expect("exe parent"));
-        let aliased = junction.join(exe.file_name().expect("exe file name"));
+        client
+            .validate_executable_path(
+                junction
+                    .join(exe.file_name().expect("exe file name"))
+                    .to_str()
+                    .expect("UTF-8 path"),
+            )
+            .expect("a path through a junction to the client image must match");
+        crate::impersonation::tests::assert_thread_not_impersonating();
+        std::fs::remove_dir(&junction).expect("remove junction");
+    }
+
+    #[test]
+    fn executable_path_accepts_a_substituted_drive_opened_as_the_client() {
+        let client = captured_current_process_client();
+        let exe = client.executable_path.clone();
+        let Some(drive) = ('P'..='Y')
+            .rev()
+            .find(|letter| !Path::new(&format!("{letter}:\\")).exists())
+        else {
+            return;
+        };
+        let substitute = |args: &[&std::ffi::OsStr]| {
+            std::process::Command::new("subst")
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let drive_spec = format!("{drive}:");
+        if !substitute(&[drive_spec.as_ref(), exe.parent().expect("exe parent").as_os_str()]) {
+            return;
+        }
+
+        let result = client.validate_executable_path(&format!(
+            "{drive}:\\{}",
+            exe.file_name()
+                .expect("exe file name")
+                .to_str()
+                .expect("UTF-8 file name")
+        ));
+        substitute(&[drive_spec.as_ref(), "/D".as_ref()]);
+
+        result.expect("a substituted drive path to the client image must match");
+    }
+
+    #[test]
+    fn executable_path_rejects_a_different_file_opened_as_the_client() {
+        let client = captured_current_process_client();
+        let root = tempfile::tempdir().expect("create temp directory");
+        let other = root.path().join("other-client.exe");
+        std::fs::write(&other, b"other").expect("write other file");
 
         let error = client
-            .validate_executable_path(aliased.to_str().expect("UTF-8 path"))
-            .expect_err("a path through a junction must not resolve to the captured executable");
+            .validate_executable_path(other.to_str().expect("UTF-8 path"))
+            .expect_err("a different file must be rejected");
         assert!(error.to_string().contains("does not match"), "{error:#}");
+        crate::impersonation::tests::assert_thread_not_impersonating();
+    }
 
-        std::fs::remove_dir(&junction).expect("remove junction");
+    #[test]
+    fn executable_path_rejects_non_local_shapes_before_opening_them_as_the_client() {
+        let client = captured_current_process_client();
+        for path in [r"\\server\share\client.exe", r"\\?\UNC\server\share\client.exe"] {
+            let error = client
+                .validate_executable_path(path)
+                .expect_err("non-local paths must be rejected");
+            assert!(error.to_string().contains("not a plain local drive path"), "{error:#}");
+        }
     }
 
     #[test]
@@ -1126,6 +1250,7 @@ mod tests {
             user_sid: client_user_sid(),
             is_elevated: false,
             is_administrator: false,
+            impersonation_token: None,
         };
 
         let error = client
@@ -1150,6 +1275,7 @@ mod tests {
             user_sid: client_user_sid(),
             is_elevated: false,
             is_administrator: false,
+            impersonation_token: None,
         };
 
         assert!(client.validate_connection(true).is_ok());

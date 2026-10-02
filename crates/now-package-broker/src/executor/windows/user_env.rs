@@ -2,17 +2,13 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::marker::PhantomData;
 use std::path::Path;
 
 use anyhow::Context as _;
-use tracing::{debug, error, warn};
-use win_api_wrappers::handle::HandleWrapper as _;
+use tracing::{debug, warn};
 use win_api_wrappers::token::Token;
-use windows::Win32::Security::{
-    ImpersonateLoggedOnUser, RevertToSelf, SecurityImpersonation, TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
-};
 
+use crate::impersonation::{ThreadImpersonation, impersonation_token};
 use crate::policy_security::{PathOpener, is_plain_local_drive_path};
 
 /// Environment variables of the target user, with filesystem lookups performed as that user.
@@ -27,14 +23,8 @@ pub(super) struct UserEnv<'a> {
 impl<'a> UserEnv<'a> {
     /// Use `token`, a token of the target user, for filesystem lookups.
     pub(super) fn for_user(vars: &'a HashMap<String, String>, token: &Token) -> anyhow::Result<Self> {
-        let lookup_token = token
-            .duplicate(
-                TOKEN_QUERY | TOKEN_IMPERSONATE,
-                None,
-                SecurityImpersonation,
-                TokenImpersonation,
-            )
-            .context("failed to duplicate the target user token for impersonation")?;
+        let lookup_token =
+            impersonation_token(token).context("failed to prepare the target user token for path lookups")?;
 
         Ok(Self {
             vars,
@@ -116,60 +106,12 @@ impl PathOpener for UserEnv<'_> {
     }
 }
 
-/// Impersonates a token on the current thread until dropped.
-///
-/// Blocking-pool threads are reused, so a failed revert aborts the process
-/// instead of letting the thread keep running under the impersonated identity.
-struct ThreadImpersonation {
-    // Impersonation is per thread, so the guard must not move to another thread.
-    _not_send: PhantomData<*const ()>,
-}
-
-impl ThreadImpersonation {
-    fn enter(token: &Token) -> anyhow::Result<Self> {
-        // SAFETY: `token` is a live impersonation token opened with TOKEN_QUERY | TOKEN_IMPERSONATE.
-        unsafe { ImpersonateLoggedOnUser(token.handle().raw()) }.context("ImpersonateLoggedOnUser failed")?;
-
-        Ok(Self { _not_send: PhantomData })
-    }
-}
-
-impl Drop for ThreadImpersonation {
-    fn drop(&mut self) {
-        // SAFETY: RevertToSelf has no preconditions.
-        if let Err(error) = unsafe { RevertToSelf() } {
-            error!(%error, "Failed to revert thread impersonation");
-            std::process::abort();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use win_api_wrappers::process::Process;
-    use win_api_wrappers::thread::Thread;
-    use windows::Win32::Foundation::ERROR_NO_TOKEN;
-    use windows::Win32::Security::TOKEN_ALL_ACCESS;
-
     use super::*;
-
-    fn current_process_token() -> Token {
-        Process::current_process()
-            .token(TOKEN_ALL_ACCESS)
-            .expect("open current process token")
-    }
-
-    fn assert_thread_not_impersonating() {
-        let Err(error) = Thread::current().token(TOKEN_QUERY, true) else {
-            panic!("the thread must not keep an impersonation token");
-        };
-        let code = error
-            .downcast_ref::<windows::core::Error>()
-            .map(windows::core::Error::code);
-        assert_eq!(code, Some(ERROR_NO_TOKEN.to_hresult()), "{error:#}");
-    }
+    use crate::impersonation::tests::{assert_thread_not_impersonating, current_process_token};
 
     #[test]
     fn lookups_impersonate_and_always_revert() {
@@ -181,29 +123,6 @@ mod tests {
         assert!(env.is_file(&exe));
         assert!(env.exists(exe.parent().expect("exe parent")));
         assert!(!env.is_file(&exe.with_file_name("missing-broker-test.exe")));
-        assert_thread_not_impersonating();
-    }
-
-    #[test]
-    fn impersonation_guard_reverts_on_panic() {
-        let token = current_process_token()
-            .duplicate(
-                TOKEN_QUERY | TOKEN_IMPERSONATE,
-                None,
-                SecurityImpersonation,
-                TokenImpersonation,
-            )
-            .expect("duplicate impersonation token");
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _impersonation = ThreadImpersonation::enter(&token).expect("impersonate");
-            Thread::current()
-                .token(TOKEN_QUERY, true)
-                .expect("the thread is impersonating inside the guard");
-            panic!("lookup panicked");
-        }));
-
-        assert!(result.is_err());
         assert_thread_not_impersonating();
     }
 

@@ -639,6 +639,18 @@ pub(crate) fn pin_executable(
 
 /// Return the final drive-letter path of `file`, requiring it to be on a local disk volume.
 fn verify_local_final_path(file: &File) -> anyhow::Result<PathBuf> {
+    verify_local_volume_file(file)?;
+
+    let final_path = final_path_from_handle(file)?;
+    if !final_path.to_str().is_some_and(is_plain_local_drive_path) {
+        bail!("file has no plain local drive path: '{}'", final_path.display());
+    }
+
+    Ok(final_path)
+}
+
+/// Require `file` to be on a local disk volume rather than a redirector or another device.
+pub(crate) fn verify_local_volume_file(file: &File) -> anyhow::Result<()> {
     let handle = HANDLE(file.as_raw_handle());
     let device_path = final_path_name(
         handle,
@@ -650,12 +662,7 @@ fn verify_local_final_path(file: &File) -> anyhow::Result<PathBuf> {
         bail!("file is not on a local disk volume: '{}'", device_path.display());
     }
 
-    let final_path = final_path_from_handle(file)?;
-    if !final_path.to_str().is_some_and(is_plain_local_drive_path) {
-        bail!("file has no plain local drive path: '{}'", final_path.display());
-    }
-
-    Ok(final_path)
+    Ok(())
 }
 
 impl VerifiedExecutable {
