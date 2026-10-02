@@ -11,6 +11,7 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 use crate::config::dto::PsuPowerShellConf;
+use crate::psu_agent::process_tree::ProcessTree;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -377,20 +378,29 @@ impl PowerShellWorker {
             command.env("PSMODULE_VENV_PATH", virtual_environment);
         }
         command.kill_on_drop(true);
+        ProcessTree::prepare(&mut command);
 
-        let output = match tokio::time::timeout(self.execution_timeout, command.output()).await {
-            Ok(output) => output.with_context(|| {
-                format!(
-                    "failed to start PowerShell worker using {}",
-                    executable.to_string_lossy()
-                )
-            })?,
+        let child = command.spawn().with_context(|| {
+            format!(
+                "failed to start PowerShell worker using {}",
+                executable.to_string_lossy()
+            )
+        })?;
+        let mut process_tree = ProcessTree::attach(&child);
+
+        let output = match tokio::time::timeout(self.execution_timeout, child.wait_with_output()).await {
+            Ok(output) => {
+                process_tree.release();
+                output.context("failed to wait for PowerShell worker")?
+            }
             Err(_) => {
                 warn!(
                     timeout_secs = self.execution_timeout.as_secs(),
                     "PowerShell worker timed out"
                 );
-                return Ok(PowerShellWorkerResponse::timeout("PowerShell worker timed out."));
+                // Also stops processes started by the worker, such as a secret vault client.
+                process_tree.terminate();
+                return Ok(PowerShellWorkerResponse::timeout("PowerShell worker timed out"));
             }
         };
 

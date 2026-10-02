@@ -1,5 +1,7 @@
 mod process;
 
+mod process_tree;
+
 mod powershell;
 
 use std::collections::HashMap;
@@ -21,7 +23,7 @@ use uuid::Uuid;
 
 use crate::config::{ConfHandle, PsuConf, dto};
 use crate::psu_agent::powershell::{PowerShellWorker, app_token_secret_reference_name};
-use crate::psu_agent::process::{ProcessControl, ProcessRegistry};
+use crate::psu_agent::process::ProcessRegistry;
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
@@ -315,28 +317,32 @@ impl PsuAgent {
                 info!(connection_id = %accepted.connection_id, "PSU gRPC agent registration accepted");
             }
             Some(ServerPayload::StartProcess(start_process)) => {
-                let (control_tx, control_rx) = mpsc::channel(8);
-                let incoming_rx = registry
-                    .register_stream(&start_process.stream_id, control_tx.clone())
-                    .await;
-                registry
-                    .register_process(
-                        start_process.correlation_id.clone(),
-                        ProcessControl { stop: control_tx },
-                    )
-                    .await;
-
                 let agent_id = self.agent_id.clone();
                 let connection_id = connection_id.clone();
-                let default_executable = self.powershell_executable.clone();
                 let outgoing_tx = outgoing_tx.clone();
+
+                let channels = match registry
+                    .register(&start_process.correlation_id, &start_process.stream_id)
+                    .await
+                {
+                    Ok(channels) => channels,
+                    Err(error) => {
+                        warn!(error = format!("{error:#}"), "Rejecting PSU gRPC process start");
+                        process_tasks.spawn(async move {
+                            process::report_rejected_start(&outgoing_tx, &agent_id, &connection_id, &error).await;
+                            Ok(())
+                        });
+                        return Ok(());
+                    }
+                };
+
+                let default_executable = self.powershell_executable.clone();
                 let registry = registry.clone();
 
                 process_tasks.spawn(async move {
                     process::run_process(
                         start_process,
-                        incoming_rx,
-                        control_rx,
+                        channels,
                         outgoing_tx,
                         registry,
                         agent_id,
@@ -717,22 +723,36 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let marker = temp_dir.path().join("still-running");
 
-        // Stands in for PowerShell blocked on a secret vault: it ignores its arguments and writes the marker
-        // only if it is still alive after the timeout.
+        // Stands in for PowerShell blocked on a secret vault client: it ignores its arguments and starts a process
+        // that writes the marker only if it is still alive after the timeout.
         let script = if cfg!(windows) {
-            let script = temp_dir.path().join("hung-pwsh.cmd");
+            let vault_client = temp_dir.path().join("vault-client.cmd");
             let content = format!("@ping -n 4 127.0.0.1 >nul\r\n@echo done> \"{}\"\r\n", marker.display());
+            std::fs::write(&vault_client, content).expect("write script");
+
+            let script = temp_dir.path().join("hung-pwsh.cmd");
+            let content = format!(
+                "@start \"\" /B \"{}\"\r\n@ping -n 31 127.0.0.1 >nul\r\n",
+                vault_client.display()
+            );
             std::fs::write(&script, content).expect("write script");
             script
         } else {
+            let source = temp_dir.path().join("hung-pwsh.txt");
+            let content = format!("#!/bin/sh\n(sleep 3; touch '{}') &\nsleep 30\n", marker.display());
+            std::fs::write(&source, content).expect("write script");
+
+            // Copied by another process: executing a file this process just wrote can fail with ETXTBSY while a
+            // process forked concurrently by another test still holds the write handle.
             let script = temp_dir.path().join("hung-pwsh.sh");
-            let content = format!("#!/bin/sh\nsleep 3\ntouch '{}'\n", marker.display());
-            std::fs::write(&script, content).expect("write script");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
-            }
+            let status = std::process::Command::new("install")
+                .arg("-m")
+                .arg("755")
+                .arg(&source)
+                .arg(&script)
+                .status()
+                .expect("run install");
+            assert!(status.success(), "install failed: {status}");
             script
         };
 
@@ -757,7 +777,10 @@ mod tests {
         );
 
         tokio::time::sleep(Duration::from_secs(5)).await;
-        assert!(!marker.exists(), "the timed-out PowerShell process was not killed");
+        assert!(
+            !marker.exists(),
+            "a process started by the timed-out PowerShell worker survived"
+        );
     }
 
     #[tokio::test]
@@ -858,11 +881,11 @@ mod tests {
         server_tx.send(Ok(stalled)).await.expect("send StartProcess");
         server_tx.send(Ok(echo)).await.expect("send StartProcess");
 
-        // Large frames fill the OS pipe buffer quickly, so the agent-side stdin buffer for the stalled child fills too.
+        // More than the stdin backlog limit arrives for a child process that never reads its stdin.
         let flood = tokio::spawn({
             let server_tx = server_tx.clone();
             async move {
-                for sequence in 0..1024 {
+                for sequence in 0..1100 {
                     let frame = stream_data("stalled".to_owned(), sequence, vec![b'x'; 64 * 1024], false);
                     if server_tx
                         .send(Ok(server_message(ServerPayload::StreamData(frame))))
@@ -910,7 +933,7 @@ mod tests {
         let stalled_closed = stalled_closed.expect("stalled stream closed");
         assert!(stalled_closed.error);
         assert!(
-            stalled_closed.reason.contains("stopped consuming stdin"),
+            stalled_closed.reason.contains("stdin backlog exceeded"),
             "unexpected reason: {}",
             stalled_closed.reason
         );
