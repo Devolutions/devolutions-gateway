@@ -1507,41 +1507,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn viewers_see_the_end_when_the_reconnect_window_expires() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        harness
-            .sender
-            .connect(id, WEBM, Duration::from_secs(1))
-            .await
-            .expect("connect");
-        let mut state = harness
-            .sender
-            .subscribe_to_stream(id)
-            .await
-            .expect("subscribe")
-            .expect("ongoing recording");
-        harness.disconnect(id).await;
-        let disconnected_at = tokio::time::Instant::now();
-
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            state.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
-        )
-        .await
-        .expect("viewers should see the end after the reconnect window")
-        .expect("stream state alive");
-
-        // The end follows the 1-second window, not the extra cleanup leeway, and Gateway still knows the recording.
-        assert!(disconnected_at.elapsed() < DISCONNECTED_TTL_EXTRA_LEEWAY);
-        assert!(matches!(
-            harness.sender.get_state(id).await.expect("get state"),
-            Some(OnGoingRecordingState::LastSeen { .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn a_late_reconnection_starts_a_new_stream() {
+    async fn viewers_see_the_end_at_the_reconnect_window_and_a_late_reconnection_starts_a_new_stream() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
         harness
@@ -1556,13 +1522,21 @@ mod tests {
             .expect("subscribe")
             .expect("ongoing recording");
         harness.disconnect(id).await;
+        let disconnected_at = tokio::time::Instant::now();
         tokio::time::timeout(
             Duration::from_secs(5),
             ended.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
         )
         .await
-        .expect("viewers should see the end")
+        .expect("viewers should see the end after the reconnect window")
         .expect("stream state alive");
+
+        // The end follows the 1-second window, not the extra cleanup leeway, and Gateway still knows the recording.
+        assert!(disconnected_at.elapsed() < DISCONNECTED_TTL_EXTRA_LEEWAY);
+        assert!(matches!(
+            harness.sender.get_state(id).await.expect("get state"),
+            Some(OnGoingRecordingState::LastSeen { .. })
+        ));
 
         // Within the cleanup leeway, Gateway still accepts the reconnection.
         harness

@@ -521,32 +521,20 @@ mod tests {
         (handshake.echoed, selected)
     }
 
+    #[rstest::rstest]
+    #[case::offers_v2(Some("jrec-shadow.v2"), Some("jrec-shadow.v2"), "v2")]
+    #[case::offers_v2_among_others(Some("jrec-shadow.v3, jrec-shadow.v2"), Some("jrec-shadow.v2"), "v2")]
+    #[case::offers_nothing(None, None, "v1")]
+    #[case::offers_an_unknown_protocol(Some("jrec-shadow.v3"), None, "v1")]
     #[tokio::test]
-    async fn client_offering_jrec_shadow_v2_gets_v2() {
-        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v2")).await;
-        assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
-        assert_eq!(selected, "v2");
-    }
-
-    #[tokio::test]
-    async fn client_offering_v2_among_other_protocols_gets_v2() {
-        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v3, jrec-shadow.v2")).await;
-        assert_eq!(echoed.as_deref(), Some("jrec-shadow.v2"));
-        assert_eq!(selected, "v2");
-    }
-
-    #[tokio::test]
-    async fn client_without_subprotocol_gets_v1_and_no_echo() {
-        let (echoed, selected) = negotiated_version(None).await;
-        assert_eq!(echoed, None);
-        assert_eq!(selected, "v1");
-    }
-
-    #[tokio::test]
-    async fn client_offering_an_unknown_subprotocol_gets_v1_and_no_echo() {
-        let (echoed, selected) = negotiated_version(Some("jrec-shadow.v3")).await;
-        assert_eq!(echoed, None);
-        assert_eq!(selected, "v1");
+    async fn client_gets_the_shadow_protocol_it_offers(
+        #[case] offered: Option<&str>,
+        #[case] expected_echo: Option<&str>,
+        #[case] expected_version: &str,
+    ) {
+        let (echoed, selected) = negotiated_version(offered).await;
+        assert_eq!(echoed.as_deref(), expected_echo);
+        assert_eq!(selected, expected_version);
     }
 
     #[tokio::test]
