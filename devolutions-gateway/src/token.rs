@@ -55,6 +55,7 @@ pub enum ContentType {
     WebApp,
     NetScan,
     Enrollment,
+    Task,
 }
 
 impl FromStr for ContentType {
@@ -72,6 +73,7 @@ impl FromStr for ContentType {
             "WEBAPP" => Ok(ContentType::WebApp),
             "NETSCAN" => Ok(ContentType::NetScan),
             "ENROLLMENT" => Ok(ContentType::Enrollment),
+            "TASK" => Ok(ContentType::Task),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -92,6 +94,7 @@ impl fmt::Display for ContentType {
             ContentType::WebApp => write!(f, "WEBAPP"),
             ContentType::NetScan => write!(f, "NETSCAN"),
             ContentType::Enrollment => write!(f, "ENROLLMENT"),
+            ContentType::Task => write!(f, "TASK"),
         }
     }
 }
@@ -125,6 +128,7 @@ pub enum AccessTokenClaims {
     WebApp(WebAppTokenClaims),
     NetScan(NetScanClaims),
     Enrollment(EnrollmentTokenClaims),
+    Task(TaskTokenClaims),
 }
 
 impl AccessTokenClaims {
@@ -140,6 +144,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::WebApp(_) => false,
             AccessTokenClaims::NetScan(_) => false,
             AccessTokenClaims::Enrollment(_) => false,
+            AccessTokenClaims::Task(_) => false,
         }
     }
 }
@@ -545,6 +550,32 @@ pub struct EnrollmentTokenClaims {
 
     /// Agent friendly name.
     pub jet_agent_name: String,
+}
+
+// ----- task claims ----- //
+
+/// Kind of background task, with the target that this kind works on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "jet_tk")]
+pub enum TaskKind {
+    /// Describe what the user did in one session and store the result as a new log of that session.
+    #[serde(rename = "ai-log")]
+    AiLog {
+        /// Association ID (= Session ID) of the session to describe.
+        jet_aid: Uuid,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskTokenClaims {
+    #[serde(flatten)]
+    pub kind: TaskKind,
+
+    /// JWT expiration time claim.
+    pub exp: i64,
+
+    /// JWT "JWT ID" claim, the unique ID for this token.
+    pub jti: Uuid,
 }
 
 // ----- bridge claims ----- //
@@ -1014,7 +1045,8 @@ fn validate_token_impl(
             | ContentType::Kdc
             | ContentType::WebApp
             | ContentType::NetScan
-            | ContentType::Enrollment => jwt.validate::<Value>(&strict_validator)?.state.claims,
+            | ContentType::Enrollment
+            | ContentType::Task => jwt.validate::<Value>(&strict_validator)?.state.claims,
             ContentType::Jrl => {
                 // NOTE: JRL tokens are not expected to expire.
                 // However, `iat` (Issued At) claim is required, and only more recent tokens will
@@ -1101,6 +1133,7 @@ fn validate_token_impl(
         ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
         ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
         ContentType::Enrollment => serde_json::from_value(claims).map(AccessTokenClaims::Enrollment),
+        ContentType::Task => serde_json::from_value(claims).map(AccessTokenClaims::Task),
     }
     .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
@@ -1185,10 +1218,11 @@ fn validate_token_impl(
             }
         }
 
-        // SCOPE, NETSCAN, and JMUX tokens can never be reused.
+        // SCOPE, NETSCAN, JMUX, and TASK tokens can never be reused.
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Task(TaskTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 return Err(TokenError::UnexpectedReplay {
                     reason: "never allowed for this use case",
@@ -1450,6 +1484,7 @@ pub mod unsafe_debug {
             ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
             ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
             ContentType::Enrollment => serde_json::from_value(claims).map(AccessTokenClaims::Enrollment),
+            ContentType::Task => serde_json::from_value(claims).map(AccessTokenClaims::Task),
         }
         .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
@@ -1973,5 +2008,117 @@ mod tests {
         for (recording_file_type, expected_content_type) in expected {
             assert_eq!(recording_file_type.content_type(), expected_content_type);
         }
+    }
+
+    struct TaskTokenFixture {
+        provisioner_key: PrivateKey,
+        token_cache: TokenCache,
+        revocation_list: CurrentJrl,
+        active_recordings: Arc<ActiveRecordings>,
+    }
+
+    impl TaskTokenFixture {
+        fn new() -> Self {
+            let (sender, _) = crate::recording::recording_message_channel();
+
+            Self {
+                provisioner_key: PrivateKey::generate_ec(picky::key::EcCurve::NistP256).expect("generate EC key"),
+                token_cache: new_token_cache(),
+                revocation_list: Mutex::new(JrlTokenClaims::default()),
+                active_recordings: sender.active_recordings,
+            }
+        }
+
+        fn sign(&self, claims: &serde_json::Value) -> String {
+            picky::jose::jwt::CheckedJwtSig::new_with_cty(picky::jose::jws::JwsAlg::ES256, "TASK", claims)
+                .encode(&self.provisioner_key)
+                .expect("sign TASK token")
+        }
+
+        fn validate(&self, token: &str, gw_id: Option<Uuid>) -> Result<AccessTokenClaims, TokenError> {
+            TokenValidator::builder()
+                .source_ip(IpAddr::from([127, 0, 0, 1]))
+                .provisioner_key(&self.provisioner_key.to_public_key().expect("public key"))
+                .token_cache(&self.token_cache)
+                .revocation_list(&self.revocation_list)
+                .active_recordings(&self.active_recordings)
+                .delegation_key(None)
+                .subkey(None)
+                .gw_id(gw_id)
+                .disconnected_info(None)
+                .build()
+                .validate(token)
+        }
+    }
+
+    fn task_claims(extra: serde_json::Value) -> serde_json::Value {
+        let mut claims = serde_json::json!({
+            "jet_tk": "ai-log",
+            "jet_aid": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+            "nbf": time::OffsetDateTime::now_utc().unix_timestamp(),
+            "exp": time::OffsetDateTime::now_utc().unix_timestamp() + 600,
+            "jti": Uuid::new_v4(),
+        });
+
+        claims
+            .as_object_mut()
+            .expect("object")
+            .extend(extra.as_object().expect("object").clone());
+
+        claims
+    }
+
+    #[test]
+    fn task_token_claims_parse() {
+        let fixture = TaskTokenFixture::new();
+        let token = fixture.sign(&task_claims(serde_json::json!({})));
+
+        let claims = fixture.validate(&token, None).expect("valid TASK token");
+
+        let AccessTokenClaims::Task(claims) = claims else {
+            panic!("expected TASK claims");
+        };
+        assert_eq!(
+            claims.kind,
+            TaskKind::AiLog {
+                jet_aid: Uuid::parse_str("5e3e833f-84c7-4541-b676-acc3299e39b8").expect("UUID"),
+            }
+        );
+    }
+
+    #[test]
+    fn task_token_is_rejected_on_second_use() {
+        let fixture = TaskTokenFixture::new();
+        let token = fixture.sign(&task_claims(serde_json::json!({})));
+
+        fixture.validate(&token, None).expect("first use");
+        let error = fixture.validate(&token, None).err().expect("second use is rejected");
+
+        assert!(matches!(error, TokenError::UnexpectedReplay { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn unknown_task_kind_is_rejected() {
+        let fixture = TaskTokenFixture::new();
+        let token = fixture.sign(&task_claims(serde_json::json!({ "jet_tk": "monitoring" })));
+
+        let error = fixture.validate(&token, None).err().expect("unknown kind is rejected");
+
+        assert!(matches!(error, TokenError::InvalidClaimScheme { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn task_token_honors_gateway_id_scope() {
+        let fixture = TaskTokenFixture::new();
+        let gw_id = Uuid::new_v4();
+        let token = fixture.sign(&task_claims(serde_json::json!({ "jet_gw_id": gw_id })));
+
+        let error = fixture
+            .validate(&token, Some(Uuid::new_v4()))
+            .err()
+            .expect("other gateway is rejected");
+        assert!(matches!(error, TokenError::GatewayIdScopeMismatch), "{error:?}");
+
+        fixture.validate(&token, Some(gw_id)).expect("this gateway is accepted");
     }
 }
