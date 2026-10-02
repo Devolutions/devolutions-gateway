@@ -53,8 +53,9 @@ const CONNECT_FAILURES_BEFORE_BACKOFF: u32 = 3;
 const CONNECT_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
 const CONNECT_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Minimum interval between two connect failure log entries.
-const CONNECT_FAILURE_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Minimum interval between two entries of a repeated warning or error log, such as connect
+/// failures or rejected connections.
+const REPEATED_LOG_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Initial delay before retrying after a pipe instance could not be created or recycled.
 const INSTANCE_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
@@ -105,24 +106,27 @@ async fn accept_connections(
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
-    let user_slots = Arc::new(UserConnectionSlots::new(MAX_CONCURRENT_CONNECTIONS_PER_USER));
     let busy_replies = Arc::new(Semaphore::new(MAX_CONCURRENT_BUSY_REPLIES));
+    let admission = Arc::new(UserAdmission::new(
+        MAX_CONCURRENT_CONNECTIONS_PER_USER,
+        Arc::clone(&busy_replies),
+    ));
 
     accept_loop(
         &pipe_name,
         shutdown,
         AcceptLimits {
             max_connections: MAX_CONCURRENT_CONNECTIONS,
-            busy_replies: Arc::clone(&busy_replies),
+            busy_replies,
         },
         &create_pipe_instance,
         RetryDelay::default(),
-        |server, admission| {
+        |server, accepted| {
             // Reap the connections that already finished, so completed tasks do not accumulate here
             // for the lifetime of the process.
             while connections.try_join_next().is_some() {}
 
-            let permit = match admission {
+            let permit = match accepted {
                 Admission::Serve(permit) => permit,
                 Admission::Busy(permit) => {
                     connections.spawn(send_busy_reply(server, permit));
@@ -131,8 +135,7 @@ async fn accept_connections(
             };
 
             let state = Arc::clone(state);
-            let user_slots = Arc::clone(&user_slots);
-            let busy_replies = Arc::clone(&busy_replies);
+            let admission = Arc::clone(&admission);
             let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
             connections.spawn(async move {
                 // Serving this connection can commit a policy and record its terminal
@@ -140,75 +143,18 @@ async fn accept_connections(
                 // lease keeps the recorder from closing the queue under that event.
                 let _audit_lease = crate::audit::AuditLease::acquire();
 
-                let serve = async move {
-                    // Keep blocking unauthenticated work off the accept loop and retain
-                    // the connection slots until that work actually completes. The client
-                    // user is looked up first, so that the per-user limit applies before
-                    // the expensive identity capture.
-                    let lookup = spawn_bounded_capture(permit, move || {
-                        let user_sid = connected_pipe_client_user_sid(&server);
-                        (server, user_sid)
-                    });
-                    let (permit, server, user_sid) = match lookup.await {
-                        Ok((permit, (server, Ok(user_sid)))) => (permit, server, user_sid),
-                        Ok((_permit, (_server, Err(error)))) => {
-                            warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                            return;
-                        }
-                        Err(error) => {
-                            error!(
-                                error = format!("{error:#}"),
-                                "Named pipe client user lookup task failed"
-                            );
-                            return;
-                        }
-                    };
-
-                    let Some(user_slot) = user_slots.try_acquire(&user_sid) else {
-                        warn!(
-                            %user_sid,
-                            "Rejected named pipe client: too many concurrent connections for the user"
-                        );
-                        // Release the connection slot so the busy reply cannot hold it for other users.
-                        drop(permit);
-                        if let Ok(busy_permit) = Arc::clone(&busy_replies).try_acquire_owned() {
-                            send_busy_reply(server, busy_permit).await;
-                        }
-                        return;
-                    };
-
-                    let capture = spawn_bounded_capture((permit, user_slot), move || {
-                        let client = PipeClient::from_connected_pipe(&server);
-                        (server, client)
-                    });
-                    let (_slots, server, client) = match capture.await {
-                        Ok((slots, (server, Ok(client)))) => (slots, server, client),
-                        Ok((_slots, (_server, Err(error)))) => {
-                            warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                            return;
-                        }
-                        Err(error) => {
-                            error!(
-                                error = format!("{error:#}"),
-                                "Named pipe client identity capture task failed"
-                            );
-                            return;
-                        }
-                    };
-                    if *client.user_sid() != user_sid {
-                        warn!(
-                            %user_sid,
-                            captured_user_sid = %client.user_sid(),
-                            "Rejected named pipe client: user changed while its identity was captured"
-                        );
-                        return;
-                    }
-
-                    info!("Client connected to named pipe");
-                    let router = build_router_for_client(state, client);
-                    serve_connection(server, router).await;
-                    info!("Client disconnected from named pipe");
-                };
+                let serve = admission.serve(
+                    server,
+                    permit,
+                    PipeClient::from_connected_pipe,
+                    PipeClient::user_sid,
+                    |server, client| async move {
+                        info!("Client connected to named pipe");
+                        let router = build_router_for_client(state, client);
+                        serve_connection(server, router).await;
+                        info!("Client disconnected from named pipe");
+                    },
+                );
 
                 // Enforce a deadline so idle or slow clients cannot pin
                 // a connection slot indefinitely.
@@ -264,8 +210,8 @@ enum Admission {
 /// Clients over the connection limit are handed off for a busy reply while busy reply
 /// slots remain. Instance failures are retried with backoff instead of ending the loop.
 /// While a failed spare creation is backing off, the loop keeps listening and disconnects
-/// the clients that arrive in the meantime. Repeated connect failures are rate-limited in
-/// the log and slowed down with backoff.
+/// the clients that arrive in the meantime. Repeated connect failures and rejections are
+/// rate-limited in the log, and connect failures are slowed down with backoff.
 async fn accept_loop(
     pipe_name: &str,
     shutdown: &CancellationToken,
@@ -277,6 +223,8 @@ async fn accept_loop(
     let connection_permits = Arc::new(Semaphore::new(limits.max_connections));
     let busy_permits = limits.busy_replies;
     let mut connect_failures = ConnectFailures::default();
+    let mut busy_log = LogRateLimit::default();
+    let mut rejection_log = LogRateLimit::default();
 
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
     let mut server = loop {
@@ -359,11 +307,21 @@ async fn accept_loop(
             Ok(permit) => Admission::Serve(permit),
             Err(_) => match Arc::clone(&busy_permits).try_acquire_owned() {
                 Ok(permit) => {
-                    warn!("Replying busy to named pipe client: too many concurrent connections");
+                    if let Some(suppressed) = busy_log.record(std::time::Instant::now()) {
+                        warn!(
+                            suppressed,
+                            "Replying busy to named pipe client: too many concurrent connections"
+                        );
+                    }
                     Admission::Busy(permit)
                 }
                 Err(_) => {
-                    warn!("Rejected named pipe client: too many concurrent connections and busy replies");
+                    if let Some(suppressed) = rejection_log.record(std::time::Instant::now()) {
+                        warn!(
+                            suppressed,
+                            "Rejected named pipe client: too many concurrent connections and busy replies"
+                        );
+                    }
                     if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
                         return;
                     }
@@ -379,7 +337,12 @@ async fn accept_loop(
             spare.replenish(pipe_name, create_instance, &mut retry);
         }
         let Some(next) = spare.instance.take() else {
-            warn!("Rejected named pipe client: waiting to retry the spare named pipe instance");
+            if let Some(suppressed) = rejection_log.record(std::time::Instant::now()) {
+                warn!(
+                    suppressed,
+                    "Rejected named pipe client: waiting to retry the spare named pipe instance"
+                );
+            }
             drop(admission);
             if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
                 return;
@@ -438,8 +401,7 @@ struct ConnectFailureAction {
 /// Tracks consecutive connect failures to rate-limit their logs and slow the loop down.
 struct ConnectFailures {
     consecutive: u32,
-    suppressed: u64,
-    last_report: Option<std::time::Instant>,
+    log: LogRateLimit,
     delay: RetryDelay,
 }
 
@@ -447,8 +409,7 @@ impl Default for ConnectFailures {
     fn default() -> Self {
         Self {
             consecutive: 0,
-            suppressed: 0,
-            last_report: None,
+            log: LogRateLimit::default(),
             delay: RetryDelay::new(CONNECT_RETRY_INITIAL_DELAY, CONNECT_RETRY_MAX_DELAY),
         }
     }
@@ -457,18 +418,7 @@ impl Default for ConnectFailures {
 impl ConnectFailures {
     fn record(&mut self, now: std::time::Instant) -> ConnectFailureAction {
         self.consecutive = self.consecutive.saturating_add(1);
-
-        let report = if self
-            .last_report
-            .is_none_or(|last| now.saturating_duration_since(last) >= CONNECT_FAILURE_REPORT_INTERVAL)
-        {
-            self.last_report = Some(now);
-            Some(std::mem::take(&mut self.suppressed))
-        } else {
-            self.suppressed += 1;
-            None
-        };
-
+        let report = self.log.record(now);
         let delay = (self.consecutive > CONNECT_FAILURES_BEFORE_BACKOFF).then(|| self.delay.advance());
 
         ConnectFailureAction { report, delay }
@@ -481,8 +431,32 @@ impl ConnectFailures {
         }
         self.consecutive = 0;
         self.delay.reset();
-        let suppressed = std::mem::take(&mut self.suppressed);
+        let suppressed = std::mem::take(&mut self.log.suppressed);
         (suppressed > 0).then_some(suppressed)
+    }
+}
+
+/// Limits a repeated log entry to one per `REPEATED_LOG_REPORT_INTERVAL`, counting the suppressed ones.
+#[derive(Default)]
+struct LogRateLimit {
+    suppressed: u64,
+    last_report: Option<std::time::Instant>,
+}
+
+impl LogRateLimit {
+    /// Record an occurrence. Returns the number of occurrences suppressed since the last report
+    /// when this one must be logged.
+    fn record(&mut self, now: std::time::Instant) -> Option<u64> {
+        if self
+            .last_report
+            .is_none_or(|last| now.saturating_duration_since(last) >= REPEATED_LOG_REPORT_INTERVAL)
+        {
+            self.last_report = Some(now);
+            Some(std::mem::take(&mut self.suppressed))
+        } else {
+            self.suppressed += 1;
+            None
+        }
     }
 }
 
@@ -532,6 +506,106 @@ impl Drop for UserConnectionSlot {
                 counts.remove(&self.key);
             }
         }
+    }
+}
+
+/// Per-user admission of the clients that hold a connection slot.
+struct UserAdmission {
+    user_slots: Arc<UserConnectionSlots>,
+    /// Slots for busy replies, shared with the connection limit of the accept loop.
+    busy_replies: Arc<Semaphore>,
+    rejections: parking_lot::Mutex<LogRateLimit>,
+}
+
+impl UserAdmission {
+    fn new(max_per_user: usize, busy_replies: Arc<Semaphore>) -> Self {
+        Self {
+            user_slots: Arc::new(UserConnectionSlots::new(max_per_user)),
+            busy_replies,
+            rejections: parking_lot::Mutex::new(LogRateLimit::default()),
+        }
+    }
+
+    /// Serve a connected client, or send it a busy reply when its user already holds all of their
+    /// connection slots.
+    ///
+    /// Blocking unauthenticated work stays off the async runtime and keeps the connection slots until
+    /// it actually completes. The client user is looked up first, so that the per-user limit applies
+    /// before the expensive identity `capture`, which must report the same user.
+    async fn serve<C, Fut>(
+        &self,
+        server: NamedPipeServer,
+        permit: OwnedSemaphorePermit,
+        capture: fn(&NamedPipeServer) -> anyhow::Result<C>,
+        client_user: fn(&C) -> &Sid,
+        serve: impl FnOnce(NamedPipeServer, C) -> Fut,
+    ) where
+        C: Send + 'static,
+        Fut: Future<Output = ()>,
+    {
+        let lookup = spawn_bounded_capture(permit, move || {
+            let user_sid = connected_pipe_client_user_sid(&server);
+            (server, user_sid)
+        });
+        let (permit, server, user_sid) = match lookup.await {
+            Ok((permit, (server, Ok(user_sid)))) => (permit, server, user_sid),
+            Ok((_permit, (_server, Err(error)))) => {
+                warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                return;
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Named pipe client user lookup task failed"
+                );
+                return;
+            }
+        };
+
+        let Some(user_slot) = self.user_slots.try_acquire(&user_sid) else {
+            if let Some(suppressed) = self.rejections.lock().record(std::time::Instant::now()) {
+                warn!(
+                    %user_sid,
+                    suppressed,
+                    "Replying busy to named pipe client: too many concurrent connections for the user"
+                );
+            }
+            // Release the connection slot so the busy reply cannot hold it for other users.
+            drop(permit);
+            if let Ok(busy_permit) = Arc::clone(&self.busy_replies).try_acquire_owned() {
+                send_busy_reply(server, busy_permit).await;
+            }
+            return;
+        };
+
+        let capture = spawn_bounded_capture((permit, user_slot), move || {
+            let client = capture(&server);
+            (server, client)
+        });
+        let (_slots, server, client) = match capture.await {
+            Ok((slots, (server, Ok(client)))) => (slots, server, client),
+            Ok((_slots, (_server, Err(error)))) => {
+                warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                return;
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Named pipe client identity capture task failed"
+                );
+                return;
+            }
+        };
+        if *client_user(&client) != user_sid {
+            warn!(
+                %user_sid,
+                captured_user_sid = %client_user(&client),
+                "Rejected named pipe client: user changed while its identity was captured"
+            );
+            return;
+        }
+
+        serve(server, client).await;
     }
 }
 
@@ -1107,7 +1181,7 @@ mod tests {
             ]
         );
 
-        let later = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        let later = failures.record(start + REPEATED_LOG_REPORT_INTERVAL);
         assert_eq!(
             later.report,
             Some(5),
@@ -1116,7 +1190,7 @@ mod tests {
 
         assert_eq!(failures.reset(), None, "everything was reported");
         assert_eq!(failures.reset(), None);
-        let after_reset = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        let after_reset = failures.record(start + REPEATED_LOG_REPORT_INTERVAL);
         assert_eq!(after_reset.delay, None, "backoff restarts after a success");
         assert_eq!(after_reset.report, None, "the log stays rate-limited across a success");
         assert_eq!(
@@ -1139,6 +1213,135 @@ mod tests {
 
         drop(first);
         let _third = slots.try_acquire(&alice).expect("a released slot can be reused");
+    }
+
+    fn same_user(user_sid: &Sid) -> &Sid {
+        user_sid
+    }
+
+    /// Connect a client and admit it like the pipe server does, with the current user as the client user.
+    ///
+    /// A served client reports on `on_served`, then holds its connection until `release` grants a permit.
+    async fn connect_admitted(
+        pipe_name: &str,
+        admission: &Arc<UserAdmission>,
+        connection_permits: &Arc<Semaphore>,
+        on_served: tokio::sync::mpsc::UnboundedSender<()>,
+        release: Arc<Semaphore>,
+    ) -> (tokio::net::windows::named_pipe::NamedPipeClient, JoinHandle<()>) {
+        let server = create_owned_test_instance(pipe_name, false).expect("create pipe instance");
+        let client = open_client(pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+        let permit = Arc::clone(connection_permits)
+            .try_acquire_owned()
+            .expect("connection slot");
+
+        let admission = Arc::clone(admission);
+        let task = tokio::spawn(async move {
+            admission
+                .serve(
+                    server,
+                    permit,
+                    connected_pipe_client_user_sid,
+                    same_user,
+                    |server, _user_sid| async move {
+                        let _server = server;
+                        on_served.send(()).expect("the test holds the receiver");
+                        release.acquire().await.expect("release semaphore").forget();
+                    },
+                )
+                .await;
+        });
+
+        (client, task)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_admission_replies_busy_over_the_per_user_limit_and_reuses_released_slots() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        const MAX_PER_USER: usize = 2;
+        const MAX_CONNECTIONS: usize = 8;
+
+        let pipe_name = unique_pipe_name("admission");
+        let connection_permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let admission = Arc::new(UserAdmission::new(MAX_PER_USER, Arc::new(Semaphore::new(1))));
+        let (served_tx, mut served_rx) = tokio::sync::mpsc::unbounded_channel();
+        let release = Arc::new(Semaphore::new(0));
+        let next_served = async |served_rx: &mut tokio::sync::mpsc::UnboundedReceiver<()>| {
+            tokio::time::timeout(Duration::from_secs(10), served_rx.recv())
+                .await
+                .expect("the client is served")
+                .expect("a serving task reports");
+        };
+
+        let mut connections = Vec::new();
+        for _ in 0..MAX_PER_USER {
+            let (client, task) = connect_admitted(
+                &pipe_name,
+                &admission,
+                &connection_permits,
+                served_tx.clone(),
+                Arc::clone(&release),
+            )
+            .await;
+            next_served(&mut served_rx).await;
+            connections.push((client, task));
+        }
+
+        // The user already holds all of their slots, so the next client receives a busy reply.
+        let (mut busy_client, busy_task) = connect_admitted(
+            &pipe_name,
+            &admission,
+            &connection_permits,
+            served_tx.clone(),
+            Arc::clone(&release),
+        )
+        .await;
+        busy_client
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), busy_client.read_to_end(&mut response))
+            .await
+            .expect("the busy reply completes promptly")
+            .expect("read busy reply");
+        let response = String::from_utf8(response).expect("UTF-8 response");
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("\r\nretry-after: 1\r\n"),
+            "{response}"
+        );
+        tokio::time::timeout(Duration::from_secs(10), busy_task)
+            .await
+            .expect("the busy reply task ends")
+            .expect("the busy reply task does not panic");
+        assert!(served_rx.try_recv().is_err(), "an over-limit client is not served");
+        assert_eq!(
+            connection_permits.available_permits(),
+            MAX_CONNECTIONS - MAX_PER_USER,
+            "a busy reply does not keep its connection slot"
+        );
+
+        // Once a served connection ends, its slot serves the next client of the same user.
+        release.add_permits(1);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !connections.iter().any(|(_client, task)| task.is_finished()) {
+            assert!(Instant::now() < deadline, "a released connection ends");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let (_client, _task) = connect_admitted(
+            &pipe_name,
+            &admission,
+            &connection_permits,
+            served_tx.clone(),
+            Arc::clone(&release),
+        )
+        .await;
+        next_served(&mut served_rx).await;
+
+        release.add_permits(MAX_PER_USER);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
