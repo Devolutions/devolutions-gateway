@@ -1,5 +1,7 @@
 mod process;
 
+mod process_tree;
+
 mod powershell;
 
 use std::collections::HashMap;
@@ -12,14 +14,16 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::Request;
+use tokio_stream::{Stream, StreamExt as _};
 use tonic::metadata::MetadataValue;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
+use tonic::{Request, Streaming};
+use url::Url;
 use uuid::Uuid;
 
-use crate::config::{ConfHandle, PsuConf, dto};
+use crate::config::{ConfHandle, PsuConf, dto, redacted_url};
 use crate::psu_agent::powershell::{PowerShellWorker, app_token_secret_reference_name};
-use crate::psu_agent::process::{ProcessControl, ProcessRegistry};
+use crate::psu_agent::process::ProcessRegistry;
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
@@ -65,75 +69,128 @@ impl Task for PsuAgentTask {
     }
 }
 
+/// Timing parameters for the PSU gRPC connection and its reconnection policy.
+#[derive(Debug, Clone, Copy)]
+struct ConnectionSettings {
+    /// Upper bound for resolving a `$secret:` AppToken through PowerShell.
+    app_token_resolution_timeout: Duration,
+    /// Upper bound for establishing the transport (TCP, TLS, and HTTP/2 handshakes).
+    connect_timeout: Duration,
+    /// Upper bound for the server to accept the agent stream once the transport is established.
+    stream_start_timeout: Duration,
+    /// Interval between TCP keepalive probes and HTTP/2 PING frames.
+    keep_alive_interval: Duration,
+    /// Time to wait for an HTTP/2 PING acknowledgement before closing the connection.
+    keep_alive_timeout: Duration,
+    retry_initial_interval: Duration,
+    retry_max_interval: Duration,
+    /// A connection that stayed up at least this long resets the reconnect backoff.
+    stable_connection_threshold: Duration,
+}
+
+impl Default for ConnectionSettings {
+    fn default() -> Self {
+        Self {
+            app_token_resolution_timeout: Duration::from_secs(30),
+            connect_timeout: Duration::from_secs(15),
+            stream_start_timeout: Duration::from_secs(30),
+            keep_alive_interval: Duration::from_secs(30),
+            keep_alive_timeout: Duration::from_secs(20),
+            retry_initial_interval: Duration::from_secs(1),
+            retry_max_interval: Duration::from_secs(60),
+            stable_connection_threshold: Duration::from_secs(30),
+        }
+    }
+}
+
+/// An established agent stream.
+struct PsuConnection {
+    // Owned for the lifetime of the stream, matching the previous single-scope connection handling.
+    _client: AgentControlClient<Channel>,
+    outgoing_tx: mpsc::Sender<AgentMessage>,
+    response_stream: Streaming<protocol::ServerMessage>,
+}
+
 #[derive(Debug, Clone)]
 struct PsuAgent {
     conf: PsuConf,
-    server_url: String,
+    settings: ConnectionSettings,
+    /// The server URL without credentials or query, for logs.
+    display_url: String,
     agent_id: String,
     display_name: String,
     machine_name: String,
-    app_token: String,
     powershell_executable: String,
 }
 
 impl PsuAgent {
     fn new(conf: PsuConf) -> anyhow::Result<Self> {
-        let server_url = conf.server_url.to_string();
+        let display_url = redacted_url(&conf.server_url);
         let machine_name = machine_name();
         let agent_id = conf.agent_id.clone().unwrap_or_else(|| machine_name.clone());
         let display_name = conf.display_name.clone().unwrap_or_else(|| agent_id.clone());
-        let app_token = conf.app_token.clone();
         let powershell_executable = resolve_powershell_executable(&conf.powershell)
             .to_string_lossy()
             .into_owned();
 
         Ok(Self {
             conf,
-            server_url,
+            settings: ConnectionSettings::default(),
+            display_url,
             agent_id,
             display_name,
             machine_name,
-            app_token,
             powershell_executable,
         })
     }
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
-        const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
-        const RETRY_MAX_INTERVAL: Duration = Duration::from_secs(60);
         const RETRY_MULTIPLIER: f64 = 2.0;
-        const CONNECTED_THRESHOLD: Duration = Duration::from_secs(30);
+
+        if is_plaintext_to_remote_host(&self.conf.server_url) {
+            warn!(
+                url = %self.display_url,
+                "PSU gRPC agent uses plaintext HTTP to a non-loopback host; the AppToken and job traffic are not encrypted"
+            );
+        }
 
         let mut backoff = backoff::ExponentialBackoffBuilder::default()
-            .with_initial_interval(RETRY_INITIAL_INTERVAL)
-            .with_max_interval(RETRY_MAX_INTERVAL)
+            .with_initial_interval(self.settings.retry_initial_interval)
+            .with_max_interval(self.settings.retry_max_interval)
             .with_multiplier(RETRY_MULTIPLIER)
             .with_max_elapsed_time(None)
             .build();
-        let app_token = self.resolve_app_token().await?;
 
         loop {
-            let start = Instant::now();
-
-            match self.run_single_connection(&mut shutdown_signal, &app_token).await {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    warn!(url = %self.server_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
-                }
-            }
-
-            if start.elapsed() > CONNECTED_THRESHOLD {
-                backoff.reset();
-            }
-
-            let wait = match backoff.next_backoff() {
-                Some(wait) => wait,
-                None => {
-                    warn!("PSU gRPC agent reconnect backoff exhausted, resetting");
-                    backoff.reset();
-                    RETRY_INITIAL_INTERVAL
-                }
+            // The connect phase may block on secret resolution, the network, or the server,
+            // so it must not delay the service shutdown.
+            let connection = tokio::select! {
+                _ = shutdown_signal.wait() => return Ok(()),
+                connection = self.connect() => connection,
             };
+
+            match connection {
+                Ok(connection) => {
+                    let connected_at = Instant::now();
+
+                    match self.serve(connection, &mut shutdown_signal).await {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection lost")
+                        }
+                    }
+
+                    if connected_at.elapsed() >= self.settings.stable_connection_threshold {
+                        backoff.reset();
+                    }
+                }
+                Err(error) => {
+                    warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
+                }
+            }
+
+            // The backoff has no maximum elapsed time, so it always yields a value.
+            let wait = backoff.next_backoff().unwrap_or(self.settings.retry_max_interval);
 
             info!(?wait, "Reconnecting PSU gRPC agent after backoff");
 
@@ -144,12 +201,15 @@ impl PsuAgent {
         }
     }
 
-    async fn run_single_connection(&self, shutdown_signal: &mut ShutdownSignal, app_token: &str) -> anyhow::Result<()> {
-        let endpoint = psu_endpoint(&self.server_url)?;
-        let channel = endpoint
-            .connect()
+    async fn connect(&self) -> anyhow::Result<PsuConnection> {
+        // Resolved on every attempt so a secret vault that is not ready yet, or a rotated secret, is picked up.
+        let app_token = self.resolve_app_token().await?;
+
+        let endpoint = psu_endpoint(self.conf.server_url.as_str(), &self.settings)?;
+        let channel = tokio::time::timeout(self.settings.connect_timeout, endpoint.connect())
             .await
-            .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.server_url))?;
+            .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.display_url))?
+            .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.display_url))?;
         let mut client = AgentControlClient::new(channel);
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(256);
@@ -159,14 +219,40 @@ impl PsuAgent {
             .await
             .context("failed to queue PSU gRPC agent registration")?;
 
-        let mut response_stream = client
-            .connect(connect_request(ReceiverStream::new(outgoing_rx), Some(app_token))?)
+        let request = connect_request(ReceiverStream::new(outgoing_rx), Some(&app_token))?;
+        let response_stream = tokio::time::timeout(self.settings.stream_start_timeout, client.connect(request))
             .await
+            .context("timed out starting PSU gRPC agent stream")?
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
 
-        info!(agent_id = %self.agent_id, url = %self.server_url, "Connected PSU gRPC agent");
+        info!(agent_id = %self.agent_id, url = %self.display_url, "Connected PSU gRPC agent");
 
+        Ok(PsuConnection {
+            _client: client,
+            outgoing_tx,
+            response_stream,
+        })
+    }
+
+    async fn serve(&self, mut connection: PsuConnection, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+        self.serve_messages(
+            &mut connection.response_stream,
+            &connection.outgoing_tx,
+            shutdown_signal,
+        )
+        .await
+    }
+
+    async fn serve_messages<S>(
+        &self,
+        messages: &mut S,
+        outgoing_tx: &mpsc::Sender<AgentMessage>,
+        shutdown_signal: &mut ShutdownSignal,
+    ) -> anyhow::Result<()>
+    where
+        S: Stream<Item = Result<protocol::ServerMessage, tonic::Status>> + Unpin,
+    {
         let registry = ProcessRegistry::default();
         let mut process_tasks = JoinSet::new();
         let mut connection_id = String::new();
@@ -177,22 +263,35 @@ impl PsuAgent {
                     process_tasks.shutdown().await;
                     return Ok(());
                 }
-                message = response_stream.message() => {
-                    let Some(message) = message.context("failed to read PSU gRPC server message")? else {
+                message = messages.next() => {
+                    let Some(message) = message else {
                         bail!("PSU gRPC server closed the agent stream");
                     };
+                    let message = message.context("failed to read PSU gRPC server message")?;
 
                     if !message.connection_id.trim().is_empty() {
                         connection_id.clone_from(&message.connection_id);
                     }
 
-                    self.handle_server_message(
-                        message,
-                        &outgoing_tx,
-                        &registry,
-                        &mut process_tasks,
-                        &mut connection_id,
-                    ).await?;
+                    // Shutdown must not wait for message handling to complete.
+                    let handled = tokio::select! {
+                        _ = shutdown_signal.wait() => None,
+                        result = self.handle_server_message(
+                            message,
+                            outgoing_tx,
+                            &registry,
+                            &mut process_tasks,
+                            &mut connection_id,
+                        ) => Some(result),
+                    };
+
+                    match handled {
+                        Some(result) => result?,
+                        None => {
+                            process_tasks.shutdown().await;
+                            return Ok(());
+                        }
+                    }
                 }
                 Some(result) = process_tasks.join_next(), if !process_tasks.is_empty() => {
                     match result {
@@ -219,26 +318,32 @@ impl PsuAgent {
                 info!(connection_id = %accepted.connection_id, "PSU gRPC agent registration accepted");
             }
             Some(ServerPayload::StartProcess(start_process)) => {
-                let incoming_rx = registry.register_stream(&start_process.stream_id).await;
-                let (control_tx, control_rx) = mpsc::channel(8);
-                registry
-                    .register_process(
-                        start_process.correlation_id.clone(),
-                        ProcessControl { stop: control_tx },
-                    )
-                    .await;
-
                 let agent_id = self.agent_id.clone();
                 let connection_id = connection_id.clone();
-                let default_executable = self.powershell_executable.clone();
                 let outgoing_tx = outgoing_tx.clone();
+
+                let channels = match registry
+                    .register(&start_process.correlation_id, &start_process.stream_id)
+                    .await
+                {
+                    Ok(channels) => channels,
+                    Err(error) => {
+                        warn!(error = format!("{error:#}"), "Rejecting PSU gRPC process start");
+                        process_tasks.spawn(async move {
+                            process::report_rejected_start(&outgoing_tx, &agent_id, &connection_id, &error).await;
+                            Ok(())
+                        });
+                        return Ok(());
+                    }
+                };
+
+                let default_executable = self.powershell_executable.clone();
                 let registry = registry.clone();
 
                 process_tasks.spawn(async move {
                     process::run_process(
                         start_process,
-                        incoming_rx,
-                        control_rx,
+                        channels,
                         outgoing_tx,
                         registry,
                         agent_id,
@@ -262,14 +367,15 @@ impl PsuAgent {
     }
 
     async fn resolve_app_token(&self) -> anyhow::Result<String> {
-        let app_token = self.app_token.as_str();
+        let app_token = self.conf.app_token.as_str();
 
         // Avoid constructing a PowerShell worker unless the token is a secret reference.
         if app_token_secret_reference_name(app_token).is_none() {
             return Ok(app_token.to_owned());
         }
 
-        let worker = PowerShellWorker::new(self.conf.powershell.clone())
+        // A hung secret vault must not stall every reconnect attempt; the worker kills the PowerShell process on timeout.
+        let worker = PowerShellWorker::new(self.conf.powershell.clone(), self.settings.app_token_resolution_timeout)
             .context("failed to initialize PSU PowerShell worker for gRPC AppToken secret resolution")?;
 
         worker
@@ -314,9 +420,29 @@ impl PsuAgent {
     }
 }
 
-fn psu_endpoint(server_url: &str) -> Result<Endpoint, tonic::transport::Error> {
+fn psu_endpoint(server_url: &str, settings: &ConnectionSettings) -> Result<Endpoint, tonic::transport::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Endpoint::new(server_url.to_owned())
+
+    // HTTP/2 PINGs detect a silently dropped connection (for example, after a NAT or firewall idle timeout)
+    // even when no job is running, and make the pending stream read fail so the agent reconnects.
+    Ok(Endpoint::new(server_url.to_owned())?
+        .connect_timeout(settings.connect_timeout)
+        .tcp_keepalive(Some(settings.keep_alive_interval))
+        .http2_keep_alive_interval(settings.keep_alive_interval)
+        .keep_alive_timeout(settings.keep_alive_timeout)
+        .keep_alive_while_idle(true))
+}
+
+/// Returns whether the URL sends traffic unencrypted to a host other than the local machine.
+fn is_plaintext_to_remote_host(url: &Url) -> bool {
+    let is_loopback = match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
+
+    url.scheme() == "http" && !is_loopback
 }
 
 pub(crate) fn agent_message(agent_id: &str, connection_id: &str, payload: AgentPayload) -> AgentMessage {
@@ -418,6 +544,7 @@ async fn get_powershell_version(executable: &str) -> String {
             .arg("-NoProfile")
             .arg("-Command")
             .arg("$PSVersionTable.PSVersion.ToString()")
+            .kill_on_drop(true)
             .output(),
     )
     .await;
@@ -437,6 +564,7 @@ async fn get_powershell_version(executable: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use devolutions_gateway_task::ShutdownHandle;
     use tokio::io::AsyncReadExt as _;
     use tokio::net::TcpListener;
 
@@ -445,7 +573,7 @@ mod tests {
     async fn first_connection_byte(scheme: &str) -> u8 {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
         let url = format!("{scheme}://{}", listener.local_addr().expect("listener address"));
-        let endpoint = psu_endpoint(&url).expect("create endpoint");
+        let endpoint = psu_endpoint(&url, &ConnectionSettings::default()).expect("create endpoint");
         let connection = tokio::spawn(async move { endpoint.connect().await });
 
         let first_byte = tokio::time::timeout(Duration::from_secs(5), async {
@@ -503,20 +631,320 @@ mod tests {
 
     #[tokio::test]
     async fn literal_app_token_does_not_require_secret_resolution() {
-        let agent = PsuAgent::new(PsuConf {
-            server_url: "http://localhost:5000".parse().expect("server URL"),
+        let agent = test_agent("http://localhost:5000", "literal-token", ConnectionSettings::default());
+
+        let app_token = agent.resolve_app_token().await.expect("resolve AppToken");
+
+        assert_eq!(app_token, "literal-token");
+    }
+
+    fn test_agent(server_url: &str, app_token: &str, settings: ConnectionSettings) -> PsuAgent {
+        let mut agent = PsuAgent::new(PsuConf {
+            server_url: server_url.parse().expect("server URL"),
             agent_id: Some("agent-01".to_owned()),
             display_name: None,
-            app_token: "literal-token".to_owned(),
+            app_token: app_token.to_owned(),
             powershell: dto::PsuPowerShellConf {
                 executable_path: Some("missing-pwsh".into()),
                 ..dto::PsuPowerShellConf::default()
             },
         })
         .expect("create agent");
+        agent.settings = settings;
+        agent
+    }
 
-        let app_token = agent.resolve_app_token().await.expect("resolve AppToken");
+    /// Binds a TCP listener that accepts connections and never answers, like a peer behind a silently dropped route.
+    async fn unresponsive_server() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
+        let url = format!("http://{}", listener.local_addr().expect("listener address"));
+        let server = tokio::spawn(async move {
+            let mut connections = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                // Hold the stream open without ever reading or writing.
+                connections.push(stream);
+            }
+            drop(connections);
+        });
 
-        assert_eq!(app_token, "literal-token");
+        (url, server)
+    }
+
+    #[test]
+    fn plaintext_warning_only_targets_remote_http_hosts() {
+        for (url, expected) in [
+            ("http://psu.example.com", true),
+            ("http://192.0.2.10:5000", true),
+            ("http://localhost:5000", false),
+            ("http://LOCALHOST:5000", false),
+            ("http://127.0.0.1:5000", false),
+            ("http://[::1]:5000", false),
+            ("https://psu.example.com", false),
+        ] {
+            let url = url.parse::<Url>().expect("parse URL");
+            assert_eq!(is_plaintext_to_remote_host(&url), expected, "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn secret_resolution_failure_is_retried_until_shutdown() {
+        let agent = test_agent(
+            "http://127.0.0.1:9",
+            "$secret:AppToken",
+            ConnectionSettings {
+                retry_initial_interval: Duration::from_millis(10),
+                retry_max_interval: Duration::from_millis(10),
+                ..ConnectionSettings::default()
+            },
+        );
+
+        // The PowerShell executable does not exist, so every secret resolution attempt fails.
+        let error = agent.connect().await.err().expect("secret resolution should fail");
+        assert!(format!("{error:#}").contains("AppToken"), "unexpected error: {error:#}");
+
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let run = tokio::spawn(agent.run(shutdown_signal));
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !run.is_finished(),
+            "agent must keep retrying when the secret cannot be resolved"
+        );
+
+        shutdown_handle.signal();
+        tokio::time::timeout(Duration::from_secs(5), run)
+            .await
+            .expect("agent did not stop")
+            .expect("agent task panicked")
+            .expect("agent run failed");
+    }
+
+    #[tokio::test]
+    async fn hung_app_token_resolution_times_out_and_kills_powershell() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("still-running");
+
+        // Stands in for PowerShell blocked on a secret vault client: it ignores its arguments and starts a process
+        // that writes the marker only if it is still alive after the timeout.
+        let script = if cfg!(windows) {
+            let vault_client = temp_dir.path().join("vault-client.cmd");
+            let content = format!("@ping -n 4 127.0.0.1 >nul\r\n@echo done> \"{}\"\r\n", marker.display());
+            std::fs::write(&vault_client, content).expect("write script");
+
+            let script = temp_dir.path().join("hung-pwsh.cmd");
+            let content = format!(
+                "@start \"\" /B \"{}\"\r\n@ping -n 31 127.0.0.1 >nul\r\n",
+                vault_client.display()
+            );
+            std::fs::write(&script, content).expect("write script");
+            script
+        } else {
+            let source = temp_dir.path().join("hung-pwsh.txt");
+            let content = format!("#!/bin/sh\n(sleep 3; touch '{}') &\nsleep 30\n", marker.display());
+            std::fs::write(&source, content).expect("write script");
+
+            // Copied by another process: executing a file this process just wrote can fail with ETXTBSY while a
+            // process forked concurrently by another test still holds the write handle.
+            let script = temp_dir.path().join("hung-pwsh.sh");
+            let status = std::process::Command::new("install")
+                .arg("-m")
+                .arg("755")
+                .arg(&source)
+                .arg(&script)
+                .status()
+                .expect("run install");
+            assert!(status.success(), "install failed: {status}");
+            script
+        };
+
+        let mut agent = test_agent(
+            "http://127.0.0.1:9",
+            "$secret:AppToken",
+            ConnectionSettings {
+                app_token_resolution_timeout: Duration::from_millis(500),
+                ..ConnectionSettings::default()
+            },
+        );
+        agent.conf.powershell.executable_path =
+            Some(camino::Utf8PathBuf::from_path_buf(script).expect("UTF-8 script path"));
+
+        // Far below the 30 seconds the hung script runs for, with headroom for process creation under load.
+        let error = tokio::time::timeout(Duration::from_secs(10), agent.resolve_app_token())
+            .await
+            .expect("AppToken resolution was not bounded by its timeout")
+            .expect_err("hung AppToken resolution should fail");
+        assert!(
+            format!("{error:#}").contains("timed out"),
+            "unexpected error: {error:#}"
+        );
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(
+            !marker.exists(),
+            "a process started by the timed-out PowerShell worker survived"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_pending_connection() {
+        let (url, server) = unresponsive_server().await;
+        let agent = test_agent(&url, "literal-token", ConnectionSettings::default());
+
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let run = tokio::spawn(agent.run(shutdown_signal));
+
+        // Let the agent reach the server and wait for the stream to start.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!run.is_finished(), "agent must wait for the unresponsive server");
+
+        shutdown_handle.signal();
+        tokio::time::timeout(Duration::from_secs(2), run)
+            .await
+            .expect("shutdown did not interrupt the connect phase")
+            .expect("agent task panicked")
+            .expect("agent run failed");
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn http2_keep_alive_detects_unresponsive_server() {
+        let (url, server) = unresponsive_server().await;
+        let agent = test_agent(
+            &url,
+            "literal-token",
+            ConnectionSettings {
+                keep_alive_interval: Duration::from_millis(200),
+                keep_alive_timeout: Duration::from_millis(200),
+                ..ConnectionSettings::default()
+            },
+        );
+
+        // Without HTTP/2 keepalive, this would wait for the 30-second stream start timeout.
+        let result = tokio::time::timeout(Duration::from_secs(10), agent.connect())
+            .await
+            .expect("keepalive did not close the unresponsive connection");
+        let error = result.err().expect("connection to an unresponsive server should fail");
+        assert!(
+            format!("{error:#}").contains("keep-alive timed out"),
+            "connection should fail on keepalive: {error:#}"
+        );
+
+        server.abort();
+    }
+
+    fn server_message(payload: ServerPayload) -> protocol::ServerMessage {
+        protocol::ServerMessage {
+            request_id: String::new(),
+            connection_id: String::new(),
+            timestamp: None,
+            payload: Some(payload),
+        }
+    }
+
+    fn start_process(id: &str, executable: &str, arguments: &[&str]) -> protocol::ServerMessage {
+        server_message(ServerPayload::StartProcess(protocol::StartProcess {
+            correlation_id: id.to_owned(),
+            stream_id: id.to_owned(),
+            executable: executable.to_owned(),
+            arguments: arguments.iter().map(|&argument| argument.to_owned()).collect(),
+            working_directory: String::new(),
+            environment: HashMap::new(),
+            metadata: HashMap::new(),
+        }))
+    }
+
+    #[tokio::test]
+    async fn stalled_child_stdin_does_not_block_other_streams_or_shutdown() {
+        // The stalled child never reads stdin; the echo child copies stdin to stdout.
+        let (stalled, echo) = if cfg!(windows) {
+            (
+                start_process("stalled", "ping", &["-n", "60", "127.0.0.1"]),
+                start_process("echo", "findstr", &["^"]),
+            )
+        } else {
+            (
+                start_process("stalled", "sleep", &["60"]),
+                start_process("echo", "cat", &[]),
+            )
+        };
+
+        let agent = test_agent("http://127.0.0.1:9", "literal-token", ConnectionSettings::default());
+        let (server_tx, server_rx) = mpsc::channel::<Result<protocol::ServerMessage, tonic::Status>>(16);
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(1024);
+        let (shutdown_handle, mut shutdown_signal) = ShutdownHandle::new();
+
+        let serve = tokio::spawn(async move {
+            agent
+                .serve_messages(&mut ReceiverStream::new(server_rx), &outgoing_tx, &mut shutdown_signal)
+                .await
+        });
+
+        server_tx.send(Ok(stalled)).await.expect("send StartProcess");
+        server_tx.send(Ok(echo)).await.expect("send StartProcess");
+
+        // More than the stdin backlog limit arrives for a child process that never reads its stdin.
+        let flood = tokio::spawn({
+            let server_tx = server_tx.clone();
+            async move {
+                for sequence in 0..1100 {
+                    let frame = stream_data("stalled".to_owned(), sequence, vec![b'x'; 64 * 1024], false);
+                    if server_tx
+                        .send(Ok(server_message(ServerPayload::StreamData(frame))))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(10), flood)
+            .await
+            .expect("serve loop blocked on the stalled stream")
+            .expect("flood task panicked");
+
+        for (sequence, data, end_of_stream) in [(0, b"hello".to_vec(), false), (1, Vec::new(), true)] {
+            let frame = stream_data("echo".to_owned(), sequence, data, end_of_stream);
+            server_tx
+                .send(Ok(server_message(ServerPayload::StreamData(frame))))
+                .await
+                .expect("send StreamData");
+        }
+
+        let mut stalled_closed = None;
+        let mut echoed = false;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while stalled_closed.is_none() || !echoed {
+                let message = outgoing_rx.recv().await.expect("outgoing channel closed");
+                match message.payload {
+                    Some(AgentPayload::StreamClosed(closed)) if closed.stream_id == "stalled" => {
+                        stalled_closed = Some(closed);
+                    }
+                    Some(AgentPayload::StreamData(data)) if data.stream_id == "echo" && data.data == b"hello" => {
+                        echoed = true;
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("expected the stalled stream to be stopped and the echo stream to be served");
+
+        let stalled_closed = stalled_closed.expect("stalled stream closed");
+        assert!(stalled_closed.error);
+        assert!(
+            stalled_closed.reason.contains("stdin backlog limit exceeded"),
+            "unexpected reason: {}",
+            stalled_closed.reason
+        );
+
+        shutdown_handle.signal();
+        tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("shutdown did not stop the serve loop")
+            .expect("serve task panicked")
+            .expect("serve failed");
     }
 }

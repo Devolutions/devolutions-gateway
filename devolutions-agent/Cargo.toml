@@ -99,7 +99,12 @@ features = [
     "Win32_Security_Authorization",
     "Win32_System_ApplicationInstallationAndServicing",
     "Win32_System_RemoteDesktop",
+    "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp",
 ]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"
