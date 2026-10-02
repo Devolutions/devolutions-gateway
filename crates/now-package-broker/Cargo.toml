@@ -22,7 +22,7 @@ devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 hex = "0.4"
 hmac = "0.12"
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service"] }
 notify = { version = "7", default-features = false }
 http-body-util = "0.1"
 mime = "0.3"

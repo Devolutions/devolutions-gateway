@@ -10,7 +10,7 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
@@ -20,7 +20,7 @@ use windows::Win32::Security::Authorization::SET_ACCESS;
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA};
 
 use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::server::{BrokerState, build_busy_router, build_router_for_client, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -29,9 +29,32 @@ pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1"
 ///
 /// Connection setup performs unauthenticated work (client process identity lookups)
 /// before any signature gate, so a connection flood could otherwise trigger unbounded
-/// work and task spawning. While all slots are taken, further clients are accepted and
-/// immediately disconnected, so a server instance keeps listening on the pipe name.
+/// work and task spawning. While all slots are taken, further clients receive a busy
+/// reply, so a server instance keeps listening on the pipe name.
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+/// Maximum number of concurrently served connections per client user.
+///
+/// Keeps a single user from holding every connection slot.
+const MAX_CONCURRENT_CONNECTIONS_PER_USER: usize = 4;
+
+/// Maximum number of concurrent busy replies to clients over the connection limit.
+///
+/// Beyond this, further clients are disconnected without a reply.
+const MAX_CONCURRENT_BUSY_REPLIES: usize = 16;
+
+/// Deadline for sending a busy reply, from accept to response completion.
+const BUSY_REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Consecutive connect failures tolerated before the accept loop backs off.
+const CONNECT_FAILURES_BEFORE_BACKOFF: u32 = 3;
+
+/// Initial and maximum delays between connect attempts after repeated connect failures.
+const CONNECT_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
+const CONNECT_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Minimum interval between two connect failure log entries.
+const CONNECT_FAILURE_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Initial delay before retrying after a pipe instance could not be created or recycled.
 const INSTANCE_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
@@ -82,18 +105,40 @@ async fn accept_connections(
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
+    let user_slots = Arc::new(UserConnectionSlots::new(MAX_CONCURRENT_CONNECTIONS_PER_USER));
+
     accept_loop(
         &pipe_name,
         shutdown,
-        MAX_CONCURRENT_CONNECTIONS,
+        AcceptLimits {
+            max_connections: MAX_CONCURRENT_CONNECTIONS,
+            max_busy_replies: MAX_CONCURRENT_BUSY_REPLIES,
+        },
         &create_pipe_instance,
         RetryDelay::default(),
-        |server, permit| {
+        |server, admission| {
             // Reap the connections that already finished, so completed tasks do not accumulate here
             // for the lifetime of the process.
             while connections.try_join_next().is_some() {}
 
+            let permit = match admission {
+                Admission::Serve(permit) => permit,
+                Admission::Busy(permit) => {
+                    connections.spawn(async move {
+                        let _permit = permit;
+                        if tokio::time::timeout(BUSY_REPLY_DEADLINE, serve_connection(server, build_busy_router()))
+                            .await
+                            .is_err()
+                        {
+                            debug!("Closed named pipe busy reply: deadline exceeded");
+                        }
+                    });
+                    return;
+                }
+            };
+
             let state = Arc::clone(state);
+            let user_slots = Arc::clone(&user_slots);
             let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
             connections.spawn(async move {
                 // Serving this connection can commit a policy and record its terminal
@@ -123,6 +168,15 @@ async fn accept_connections(
                         }
                     };
 
+                    let Some(_user_slot) = user_slots.try_acquire(client.user_sid()) else {
+                        warn!(
+                            user_sid = %client.user_sid(),
+                            "Rejected named pipe client: too many concurrent connections for the user"
+                        );
+                        serve_connection(server, build_busy_router()).await;
+                        return;
+                    };
+
                     info!("Client connected to named pipe");
                     let router = build_router_for_client(state, client);
                     serve_connection(server, router).await;
@@ -144,23 +198,44 @@ async fn accept_connections(
     Ok(())
 }
 
+/// Concurrency limits applied by [`accept_loop`].
+#[derive(Clone, Copy)]
+struct AcceptLimits {
+    /// Connections served concurrently.
+    max_connections: usize,
+    /// Busy replies sent concurrently to clients over `max_connections`.
+    max_busy_replies: usize,
+}
+
+/// How a connected client handed off by [`accept_loop`] must be handled.
+enum Admission {
+    /// Serve the client, holding a connection slot.
+    Serve(OwnedSemaphorePermit),
+    /// Send the client a busy reply, holding a busy reply slot.
+    Busy(OwnedSemaphorePermit),
+}
+
 /// Accept clients on `pipe_name` until `shutdown` is cancelled, handing each one to `dispatch`.
 ///
 /// The pipe name always keeps a listening server instance owned by this loop:
 /// the next instance is created before a connected one is handed off, and a client
-/// that cannot be served is disconnected so that its instance listens again.
-/// Instance failures are retried with backoff instead of ending the loop.
+/// that cannot be handed off is disconnected so that its instance listens again.
+/// Clients over the connection limit are handed off for a busy reply while busy reply
+/// slots remain. Instance failures are retried with backoff instead of ending the loop.
 /// While a failed next-instance creation is backing off, the loop keeps listening and
-/// disconnects the clients that arrive in the meantime.
+/// disconnects the clients that arrive in the meantime. Repeated connect failures are
+/// rate-limited in the log and slowed down with backoff.
 async fn accept_loop(
     pipe_name: &str,
     shutdown: &CancellationToken,
-    max_connections: usize,
+    limits: AcceptLimits,
     create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
     mut retry: RetryDelay,
-    mut dispatch: impl FnMut(NamedPipeServer, OwnedSemaphorePermit),
+    mut dispatch: impl FnMut(NamedPipeServer, Admission),
 ) {
-    let connection_permits = Arc::new(Semaphore::new(max_connections));
+    let connection_permits = Arc::new(Semaphore::new(limits.max_connections));
+    let busy_permits = Arc::new(Semaphore::new(limits.max_busy_replies));
+    let mut connect_failures = ConnectFailures::default();
 
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
     let mut server = loop {
@@ -188,24 +263,54 @@ async fn accept_loop(
         };
 
         if let Err(error) = result {
-            error!(%error, "Failed to accept pipe connection");
+            let action = connect_failures.record(std::time::Instant::now());
+            match action.report {
+                Some(0) => error!(%error, "Failed to accept pipe connection"),
+                Some(suppressed) => error!(
+                    %error,
+                    suppressed,
+                    "Failed to accept pipe connection; similar failures were suppressed"
+                ),
+                None => {}
+            }
             if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
                 return;
+            }
+            if let Some(delay) = action.delay {
+                tokio::select! {
+                    () = tokio::time::sleep(delay) => {}
+                    () = shutdown.cancelled() => return,
+                }
             }
             continue;
         }
+        if let Some(suppressed) = connect_failures.reset() {
+            warn!(
+                suppressed,
+                "Named pipe connections are accepted again after repeated failures"
+            );
+        }
 
-        let Ok(permit) = Arc::clone(&connection_permits).try_acquire_owned() else {
-            warn!("Rejected named pipe client: too many concurrent connections");
-            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
-                return;
-            }
-            continue;
+        let admission = match Arc::clone(&connection_permits).try_acquire_owned() {
+            Ok(permit) => Admission::Serve(permit),
+            Err(_) => match Arc::clone(&busy_permits).try_acquire_owned() {
+                Ok(permit) => {
+                    warn!("Replying busy to named pipe client: too many concurrent connections");
+                    Admission::Busy(permit)
+                }
+                Err(_) => {
+                    warn!("Rejected named pipe client: too many concurrent connections and busy replies");
+                    if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                        return;
+                    }
+                    continue;
+                }
+            },
         };
 
         if next_instance_retry_at.is_some_and(|retry_at| tokio::time::Instant::now() < retry_at) {
             warn!("Rejected named pipe client: waiting to retry the next named pipe instance");
-            drop(permit);
+            drop(admission);
             if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
                 return;
             }
@@ -220,7 +325,7 @@ async fn accept_loop(
                     error = format!("{error:#}"),
                     "Failed to create the next named pipe instance; disconnecting the client"
                 );
-                drop(permit);
+                drop(admission);
                 // Keep listening on this instance while the retry delay elapses.
                 next_instance_retry_at = Some(tokio::time::Instant::now() + retry.advance());
                 if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
@@ -232,7 +337,116 @@ async fn accept_loop(
         retry.reset();
         next_instance_retry_at = None;
 
-        dispatch(std::mem::replace(&mut server, next), permit);
+        dispatch(std::mem::replace(&mut server, next), admission);
+    }
+}
+
+/// What the accept loop does after a connect failure.
+#[derive(Debug, PartialEq, Eq)]
+struct ConnectFailureAction {
+    /// Log the failure, with the number of failures suppressed since the last report.
+    report: Option<u64>,
+    /// Wait before listening again.
+    delay: Option<std::time::Duration>,
+}
+
+/// Tracks consecutive connect failures to rate-limit their logs and slow the loop down.
+struct ConnectFailures {
+    consecutive: u32,
+    suppressed: u64,
+    last_report: Option<std::time::Instant>,
+    delay: RetryDelay,
+}
+
+impl Default for ConnectFailures {
+    fn default() -> Self {
+        Self {
+            consecutive: 0,
+            suppressed: 0,
+            last_report: None,
+            delay: RetryDelay::new(CONNECT_RETRY_INITIAL_DELAY, CONNECT_RETRY_MAX_DELAY),
+        }
+    }
+}
+
+impl ConnectFailures {
+    fn record(&mut self, now: std::time::Instant) -> ConnectFailureAction {
+        self.consecutive = self.consecutive.saturating_add(1);
+
+        let report = if self
+            .last_report
+            .is_none_or(|last| now.saturating_duration_since(last) >= CONNECT_FAILURE_REPORT_INTERVAL)
+        {
+            self.last_report = Some(now);
+            Some(std::mem::take(&mut self.suppressed))
+        } else {
+            self.suppressed += 1;
+            None
+        };
+
+        let delay = (self.consecutive > CONNECT_FAILURES_BEFORE_BACKOFF).then(|| self.delay.advance());
+
+        ConnectFailureAction { report, delay }
+    }
+
+    /// Record a successful connect. Returns the number of unreported failures, if any.
+    fn reset(&mut self) -> Option<u64> {
+        if self.consecutive == 0 {
+            return None;
+        }
+        self.consecutive = 0;
+        self.delay.reset();
+        let suppressed = std::mem::take(&mut self.suppressed);
+        (suppressed > 0).then_some(suppressed)
+    }
+}
+
+/// Per-user count of concurrently served connections.
+struct UserConnectionSlots {
+    max_per_user: usize,
+    counts: parking_lot::Mutex<std::collections::HashMap<String, usize>>,
+}
+
+impl UserConnectionSlots {
+    fn new(max_per_user: usize) -> Self {
+        Self {
+            max_per_user,
+            counts: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Take a connection slot for `user_sid`, unless the user already holds all of theirs.
+    fn try_acquire(self: &Arc<Self>, user_sid: &Sid) -> Option<UserConnectionSlot> {
+        let key = user_sid.to_string();
+        let mut counts = self.counts.lock();
+        let count = counts.entry(key.clone()).or_insert(0);
+        if *count >= self.max_per_user {
+            return None;
+        }
+        *count += 1;
+
+        Some(UserConnectionSlot {
+            slots: Arc::clone(self),
+            key,
+        })
+    }
+}
+
+/// A connection slot held by one user, released on drop.
+struct UserConnectionSlot {
+    slots: Arc<UserConnectionSlots>,
+    key: String,
+}
+
+impl Drop for UserConnectionSlot {
+    fn drop(&mut self) {
+        let mut counts = self.slots.counts.lock();
+        if let Some(count) = counts.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.key);
+            }
+        }
     }
 }
 
@@ -524,7 +738,7 @@ mod tests {
         }
     }
 
-    type Dispatched = (NamedPipeServer, OwnedSemaphorePermit);
+    type Dispatched = (NamedPipeServer, Admission);
 
     /// Create an instance with the broker client ACE, plus full control for the current user
     /// so that a non-elevated test process can create additional instances like the service does.
@@ -542,25 +756,27 @@ mod tests {
         Ok(server)
     }
 
+    fn limits(max_connections: usize, max_busy_replies: usize) -> AcceptLimits {
+        AcceptLimits {
+            max_connections,
+            max_busy_replies,
+        }
+    }
+
     fn spawn_accept_loop(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
     ) -> (
         CancellationToken,
         tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
         JoinHandle<()>,
     ) {
-        spawn_accept_loop_with(
-            pipe_name,
-            max_connections,
-            create_owned_test_instance,
-            RetryDelay::default(),
-        )
+        spawn_accept_loop_with(pipe_name, limits, create_owned_test_instance, RetryDelay::default())
     }
 
     fn spawn_accept_loop_with(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
         create_instance: impl Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Send + Sync + 'static,
         retry: RetryDelay,
     ) -> (
@@ -577,11 +793,13 @@ mod tests {
                 accept_loop(
                     &pipe_name,
                     &shutdown,
-                    max_connections,
+                    limits,
                     &create_instance,
                     retry,
-                    move |server, permit| {
-                        dispatched_tx.send((server, permit)).expect("test holds the receiver");
+                    move |server, admission| {
+                        dispatched_tx
+                            .send((server, admission))
+                            .expect("test holds the receiver");
                     },
                 )
                 .await;
@@ -602,16 +820,23 @@ mod tests {
         use tokio::io::AsyncReadExt as _;
 
         let pipe_name = unique_pipe_name("listen");
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 2);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(2, 1));
 
         let _first_client = open_client_when_listening(&pipe_name).await;
         let first = next_dispatched(&mut dispatched).await;
+        assert!(matches!(first.1, Admission::Serve(_)));
 
         // The next instance exists before the connected one is handed off, so no wait is needed.
         let _second_client = open_client(&pipe_name).expect("a listening instance follows each handoff");
-        let _second = next_dispatched(&mut dispatched).await;
+        let second = next_dispatched(&mut dispatched).await;
+        assert!(matches!(second.1, Admission::Serve(_)));
 
-        // Over the limit, the client is accepted and disconnected, and the loop keeps listening.
+        // Over the connection limit, the client is handed off for a busy reply.
+        let _busy_client = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let busy = next_dispatched(&mut dispatched).await;
+        assert!(matches!(busy.1, Admission::Busy(_)));
+
+        // Over both limits, the client is accepted and disconnected, and the loop keeps listening.
         let mut rejected = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
         let mut buffer = [0u8; 1];
         let read = tokio::time::timeout(Duration::from_secs(10), rejected.read(&mut buffer))
@@ -644,7 +869,7 @@ mod tests {
         let next_instance_attempts = Arc::new(AtomicUsize::new(0));
         let (shutdown, mut dispatched, task) = spawn_accept_loop_with(
             &pipe_name,
-            4,
+            limits(4, 4),
             {
                 let next_instance_attempts = Arc::clone(&next_instance_attempts);
                 move |pipe_name, first_instance| {
@@ -695,6 +920,154 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_loop_survives_a_connect_and_close_storm() {
+        let pipe_name = unique_pipe_name("storm");
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(64, 0));
+
+        drop(open_client_when_listening(&pipe_name).await);
+        for _ in 0..50 {
+            if let Ok(client) = open_client(&pipe_name) {
+                drop(client);
+            }
+        }
+
+        // Some storm clients may have been handed off; a regular client is still served afterwards.
+        let _client = open_client_when_listening(&pipe_name).await;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let (server, _admission) = next_dispatched(&mut dispatched).await;
+            drop(server);
+            if dispatched.is_empty() {
+                break;
+            }
+        }
+        assert!(!task.is_finished(), "the accept loop keeps running");
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the accept loop stops on shutdown")
+            .expect("the accept loop does not panic");
+    }
+
+    #[test]
+    fn connect_failures_back_off_and_rate_limit_their_log() {
+        let mut failures = ConnectFailures::default();
+        let start = Instant::now();
+
+        let actions: Vec<_> = (0..6).map(|_| failures.record(start)).collect();
+        assert_eq!(actions[0].report, Some(0), "the first failure is logged");
+        assert!(
+            actions[1..].iter().all(|action| action.report.is_none()),
+            "repeats are suppressed"
+        );
+        let delays: Vec<_> = actions.iter().map(|action| action.delay).collect();
+        assert_eq!(
+            delays,
+            [
+                None,
+                None,
+                None,
+                Some(CONNECT_RETRY_INITIAL_DELAY),
+                Some(CONNECT_RETRY_INITIAL_DELAY * 2),
+                Some(CONNECT_RETRY_INITIAL_DELAY * 4),
+            ]
+        );
+
+        let later = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        assert_eq!(
+            later.report,
+            Some(5),
+            "a periodic report counts the suppressed failures"
+        );
+
+        assert_eq!(failures.reset(), None, "everything was reported");
+        assert_eq!(failures.reset(), None);
+        let after_reset = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        assert_eq!(after_reset.delay, None, "backoff restarts after a success");
+        assert_eq!(after_reset.report, None, "the log stays rate-limited across a success");
+        assert_eq!(
+            failures.reset(),
+            Some(1),
+            "unreported failures are summarized on recovery"
+        );
+    }
+
+    #[test]
+    fn user_connection_slots_are_capped_per_user() {
+        let slots = Arc::new(UserConnectionSlots::new(2));
+        let alice = Sid::from_well_known(Security::WinLocalSystemSid, None).expect("SYSTEM SID");
+        let bob = Sid::from_well_known(Security::WinBuiltinUsersSid, None).expect("Users SID");
+
+        let first = slots.try_acquire(&alice).expect("first slot");
+        let _second = slots.try_acquire(&alice).expect("second slot");
+        assert!(slots.try_acquire(&alice).is_none(), "the per-user cap is enforced");
+        let _other = slots.try_acquire(&bob).expect("other users are not affected");
+
+        drop(first);
+        let _third = slots.try_acquire(&alice).expect("a released slot can be reused");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn busy_reply_is_a_well_formed_service_unavailable_response() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let pipe_name = unique_pipe_name("busy");
+        let server = create_client_access_pipe(&pipe_name);
+        let mut client = open_client(&pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+        let serving = tokio::spawn(serve_connection(server, build_busy_router()));
+
+        client
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), client.read_to_end(&mut response))
+            .await
+            .expect("the busy reply completes promptly")
+            .expect("read busy reply");
+        let response = String::from_utf8(response).expect("UTF-8 response");
+
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("\r\nretry-after: 1\r\n"),
+            "{response}"
+        );
+        let body = response.split_once("\r\n\r\n").expect("response body").1;
+        let error: now_policy_api::ErrorResponse = serde_json::from_str(body).expect("JSON error response");
+        assert_eq!(error.code, now_policy_api::ErrorCode::BrokerPaused);
+
+        serving.await.expect("serving task");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_connections_are_closed_after_the_header_timeout() {
+        use tokio::io::AsyncReadExt as _;
+
+        let pipe_name = unique_pipe_name("idle");
+        let server = create_client_access_pipe(&pipe_name);
+        let mut client = open_client(&pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+
+        let started = Instant::now();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::server::serve_connection_with_header_timeout(
+                server,
+                build_busy_router(),
+                Duration::from_millis(200),
+            ),
+        )
+        .await
+        .expect("an idle connection is closed after the header timeout");
+        assert!(started.elapsed() >= Duration::from_millis(200));
+
+        let mut buffer = Vec::new();
+        let _ = client.read_to_end(&mut buffer).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accept_loop_retries_until_it_owns_the_first_instance() {
         let pipe_name = unique_pipe_name("retry");
         let squatter = ServerOptions::new()
@@ -702,7 +1075,7 @@ mod tests {
             .create(&pipe_name)
             .expect("create the competing first instance");
 
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 1);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(1, 0));
         tokio::time::sleep(INSTANCE_RETRY_INITIAL_DELAY * 3).await;
         assert!(!task.is_finished(), "a failed first instance must be retried");
         drop(squatter);

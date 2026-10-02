@@ -41,6 +41,8 @@ mod execution;
 mod responses;
 
 pub use connection::serve_connection;
+#[cfg(test)]
+pub(crate) use connection::serve_connection_with_header_timeout;
 use responses::{
     api_version, diagnostics, error_response, filter_manager_capabilities, new_operation_id, parse_rule_id,
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
@@ -109,6 +111,23 @@ struct EvaluatedRequest {
     decision: DecisionInfo,
     would_execute: bool,
     command: Vec<String>,
+}
+
+/// `Retry-After` value, in seconds, sent with busy replies.
+const BUSY_RETRY_AFTER_SECONDS: &str = "1";
+
+/// Build a router that answers every request with a busy error, for clients over a connection limit.
+pub(crate) fn build_busy_router() -> axum::Router {
+    axum::Router::new().fallback(|| async {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, BUSY_RETRY_AFTER_SECONDS)],
+            Json(error_response(
+                ErrorCode::BrokerPaused,
+                "package broker is busy; retry later",
+            )),
+        )
+    })
 }
 
 /// Build the axum router for a single authenticated pipe client.
