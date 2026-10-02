@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio::time::{Instant, MissedTickBehavior};
 
@@ -59,6 +59,31 @@ pub(super) enum StopRequest {
     StdinOverflow,
 }
 
+impl StopRequest {
+    fn severity(self) -> u8 {
+        match self {
+            Self::Graceful => 1,
+            Self::Kill | Self::StdinOverflow => 2,
+        }
+    }
+}
+
+/// The most severe stop requested for a process.
+///
+/// A watch channel only keeps the latest value, so stop requests can never fill it, and repeated requests that do
+/// not escalate do not wake the process up again.
+type StopSender = Arc<watch::Sender<Option<StopRequest>>>;
+
+fn request_stop(stop: &watch::Sender<Option<StopRequest>>, request: StopRequest) {
+    stop.send_if_modified(|current| {
+        let escalates = current.is_none_or(|current| request.severity() > current.severity());
+        if escalates {
+            *current = Some(request);
+        }
+        escalates
+    });
+}
+
 /// Why the agent killed a child process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KillReason {
@@ -68,13 +93,20 @@ enum KillReason {
     StdinStalled,
 }
 
+const INPUT_ACCEPTED: u8 = 0;
+const INPUT_OVERFLOWED: u8 = 1;
+const CHILD_EXITED: u8 = 2;
+
 /// Stdin backlog accounting shared by the registry, the stdin pump, and the stall watchdog.
 #[derive(Debug, Default)]
 struct StdinBacklog {
     pending_bytes: AtomicUsize,
     consumed_bytes: AtomicU64,
-    /// Set under the registry lock when input was dropped because the backlog exceeded its limit.
-    overflowed: AtomicBool,
+    /// Whether input was dropped before the child process exit was observed.
+    ///
+    /// Moves once from `INPUT_ACCEPTED` to either `INPUT_OVERFLOWED` or `CHILD_EXITED`, so input that arrives after
+    /// the exit cannot change the reported outcome.
+    input_state: AtomicU8,
     /// Set by the stdin pump before it closes stdin because the server ended the stream.
     end_of_stream: AtomicBool,
 }
@@ -89,6 +121,24 @@ impl StdinBacklog {
         self.pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
         self.consumed_bytes
             .fetch_add(u64::try_from(bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    /// Records dropped input, and returns whether it happened before the child process exit was observed.
+    fn record_overflow(&self) -> bool {
+        match self
+            .input_state
+            .compare_exchange(INPUT_ACCEPTED, INPUT_OVERFLOWED, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => true,
+            Err(state) => state == INPUT_OVERFLOWED,
+        }
+    }
+
+    /// Marks the child process exit as observed, and returns whether input was dropped before.
+    fn record_child_exit(&self) -> bool {
+        self.input_state
+            .compare_exchange(INPUT_ACCEPTED, CHILD_EXITED, Ordering::AcqRel, Ordering::Acquire)
+            .is_err_and(|state| state == INPUT_OVERFLOWED)
     }
 }
 
@@ -208,13 +258,13 @@ struct StreamEntry {
     registration: u64,
     stdin: mpsc::UnboundedSender<StreamData>,
     backlog: Arc<StdinBacklog>,
-    stop: mpsc::Sender<StopRequest>,
+    stop: StopSender,
 }
 
 #[derive(Debug)]
 struct ProcessEntry {
     registration: u64,
-    stop: mpsc::Sender<StopRequest>,
+    stop: StopSender,
 }
 
 /// Channels of a registered process, consumed by [`run_process`].
@@ -223,7 +273,7 @@ pub(super) struct ProcessChannels {
     registration: u64,
     stdin: mpsc::UnboundedReceiver<StreamData>,
     backlog: Arc<StdinBacklog>,
-    control: mpsc::Receiver<StopRequest>,
+    control: watch::Receiver<Option<StopRequest>>,
 }
 
 impl ProcessRegistry {
@@ -253,7 +303,8 @@ impl ProcessRegistry {
         inner.last_registration += 1;
         let registration = inner.last_registration;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
-        let (control_tx, control_rx) = mpsc::channel(8);
+        let (control_tx, control_rx) = watch::channel(None);
+        let control_tx = Arc::new(control_tx);
         let backlog = Arc::new(StdinBacklog::default());
 
         inner.streams.insert(
@@ -262,7 +313,7 @@ impl ProcessRegistry {
                 registration,
                 stdin: stdin_tx,
                 backlog: Arc::clone(&backlog),
-                stop: control_tx.clone(),
+                stop: Arc::clone(&control_tx),
             },
         );
         inner.processes.insert(
@@ -287,30 +338,7 @@ impl ProcessRegistry {
     /// every other stream and control message. A stream whose backlog exceeds the limit is failed instead.
     pub(super) async fn dispatch_stream_data(&self, stream_data: StreamData) {
         let mut inner = self.inner.lock().await;
-        let Some(entry) = inner.streams.get(&stream_data.stream_id) else {
-            return;
-        };
-        let stream_id = stream_data.stream_id.clone();
-        let end_of_stream = stream_data.end_of_stream;
-        let frame_bytes = frame_charge(&stream_data);
-
-        let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
-        let keep_stream = if pending_bytes.saturating_add(frame_bytes) > self.limits.max_buffered_bytes {
-            // Recorded under the registry lock, so `run_process` can tell whether input was dropped before it
-            // observed the child process exit.
-            entry.backlog.overflowed.store(true, Ordering::Relaxed);
-            let _ = entry.stop.try_send(StopRequest::StdinOverflow);
-            false
-        } else {
-            entry.backlog.pending_bytes.fetch_add(frame_bytes, Ordering::Relaxed);
-            entry.stdin.send(stream_data).is_ok() && !end_of_stream
-        };
-
-        // Close the stream when it is the last frame, when the receiver is gone, or when the backlog overflows, so
-        // the mapping is never leaked in the registry.
-        if !keep_stream {
-            inner.streams.remove(&stream_id);
-        }
+        dispatch_locked(&mut inner, self.limits, stream_data);
     }
 
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
@@ -319,7 +347,7 @@ impl ProcessRegistry {
             if kill_process {
                 inner.processes.remove(correlation_id).map(|entry| entry.stop)
             } else {
-                inner.processes.get(correlation_id).map(|entry| entry.stop.clone())
+                inner.processes.get(correlation_id).map(|entry| Arc::clone(&entry.stop))
             }
         };
 
@@ -329,10 +357,8 @@ impl ProcessRegistry {
             StopRequest::Graceful
         };
 
-        // Never wait here: a full queue means the process is already being stopped, and a graceful stop
-        // escalates to a kill on its own.
-        if let Some(Err(error)) = control.map(|control| control.try_send(request)) {
-            debug!(correlation_id, %error, "PSU gRPC stop request not queued");
+        if let Some(control) = control {
+            request_stop(&control, request);
         }
     }
 
@@ -368,6 +394,32 @@ impl ProcessRegistry {
         {
             inner.processes.remove(correlation_id);
         }
+    }
+}
+
+fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream_data: StreamData) {
+    let Some(entry) = inner.streams.get(&stream_data.stream_id) else {
+        return;
+    };
+    let stream_id = stream_data.stream_id.clone();
+    let end_of_stream = stream_data.end_of_stream;
+    let frame_bytes = frame_charge(&stream_data);
+
+    let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
+    let keep_stream = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes {
+        if entry.backlog.record_overflow() {
+            request_stop(&entry.stop, StopRequest::StdinOverflow);
+        }
+        false
+    } else {
+        entry.backlog.pending_bytes.fetch_add(frame_bytes, Ordering::Relaxed);
+        entry.stdin.send(stream_data).is_ok() && !end_of_stream
+    };
+
+    // Close the stream when it is the last frame, when the receiver is gone, or when the backlog overflows, so the
+    // mapping is never leaked in the registry.
+    if !keep_stream {
+        inner.streams.remove(&stream_id);
     }
 }
 
@@ -530,15 +582,13 @@ async fn run_process_inner(
     // Every branch returns promptly, so stop requests are handled while waiting for the child process to exit.
     let status = loop {
         tokio::select! {
-            biased;
-
-            stop_request = control_rx.recv(), if control_open => match stop_request {
-                Some(StopRequest::Kill) => {
+            stop_request = control_rx.changed(), if control_open => match stop_request.map(|()| *control_rx.borrow_and_update()) {
+                Ok(Some(StopRequest::Kill)) => {
                     info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
                     kill_reason = Some(KillReason::ServerRequest);
                     break kill_process_tree(&mut child, &mut process_tree).await?;
                 }
-                Some(StopRequest::StdinOverflow) => {
+                Ok(Some(StopRequest::StdinOverflow)) => {
                     warn!(
                         process_id,
                         correlation_id = %request.correlation_id,
@@ -548,7 +598,7 @@ async fn run_process_inner(
                     kill_reason = Some(KillReason::StdinOverflow);
                     break kill_process_tree(&mut child, &mut process_tree).await?;
                 }
-                Some(StopRequest::Graceful) => {
+                Ok(Some(StopRequest::Graceful)) => {
                     if !graceful_stop_requested {
                         info!(process_id, correlation_id = %request.correlation_id, "Gracefully stopping PSU gRPC child process by closing stdin");
                         graceful_stop_requested = true;
@@ -560,8 +610,9 @@ async fn run_process_inner(
                         exit_deadline.get_or_insert_with(|| Instant::now() + GRACEFUL_EXIT_TIMEOUT);
                     }
                 }
+                Ok(None) => {}
                 // All stop request senders are gone; stop polling the closed channel.
-                None => control_open = false,
+                Err(_) => control_open = false,
             },
             status = child.wait() => break status.context("failed to wait for PSU gRPC child process")?,
             _ = &mut stdin_task, if !stdin_task_completed => {
@@ -590,10 +641,9 @@ async fn run_process_inner(
     };
 
     // Input that arrives once the child process has exited could not be delivered anyway, so only an overflow
-    // recorded before this point counts. Closing the stream takes the registry lock that dispatch holds while
-    // recording an overflow, so the flag is final once the stream is closed.
+    // recorded before this point counts. This is decided atomically, before anything is awaited.
+    let stdin_overflowed = backlog.record_child_exit();
     registry.close_registered_stream(&request.stream_id, registration).await;
-    let stdin_overflowed = backlog.overflowed.load(Ordering::Relaxed);
     let stdin_closed_from_end_of_stream = backlog.end_of_stream.load(Ordering::Relaxed);
 
     // Only a child process that exited on its own leaves its background processes running.
@@ -1072,11 +1122,13 @@ mod tests {
             .expect("register");
 
         registry.stop_process("correlation-id", false).await;
-        assert_eq!(channels.control.recv().await, Some(StopRequest::Graceful));
+        channels.control.changed().await.expect("stop request");
+        assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::Graceful));
         assert!(registry.inner.lock().await.processes.contains_key("correlation-id"));
 
         registry.stop_process("correlation-id", true).await;
-        assert_eq!(channels.control.recv().await, Some(StopRequest::Kill));
+        channels.control.changed().await.expect("stop request");
+        assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::Kill));
         assert!(!registry.inner.lock().await.processes.contains_key("correlation-id"));
     }
 
@@ -1098,7 +1150,7 @@ mod tests {
         assert_eq!(channels.stdin.try_recv().expect("stdin frame").data, b"data");
 
         registry.stop_process("process", true).await;
-        assert_eq!(channels.control.try_recv().ok(), Some(StopRequest::Kill));
+        assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::Kill));
     }
 
     #[tokio::test]
@@ -1115,12 +1167,12 @@ mod tests {
         }
         dispatch(&registry, "healthy", 0, b"data".to_vec(), false).await;
 
-        assert_eq!(stalled.control.try_recv().ok(), Some(StopRequest::StdinOverflow));
-        assert!(stalled.backlog.overflowed.load(Ordering::Relaxed));
+        assert_eq!(*stalled.control.borrow_and_update(), Some(StopRequest::StdinOverflow));
+        assert!(stalled.backlog.input_state.load(Ordering::Relaxed) == INPUT_OVERFLOWED);
         assert!(!registry.inner.lock().await.streams.contains_key("stalled"));
 
         assert_eq!(healthy.stdin.try_recv().expect("healthy frame").data, b"data");
-        assert!(healthy.control.try_recv().is_err());
+        assert!(healthy.control.borrow().is_none());
         assert!(registry.inner.lock().await.streams.contains_key("healthy"));
     }
 
@@ -1138,7 +1190,7 @@ mod tests {
         dispatch(&registry, "job", 0, vec![b'x'; 2048], false).await;
 
         // Consume the notification to model a child process that exits before the stop request is read.
-        assert_eq!(channels.control.try_recv().ok(), Some(StopRequest::StdinOverflow));
+        assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::StdinOverflow));
 
         let (task, outgoing_rx) = spawn_with_channels(&registry, request, channels, 64);
         let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
@@ -1406,8 +1458,8 @@ mod tests {
             dispatch(&registry, "job", sequence, Vec::new(), false).await;
         }
 
-        assert_eq!(channels.control.try_recv().ok(), Some(StopRequest::StdinOverflow));
-        assert!(channels.backlog.overflowed.load(Ordering::Relaxed));
+        assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::StdinOverflow));
+        assert!(channels.backlog.input_state.load(Ordering::Relaxed) == INPUT_OVERFLOWED);
     }
 
     #[tokio::test]
@@ -1487,6 +1539,77 @@ mod tests {
         assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
         assert!(!outcome.completed.canceled);
     }
+    #[tokio::test]
+    async fn kill_is_not_lost_after_repeated_graceful_stops() {
+        let registry = ProcessRegistry::default();
+        let channels = registry.register("job", "job").await.expect("register");
+
+        for _ in 0..100 {
+            registry.stop_process("job", false).await;
+        }
+        registry.stop_process("job", true).await;
+
+        assert_eq!(*channels.control.borrow(), Some(StopRequest::Kill));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repeated_graceful_stops_do_not_delay_the_exit_deadline() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let registry = ProcessRegistry::default();
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        let spam = tokio::spawn({
+            let registry = registry.clone();
+            async move {
+                loop {
+                    registry.stop_process("job", false).await;
+                }
+            }
+        });
+
+        let outcome = collect_outcome(task, outgoing_rx, GRACEFUL_EXIT_TIMEOUT + Duration::from_secs(5)).await;
+        spam.abort();
+        assert!(outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn overflow_dispatched_while_the_exit_is_being_handled_is_ignored() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = write_script(temp_dir.path(), "exit", "@exit /b 0\n", "exit 0\n");
+        let registry = ProcessRegistry::new(StdinLimits {
+            max_buffered_bytes: 1024,
+            ..LIMITS_FOR_TESTS
+        });
+        let channels = registry.register("job", "job").await.expect("register");
+        let backlog = Arc::clone(&channels.backlog);
+
+        // Holding the registry lock models a dispatch in progress when the child process exits.
+        let mut inner = registry.inner.lock().await;
+        let (task, outgoing_rx) = spawn_with_channels(&registry, start_request("job", &script), channels, 64);
+
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while backlog.input_state.load(Ordering::Acquire) != CHILD_EXITED {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("child process exit was not observed while the registry was locked");
+
+        dispatch_locked(
+            &mut inner,
+            registry.limits,
+            stream_data("job".to_owned(), 0, vec![b'x'; 2048], false),
+        );
+        drop(inner);
+
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
+        assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
+        assert!(!outcome.completed.canceled);
+    }
+
     #[tokio::test]
     async fn run_process_cleans_registry_and_reports_spawn_failure() {
         let registry = ProcessRegistry::default();

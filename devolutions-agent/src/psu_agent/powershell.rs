@@ -390,8 +390,10 @@ impl PowerShellWorker {
 
         let output = match tokio::time::timeout(self.execution_timeout, child.wait_with_output()).await {
             Ok(output) => {
+                // On failure, the process tree guard is dropped armed and terminates the worker tree.
+                let output = output.context("failed to wait for PowerShell worker")?;
                 process_tree.release();
-                output.context("failed to wait for PowerShell worker")?
+                output
             }
             Err(_) => {
                 warn!(
