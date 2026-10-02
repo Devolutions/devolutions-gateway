@@ -10,17 +10,17 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use windows::Win32::Foundation::GENERIC_ALL;
 use windows::Win32::Security;
 use windows::Win32::Security::Authorization::SET_ACCESS;
-use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA};
 
 use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::server::{BrokerState, build_busy_router, build_router_for_client, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -29,9 +29,22 @@ pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1"
 ///
 /// Connection setup performs unauthenticated work (client process identity lookups)
 /// before any signature gate, so a connection flood could otherwise trigger unbounded
-/// work and task spawning. While all slots are taken, no pipe instance is listening, so
-/// further clients see the pipe as busy and can wait until a slot frees up.
+/// work and task spawning. While all slots are taken, further clients receive a busy
+/// reply, so a server instance keeps listening on the pipe name.
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+/// Maximum number of concurrently served connections per client user.
+///
+/// Keeps a single user from holding every connection slot.
+const MAX_CONCURRENT_CONNECTIONS_PER_USER: usize = 4;
+
+/// Maximum number of concurrent busy replies to clients over the connection limit.
+///
+/// Beyond this, further clients are disconnected without a reply.
+const MAX_CONCURRENT_BUSY_REPLIES: usize = 16;
+
+/// Deadline for sending a busy reply, from accept to response completion.
+const BUSY_REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Consecutive connect failures tolerated before the accept loop backs off.
 const CONNECT_FAILURES_BEFORE_BACKOFF: u32 = 3;
@@ -43,7 +56,7 @@ const CONNECT_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_s
 /// Minimum interval between two connect failure log entries.
 const CONNECT_FAILURE_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Initial delay before retrying after a pipe instance could not be created.
+/// Initial delay before retrying after a pipe instance could not be created or recycled.
 const INSTANCE_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Maximum delay between pipe instance retries.
@@ -92,18 +105,34 @@ async fn accept_connections(
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
+    let user_slots = Arc::new(UserConnectionSlots::new(MAX_CONCURRENT_CONNECTIONS_PER_USER));
+    let busy_replies = Arc::new(Semaphore::new(MAX_CONCURRENT_BUSY_REPLIES));
+
     accept_loop(
         &pipe_name,
         shutdown,
-        MAX_CONCURRENT_CONNECTIONS,
+        AcceptLimits {
+            max_connections: MAX_CONCURRENT_CONNECTIONS,
+            busy_replies: Arc::clone(&busy_replies),
+        },
         &create_pipe_instance,
         RetryDelay::default(),
-        |server, permit| {
+        |server, admission| {
             // Reap the connections that already finished, so completed tasks do not accumulate here
             // for the lifetime of the process.
             while connections.try_join_next().is_some() {}
 
+            let permit = match admission {
+                Admission::Serve(permit) => permit,
+                Admission::Busy(permit) => {
+                    connections.spawn(send_busy_reply(server, permit));
+                    return;
+                }
+            };
+
             let state = Arc::clone(state);
+            let user_slots = Arc::clone(&user_slots);
+            let busy_replies = Arc::clone(&busy_replies);
             let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
             connections.spawn(async move {
                 // Serving this connection can commit a policy and record its terminal
@@ -118,7 +147,7 @@ async fn accept_connections(
                         let client = PipeClient::from_connected_pipe(&server);
                         (server, client)
                     });
-                    let (_permit, server, client) = match capture.await {
+                    let (permit, server, client) = match capture.await {
                         Ok((permit, (server, Ok(client)))) => (permit, server, client),
                         Ok((_permit, (_server, Err(error)))) => {
                             warn!(error = format!("{error:#}"), "Rejected named pipe client");
@@ -132,6 +161,20 @@ async fn accept_connections(
                             return;
                         }
                     };
+
+                    let Some(_user_slot) = user_slots.try_acquire(client.user_sid()) else {
+                        warn!(
+                            user_sid = %client.user_sid(),
+                            "Rejected named pipe client: too many concurrent connections for the user"
+                        );
+                        // Release the connection slot so the busy reply cannot hold it for other users.
+                        drop(permit);
+                        if let Ok(busy_permit) = Arc::clone(&busy_replies).try_acquire_owned() {
+                            send_busy_reply(server, busy_permit).await;
+                        }
+                        return;
+                    };
+                    let _permit = permit;
 
                     info!("Client connected to named pipe");
                     let router = build_router_for_client(state, client);
@@ -154,56 +197,78 @@ async fn accept_connections(
     Ok(())
 }
 
+/// Concurrency limits applied by [`accept_loop`].
+struct AcceptLimits {
+    /// Connections served concurrently.
+    max_connections: usize,
+    /// Slots for busy replies to clients over a connection limit, shared with the per-user limit.
+    busy_replies: Arc<Semaphore>,
+}
+
+/// Answer a client over a connection limit with a busy reply, holding a busy reply slot.
+async fn send_busy_reply(server: NamedPipeServer, permit: OwnedSemaphorePermit) {
+    let _permit = permit;
+    if tokio::time::timeout(BUSY_REPLY_DEADLINE, serve_connection(server, build_busy_router()))
+        .await
+        .is_err()
+    {
+        debug!("Closed named pipe busy reply: deadline exceeded");
+    }
+}
+
+/// How a connected client handed off by [`accept_loop`] must be handled.
+enum Admission {
+    /// Serve the client, holding a connection slot.
+    Serve(OwnedSemaphorePermit),
+    /// Send the client a busy reply, holding a busy reply slot.
+    Busy(OwnedSemaphorePermit),
+}
+
 /// Accept clients on `pipe_name` until `shutdown` is cancelled, handing each one to `dispatch`.
 ///
-/// A pipe instance is only exposed while a connection slot is free, so clients arriving while
-/// all slots are taken see the pipe as busy and can wait for an instance to become available.
-/// Instance creation failures are retried with backoff instead of ending the loop, and repeated
-/// connect failures are rate-limited in the log and slowed down with backoff.
+/// The pipe name always keeps a listening server instance owned by this loop:
+/// the next instance is created before a connected one is handed off, and a client
+/// that cannot be handed off is disconnected so that its instance listens again.
+/// Clients over the connection limit are handed off for a busy reply while busy reply
+/// slots remain. Instance failures are retried with backoff instead of ending the loop.
+/// While a failed next-instance creation is backing off, the loop keeps listening and
+/// disconnects the clients that arrive in the meantime. Repeated connect failures are
+/// rate-limited in the log and slowed down with backoff.
 async fn accept_loop(
     pipe_name: &str,
     shutdown: &CancellationToken,
-    max_connections: usize,
+    limits: AcceptLimits,
     create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
     mut retry: RetryDelay,
-    mut dispatch: impl FnMut(NamedPipeServer, OwnedSemaphorePermit),
+    mut dispatch: impl FnMut(NamedPipeServer, Admission),
 ) {
-    let connection_permits = Arc::new(Semaphore::new(max_connections));
+    let connection_permits = Arc::new(Semaphore::new(limits.max_connections));
+    let busy_permits = limits.busy_replies;
     let mut connect_failures = ConnectFailures::default();
+
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
-    let mut first_instance = true;
-
-    loop {
-        // Wait for a free connection slot before exposing a new pipe instance.
-        let permit = tokio::select! {
-            permit = Arc::clone(&connection_permits).acquire_owned() => {
-                permit.expect("the semaphore is never closed")
-            }
-            () = shutdown.cancelled() => return,
-        };
-
-        let server = match create_instance(pipe_name, first_instance) {
-            Ok(server) => server,
+    let mut server = loop {
+        match create_instance(pipe_name, true) {
+            Ok(server) => break server,
             Err(error) => {
                 error!(
                     error = format!("{error:#}"),
                     %pipe_name,
-                    first_instance,
-                    "Failed to create a named pipe instance; retrying"
+                    "Failed to create the first named pipe instance; retrying"
                 );
-                drop(permit);
                 if !retry.wait(shutdown).await {
                     return;
                 }
-                continue;
             }
-        };
-        retry.reset();
-        first_instance = false;
+        }
+    };
+    retry.reset();
+    let mut next_instance_retry_at: Option<tokio::time::Instant> = None;
 
+    loop {
         let result = tokio::select! {
             result = server.connect() => result,
-            () = shutdown.cancelled() => return,
+            _ = shutdown.cancelled() => return,
         };
 
         if let Err(error) = result {
@@ -217,8 +282,9 @@ async fn accept_loop(
                 ),
                 None => {}
             }
-            drop(server);
-            drop(permit);
+            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                return;
+            }
             if let Some(delay) = action.delay {
                 tokio::select! {
                     () = tokio::time::sleep(delay) => {}
@@ -234,7 +300,53 @@ async fn accept_loop(
             );
         }
 
-        dispatch(server, permit);
+        let admission = match Arc::clone(&connection_permits).try_acquire_owned() {
+            Ok(permit) => Admission::Serve(permit),
+            Err(_) => match Arc::clone(&busy_permits).try_acquire_owned() {
+                Ok(permit) => {
+                    warn!("Replying busy to named pipe client: too many concurrent connections");
+                    Admission::Busy(permit)
+                }
+                Err(_) => {
+                    warn!("Rejected named pipe client: too many concurrent connections and busy replies");
+                    if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                        return;
+                    }
+                    continue;
+                }
+            },
+        };
+
+        if next_instance_retry_at.is_some_and(|retry_at| tokio::time::Instant::now() < retry_at) {
+            warn!("Rejected named pipe client: waiting to retry the next named pipe instance");
+            drop(admission);
+            if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                return;
+            }
+            continue;
+        }
+
+        // Create the next listening instance before handing off the connected one.
+        let next = match create_instance(pipe_name, false) {
+            Ok(next) => next,
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Failed to create the next named pipe instance; disconnecting the client"
+                );
+                drop(admission);
+                // Keep listening on this instance while the retry delay elapses.
+                next_instance_retry_at = Some(tokio::time::Instant::now() + retry.advance());
+                if !recycle_instance(pipe_name, &mut server, create_instance) && !retry.wait(shutdown).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        retry.reset();
+        next_instance_retry_at = None;
+
+        dispatch(std::mem::replace(&mut server, next), admission);
     }
 }
 
@@ -295,6 +407,84 @@ impl ConnectFailures {
         self.delay.reset();
         let suppressed = std::mem::take(&mut self.suppressed);
         (suppressed > 0).then_some(suppressed)
+    }
+}
+
+/// Per-user count of concurrently served connections.
+struct UserConnectionSlots {
+    max_per_user: usize,
+    counts: parking_lot::Mutex<std::collections::HashMap<String, usize>>,
+}
+
+impl UserConnectionSlots {
+    fn new(max_per_user: usize) -> Self {
+        Self {
+            max_per_user,
+            counts: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Take a connection slot for `user_sid`, unless the user already holds all of theirs.
+    fn try_acquire(self: &Arc<Self>, user_sid: &Sid) -> Option<UserConnectionSlot> {
+        let key = user_sid.to_string();
+        let mut counts = self.counts.lock();
+        let count = counts.entry(key.clone()).or_insert(0);
+        if *count >= self.max_per_user {
+            return None;
+        }
+        *count += 1;
+
+        Some(UserConnectionSlot {
+            slots: Arc::clone(self),
+            key,
+        })
+    }
+}
+
+/// A connection slot held by one user, released on drop.
+struct UserConnectionSlot {
+    slots: Arc<UserConnectionSlots>,
+    key: String,
+}
+
+impl Drop for UserConnectionSlot {
+    fn drop(&mut self) {
+        let mut counts = self.slots.counts.lock();
+        if let Some(count) = counts.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Make `server` listen again after a client that is not served.
+///
+/// Disconnects the client and reuses the instance. If that fails, the instance is replaced
+/// by a new one created before the old one closes. Returns `false` when neither worked.
+fn recycle_instance(
+    pipe_name: &str,
+    server: &mut NamedPipeServer,
+    create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+) -> bool {
+    let Err(error) = server.disconnect() else {
+        return true;
+    };
+
+    warn!(%error, "Failed to disconnect named pipe instance; replacing it");
+    match create_instance(pipe_name, false) {
+        Ok(next) => {
+            *server = next;
+            true
+        }
+        Err(error) => {
+            error!(
+                error = format!("{error:#}"),
+                "Failed to create a replacement named pipe instance"
+            );
+            false
+        }
     }
 }
 
@@ -409,13 +599,15 @@ fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result
 
 /// Access granted to `BUILTIN\Users` on the broker pipe.
 ///
-/// Existing clients open the pipe with `GENERIC_READ | GENERIC_WRITE`, so both generic rights are granted.
-const PIPE_CLIENT_ACCESS: u32 = FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0;
+/// Clients need to read, write data, and set the pipe read mode through `FILE_WRITE_ATTRIBUTES`.
+/// `FILE_GENERIC_WRITE` is deliberately not granted because it includes `FILE_APPEND_DATA`,
+/// which for named pipes is `FILE_CREATE_PIPE_INSTANCE`.
+const PIPE_CLIENT_ACCESS: u32 = FILE_GENERIC_READ.0 | FILE_WRITE_DATA.0 | FILE_WRITE_ATTRIBUTES.0;
 
 /// Build a security descriptor that grants:
 /// - SYSTEM: full control
 /// - Administrators: full control
-/// - BUILTIN\Users: read + write (allows interactive users to connect)
+/// - BUILTIN\Users: client read and write access, without the right to create pipe instances
 fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security::attributes::SecurityAttributes> {
     let users_sid = Sid::from_well_known(Security::WinBuiltinUsersSid, None).context("failed to create Users SID")?;
     let admins_sid = Sid::from_well_known(Security::WinBuiltinAdministratorsSid, None)
@@ -517,13 +709,13 @@ mod tests {
         .expect("create first pipe instance")
     }
 
-    /// Open a broker pipe client with `GENERIC_READ | FILE_WRITE_DATA`, as the Agent policy tester does.
+    /// Open a broker pipe client with the access the broker grants to standard users.
     fn open_client(pipe_name: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
         use std::os::windows::fs::OpenOptionsExt as _;
         use std::os::windows::io::IntoRawHandle as _;
 
         use windows::Win32::Foundation::GENERIC_READ;
-        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_WRITE_DATA, SECURITY_IDENTIFICATION};
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, SECURITY_IDENTIFICATION};
 
         let file = std::fs::OpenOptions::new()
             .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
@@ -555,7 +747,7 @@ mod tests {
         }
     }
 
-    type Dispatched = (NamedPipeServer, OwnedSemaphorePermit);
+    type Dispatched = (NamedPipeServer, Admission);
 
     /// Create an instance with the broker client ACE, plus full control for the current user
     /// so that a non-elevated test process can create additional instances like the service does.
@@ -573,25 +765,27 @@ mod tests {
         Ok(server)
     }
 
+    fn limits(max_connections: usize, max_busy_replies: usize) -> AcceptLimits {
+        AcceptLimits {
+            max_connections,
+            busy_replies: Arc::new(Semaphore::new(max_busy_replies)),
+        }
+    }
+
     fn spawn_accept_loop(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
     ) -> (
         CancellationToken,
         tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
         JoinHandle<()>,
     ) {
-        spawn_accept_loop_with(
-            pipe_name,
-            max_connections,
-            create_owned_test_instance,
-            RetryDelay::default(),
-        )
+        spawn_accept_loop_with(pipe_name, limits, create_owned_test_instance, RetryDelay::default())
     }
 
     fn spawn_accept_loop_with(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
         create_instance: impl Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Send + Sync + 'static,
         retry: RetryDelay,
     ) -> (
@@ -608,11 +802,13 @@ mod tests {
                 accept_loop(
                     &pipe_name,
                     &shutdown,
-                    max_connections,
+                    limits,
                     &create_instance,
                     retry,
-                    move |server, permit| {
-                        dispatched_tx.send((server, permit)).expect("test holds the receiver");
+                    move |server, admission| {
+                        dispatched_tx
+                            .send((server, admission))
+                            .expect("test holds the receiver");
                     },
                 )
                 .await;
@@ -629,46 +825,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn accept_loop_reports_busy_at_capacity_and_lets_waiting_clients_connect() {
-        use windows::Win32::Foundation::ERROR_PIPE_BUSY;
-        use windows::Win32::System::Pipes::WaitNamedPipeW;
-        use windows::core::PCWSTR;
+    async fn accept_loop_keeps_a_listening_instance_while_connections_are_held() {
+        use tokio::io::AsyncReadExt as _;
 
-        let pipe_name = unique_pipe_name("capacity");
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 2);
+        let pipe_name = unique_pipe_name("listen");
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(2, 1));
 
         let _first_client = open_client_when_listening(&pipe_name).await;
         let first = next_dispatched(&mut dispatched).await;
-        let _second_client = open_client_when_listening(&pipe_name).await;
-        let _second = next_dispatched(&mut dispatched).await;
+        assert!(matches!(first.1, Admission::Serve(_)));
 
-        // At capacity, no instance is listening, so clients see the pipe as busy.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let error = open_client(&pipe_name).expect_err("no instance listens while all slots are taken");
-        assert_eq!(error.raw_os_error(), Some(ERROR_PIPE_BUSY.0.cast_signed()));
-        assert!(dispatched.try_recv().is_err(), "no client is dispatched at capacity");
+        // The next instance exists before the connected one is handed off, so no wait is needed.
+        let _second_client = open_client(&pipe_name).expect("a listening instance follows each handoff");
+        let second = next_dispatched(&mut dispatched).await;
+        assert!(matches!(second.1, Admission::Serve(_)));
 
-        // A client waiting for an instance is released once a slot frees up.
-        let waiter = std::thread::spawn({
-            let pipe_name = widestring::U16CString::from_str(&pipe_name).expect("pipe name without NUL");
-            move || {
-                // SAFETY: `pipe_name` is a valid NUL-terminated UTF-16 string for the duration of the call.
-                unsafe { WaitNamedPipeW(PCWSTR(pipe_name.as_ptr()), 10_000) }.as_bool()
-            }
-        });
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Over the connection limit, the client is handed off for a busy reply.
+        let _busy_client = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let busy = next_dispatched(&mut dispatched).await;
+        assert!(matches!(busy.1, Admission::Busy(_)));
+
+        // Over both limits, the client is accepted and disconnected, and the loop keeps listening.
+        let mut rejected = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let mut buffer = [0u8; 1];
+        let read = tokio::time::timeout(Duration::from_secs(10), rejected.read(&mut buffer))
+            .await
+            .expect("an over-limit client is disconnected promptly");
+        assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
         assert!(
-            !waiter.is_finished(),
-            "the waiting client blocks while the pipe is busy"
+            dispatched.try_recv().is_err(),
+            "an over-limit client must not be dispatched"
         );
 
         drop(first);
-        assert!(
-            tokio::task::spawn_blocking(move || waiter.join().expect("waiter thread"))
-                .await
-                .expect("join waiter"),
-            "the waiting client sees an available instance"
-        );
         let _third_client = open_client_when_listening(&pipe_name).await;
         let _third = next_dispatched(&mut dispatched).await;
 
@@ -680,34 +869,57 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn accept_loop_retries_failed_instance_creation() {
+    async fn accept_loop_keeps_listening_while_next_instance_creation_backs_off() {
         use std::sync::atomic::AtomicUsize;
 
-        let pipe_name = unique_pipe_name("retry-next");
-        let failed_attempts = Arc::new(AtomicUsize::new(0));
+        use tokio::io::AsyncReadExt as _;
+
+        let pipe_name = unique_pipe_name("backoff");
+        let next_instance_attempts = Arc::new(AtomicUsize::new(0));
         let (shutdown, mut dispatched, task) = spawn_accept_loop_with(
             &pipe_name,
-            4,
+            limits(4, 4),
             {
-                let failed_attempts = Arc::clone(&failed_attempts);
+                let next_instance_attempts = Arc::clone(&next_instance_attempts);
                 move |pipe_name, first_instance| {
-                    if !first_instance && failed_attempts.fetch_add(1, Ordering::SeqCst) < 2 {
-                        anyhow::bail!("injected instance creation failure");
+                    if first_instance {
+                        create_owned_test_instance(pipe_name, true)
+                    } else {
+                        next_instance_attempts.fetch_add(1, Ordering::SeqCst);
+                        anyhow::bail!("injected next instance failure")
                     }
-                    create_owned_test_instance(pipe_name, first_instance)
                 }
             },
-            RetryDelay::new(Duration::from_millis(10), Duration::from_millis(10)),
+            // Long enough that every client below arrives during the backoff.
+            RetryDelay::new(Duration::from_secs(60), Duration::from_secs(60)),
         );
 
-        let _first_client = open_client_when_listening(&pipe_name).await;
-        let _first = next_dispatched(&mut dispatched).await;
+        for attempt in 0..3 {
+            // The instance must be listening again promptly, well before the retry delay ends.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut client = loop {
+                match open_client(&pipe_name) {
+                    Ok(client) => break client,
+                    Err(_) if Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(error) => panic!("no listening instance during backoff (attempt {attempt}): {error}"),
+                }
+            };
+            let mut buffer = [0u8; 1];
+            let read = tokio::time::timeout(Duration::from_secs(5), client.read(&mut buffer))
+                .await
+                .expect("the client is disconnected promptly");
+            assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
+        }
 
-        // The next instance fails twice, then the loop recovers instead of exiting.
-        let _second_client = open_client_when_listening(&pipe_name).await;
-        let _second = next_dispatched(&mut dispatched).await;
-        assert!(failed_attempts.load(Ordering::SeqCst) >= 3);
-        assert!(!task.is_finished(), "the accept loop keeps running");
+        assert_eq!(
+            next_instance_attempts.load(Ordering::SeqCst),
+            1,
+            "next instance creation is not retried before the delay elapses"
+        );
+        assert!(
+            dispatched.try_recv().is_err(),
+            "no client is dispatched without a next instance"
+        );
 
         shutdown.cancel();
         tokio::time::timeout(Duration::from_secs(10), task)
@@ -719,7 +931,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accept_loop_survives_a_connect_and_close_storm() {
         let pipe_name = unique_pipe_name("storm");
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 64);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(64, 0));
 
         drop(open_client_when_listening(&pipe_name).await);
         for _ in 0..50 {
@@ -732,7 +944,7 @@ mod tests {
         let _client = open_client_when_listening(&pipe_name).await;
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            let (server, _permit) = next_dispatched(&mut dispatched).await;
+            let (server, _admission) = next_dispatched(&mut dispatched).await;
             drop(server);
             if dispatched.is_empty() {
                 break;
@@ -790,6 +1002,54 @@ mod tests {
         );
     }
 
+    #[test]
+    fn user_connection_slots_are_capped_per_user() {
+        let slots = Arc::new(UserConnectionSlots::new(2));
+        let alice = Sid::from_well_known(Security::WinLocalSystemSid, None).expect("SYSTEM SID");
+        let bob = Sid::from_well_known(Security::WinBuiltinUsersSid, None).expect("Users SID");
+
+        let first = slots.try_acquire(&alice).expect("first slot");
+        let _second = slots.try_acquire(&alice).expect("second slot");
+        assert!(slots.try_acquire(&alice).is_none(), "the per-user cap is enforced");
+        let _other = slots.try_acquire(&bob).expect("other users are not affected");
+
+        drop(first);
+        let _third = slots.try_acquire(&alice).expect("a released slot can be reused");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn busy_reply_is_a_well_formed_service_unavailable_response() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let pipe_name = unique_pipe_name("busy");
+        let server = create_client_access_pipe(&pipe_name);
+        let mut client = open_client(&pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+        let serving = tokio::spawn(serve_connection(server, build_busy_router()));
+
+        client
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), client.read_to_end(&mut response))
+            .await
+            .expect("the busy reply completes promptly")
+            .expect("read busy reply");
+        let response = String::from_utf8(response).expect("UTF-8 response");
+
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("\r\nretry-after: 1\r\n"),
+            "{response}"
+        );
+        let body = response.split_once("\r\n\r\n").expect("response body").1;
+        let error: now_policy_api::ErrorResponse = serde_json::from_str(body).expect("JSON error response");
+        assert_eq!(error.code, now_policy_api::ErrorCode::BrokerPaused);
+
+        serving.await.expect("serving task");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn idle_connections_are_closed_after_the_header_timeout() {
         use tokio::io::AsyncReadExt as _;
@@ -804,7 +1064,7 @@ mod tests {
             Duration::from_secs(10),
             crate::server::serve_connection_with_header_timeout(
                 server,
-                axum::Router::new(),
+                build_busy_router(),
                 Duration::from_millis(200),
             ),
         )
@@ -824,7 +1084,7 @@ mod tests {
             .create(&pipe_name)
             .expect("create the competing first instance");
 
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 1);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(1, 0));
         tokio::time::sleep(INSTANCE_RETRY_INITIAL_DELAY * 3).await;
         assert!(!task.is_finished(), "a failed first instance must be retried");
         drop(squatter);
@@ -858,6 +1118,29 @@ mod tests {
         assert_eq!(retry.next, INSTANCE_RETRY_INITIAL_DELAY);
     }
 
+    #[test]
+    fn pipe_client_access_never_includes_pipe_instance_creation() {
+        use windows::Win32::Storage::FileSystem::{FILE_APPEND_DATA, FILE_CREATE_PIPE_INSTANCE, FILE_GENERIC_WRITE};
+
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_CREATE_PIPE_INSTANCE.0, 0);
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_APPEND_DATA.0, 0);
+        assert_ne!(PIPE_CLIENT_ACCESS & FILE_GENERIC_WRITE.0, FILE_GENERIC_WRITE.0);
+    }
+
+    #[tokio::test]
+    async fn client_access_cannot_create_additional_pipe_instances() {
+        let pipe_name = unique_pipe_name("instance");
+        let _server = create_client_access_pipe(&pipe_name);
+
+        let error = ServerOptions::new()
+            .create(&pipe_name)
+            .expect_err("client access must not allow creating another pipe instance");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
+    }
+
     #[tokio::test]
     async fn client_access_allows_read_and_write_data_clients() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -880,28 +1163,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_access_allows_generic_read_write_clients() {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    async fn client_access_rejects_generic_write_clients() {
         use tokio::net::windows::named_pipe::ClientOptions;
 
-        // The pipe grants only the client entry to the current user, so this holds for non-administrators.
         let pipe_name = unique_pipe_name("generic");
-        let mut server = create_client_access_pipe(&pipe_name);
+        let _server = create_client_access_pipe(&pipe_name);
 
-        let mut client = ClientOptions::new()
+        let error = ClientOptions::new()
             .open(&pipe_name)
-            .expect("open the pipe with GENERIC_READ | GENERIC_WRITE");
-        server.connect().await.expect("accept the client");
-
-        client.write_all(b"ping").await.expect("client write");
-        let mut request = [0u8; 4];
-        server.read_exact(&mut request).await.expect("server read");
-        assert_eq!(&request, b"ping");
-
-        server.write_all(b"pong").await.expect("server write");
-        let mut response = [0u8; 4];
-        client.read_exact(&mut response).await.expect("client read");
-        assert_eq!(&response, b"pong");
+            .expect_err("GENERIC_WRITE requests FILE_CREATE_PIPE_INSTANCE, which clients are not granted");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
