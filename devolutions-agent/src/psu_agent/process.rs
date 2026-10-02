@@ -145,11 +145,16 @@ impl StdinBacklog {
         self.total_pending_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    fn consume(&self, bytes: usize) {
-        self.pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
-        self.total_pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
+    /// Records stdin bytes written to the child process, for the stall watchdog.
+    fn record_progress(&self, bytes: usize) {
         self.consumed_bytes
             .fetch_add(u64::try_from(bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    /// Releases the memory charged for a frame once it is dropped.
+    fn release(&self, bytes: usize) {
+        self.pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
+        self.total_pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
     }
 
     /// Records dropped input, and returns whether it happened before the child process exit was observed.
@@ -692,8 +697,9 @@ async fn run_process_inner(
     registry.close_registered_stream(&request.stream_id, registration).await;
     let stdin_closed_from_end_of_stream = backlog.end_of_stream.load(Ordering::Relaxed);
 
-    // Only a child process that exited on its own leaves its background processes running.
-    if kill_reason.is_none() && !graceful_stop_requested {
+    // Only a child process that exited on its own, with all of its input delivered, leaves its background processes
+    // running.
+    if kill_reason.is_none() && !graceful_stop_requested && !stdin_overflowed {
         process_tree.release();
     } else {
         process_tree.terminate();
@@ -920,13 +926,19 @@ async fn pump_server_to_stdin(
 ) {
     while let Some(frame) = incoming_rx.recv().await {
         if frame.end_of_stream {
+            backlog.release(frame_charge(&frame));
             info!(process_id, "Received PSU gRPC stdin end-of-stream; closing child stdin");
             // Recorded before stdin is closed, so it is visible by the time the child process exits.
             backlog.end_of_stream.store(true, Ordering::Relaxed);
             break;
         }
 
-        if let Err(error) = write_stdin_frame(&mut stdin, &frame, &backlog).await {
+        let result = write_stdin_frame(&mut stdin, &frame, &backlog).await;
+        // The frame memory is retained until here, even when parts of it were already written.
+        backlog.release(frame_charge(&frame));
+        drop(frame);
+
+        if let Err(error) = result {
             warn!(process_id, %error, "Failed to write PSU gRPC frame to child stdin");
             break;
         }
@@ -944,7 +956,7 @@ async fn write_stdin_frame(stdin: &mut ChildStdin, frame: &StreamData, backlog: 
             if written == 0 {
                 return Err(std::io::ErrorKind::WriteZero.into());
             }
-            backlog.consume(written);
+            backlog.record_progress(written);
             chunk = &chunk[written..];
         }
     }
@@ -954,7 +966,8 @@ async fn write_stdin_frame(stdin: &mut ChildStdin, frame: &StreamData, backlog: 
     }
     stdin.flush().await?;
 
-    backlog.consume(frame_charge(frame) - frame.data.len());
+    // Writing an empty frame counts as progress too.
+    backlog.record_progress(frame_charge(frame) - frame.data.len());
 
     Ok(())
 }
@@ -1228,7 +1241,20 @@ mod tests {
     #[tokio::test]
     async fn stdin_overflow_before_exit_is_reported_when_the_child_exits_successfully_first() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let script = write_script(temp_dir.path(), "exit", "@exit /b 0\n", "exit 0\n");
+        let marker = temp_dir.path().join("background-survived");
+        let background = write_script(
+            temp_dir.path(),
+            "background",
+            &format!("@ping -n 4 127.0.0.1 >nul\n@echo done> \"{}\"\n", marker.display()),
+            &format!("sleep 3\ntouch '{}'\n", marker.display()),
+        );
+        // Starts a background process, then exits successfully right away.
+        let script = write_script(
+            temp_dir.path(),
+            "exit",
+            &format!("@start \"\" /B \"{}\"\n@exit /b 0\n", background.display()),
+            &format!("sh '{}' &\nexit 0\n", background.display()),
+        );
         let registry = ProcessRegistry::new(StdinLimits {
             max_buffered_bytes: 1024,
             ..LIMITS_FOR_TESTS
@@ -1251,6 +1277,42 @@ mod tests {
             outcome.stream_closed.reason
         );
         assert!(outcome.completed.canceled);
+
+        // A job that lost input is reported as canceled, so the processes it started are stopped too.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!marker.exists(), "a process started by a job that lost input survived");
+    }
+
+    #[tokio::test]
+    async fn partially_written_frame_stays_charged_until_dropped() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let registry = ProcessRegistry::default();
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        let frame = stream_data("job".to_owned(), 0, vec![b'x'; 4 * MIB], false);
+        let charge = frame_charge(&frame);
+        registry.dispatch_stream_data(frame).await;
+
+        // The child process never reads stdin, so the frame is only partly written once the pipe is full.
+        let backlog = Arc::clone(&registry.inner.lock().await.streams["job"].backlog);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while backlog.consumed_bytes.load(Ordering::Relaxed) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("no part of the frame was written");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(registry.total_pending_bytes.load(Ordering::Relaxed), charge);
+
+        registry.stop_process("job", true).await;
+        collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        drop(backlog);
+        assert_eq!(registry.total_pending_bytes.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
@@ -1614,7 +1676,7 @@ mod tests {
         registry.unregister("second", "second", registration).await;
         while first.stdin.try_recv().is_ok() {}
         let pending = first.backlog.pending_bytes.load(Ordering::Relaxed);
-        first.backlog.consume(pending);
+        first.backlog.release(pending);
         assert_eq!(registry.total_pending_bytes.load(Ordering::Relaxed), 0);
     }
 
