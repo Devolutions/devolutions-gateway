@@ -19,7 +19,8 @@ use crate::psu_agent::{agent_message, diagnostic, stream_closed, stream_data};
 
 const PWSH_STDIN_CLOSED_EXIT_CODE: i32 = 160;
 const GRACEFUL_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
-const STDIN_WRITE_CHUNK_SIZE: usize = 64 * 1024;
+// Matches the Windows pipe buffer, where a write completes only once the child process reads it.
+const STDIN_WRITE_CHUNK_SIZE: usize = 4 * 1024;
 const MIB: usize = 1024 * 1024;
 
 /// Limits on stdin data buffered for a child process.
@@ -74,6 +75,13 @@ struct StdinBacklog {
     consumed_bytes: AtomicU64,
     /// Set under the registry lock when input was dropped because the backlog exceeded its limit.
     overflowed: AtomicBool,
+    /// Set by the stdin pump before it closes stdin because the server ended the stream.
+    end_of_stream: AtomicBool,
+}
+
+/// Memory charged against the stdin backlog for a queued frame, so that empty frames are bounded too.
+fn frame_charge(frame: &StreamData) -> usize {
+    size_of::<StreamData>() + frame.stream_id.len() + frame.data.len()
 }
 
 impl StdinBacklog {
@@ -284,7 +292,7 @@ impl ProcessRegistry {
         };
         let stream_id = stream_data.stream_id.clone();
         let end_of_stream = stream_data.end_of_stream;
-        let frame_bytes = stream_data.data.len();
+        let frame_bytes = frame_charge(&stream_data);
 
         let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
         let keep_stream = if pending_bytes.saturating_add(frame_bytes) > self.limits.max_buffered_bytes {
@@ -463,7 +471,7 @@ async fn run_process_inner(
             return Err(error);
         }
     };
-    let mut process_tree = ProcessTree::attach(&child);
+    let mut process_tree = ProcessTree::attach(&mut child);
     let process_id_u32 = child.id().unwrap_or(0);
     let process_id = i32::try_from(process_id_u32).unwrap_or(i32::MAX);
 
@@ -513,7 +521,6 @@ async fn run_process_inner(
     let mut watchdog_interval = tokio::time::interval(watchdog.check_period());
     watchdog_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-    let mut stdin_closed_from_end_of_stream = false;
     let mut stdin_task_completed = false;
     let mut control_open = true;
     let mut graceful_stop_requested = false;
@@ -557,9 +564,8 @@ async fn run_process_inner(
                 None => control_open = false,
             },
             status = child.wait() => break status.context("failed to wait for PSU gRPC child process")?,
-            stdin_result = &mut stdin_task, if !stdin_task_completed => {
+            _ = &mut stdin_task, if !stdin_task_completed => {
                 stdin_task_completed = true;
-                stdin_closed_from_end_of_stream = stdin_result.unwrap_or(false);
                 info!(process_id, "Finished receiving PSU gRPC stdin data; waiting for graceful child process exit");
                 exit_deadline.get_or_insert_with(|| Instant::now() + GRACEFUL_EXIT_TIMEOUT);
             }
@@ -588,9 +594,13 @@ async fn run_process_inner(
     // recording an overflow, so the flag is final once the stream is closed.
     registry.close_registered_stream(&request.stream_id, registration).await;
     let stdin_overflowed = backlog.overflowed.load(Ordering::Relaxed);
+    let stdin_closed_from_end_of_stream = backlog.end_of_stream.load(Ordering::Relaxed);
 
-    if kill_reason.is_none() {
+    // Only a child process that exited on its own leaves its background processes running.
+    if kill_reason.is_none() && !graceful_stop_requested {
         process_tree.release();
+    } else {
+        process_tree.terminate();
     }
 
     if !stdin_task_completed {
@@ -810,38 +820,46 @@ async fn pump_server_to_stdin(
     mut stdin: ChildStdin,
     backlog: Arc<StdinBacklog>,
     process_id: i32,
-) -> bool {
-    let mut closed_from_end_of_stream = false;
-
+) {
     while let Some(frame) = incoming_rx.recv().await {
         if frame.end_of_stream {
             info!(process_id, "Received PSU gRPC stdin end-of-stream; closing child stdin");
-            closed_from_end_of_stream = true;
+            // Recorded before stdin is closed, so it is visible by the time the child process exits.
+            backlog.end_of_stream.store(true, Ordering::Relaxed);
             break;
         }
 
-        if let Err(error) = write_stdin_frame(&mut stdin, &frame.data, &backlog).await {
+        if let Err(error) = write_stdin_frame(&mut stdin, &frame, &backlog).await {
             warn!(process_id, %error, "Failed to write PSU gRPC frame to child stdin");
             break;
         }
     }
 
     let _ = stdin.shutdown().await;
-    closed_from_end_of_stream
 }
 
-async fn write_stdin_frame(stdin: &mut ChildStdin, data: &[u8], backlog: &StdinBacklog) -> std::io::Result<()> {
-    // Writing in chunks reports progress while the child process slowly reads a large frame.
-    for chunk in data.chunks(STDIN_WRITE_CHUNK_SIZE) {
-        stdin.write_all(chunk).await?;
-        backlog.consume(chunk.len());
+async fn write_stdin_frame(stdin: &mut ChildStdin, frame: &StreamData, backlog: &StdinBacklog) -> std::io::Result<()> {
+    // Every partial write counts as progress, so a child process that reads slowly is not considered stalled.
+    for chunk in frame.data.chunks(STDIN_WRITE_CHUNK_SIZE) {
+        let mut chunk = chunk;
+        while !chunk.is_empty() {
+            let written = stdin.write(chunk).await?;
+            if written == 0 {
+                return Err(std::io::ErrorKind::WriteZero.into());
+            }
+            backlog.consume(written);
+            chunk = &chunk[written..];
+        }
     }
 
-    if !ends_with_line_ending(data) {
+    if !ends_with_line_ending(&frame.data) {
         stdin.write_all(b"\n").await?;
     }
+    stdin.flush().await?;
 
-    stdin.flush().await
+    backlog.consume(frame_charge(frame) - frame.data.len());
+
+    Ok(())
 }
 
 async fn pump_stderr_diagnostics<R>(
@@ -1339,6 +1357,136 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn graceful_stop_terminates_processes_started_by_the_child() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("grandchild-survived");
+        let grandchild = write_script(
+            temp_dir.path(),
+            "grandchild",
+            &format!("@ping -n 4 127.0.0.1 >nul\n@echo done> \"{}\"\n", marker.display()),
+            &format!("sleep 3\ntouch '{}'\n", marker.display()),
+        );
+        // The parent exits on its own as soon as its stdin is closed.
+        let script = write_script(
+            temp_dir.path(),
+            "parent",
+            &format!("@start \"\" /B \"{}\"\n@findstr \"^\" >nul\n", grandchild.display()),
+            &format!("sh '{}' &\ncat >/dev/null\n", grandchild.display()),
+        );
+        let registry = ProcessRegistry::default();
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let stopped_at = Instant::now();
+        registry.stop_process("job", false).await;
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        let elapsed = stopped_at.elapsed();
+        assert!(outcome.completed.canceled);
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(
+            !marker.exists(),
+            "a process started by the gracefully stopped child process survived (exit code {}, {elapsed:?})",
+            outcome.completed.exit_code
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_frames_count_toward_the_stdin_backlog_limit() {
+        let registry = ProcessRegistry::new(StdinLimits {
+            max_buffered_bytes: 64 * 1024,
+            ..LIMITS_FOR_TESTS
+        });
+        let mut channels = registry.register("job", "job").await.expect("register");
+
+        for sequence in 0..10_000 {
+            dispatch(&registry, "job", sequence, Vec::new(), false).await;
+        }
+
+        assert_eq!(channels.control.try_recv().ok(), Some(StopRequest::StdinOverflow));
+        assert!(channels.backlog.overflowed.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn expected_pwsh_exit_after_stdin_end_of_stream_is_not_an_error() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        // Like `pwsh -s`, exits with code 160 once stdin is closed.
+        let script = write_script(
+            temp_dir.path(),
+            "server-mode",
+            "@findstr \"^\" >nul\n@exit /b 160\n",
+            "cat >/dev/null\nexit 160\n",
+        );
+        let registry = ProcessRegistry::default();
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+        dispatch(&registry, "job", 0, Vec::new(), true).await;
+
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
+        assert_eq!(outcome.completed.exit_code, PWSH_STDIN_CLOSED_EXIT_CODE);
+        assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
+        assert!(!outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn slowly_reading_child_is_not_killed() {
+        const FRAMES: usize = 2;
+        const LINES_PER_FRAME: usize = 64;
+
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        // Reads one 1 KiB line every 50 ms, so writing a 64 KiB frame into a full Unix pipe takes twice the stall
+        // timeout. On Windows, the pipe absorbs both frames, so the test only checks that slow reading is not
+        // mistaken for a stall. The
+        // reader handles a first line before reporting that it started, so loading the cmdlets it uses is not
+        // mistaken for a stall.
+        let script = write_script(
+            temp_dir.path(),
+            "slow-reader",
+            "@powershell -NoLogo -NoProfile -NonInteractive -Command \"$null = [Console]::In.ReadLine(); Start-Sleep -Milliseconds 1; [Console]::Out.WriteLine('started'); [Console]::Out.Flush(); while ($null -ne [Console]::In.ReadLine()) { Start-Sleep -Milliseconds 50 }\"\n",
+            "read -r line\necho started\nwhile IFS= read -r line; do sleep 0.05; done\n",
+        );
+        let limits = StdinLimits {
+            stall_timeout: Duration::from_millis(1500),
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        dispatch(&registry, "job", 0, b"warm-up".to_vec(), false).await;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let message = outgoing_rx.recv().await.expect("outgoing channel closed");
+                if matches!(message.payload, Some(AgentPayload::StreamData(data)) if data.data == b"started") {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("child process did not start");
+
+        for sequence in 1..=FRAMES {
+            let frame = (0..LINES_PER_FRAME)
+                .flat_map(|line| format!("{line:0>1023}\n").into_bytes())
+                .collect();
+            dispatch(
+                &registry,
+                "job",
+                u64::try_from(sequence).expect("sequence"),
+                frame,
+                false,
+            )
+            .await;
+        }
+        dispatch(&registry, "job", u64::MAX, Vec::new(), true).await;
+
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(60)).await;
+        assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
+        assert!(!outcome.completed.canceled);
+    }
     #[tokio::test]
     async fn run_process_cleans_registry_and_reports_spawn_failure() {
         let registry = ProcessRegistry::default();

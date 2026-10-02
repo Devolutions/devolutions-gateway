@@ -767,7 +767,8 @@ mod tests {
         agent.conf.powershell.executable_path =
             Some(camino::Utf8PathBuf::from_path_buf(script).expect("UTF-8 script path"));
 
-        let error = tokio::time::timeout(Duration::from_secs(2), agent.resolve_app_token())
+        // Far below the 30 seconds the hung script runs for, with headroom for process creation under load.
+        let error = tokio::time::timeout(Duration::from_secs(10), agent.resolve_app_token())
             .await
             .expect("AppToken resolution was not bounded by its timeout")
             .expect_err("hung AppToken resolution should fail");

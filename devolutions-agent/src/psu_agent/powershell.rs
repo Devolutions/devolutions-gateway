@@ -380,13 +380,13 @@ impl PowerShellWorker {
         command.kill_on_drop(true);
         ProcessTree::prepare(&mut command);
 
-        let child = command.spawn().with_context(|| {
+        let mut child = command.spawn().with_context(|| {
             format!(
                 "failed to start PowerShell worker using {}",
                 executable.to_string_lossy()
             )
         })?;
-        let mut process_tree = ProcessTree::attach(&child);
+        let mut process_tree = ProcessTree::attach(&mut child);
 
         let output = match tokio::time::timeout(self.execution_timeout, child.wait_with_output()).await {
             Ok(output) => {
