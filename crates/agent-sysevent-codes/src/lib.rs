@@ -122,6 +122,8 @@ pub const POLICY_CHANGE_FAILED: u32 = 8004;
 pub const POLICY_CHANGE_SUCCEEDED: u32 = 8005;
 pub const POLICY_EXTERNAL_CHANGE_APPLIED: u32 = 8010;
 pub const POLICY_EXTERNAL_CHANGE_REJECTED: u32 = 8011;
+/// (Warning): repeated write denials of one caller, counted instead of logged one by one.
+pub const POLICY_WRITE_DENIED_SUMMARY: u32 = 8090;
 
 pub fn policy_write_attempted(
     actor_sid: impl ToString,
@@ -153,6 +155,24 @@ pub fn policy_write_denied(
         .field("intent", intent)
         .field("path", path.display())
         .field("reason", reason)
+}
+
+/// Summarizes the write denials of one caller that were counted after its first logged denial.
+pub fn policy_write_denied_summary(
+    actor_sid: impl ToString,
+    intent: impl ToString,
+    reason: impl ToString,
+    suppressed: u64,
+    interval_s: u64,
+) -> Entry {
+    Entry::new("Policy management write denials summarized")
+        .event_code(POLICY_WRITE_DENIED_SUMMARY)
+        .severity(Severity::Warning)
+        .field("actor_sid", actor_sid)
+        .field("intent", intent)
+        .field("reason", reason)
+        .field("suppressed", suppressed)
+        .field("interval_s", interval_s)
 }
 
 #[expect(
@@ -256,4 +276,5 @@ pub static DECLARED_CODES: &[(&str, u32)] = &[
     ("POLICY_CHANGE_SUCCEEDED", POLICY_CHANGE_SUCCEEDED),
     ("POLICY_EXTERNAL_CHANGE_APPLIED", POLICY_EXTERNAL_CHANGE_APPLIED),
     ("POLICY_EXTERNAL_CHANGE_REJECTED", POLICY_EXTERNAL_CHANGE_REJECTED),
+    ("POLICY_WRITE_DENIED_SUMMARY", POLICY_WRITE_DENIED_SUMMARY),
 ];
