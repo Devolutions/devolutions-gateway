@@ -111,7 +111,10 @@ const CHILD_EXITED: u8 = 2;
 /// Stdin backlog accounting shared by the registry, the stdin pump, and the stall watchdog.
 #[derive(Debug)]
 struct StdinBacklog {
+    /// Memory charged for frames that are queued or being written, released once a frame is dropped.
     pending_bytes: AtomicUsize,
+    /// Bytes of queued frames not written to the child process yet, for the stall watchdog.
+    unwritten_bytes: AtomicUsize,
     /// Pending bytes across all streams of the registry.
     total_pending_bytes: Arc<AtomicUsize>,
     consumed_bytes: AtomicU64,
@@ -133,6 +136,7 @@ impl StdinBacklog {
     fn new(total_pending_bytes: Arc<AtomicUsize>) -> Self {
         Self {
             pending_bytes: AtomicUsize::new(0),
+            unwritten_bytes: AtomicUsize::new(0),
             total_pending_bytes,
             consumed_bytes: AtomicU64::new(0),
             input_state: AtomicU8::new(INPUT_ACCEPTED),
@@ -142,11 +146,19 @@ impl StdinBacklog {
 
     fn add_pending(&self, bytes: usize) {
         self.pending_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.unwritten_bytes.fetch_add(bytes, Ordering::Relaxed);
         self.total_pending_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Reverts [`add_pending`](Self::add_pending) for a frame that could not be queued.
+    fn cancel_pending(&self, bytes: usize) {
+        self.unwritten_bytes.fetch_sub(bytes, Ordering::Relaxed);
+        self.release(bytes);
     }
 
     /// Records stdin bytes written to the child process, for the stall watchdog.
     fn record_progress(&self, bytes: usize) {
+        self.unwritten_bytes.fetch_sub(bytes, Ordering::Relaxed);
         self.consumed_bytes
             .fetch_add(u64::try_from(bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
     }
@@ -155,6 +167,14 @@ impl StdinBacklog {
     fn release(&self, bytes: usize) {
         self.pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
         self.total_pending_bytes.fetch_sub(bytes, Ordering::Relaxed);
+    }
+
+    /// Releases the memory charged for frames dropped with the stdin queue.
+    ///
+    /// Must only be called once no frame can be queued or written anymore.
+    fn release_remaining(&self) {
+        let remaining = self.pending_bytes.swap(0, Ordering::Relaxed);
+        self.total_pending_bytes.fetch_sub(remaining, Ordering::Relaxed);
     }
 
     /// Records dropped input, and returns whether it happened before the child process exit was observed.
@@ -271,9 +291,9 @@ impl StallWatchdog {
 
         let output_held_back = self.output.take_observed();
 
-        let pending_bytes = self.backlog.pending_bytes.load(Ordering::Relaxed);
-        let backlog_full =
-            pending_bytes > 0 && pending_bytes + self.limits.pipe_allowance_bytes >= self.limits.stall_threshold_bytes;
+        let unwritten_bytes = self.backlog.unwritten_bytes.load(Ordering::Relaxed);
+        let backlog_full = unwritten_bytes > 0
+            && unwritten_bytes + self.limits.pipe_allowance_bytes >= self.limits.stall_threshold_bytes;
 
         if progressed || !backlog_full {
             self.stalled_for = Duration::ZERO;
@@ -299,10 +319,13 @@ struct ProcessRegistryInner {
     last_registration: u64,
 }
 
+/// Keeps the stream ID reserved until its process completes, so that its output cannot be mistaken for another
+/// process output.
 #[derive(Debug)]
 struct StreamEntry {
     registration: u64,
-    stdin: mpsc::UnboundedSender<StreamData>,
+    /// `None` once the input is closed.
+    stdin: Option<mpsc::UnboundedSender<StreamData>>,
     backlog: Arc<StdinBacklog>,
     stop: StopSender,
 }
@@ -358,7 +381,7 @@ impl ProcessRegistry {
             stream_id.to_owned(),
             StreamEntry {
                 registration,
-                stdin: stdin_tx,
+                stdin: Some(stdin_tx),
                 backlog: Arc::clone(&backlog),
                 stop: Arc::clone(&control_tx),
             },
@@ -389,14 +412,15 @@ impl ProcessRegistry {
     }
 
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
-        let control = {
-            let mut inner = self.inner.lock().await;
-            if kill_process {
-                inner.processes.remove(correlation_id).map(|entry| entry.stop)
-            } else {
-                inner.processes.get(correlation_id).map(|entry| Arc::clone(&entry.stop))
-            }
-        };
+        // The process stays registered until it completes, so its correlation ID cannot be reused before its
+        // ProcessCompleted message is sent.
+        let control = self
+            .inner
+            .lock()
+            .await
+            .processes
+            .get(correlation_id)
+            .map(|entry| Arc::clone(&entry.stop));
 
         let request = if kill_process {
             StopRequest::Kill
@@ -409,19 +433,23 @@ impl ProcessRegistry {
         }
     }
 
-    /// Closes the stream on server request; the child process sees the end of its stdin.
+    /// Closes the stream input on server request; the child process sees the end of its stdin.
     pub(super) async fn close_stream(&self, stream_id: &str) {
-        self.inner.lock().await.streams.remove(stream_id);
+        if let Some(entry) = self.inner.lock().await.streams.get_mut(stream_id) {
+            entry.stdin = None;
+        }
     }
 
-    async fn close_registered_stream(&self, stream_id: &str, registration: u64) {
-        let mut inner = self.inner.lock().await;
-        if inner
+    async fn close_registered_input(&self, stream_id: &str, registration: u64) {
+        if let Some(entry) = self
+            .inner
+            .lock()
+            .await
             .streams
-            .get(stream_id)
-            .is_some_and(|entry| entry.registration == registration)
+            .get_mut(stream_id)
+            .filter(|entry| entry.registration == registration)
         {
-            inner.streams.remove(stream_id);
+            entry.stdin = None;
         }
     }
 
@@ -445,16 +473,19 @@ impl ProcessRegistry {
 }
 
 fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream_data: StreamData) {
-    let Some(entry) = inner.streams.get(&stream_data.stream_id) else {
+    let Some(entry) = inner.streams.get_mut(&stream_data.stream_id) else {
         return;
     };
-    let stream_id = stream_data.stream_id.clone();
+    // Input received after the stream input was closed is dropped.
+    let Some(stdin) = &entry.stdin else {
+        return;
+    };
     let end_of_stream = stream_data.end_of_stream;
     let frame_bytes = frame_charge(&stream_data);
 
     let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
     let total_pending_bytes = entry.backlog.total_pending_bytes.load(Ordering::Relaxed);
-    let keep_stream = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes
+    let keep_input = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes
         || total_pending_bytes.saturating_add(frame_bytes) > limits.max_total_buffered_bytes
     {
         if entry.backlog.record_overflow() {
@@ -462,14 +493,19 @@ fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream
         }
         false
     } else {
+        // Charged before sending, so the stdin pump never releases a frame that is not charged yet.
         entry.backlog.add_pending(frame_bytes);
-        entry.stdin.send(stream_data).is_ok() && !end_of_stream
+        if stdin.send(stream_data).is_ok() {
+            !end_of_stream
+        } else {
+            entry.backlog.cancel_pending(frame_bytes);
+            false
+        }
     };
 
-    // Close the stream when it is the last frame, when the receiver is gone, or when the backlog overflows, so the
-    // mapping is never leaked in the registry.
-    if !keep_stream {
-        inner.streams.remove(&stream_id);
+    // Close the input after the last frame, when the stdin pump is gone, or when the backlog overflows.
+    if !keep_input {
+        entry.stdin = None;
     }
 }
 
@@ -694,7 +730,7 @@ async fn run_process_inner(
     // Input that arrives once the child process has exited could not be delivered anyway, so only an overflow
     // recorded before this point counts. This is decided atomically, before anything is awaited.
     let stdin_overflowed = backlog.record_child_exit();
-    registry.close_registered_stream(&request.stream_id, registration).await;
+    registry.close_registered_input(&request.stream_id, registration).await;
     let stdin_closed_from_end_of_stream = backlog.end_of_stream.load(Ordering::Relaxed);
 
     // Only a child process that exited on its own, with all of its input delivered, leaves its background processes
@@ -709,6 +745,10 @@ async fn run_process_inner(
         stdin_task.abort();
         let _ = stdin_task.await;
     }
+
+    // The input is closed and the stdin pump is gone, so frames still queued were dropped. Release their charge now
+    // rather than after output delivery, which can be held back by the server connection.
+    backlog.release_remaining();
 
     await_pump_task(stdout_task, process_id, "stdout").await;
     await_pump_task(stderr_task, process_id, "stderr").await;
@@ -1176,7 +1216,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graceful_stop_keeps_process_registered_for_later_kill() {
+    async fn stop_requests_keep_identifiers_reserved_until_the_process_completes() {
         let registry = ProcessRegistry::default();
         let mut channels = registry
             .register("correlation-id", "stream-id")
@@ -1191,7 +1231,18 @@ mod tests {
         registry.stop_process("correlation-id", true).await;
         channels.control.changed().await.expect("stop request");
         assert_eq!(*channels.control.borrow_and_update(), Some(StopRequest::Kill));
-        assert!(!registry.inner.lock().await.processes.contains_key("correlation-id"));
+        registry
+            .register("correlation-id", "other-stream-id")
+            .await
+            .expect_err("a killed process keeps its correlation ID until it completes");
+
+        registry
+            .unregister("correlation-id", "stream-id", channels.registration)
+            .await;
+        registry
+            .register("correlation-id", "stream-id")
+            .await
+            .expect("identifiers are released once the process completes");
     }
 
     #[tokio::test]
@@ -1231,11 +1282,11 @@ mod tests {
 
         assert_eq!(*stalled.control.borrow_and_update(), Some(StopRequest::StdinOverflow));
         assert!(stalled.backlog.input_state.load(Ordering::Relaxed) == INPUT_OVERFLOWED);
-        assert!(!registry.inner.lock().await.streams.contains_key("stalled"));
+        assert!(registry.inner.lock().await.streams["stalled"].stdin.is_none());
 
         assert_eq!(healthy.stdin.try_recv().expect("healthy frame").data, b"data");
         assert!(healthy.control.borrow().is_none());
-        assert!(registry.inner.lock().await.streams.contains_key("healthy"));
+        assert!(registry.inner.lock().await.streams["healthy"].stdin.is_some());
     }
 
     #[tokio::test]
@@ -1710,6 +1761,127 @@ mod tests {
             outcome.stream_closed.reason
         );
         assert!(outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn frame_rejected_by_a_closed_stdin_queue_is_not_charged() {
+        let registry = ProcessRegistry::default();
+        let channels = registry.register("job", "job").await.expect("register");
+        let backlog = Arc::clone(&channels.backlog);
+
+        // The stdin pump is gone.
+        drop(channels);
+        dispatch(&registry, "job", 0, vec![b'x'; 1024], false).await;
+
+        assert_eq!(registry.total_pending_bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(backlog.unwritten_bytes.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn queued_input_is_released_before_output_delivery() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let registry = ProcessRegistry::default();
+
+        // The outgoing queue fills up with the final messages and is never read, like a server that stopped reading.
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 2).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        for sequence in 0..64 {
+            dispatch(&registry, "job", sequence, vec![b'x'; 64 * 1024], false).await;
+        }
+        assert!(registry.total_pending_bytes.load(Ordering::Relaxed) > 0);
+
+        registry.stop_process("job", true).await;
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while registry.total_pending_bytes.load(Ordering::Relaxed) != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("queued input stayed charged while output delivery was blocked");
+
+        drop(outgoing_rx);
+        let _ = task.await;
+    }
+
+    #[tokio::test]
+    async fn stream_id_stays_reserved_until_the_process_completes() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        // The background process keeps stdout open, so output is still drained after the child process exits.
+        let script = write_script(
+            temp_dir.path(),
+            "exit",
+            "@start \"\" /B ping -n 4 127.0.0.1\n@exit /b 0\n",
+            "sleep 3 &\nexit 0\n",
+        );
+        let registry = ProcessRegistry::default();
+        let channels = registry.register("job", "job").await.expect("register");
+        let backlog = Arc::clone(&channels.backlog);
+
+        let (task, outgoing_rx) = spawn_with_channels(&registry, start_request("job", &script), channels, 64);
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while backlog.input_state.load(Ordering::Acquire) != CHILD_EXITED {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("child process exit was not observed");
+
+        registry
+            .register("other-job", "job")
+            .await
+            .expect_err("the stream ID is reserved while the output of the previous process is delivered");
+
+        collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
+        registry
+            .register("other-job", "job")
+            .await
+            .expect("the stream ID is released once the process completes");
+    }
+
+    #[tokio::test]
+    async fn partially_written_frame_counts_only_unwritten_bytes_toward_a_stall() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        // Reads 600 000 bytes, then stops reading while staying alive.
+        let script = write_script(
+            temp_dir.path(),
+            "partial-reader",
+            "@powershell -NoLogo -NoProfile -NonInteractive -Command \"$stdin = [Console]::OpenStandardInput(); [Console]::Out.WriteLine('started'); [Console]::Out.Flush(); $buffer = New-Object byte[] 600000; $read = 0; while ($read -lt 600000) { $count = $stdin.Read($buffer, $read, 600000 - $read); if ($count -le 0) { break }; $read += $count }; Start-Sleep -Seconds 30\"\n",
+            "echo started\nhead -c 600000 >/dev/null\nsleep 30\n",
+        );
+        let limits = StdinLimits {
+            stall_threshold_bytes: MIB,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let message = outgoing_rx.recv().await.expect("outgoing channel closed");
+                if matches!(message.payload, Some(AgentPayload::StreamData(data)) if data.data == b"started") {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("child process did not start");
+
+        // The frame is charged in full while it is retained, but only its unwritten part is below the threshold.
+        registry
+            .dispatch_stream_data(stream_data("job".to_owned(), 0, vec![b'x'; MIB], false))
+            .await;
+        tokio::time::sleep(limits.stall_timeout * 10).await;
+        assert!(
+            !task.is_finished(),
+            "a child process that consumed most of its input was killed"
+        );
+
+        registry.stop_process("job", true).await;
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        assert_eq!(outcome.stream_closed.reason, "child process canceled");
     }
 
     #[tokio::test]
