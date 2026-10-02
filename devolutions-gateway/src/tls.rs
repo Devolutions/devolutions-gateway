@@ -8,7 +8,50 @@ use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{self, pki_types};
 use x509_cert::der::Decode as _;
 
-static DEFAULT_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
+#[cfg(all(feature = "standard", feature = "fips"))]
+compile_error!("features `standard` and `fips` are mutually exclusive");
+
+#[cfg(not(any(feature = "standard", feature = "fips")))]
+compile_error!("either feature `standard` or feature `fips` must be enabled");
+
+fn selected_crypto_provider() -> rustls::crypto::CryptoProvider {
+    #[cfg(feature = "fips")]
+    {
+        rustls::crypto::default_fips_provider()
+    }
+
+    #[cfg(feature = "standard")]
+    {
+        rustls::crypto::ring::default_provider()
+    }
+}
+
+fn client_config_builder() -> rustls::ConfigBuilder<rustls::ClientConfig, rustls::WantsVerifier> {
+    rustls::ClientConfig::builder_with_provider(Arc::new(selected_crypto_provider()))
+        .with_safe_default_protocol_versions()
+        .expect("selected crypto provider must support the default TLS protocol versions")
+}
+
+fn server_config_builder() -> rustls::ConfigBuilder<rustls::ServerConfig, rustls::WantsVerifier> {
+    rustls::ServerConfig::builder_with_provider(Arc::new(selected_crypto_provider()))
+        .with_safe_default_protocol_versions()
+        .expect("selected crypto provider must support the default TLS protocol versions")
+}
+
+fn dangerous_client_config(verifier: Arc<dyn rustls::client::danger::ServerCertVerifier>) -> rustls::ClientConfig {
+    let mut config = client_config_builder()
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_no_client_auth();
+
+    // Disable TLS resumption because it’s not supported by some services such as CredSSP.
+    //
+    // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
+    //
+    // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
+    config.resumption = rustls::client::Resumption::disabled();
+    config
+}
 
 // rustls doc says:
 //
@@ -19,18 +62,7 @@ static DEFAULT_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = rustls::crypto::
 // We’ll reuse the same TLS client config for all proxy-based TLS connections.
 // (TlsConnector is just a wrapper around the config providing the `connect` method.)
 static DANGEROUS_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
-    let mut config = rustls::client::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
-        .with_no_client_auth();
-
-    // Disable TLS resumption because it’s not supported by some services such as CredSSP.
-    //
-    // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
-    //
-    // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
-    config.resumption = rustls::client::Resumption::disabled();
-
+    let config = dangerous_client_config(Arc::new(danger::NoCertificateVerification));
     tokio_rustls::TlsConnector::from(Arc::new(config))
 });
 
@@ -38,13 +70,7 @@ static NATIVE_ROOTS_VERIFIER: LazyLock<Arc<NativeRootsVerifier>> =
     LazyLock::new(|| Arc::new(NativeRootsVerifier::new()));
 
 static SAFE_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
-    let mut config = rustls::client::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(NATIVE_ROOTS_VERIFIER.clone())
-        .with_no_client_auth();
-
-    config.resumption = rustls::client::Resumption::disabled();
-
+    let config = dangerous_client_config(NATIVE_ROOTS_VERIFIER.clone());
     tokio_rustls::TlsConnector::from(Arc::new(config))
 });
 
@@ -109,13 +135,7 @@ where
 
                 let verifier = Arc::new(ThumbprintAnchoredVerifier::new(thumbprint));
 
-                let mut config = rustls::client::ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(verifier)
-                    .with_no_client_auth();
-
-                config.resumption = rustls::client::Resumption::disabled();
-
+                let config = dangerous_client_config(verifier);
                 tokio_rustls::TlsConnector::from(Arc::new(config))
             })
             .clone()
@@ -154,9 +174,11 @@ pub fn build_server_config(
     cert_source: CertificateSource,
     strict_checks: bool,
 ) -> anyhow::Result<rustls::ServerConfig> {
-    let builder = rustls::ServerConfig::builder().with_no_client_auth();
+    install_default_crypto_provider()?;
 
-    match cert_source {
+    let builder = server_config_builder().with_no_client_auth();
+
+    let config = match cert_source {
         CertificateSource::External {
             certificates,
             private_key,
@@ -186,7 +208,7 @@ pub fn build_server_config(
                 .context("failed to set server config cert")
         }
 
-        #[cfg(windows)]
+        #[cfg(all(windows, feature = "standard"))]
         CertificateSource::SystemStore {
             machine_hostname,
             cert_subject_name,
@@ -203,18 +225,38 @@ pub fn build_server_config(
             .context("create ServerCertResolver")?;
             Ok(builder.with_cert_resolver(Arc::new(resolver)))
         }
+        #[cfg(all(windows, feature = "fips"))]
+        CertificateSource::SystemStore { .. } => {
+            anyhow::bail!("system certificate store is not available in FIPS mode")
+        }
         #[cfg(not(windows))]
         CertificateSource::SystemStore { .. } => {
             anyhow::bail!("system certificate store not supported for this platform")
         }
-    }
+    }?;
+
+    anyhow::ensure!(
+        config.fips() == cfg!(feature = "fips"),
+        "TLS server config does not match the build profile"
+    );
+
+    Ok(config)
 }
 
-pub fn install_default_crypto_provider() {
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
-        let installed_provider = rustls::crypto::CryptoProvider::get_default();
-        debug!(?installed_provider, "default crypto provider is already installed");
+pub fn install_default_crypto_provider() -> anyhow::Result<()> {
+    let already_installed = selected_crypto_provider().install_default().is_err();
+    let installed_provider = rustls::crypto::CryptoProvider::get_default()
+        .context("default crypto provider installation failed without an installed provider")?;
+    anyhow::ensure!(
+        installed_provider.fips() == cfg!(feature = "fips"),
+        "installed rustls crypto provider is inconsistent with the selected build profile"
+    );
+
+    if already_installed {
+        debug!(?installed_provider, "Compatible crypto provider is already installed");
     }
+
+    Ok(())
 }
 
 /// Retrieves the TLS server public key from the given acceptor, with per-acceptor caching.
@@ -320,6 +362,7 @@ impl<S> GetPeerCerts for tokio_rustls::server::TlsStream<S> {
     }
 }
 
+#[cfg(feature = "standard")]
 pub(crate) fn extract_stream_peer_public_key(tls_stream: &impl GetPeerCerts) -> anyhow::Result<Vec<u8>> {
     let cert = tls_stream
         .get_peer_certificates()
@@ -329,6 +372,7 @@ pub(crate) fn extract_stream_peer_public_key(tls_stream: &impl GetPeerCerts) -> 
     extract_public_key(cert)
 }
 
+#[cfg(feature = "standard")]
 pub(crate) fn extract_public_key(cert: &pki_types::CertificateDer<'static>) -> anyhow::Result<Vec<u8>> {
     use x509_cert::der::Decode as _;
 
@@ -345,7 +389,7 @@ pub(crate) fn extract_public_key(cert: &pki_types::CertificateDer<'static>) -> a
     Ok(public_key)
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "standard"))]
 pub mod windows {
     use std::sync::Arc;
 
@@ -1004,13 +1048,16 @@ pub mod sanity {
     use tokio_rustls::rustls;
 
     macro_rules! check_cipher_suite {
-        ( $name:ident ) => {{
-            if !crate::tls::DEFAULT_CIPHER_SUITES.contains(&rustls::crypto::ring::cipher_suite::$name) {
+        ( $cipher_suites:expr; $name:ident ) => {{
+            if !$cipher_suites
+                .iter()
+                .any(|suite| suite.suite() == rustls::CipherSuite::$name)
+            {
                 anyhow::bail!(concat!(stringify!($name), " cipher suite is missing from default array"));
             }
         }};
-        ( $( $name:ident ),+ $(,)? ) => {{
-            $( check_cipher_suite!($name); )+
+        ( $cipher_suites:expr; $( $name:ident ),+ $(,)? ) => {{
+            $( check_cipher_suite!($cipher_suites; $name); )+
         }};
     }
 
@@ -1026,19 +1073,23 @@ pub mod sanity {
     }
 
     pub fn check_default_configuration() -> anyhow::Result<()> {
-        trace!("TLS cipher suites: {:?}", crate::tls::DEFAULT_CIPHER_SUITES);
+        let cipher_suites = crate::tls::selected_crypto_provider().cipher_suites;
+        trace!("TLS cipher suites: {:?}", cipher_suites);
         trace!("TLS protocol versions: {:?}", rustls::DEFAULT_VERSIONS);
 
         // Make sure we have a few TLS 1.2 cipher suites in our build.
-        // Compilation will fail if one of these is missing.
-        // Additionally, this function will returns an error if any one of these is not in the
-        // default cipher suites array.
         check_cipher_suite![
+            cipher_suites;
             TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
             TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-            TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
             TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
             TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        ];
+
+        #[cfg(feature = "standard")]
+        check_cipher_suite![
+            cipher_suites;
+            TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
             TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
         ];
 
@@ -1088,7 +1139,9 @@ pub mod danger {
 
         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
             vec![
+                #[cfg(feature = "standard")]
                 SignatureScheme::RSA_PKCS1_SHA1,
+                #[cfg(feature = "standard")]
                 SignatureScheme::ECDSA_SHA1_Legacy,
                 SignatureScheme::RSA_PKCS1_SHA256,
                 SignatureScheme::ECDSA_NISTP256_SHA256,
@@ -1099,7 +1152,9 @@ pub mod danger {
                 SignatureScheme::RSA_PSS_SHA256,
                 SignatureScheme::RSA_PSS_SHA384,
                 SignatureScheme::RSA_PSS_SHA512,
+                #[cfg(feature = "standard")]
                 SignatureScheme::ED25519,
+                #[cfg(feature = "standard")]
                 SignatureScheme::ED448,
             ]
         }
@@ -1164,9 +1219,16 @@ pub mod thumbprint {
 
     /// Compute SHA-256 thumbprint of certificate DER bytes.
     pub fn compute_sha256_thumbprint(cert_der: &[u8]) -> Sha256Thumbprint {
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(cert_der);
-        Sha256Thumbprint(hex::encode(hash))
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "fips")] {
+                let hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, cert_der);
+                Sha256Thumbprint(hex::encode(hash.as_ref()))
+            } else {
+                use sha2::{Digest as _, Sha256};
+
+                Sha256Thumbprint(hex::encode(Sha256::digest(cert_der)))
+            }
+        }
     }
 
     #[cfg(test)]

@@ -180,6 +180,7 @@ where
             }
         },
         flags: received_connection_request.0.flags,
+        correlation_info: received_connection_request.0.correlation_info,
         // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3
         //
         // The spec states that `PROTOCOL_SSL` "SHOULD" also be set when using `PROTOCOL_HYBRID`:

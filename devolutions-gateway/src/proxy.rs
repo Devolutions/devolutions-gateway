@@ -169,16 +169,26 @@ fn is_really_an_error(original_error: &io::Error) -> bool {
                     return true;
                 }
             }
-        } else if let Some(tungstenite_error) = source_error.downcast_ref::<tungstenite::Error>() {
-            match tungstenite_error {
-                tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => return false,
-                tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
-                    return false;
-                }
-                tungstenite::Error::Io(io_error) => dyn_error = Some(io_error),
-                _ => return true,
-            }
         } else {
+            #[cfg(feature = "standard")]
+            {
+                if let Some(tungstenite_error) = source_error.downcast_ref::<tungstenite::Error>() {
+                    match tungstenite_error {
+                        tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => return false,
+                        tungstenite::Error::Protocol(
+                            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+                        ) => {
+                            return false;
+                        }
+                        tungstenite::Error::Io(io_error) => {
+                            dyn_error = Some(io_error);
+                            continue;
+                        }
+                        _ => return true,
+                    }
+                }
+            }
+
             dyn_error = source_error.source();
         }
     }

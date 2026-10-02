@@ -1,0 +1,218 @@
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+# The reduced FIPS artifact must use aws-lc-fips-sys for cryptographic
+# operations. These packages provide alternate or non-validated
+# implementations, so the audit fails even when the corresponding code path is
+# disabled at runtime.
+[[bans.deny]]
+name = "ring"
+reason = "ring is not the validated cryptographic module selected for the FIPS artifact"
+
+[[bans.deny]]
+name = "aws-lc-sys"
+reason = "the non-FIPS AWS-LC bindings must not be linked into the FIPS artifact"
+
+[[bans.deny]]
+name = "openssl"
+reason = "OpenSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "openssl-sys"
+reason = "OpenSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "boring"
+reason = "BoringSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "boring-sys"
+reason = "BoringSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "mbedtls"
+reason = "Mbed TLS is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "mbedtls-sys"
+reason = "Mbed TLS is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "mbedtls-sys-auto"
+reason = "Mbed TLS is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "wolfssl"
+reason = "wolfSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "wolfssl-sys"
+reason = "wolfSSL is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "sodiumoxide"
+reason = "libsodium is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "libsodium-sys"
+reason = "libsodium is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "nettle"
+reason = "Nettle is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "nettle-sys"
+reason = "Nettle is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "botan"
+reason = "Botan is not an approved provider for this FIPS artifact"
+
+[[bans.deny]]
+name = "botan-sys"
+reason = "Botan is not an approved provider for this FIPS artifact"
+
+# RustCrypto implementations are not covered by the AWS-LC FIPS validation.
+[[bans.deny]]
+name = "aes"
+reason = "AES operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "aes-gcm"
+reason = "AES-GCM operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "aes-kw"
+reason = "AES key wrapping must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "argon2"
+reason = "Argon2 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "blake2"
+reason = "BLAKE2 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "blake3"
+reason = "BLAKE3 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "bcrypt-pbkdf"
+reason = "bcrypt-PBKDF is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "cbc"
+reason = "CBC mode operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "chacha20"
+reason = "ChaCha20 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "chacha20poly1305"
+reason = "ChaCha20-Poly1305 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "curve25519-dalek"
+reason = "Curve25519 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "ctr"
+reason = "CTR mode operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "des"
+reason = "DES and 3DES are outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "ecdsa"
+reason = "ECDSA operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "ed25519-dalek"
+reason = "Ed25519 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "ghash"
+reason = "GHASH operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "hkdf"
+reason = "HKDF operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "hmac"
+reason = "HMAC operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "md4"
+reason = "MD4 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "md-5"
+reason = "MD5 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "p256"
+reason = "P-256 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "p384"
+reason = "P-384 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "p521"
+reason = "P-521 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "pbkdf2"
+reason = "PBKDF2 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "poly1305"
+reason = "Poly1305 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "polyval"
+reason = "POLYVAL operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "rc2"
+reason = "RC2 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "rc4"
+reason = "RC4 is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "rsa"
+reason = "RSA operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "sha1"
+reason = "SHA-1 implementations must not be linked into the reduced FIPS artifact"
+
+[[bans.deny]]
+name = "sha2"
+reason = "SHA-2 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "sha3"
+reason = "SHA-3 operations must execute inside aws-lc-fips-sys"
+
+[[bans.deny]]
+name = "scrypt"
+reason = "scrypt is outside the approved reduced FIPS profile"
+
+[[bans.deny]]
+name = "x25519-dalek"
+reason = "X25519 is outside the approved reduced FIPS profile"

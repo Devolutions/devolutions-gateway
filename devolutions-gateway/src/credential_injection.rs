@@ -14,7 +14,11 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
+#[cfg(feature = "fips")]
+use aws_lc_rs::rand::{SecureRandom as _, SystemRandom};
+#[cfg(feature = "standard")]
 use chacha20poly1305::aead::OsRng;
+#[cfg(feature = "standard")]
 use chacha20poly1305::aead::rand_core::RngCore as _;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ironrdp_connector::sspi;
@@ -300,7 +304,10 @@ pub(crate) fn select_kerberos_for_target(kerberos_enabled: bool, target_username
     }
     sspi::Username::parse(target_username)
         .ok()
-        .is_some_and(|username| username.domain_name().is_some())
+        .is_some_and(|username| match username.parts() {
+            sspi::UsernameParts::UserPrincipalName(_) => true,
+            sspi::UsernameParts::DownLevelLogonName(parts) => parts.netbios_domain().is_some(),
+        })
 }
 
 pub(crate) struct CredentialInjectionKdcRequest {
@@ -574,7 +581,12 @@ fn synthetic_realm(jti: Uuid) -> String {
 
 fn random_32_bytes() -> Vec<u8> {
     let mut bytes = vec![0u8; 32];
+    #[cfg(feature = "standard")]
     OsRng.fill_bytes(&mut bytes);
+    #[cfg(feature = "fips")]
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .expect("AWS-LC random generation failed");
     bytes
 }
 

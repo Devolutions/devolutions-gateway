@@ -133,6 +133,7 @@ impl IntoResponse for HttpError {
 }
 
 /// Serves a static directory for a request whose sub-path was captured by a `{*path}` wildcard.
+#[cfg(feature = "standard")]
 pub(crate) async fn serve_dir<ReqBody>(
     mut request: axum::http::Request<ReqBody>,
     captured_path: Option<axum::extract::Path<String>>,

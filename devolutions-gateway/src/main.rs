@@ -2,6 +2,7 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-gateway library.
+#[cfg(feature = "standard")]
 use argon2 as _;
 use async_trait as _;
 use axum as _;
@@ -25,14 +26,16 @@ use job_queue as _;
 use job_queue_libsql as _;
 use multibase as _;
 use network_scanner as _;
+#[cfg(feature = "standard")]
 use ngrok as _;
 use nonempty as _;
 use pcap_file as _;
 use picky as _;
+#[cfg(feature = "standard")]
 use picky_krb as _;
 use pin_project_lite as _;
 use reqwest as _;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "standard"))]
 use rustls_cng as _;
 use serde as _;
 use serde_urlencoded as _;
@@ -40,10 +43,12 @@ use smol_str as _;
 use thiserror as _;
 use time as _;
 use tokio_rustls as _;
+#[cfg(feature = "standard")]
 use tokio_tungstenite as _;
 use tower as _;
 use tower_http as _;
 use transport as _;
+#[cfg(feature = "standard")]
 use tungstenite as _;
 use typed_builder as _;
 use url as _;
@@ -136,7 +141,7 @@ fn run() -> anyhow::Result<()> {
             println!("{conf_file_json}");
         }
         CliAction::Run { service_mode } => {
-            devolutions_gateway::tls::install_default_crypto_provider();
+            devolutions_gateway::tls::install_default_crypto_provider()?;
 
             if service_mode {
                 service_controller()

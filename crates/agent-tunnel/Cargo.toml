@@ -9,6 +9,21 @@ publish = false
 workspace = true
 
 [features]
+default = ["standard"]
+standard = [
+    "dep:picky",
+    "dep:picky-asn1-x509",
+    "dep:quinn",
+    "dep:rcgen",
+    "dep:rustls",
+    "dep:sha2",
+    "dep:socket2",
+    "picky/rustcrypto",
+    "quinn/rustls-ring",
+    "rcgen/ring",
+    "rustls/ring",
+]
+fips = []
 # Exposes `_for_test` helpers (e.g. `AgentPeer::set_last_seen_for_test`) so
 # integration tests in other crates can force specific peer states without
 # wall-clock sleeps. Production builds must not enable this.
@@ -36,17 +51,17 @@ camino = "1.1"
 ipnetwork = "0.20"
 
 # Crypto / PKI
-picky = { version = "7.0.0-rc.25", default-features = false, features = ["x509", "time_conversion"] }
-picky-asn1-x509 = "0.15"
-rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-sha2 = "0.10"
+picky = { version = "7.0.0-rc.25", default-features = false, features = ["x509", "time_conversion"], optional = true }
+picky-asn1-x509 = { version = "0.15", optional = true }
+rcgen = { version = "0.14", default-features = false, features = ["pem", "x509-parser"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["logging", "std", "tls12"], optional = true }
+sha2 = { version = "0.10", optional = true }
 hex = "0.4"
 time = { version = "0.3", default-features = false, features = ["std"] }
 
 # QUIC
-quinn = "0.11"
-socket2 = "0.5"
+quinn = { version = "0.11", default-features = false, features = ["bloom", "log", "platform-verifier", "runtime-tokio"], optional = true }
+socket2 = { version = "0.5", optional = true }
 
 [dev-dependencies]
 base64 = "0.23"

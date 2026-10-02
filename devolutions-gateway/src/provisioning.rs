@@ -40,18 +40,25 @@ impl std::error::Error for InsertError {}
 /// (`provision-credentials`). Connection options are optional and may be absent.
 #[derive(Debug)]
 pub struct ProvisioningEntry {
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) token: String,
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) mapping: Option<AppCredentialMapping>,
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) connection_options: Option<TargetConnectionOptions>,
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) generation: u64,
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) kdc_expires_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone)]
 struct CredentialsEntry {
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     token: String,
     mapping: Option<AppCredentialMapping>,
     expires_at: time::OffsetDateTime,
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     required_until: Option<time::OffsetDateTime>,
     generation: u64,
 }
@@ -64,6 +71,7 @@ pub(crate) enum MappingStatus {
 
 #[derive(Debug, Clone)]
 struct ConnectionOptionsEntry {
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     connection_options: TargetConnectionOptions,
     expires_at: time::OffsetDateTime,
 }
@@ -235,6 +243,7 @@ impl ProvisioningStore {
     ///
     /// The first successful lookup extends retention to the token acceptance deadline so reconnects
     /// authorized by `jet_reuse` can still inject.
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) fn get_mapping(&self, jti: Uuid, token: &str) -> anyhow::Result<ProvisioningEntry> {
         let now = time::OffsetDateTime::now_utc();
 

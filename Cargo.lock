@@ -122,7 +122,7 @@ dependencies = [
  "picky",
  "picky-asn1-x509",
  "quinn",
- "rcgen",
+ "rcgen 0.14.9",
  "rustls 0.23.43",
  "serde",
  "sha2 0.10.9",
@@ -321,6 +321,7 @@ dependencies = [
  "num-traits",
  "rusticata-macros",
  "thiserror 2.0.20",
+ "time",
 ]
 
 [[package]]
@@ -481,11 +482,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-lc-rs"
-version = "1.17.1"
+name = "aws-lc-fips-sys"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4342d8937fc7e5dd9b1c60292261c0670c882a2cd1719cfc11b1af41731e32ad"
+checksum = "03367707e92796b190a4207d4d39b0a4271d574503d2969c2b0cfbf5c87658ee"
 dependencies = [
+ "bindgen 0.72.1",
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+ "pkg-config",
+ "regex",
+]
+
+[[package]]
+name = "aws-lc-rs"
+version = "1.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
+dependencies = [
+ "aws-lc-fips-sys",
  "aws-lc-sys",
  "untrusted 0.7.1",
  "zeroize",
@@ -493,9 +510,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.42.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d9ceb1da931507a12f4fccea479dccd00da1943e1b4ae72d8e502d707361444"
+checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
 dependencies = [
  "cc",
  "cmake",
@@ -820,12 +837,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.72.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
+dependencies = [
+ "bitflags 2.13.1",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.10.5",
+ "log",
+ "prettyplease",
+ "proc-macro2 1.0.106",
+ "quote 1.0.46",
+ "regex",
+ "rustc-hash 2.1.3",
+ "shlex 1.3.0",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
- "bit-vec",
+ "bit-vec 0.8.0",
 ]
 
 [[package]]
@@ -833,6 +870,15 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+
+[[package]]
+name = "bit-vec"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bit_field"
@@ -1594,7 +1640,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -1646,6 +1692,7 @@ dependencies = [
  "asn1-rs 0.7.2",
  "displaydoc",
  "nom",
+ "num-bigint 0.4.8",
  "num-traits",
  "rusticata-macros",
 ]
@@ -1769,7 +1816,7 @@ dependencies = [
  "protoc-bin-vendored",
  "quinn",
  "rand 0.8.7",
- "rcgen",
+ "rcgen 0.13.2",
  "reqwest",
  "rustls 0.23.43",
  "rustls-pemfile 2.2.0",
@@ -1791,7 +1838,7 @@ dependencies = [
  "uuid",
  "win-api-wrappers",
  "windows 0.61.3",
- "x509-parser",
+ "x509-parser 0.16.0",
 ]
 
 [[package]]
@@ -1831,6 +1878,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "async-trait",
+ "aws-lc-rs",
  "axum 0.8.9",
  "axum-extra",
  "backoff",
@@ -2345,7 +2393,7 @@ dependencies = [
  "hkdf",
  "hybrid-array",
  "pem-rfc7468 1.0.0",
- "pkcs8",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sec1",
  "subtle",
@@ -2379,7 +2427,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3211,12 +3259,12 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite 0.2.17",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio 1.52.3",
  "tower-service",
  "tracing",
- "windows-registry 0.5.3",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -3231,7 +3279,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -3488,14 +3536,14 @@ dependencies = [
 [[package]]
 name = "ironrdp-acceptor"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30885a3bdbd0fcf2b9aa27ae9298d8858b9e101c4ac795d3d47ff917efaee63f"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 dependencies = [
- "ironrdp-async",
+ "ironrdp-async 0.10.0 (git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb)",
  "ironrdp-connector",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb)",
+ "rand 0.9.5",
  "tracing",
 ]
 
@@ -3508,7 +3556,7 @@ dependencies = [
  "bitflags 2.13.1",
  "ironrdp-core 0.2.1",
  "ironrdp-dvc",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
 ]
 
@@ -3526,6 +3574,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-async"
+version = "0.10.0"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
+dependencies = [
+ "bytes 1.12.1",
+ "ironrdp-connector",
+ "ironrdp-core 0.2.1",
+ "ironrdp-pdu",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
 name = "ironrdp-cliprdr"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3534,20 +3595,19 @@ dependencies = [
  "bitflags 2.13.1",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
 [[package]]
 name = "ironrdp-connector"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5898b3f1fcaca0f9b923b1463e158aeb64dfdec4ac361b7c086492466ff341c"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 dependencies = [
  "ironrdp-core 0.2.1",
  "ironrdp-error 0.2.0",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb)",
  "picky",
  "picky-asn1-der",
  "picky-asn1-x509",
@@ -3569,8 +3629,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-core"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef0875b98275068b88652e49ba2e0a1150a1390aad69d26c942c8c59e8ec918e"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 dependencies = [
  "ironrdp-error 0.2.0",
 ]
@@ -3584,7 +3643,7 @@ dependencies = [
  "ironrdp-core 0.2.1",
  "ironrdp-dvc",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -3596,7 +3655,7 @@ checksum = "3a5de64988ddabf96928e2f042e1772a5f7201f0001ea99012129c73a105fc52"
 dependencies = [
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -3621,8 +3680,7 @@ checksum = "4a9d7794e854eef2f13fdf79c8502bcc567a75a15fd0522885f37739386a4cef"
 [[package]]
 name = "ironrdp-error"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd344ce9518ab83f6f7568ca4f1bc6dc8c55bd2da04cb5ee7b3e8740d5041734"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 
 [[package]]
 name = "ironrdp-graphics"
@@ -3636,7 +3694,7 @@ dependencies = [
  "byteorder",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "yuv",
 ]
@@ -3644,24 +3702,24 @@ dependencies = [
 [[package]]
 name = "ironrdp-pdu"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ccd1179a4d106df1930347701388b5c79bc3725fa7dab4438d57db0d9d19347"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
  "byteorder",
  "der-parser 10.0.0",
+ "hmac 0.12.1",
  "ironrdp-core 0.2.1",
  "ironrdp-error 0.2.0",
  "md-5 0.10.6",
  "num-bigint 0.4.8",
- "num-derive",
+ "num-derive 0.5.1",
  "num-integer",
  "num-traits",
  "pkcs1 0.7.5",
- "sha1 0.10.7",
+ "sha1 0.11.0",
  "tap",
- "x509-cert 0.2.5",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
@@ -3682,7 +3740,7 @@ dependencies = [
  "bitflags 2.13.1",
  "ironrdp-core 0.2.1",
  "ironrdp-pdu",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -3697,7 +3755,7 @@ dependencies = [
  "bytes 1.12.1",
  "ironrdp-acceptor",
  "ironrdp-ainput",
- "ironrdp-async",
+ "ironrdp-async 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ironrdp-cliprdr",
  "ironrdp-core 0.2.1",
  "ironrdp-displaycontrol",
@@ -3706,7 +3764,7 @@ dependencies = [
  "ironrdp-graphics",
  "ironrdp-pdu",
  "ironrdp-rdpsnd",
- "ironrdp-svc",
+ "ironrdp-svc 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ironrdp-tokio",
  "qoicoubeh",
  "rayon",
@@ -3730,12 +3788,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-svc"
+version = "0.8.0"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
+dependencies = [
+ "bitflags 2.13.1",
+ "ironrdp-core 0.2.1",
+ "ironrdp-pdu",
+]
+
+[[package]]
 name = "ironrdp-tokio"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7692ac83a98e4b3ac01405e311bbbd5a33683447032986ed92a4a44d46ad6344"
+source = "git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb#9eaec054ac1fb8825b3083e5150a19be01bc14fb"
 dependencies = [
- "ironrdp-async",
+ "ironrdp-async 0.10.0 (git+https://github.com/Devolutions/IronRDP.git?rev=9eaec054ac1fb8825b3083e5150a19be01bc14fb)",
  "ironrdp-connector",
  "reqwest",
  "tokio 1.52.3",
@@ -3750,7 +3817,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3776,15 +3843,6 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -4184,7 +4242,7 @@ version = "0.9.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0be1da6f123ceb2cd23f469883415cab9ee963286a85d61e22afb8b12e15e681"
 dependencies = [
- "bindgen",
+ "bindgen 0.66.1",
  "cc",
  "cmake",
  "glob",
@@ -4940,7 +4998,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4979,6 +5037,17 @@ dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.46",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
+dependencies = [
+ "proc-macro2 1.0.106",
+ "quote 1.0.46",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -5077,6 +5146,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8d8034d9489cdaf79228eb9f6a3b8d7bb32ba00d6645ebd48eef4077ceb5bd9"
 dependencies = [
  "asn1-rs 0.6.2",
+]
+
+[[package]]
+name = "oid-registry"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7"
+dependencies = [
+ "asn1-rs 0.7.2",
 ]
 
 [[package]]
@@ -5361,12 +5439,12 @@ dependencies = [
 [[package]]
 name = "picky"
 version = "7.0.0-rc.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ae9cd78eb1d61be4790713d28368cf71c844218fcd91542768805423f02666"
+source = "git+https://github.com/Devolutions/picky-rs.git?rev=48ee92e8371c074ee4c02b622199ce8cbd522ecd#48ee92e8371c074ee4c02b622199ce8cbd522ecd"
 dependencies = [
  "aes 0.9.1",
  "aes-gcm",
  "aes-kw",
+ "aws-lc-rs",
  "base64 0.22.1",
  "cbc 0.2.1",
  "crypto-bigint",
@@ -5379,7 +5457,6 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hmac 0.13.0",
- "http 1.4.2",
  "inout 0.2.2",
  "md-5 0.11.0",
  "p256",
@@ -5412,8 +5489,7 @@ dependencies = [
 [[package]]
 name = "picky-asn1"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff038f9360b934342fb3c0a1d6e82c438a2624b51c3c6e3e6d7cf252b6f3ee3"
+source = "git+https://github.com/Devolutions/picky-rs.git?rev=48ee92e8371c074ee4c02b622199ce8cbd522ecd#48ee92e8371c074ee4c02b622199ce8cbd522ecd"
 dependencies = [
  "oid",
  "serde",
@@ -5424,9 +5500,8 @@ dependencies = [
 
 [[package]]
 name = "picky-asn1-der"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d413165e4bf7f808b9a27cbaba657657a2921f0965db833f488c4d4be96dcd2e"
+version = "0.5.7"
+source = "git+https://github.com/Devolutions/picky-rs.git?rev=48ee92e8371c074ee4c02b622199ce8cbd522ecd#48ee92e8371c074ee4c02b622199ce8cbd522ecd"
 dependencies = [
  "picky-asn1",
  "serde",
@@ -5435,11 +5510,10 @@ dependencies = [
 
 [[package]]
 name = "picky-asn1-x509"
-version = "0.15.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "859d4117bd1b1dc5646359ee7243c50c5000c0920ea2d1fb120335a2f4c684b8"
+version = "0.15.5"
+source = "git+https://github.com/Devolutions/picky-rs.git?rev=48ee92e8371c074ee4c02b622199ce8cbd522ecd#48ee92e8371c074ee4c02b622199ce8cbd522ecd"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crypto-bigint",
  "oid",
  "picky-asn1",
@@ -5542,6 +5616,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f"
 dependencies = [
  "der 0.7.10",
+ "pkcs8 0.10.2",
  "spki 0.7.3",
 ]
 
@@ -5553,6 +5628,16 @@ checksum = "986d2e952779af96ea048f160fd9194e1751b4faea78bcf3ceb456efe008088e"
 dependencies = [
  "der 0.8.1",
  "spki 0.8.0",
+]
+
+[[package]]
+name = "pkcs8"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+dependencies = [
+ "der 0.7.10",
+ "spki 0.7.3",
 ]
 
 [[package]]
@@ -5841,7 +5926,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bit-set",
- "bit-vec",
+ "bit-vec 0.8.0",
  "bitflags 2.13.1",
  "num-traits",
  "rand 0.9.5",
@@ -5900,7 +5985,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "proc-macro2 1.0.106",
  "quote 1.0.46",
  "syn 2.0.118",
@@ -6087,7 +6172,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls 0.23.43",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio 1.52.3",
  "tracing",
@@ -6127,9 +6212,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6301,8 +6386,22 @@ dependencies = [
  "ring 0.17.14",
  "rustls-pki-types",
  "time",
- "x509-parser",
- "yasna",
+ "x509-parser 0.16.0",
+ "yasna 0.5.2",
+]
+
+[[package]]
+name = "rcgen"
+version = "0.14.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "091e7a8e7d86e6feb87a27ce8e2cba29d49eff9507afeebefab7eeb2ca667fb4"
+dependencies = [
+ "pem",
+ "ring 0.17.14",
+ "rustls-pki-types",
+ "time",
+ "x509-parser 0.18.1",
+ "yasna 0.6.0",
 ]
 
 [[package]]
@@ -6500,7 +6599,7 @@ dependencies = [
  "crypto-primes",
  "digest 0.11.3",
  "pkcs1 0.8.0-rc.4",
- "pkcs8",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "signature",
  "spki 0.8.0",
@@ -6646,7 +6745,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6664,8 +6763,6 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.23.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -6746,7 +6843,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7347,9 +7444,8 @@ checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
 name = "sspi"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15294fb005e36e0b0871d8fc0a4f6aac19f9f5440baee229a9a2b2d7de5ed484"
+version = "0.21.3"
+source = "git+https://github.com/Devolutions/sspi-rs.git?rev=7252396beab5394ee6ad552c13ad9bb920a6d71c#7252396beab5394ee6ad552c13ad9bb920a6d71c"
 dependencies = [
  "async-dnssd",
  "async-recursion",
@@ -7367,7 +7463,7 @@ dependencies = [
  "hmac 0.13.0",
  "md-5 0.11.0",
  "md4",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "oid",
  "p256",
@@ -7605,7 +7701,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7665,7 +7761,7 @@ dependencies = [
  "picky",
  "proxy-socks",
  "quinn",
- "rcgen",
+ "rcgen 0.13.2",
  "reqwest",
  "rstest",
  "rustls 0.23.43",
@@ -9623,15 +9719,14 @@ dependencies = [
 [[package]]
 name = "winscard"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12dafb3c1468d0a3f5440e21e51614b53d1fdc62c9f82cc861c447906d09c69a"
+source = "git+https://github.com/Devolutions/sspi-rs.git?rev=7252396beab5394ee6ad552c13ad9bb920a6d71c#7252396beab5394ee6ad552c13ad9bb920a6d71c"
 dependencies = [
  "bitflags 2.13.1",
  "crypto-bigint",
  "flate2",
  "iso7816",
  "iso7816-tlv",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "picky",
  "picky-asn1-x509",
@@ -9710,10 +9805,28 @@ dependencies = [
  "der-parser 9.0.0",
  "lazy_static",
  "nom",
- "oid-registry",
+ "oid-registry 0.7.1",
  "ring 0.17.14",
  "rusticata-macros",
  "thiserror 1.0.69",
+ "time",
+]
+
+[[package]]
+name = "x509-parser"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202"
+dependencies = [
+ "asn1-rs 0.7.2",
+ "data-encoding",
+ "der-parser 10.0.0",
+ "lazy_static",
+ "nom",
+ "oid-registry 0.8.1",
+ "ring 0.17.14",
+ "rusticata-macros",
+ "thiserror 2.0.20",
  "time",
 ]
 
@@ -9732,6 +9845,16 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 dependencies = [
+ "time",
+]
+
+[[package]]
+name = "yasna"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5f6765e852b9b4dc8e2a76843e4d64d1cea8e79bcde0b6901aea8e7c7f08282"
+dependencies = [
+ "bit-vec 0.9.1",
  "time",
 ]
 

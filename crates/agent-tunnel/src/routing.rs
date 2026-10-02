@@ -10,9 +10,8 @@ use agent_tunnel_proto::DomainName;
 use anyhow::{Result, anyhow};
 use uuid::Uuid;
 
-use super::listener::AgentTunnelHandle;
 use super::registry::{AgentPeer, AgentRegistry};
-use super::stream::TunnelStream;
+use super::{AgentTunnelHandle, TunnelStream};
 
 /// A parsed target host used for route matching.
 ///

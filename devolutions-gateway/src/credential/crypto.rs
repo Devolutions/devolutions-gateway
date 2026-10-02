@@ -1,4 +1,4 @@
-//! In-memory credential encryption using ChaCha20-Poly1305.
+//! In-memory credential encryption using the active crypto profile's AEAD.
 //!
 //! This module provides encryption-at-rest for passwords stored in the credential store.
 //! A randomly generated 256-bit master key is held in a [`ProtectedBytes<32>`] allocation backed by `secure-memory`, which applies
@@ -8,8 +8,8 @@
 //!
 //! - Passwords encrypted at rest in regular heap memory.
 //! - Decryption on-demand into short-lived zeroized buffers.
-//! - ChaCha20-Poly1305 provides authenticated encryption.
-//! - Random 96-bit nonces prevent nonce reuse.
+//! - Authenticated encryption uses ChaCha20-Poly1305 in standard mode and AWS-LC AES-256-GCM in FIPS mode.
+//! - Random 96-bit nonces make nonce reuse negligibly unlikely for the volumes handled here.
 //! - Master key zeroized on drop regardless of platform.
 //! - Master key held in mlock'd / guard-paged memory where the OS permits it.
 
@@ -17,9 +17,16 @@ use core::fmt;
 use std::sync::LazyLock;
 
 use anyhow::Context as _;
+#[cfg(feature = "fips")]
+use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+#[cfg(feature = "fips")]
+use aws_lc_rs::rand::{SecureRandom as _, SystemRandom};
+#[cfg(feature = "standard")]
 use chacha20poly1305::aead::rand_core::RngCore as _;
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce};
+#[cfg(feature = "standard")]
+use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
+#[cfg(feature = "standard")]
+use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce};
 use parking_lot::Mutex;
 use secrecy::SecretString;
 use secure_memory::{ProtectedBytes, ProtectionLevel};
@@ -52,7 +59,7 @@ impl MasterKeyManager {
     /// Logs a warning if any hardening step is unavailable.
     fn new() -> Self {
         let mut raw = [0u8; 32];
-        OsRng.fill_bytes(&mut raw);
+        fill_random(&mut raw);
         // `ProtectedBytes::new` copies `raw` into secure storage and then zeroizes it,
         // covering the caller-frame residual without requiring a zeroize dep here.
         let key_material = ProtectedBytes::new(&mut raw);
@@ -97,21 +104,31 @@ impl MasterKeyManager {
         Self { key_material }
     }
 
-    /// Encrypt a password using ChaCha20-Poly1305.
+    /// Encrypt a password using the active profile's AEAD.
     ///
-    /// Returns the nonce and ciphertext (which includes the Poly1305 auth tag).
+    /// Returns the nonce and ciphertext, including the authentication tag.
     pub(super) fn encrypt(&self, plaintext: &str) -> anyhow::Result<EncryptedPassword> {
-        let cipher =
-            ChaCha20Poly1305::new_from_slice(self.key_material.expose_secret()).expect("key is exactly 32 bytes");
+        let mut nonce = [0u8; 12];
+        fill_random(&mut nonce);
 
-        // Generate a random 96-bit nonce (12 bytes for ChaCha20-Poly1305).
-        let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
+        #[cfg(feature = "standard")]
+        let ciphertext = {
+            let cipher =
+                ChaCha20Poly1305::new_from_slice(self.key_material.expose_secret()).expect("key is exactly 32 bytes");
+            cipher
+                .encrypt(ChaChaNonce::from_slice(&nonce), plaintext.as_bytes())
+                .ok()
+                .context("AEAD encryption failed")?
+        };
 
-        // Encrypt; ciphertext includes 16-byte Poly1305 authentication tag.
-        let ciphertext = cipher
-            .encrypt(&nonce, plaintext.as_bytes())
-            .ok()
-            .context("AEAD encryption failed")?;
+        #[cfg(feature = "fips")]
+        let ciphertext = {
+            let key = fips_key(self.key_material.expose_secret())?;
+            let mut ciphertext = plaintext.as_bytes().to_vec();
+            key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), &mut ciphertext)
+                .map_err(|_| anyhow::anyhow!("AEAD encryption failed"))?;
+            ciphertext
+        };
 
         Ok(EncryptedPassword { nonce, ciphertext })
     }
@@ -121,13 +138,31 @@ impl MasterKeyManager {
     /// The returned value should be used immediately and dropped promptly to
     /// minimize the plaintext lifetime in heap memory.
     pub(super) fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<SecretString> {
-        let cipher =
-            ChaCha20Poly1305::new_from_slice(self.key_material.expose_secret()).expect("key is exactly 32 bytes");
+        #[cfg(feature = "standard")]
+        let plaintext_bytes = {
+            let cipher =
+                ChaCha20Poly1305::new_from_slice(self.key_material.expose_secret()).expect("key is exactly 32 bytes");
+            cipher
+                .decrypt(ChaChaNonce::from_slice(&encrypted.nonce), encrypted.ciphertext.as_ref())
+                .ok()
+                .context("AEAD decryption failed")?
+        };
 
-        let plaintext_bytes = cipher
-            .decrypt(&encrypted.nonce, encrypted.ciphertext.as_ref())
-            .ok()
-            .context("AEAD decryption failed")?;
+        #[cfg(feature = "fips")]
+        let plaintext_bytes = {
+            let key = fips_key(self.key_material.expose_secret())?;
+            let mut plaintext = encrypted.ciphertext.clone();
+            let plaintext_len = key
+                .open_in_place(
+                    Nonce::assume_unique_for_key(encrypted.nonce),
+                    Aad::empty(),
+                    &mut plaintext,
+                )
+                .map_err(|_| anyhow::anyhow!("AEAD decryption failed"))?
+                .len();
+            plaintext.truncate(plaintext_len);
+            plaintext
+        };
 
         let plaintext = String::from_utf8(plaintext_bytes).context("decrypted password is not valid UTF-8")?;
 
@@ -137,15 +172,33 @@ impl MasterKeyManager {
 
 /// Encrypted password stored in heap memory.
 ///
-/// Contains the nonce and ciphertext (including the Poly1305 authentication
-/// tag).  Safe to store in regular memory because it is encrypted.
+/// Contains the nonce and ciphertext, including the authentication tag.
+/// Safe to store in regular memory because it is encrypted.
 #[derive(Clone)]
 pub struct EncryptedPassword {
-    /// 96-bit nonce (12 bytes) for ChaCha20-Poly1305.
-    nonce: Nonce,
+    /// 96-bit nonce.
+    nonce: [u8; 12],
 
     /// Ciphertext + 128-bit authentication tag (plaintext_len + 16 bytes).
     ciphertext: Vec<u8>,
+}
+
+#[cfg(feature = "standard")]
+fn fill_random(bytes: &mut [u8]) {
+    OsRng.fill_bytes(bytes);
+}
+
+#[cfg(feature = "fips")]
+fn fill_random(bytes: &mut [u8]) {
+    SystemRandom::new()
+        .fill(bytes)
+        .expect("AWS-LC random generation failed");
+}
+
+#[cfg(feature = "fips")]
+fn fips_key(key_material: &[u8]) -> anyhow::Result<LessSafeKey> {
+    let key = UnboundKey::new(&AES_256_GCM, key_material).map_err(|_| anyhow::anyhow!("invalid AES-256-GCM key"))?;
+    Ok(LessSafeKey::new(key))
 }
 
 impl fmt::Debug for EncryptedPassword {

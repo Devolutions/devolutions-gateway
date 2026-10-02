@@ -13,13 +13,17 @@ use picky::pem::{PemError, parse_pem, read_pem};
 use picky::x509::Cert;
 use picky_asn1_x509::{ExtensionView, GeneralName};
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType};
-use sha2::{Digest, Sha256};
+use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 const PEM_LABEL_CERTIFICATE: &str = "CERTIFICATE";
 const PEM_LABEL_PRIVATE_KEY_PKCS8: &str = "PRIVATE KEY";
 const PEM_LABEL_PRIVATE_KEY_PKCS1: &str = "RSA PRIVATE KEY";
 const PEM_LABEL_PRIVATE_KEY_SEC1: &str = "EC PRIVATE KEY";
+
+fn sha256_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
 
 /// Extract DER bytes from a PEM-encoded certificate string, checking the label.
 fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
@@ -196,16 +200,6 @@ impl CaManager {
         }))
     }
 
-    /// Reconstruct a `Certificate` object from the stored key pair.
-    ///
-    /// The reconstructed cert uses the same DN as the original CA, so the
-    /// issuer field in signed certificates will match the on-disk CA cert.
-    fn reconstruct_ca_cert(&self) -> anyhow::Result<rcgen::Certificate> {
-        make_ca_params()
-            .self_signed(&self.ca_key_pair)
-            .context("reconstruct CA certificate for signing")
-    }
-
     /// Sign an agent's CSR, producing a client certificate.
     ///
     /// The agent generates its own key pair and sends only the CSR.
@@ -243,9 +237,10 @@ impl CaManager {
             time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(AGENT_CERT_VALIDITY_DAYS) * SECS_PER_DAY);
 
         // Sign with the CA, embedding the public key from the CSR.
-        let ca_cert = self.reconstruct_ca_cert()?;
+        let ca_params = make_ca_params();
+        let issuer = rcgen::Issuer::from_params(&ca_params, &self.ca_key_pair);
         let agent_cert = agent_params
-            .signed_by(&csr_params.public_key, &ca_cert, &self.ca_key_pair)
+            .signed_by(&csr_params.public_key, &issuer)
             .context("sign agent certificate with CA")?;
 
         info!(%agent_id, %agent_name, "Signed agent CSR and issued client certificate");
@@ -293,10 +288,11 @@ impl CaManager {
         server_params.not_after =
             time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(SERVER_CERT_VALIDITY_DAYS) * SECS_PER_DAY);
 
-        let ca_cert = self.reconstruct_ca_cert()?;
+        let ca_params = make_ca_params();
+        let issuer = rcgen::Issuer::from_params(&ca_params, &self.ca_key_pair);
 
         let server_cert = server_params
-            .signed_by(&server_key_pair, &ca_cert, &self.ca_key_pair)
+            .signed_by(&server_key_pair, &issuer)
             .context("sign server certificate with CA")?;
 
         std::fs::write(&cert_path, server_cert.pem()).with_context(|| format!("write server cert to {cert_path}"))?;
@@ -331,8 +327,8 @@ impl CaManager {
     pub fn build_server_tls_config(&self, hostname: &str) -> anyhow::Result<rustls::ServerConfig> {
         use rustls::pki_types::PrivateKeyDer;
 
-        // Ensure rustls crypto provider is installed (ring).
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let provider = rustls::crypto::ring::default_provider();
+        let _ = provider.install_default();
 
         let (server_cert_path, server_key_path) = self.ensure_server_cert(hostname)?;
 
@@ -406,21 +402,18 @@ pub fn spki_sha256_digest_from_pem(pem_str: &str) -> anyhow::Result<[u8; 32]> {
 pub fn spki_sha256_digest_from_der(der_bytes: &[u8]) -> anyhow::Result<[u8; 32]> {
     let cert = Cert::from_der(der_bytes).context("parse certificate for SPKI")?;
     let spki_der = cert.public_key().to_der().context("encode SPKI for hashing")?;
-    let digest = Sha256::digest(&spki_der);
-    Ok(digest.into())
+    Ok(sha256_digest(&spki_der))
 }
 
 /// Compute SHA-256 fingerprint of a PEM-encoded certificate (hex string).
 pub fn cert_fingerprint_from_pem(pem_str: &str) -> anyhow::Result<String> {
     let der = cert_pem_to_der(pem_str).context("parse PEM for fingerprint")?;
-    let digest = Sha256::digest(&der);
-    Ok(hex::encode(digest))
+    Ok(hex::encode(sha256_digest(&der)))
 }
 
 /// Compute SHA-256 fingerprint of a DER-encoded certificate (hex string).
 pub fn cert_fingerprint_from_der(der_bytes: &[u8]) -> String {
-    let digest = Sha256::digest(der_bytes);
-    hex::encode(digest)
+    hex::encode(sha256_digest(der_bytes))
 }
 
 /// Extract agent_id from a PEM-encoded certificate's SAN (urn:uuid:{id}).

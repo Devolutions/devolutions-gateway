@@ -17,6 +17,7 @@ impl JrecArtifacts {
         ai_analysis.is_empty()
     }
 
+    #[cfg(feature = "standard")]
     pub(crate) fn into_file_names(self) -> impl IntoIterator<Item = String> {
         let Self { ai_analysis } = self;
         ai_analysis.into_iter().map(|artifact| artifact.file_name)

@@ -283,6 +283,7 @@ struct DgwJobReader;
 
 impl JobReader for DgwJobReader {
     fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
+        #[cfg(feature = "standard")]
         use crate::api::jrec::DeleteRecordingsJob;
         use crate::recording::RemuxJob;
 
@@ -291,6 +292,7 @@ impl JobReader for DgwJobReader {
                 let job: RemuxJob = serde_json::from_str(json).context("failed to deserialize RemuxJob")?;
                 Ok(Box::new(job))
             }
+            #[cfg(feature = "standard")]
             DeleteRecordingsJob::NAME => {
                 let job: DeleteRecordingsJob =
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;

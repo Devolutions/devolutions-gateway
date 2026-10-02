@@ -317,6 +317,14 @@ async fn handle_operation(
             });
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            #[cfg(feature = "fips")]
+            if operation.kind.as_str() == OP_PROVISION_CREDENTIALS {
+                return Err(PreflightError::new(
+                    PreflightAlertStatus::UnsupportedOperation,
+                    "credential provisioning is not supported in FIPS mode".to_owned(),
+                ));
+            }
+
             // Same store path as master: provision-token inserts a token-only row (mapping=None);
             // provision-credentials inserts with a mapping. Connection options are a separate op.
             let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;

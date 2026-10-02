@@ -1,4 +1,5 @@
 target/
+/fips-audit/Cargo.lock
 .DS_Store
 .idea/
 .vs/

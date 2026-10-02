@@ -46,7 +46,10 @@ impl GatewayService {
         )
         .context("failed to setup logger")?;
 
-        info!(version = env!("CARGO_PKG_VERSION"));
+        info!(
+            version = env!("CARGO_PKG_VERSION"),
+            crypto_profile = if cfg!(feature = "fips") { "fips" } else { "standard" }
+        );
 
         let conf_file = conf_handle.get_conf_file();
         trace!(?conf_file);
@@ -276,6 +279,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
     // Initialize the agent tunnel when enabled.
+    #[cfg(feature = "standard")]
     let agent_tunnel_handle = if conf.agent_tunnel.enabled {
         let data_dir = config::get_data_dir();
         let hostname = &conf.hostname;
@@ -325,6 +329,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     } else {
         None
     };
+    #[cfg(feature = "fips")]
+    let agent_tunnel_handle = None;
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -355,6 +361,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         tasks.register(listener);
     }
 
+    #[cfg(feature = "standard")]
     if let Some(ngrok_conf) = &conf.ngrok {
         let session = devolutions_gateway::ngrok::NgrokSession::connect(ngrok_conf)
             .await
@@ -373,6 +380,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
 
+    #[cfg(feature = "standard")]
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,
     });

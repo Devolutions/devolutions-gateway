@@ -17,6 +17,10 @@ pub mod artifacts;
 pub mod cli;
 pub mod config;
 pub mod credential;
+#[cfg(feature = "standard")]
+pub mod credential_injection;
+#[cfg(feature = "fips")]
+#[path = "credential_injection_fips.rs"]
 pub mod credential_injection;
 pub mod extract;
 pub mod generic_client;
@@ -24,19 +28,23 @@ pub mod http;
 pub mod interceptor;
 pub mod jmux;
 pub mod job_queue;
+#[cfg(feature = "standard")]
 pub mod kdc_connector;
 pub mod listener;
 pub mod log;
 pub mod middleware;
+#[cfg(feature = "standard")]
 pub mod ngrok;
 pub mod plugin_manager;
 pub mod provisioning;
 pub mod proxy;
 pub mod rd_clean_path;
 pub mod rdp_pcb;
+#[cfg(feature = "standard")]
 pub mod rdp_proxy;
 pub mod recording;
 pub mod session;
+#[cfg(feature = "standard")]
 pub mod streaming;
 pub mod subscriber;
 pub mod target_addr;
@@ -46,6 +54,7 @@ pub mod token;
 pub mod traffic_audit;
 pub mod upstream;
 pub mod utils;
+#[cfg(feature = "standard")]
 pub mod ws;
 
 use std::sync::Arc;
@@ -142,26 +151,29 @@ pub fn make_http_service(state: DgwState) -> axum::Router<()> {
 
     trace!("Make http service");
 
-    axum::Router::new()
-        .merge(api::make_router(state.clone()))
+    let router = axum::Router::new().merge(api::make_router(state.clone()));
+
+    #[cfg(feature = "standard")]
+    let router = router
         .nest_service("/KdcProxy", api::kdc_proxy::make_router(state.clone()))
-        .nest_service("/jet/KdcProxy", api::kdc_proxy::make_router(state.clone()))
-        .layer(
-            // NOTE: It is recommended to use `tower::ServiceBuilder` when applying multiple middlewares at once:
-            // https://docs.rs/axum/0.6.20/axum/middleware/index.html#applying-multiple-middleware
-            ServiceBuilder::new()
-                .layer(axum::middleware::from_fn(middleware::log::log_middleware))
-                .layer(middleware::cors::make_middleware())
-                .layer(axum::middleware::from_fn_with_state(
-                    state,
-                    middleware::auth::auth_middleware,
-                ))
-                // This middleware goes above `TimeoutLayer` because it will receive errors returned by `TimeoutLayer`.
-                .layer(HandleErrorLayer::new(|_: axum::BoxError| async {
-                    hyper::StatusCode::REQUEST_TIMEOUT
-                }))
-                .layer(TimeoutLayer::new(Duration::from_secs(15))),
-        )
+        .nest_service("/jet/KdcProxy", api::kdc_proxy::make_router(state.clone()));
+
+    router.layer(
+        // NOTE: It is recommended to use `tower::ServiceBuilder` when applying multiple middlewares at once:
+        // https://docs.rs/axum/0.6.20/axum/middleware/index.html#applying-multiple-middleware
+        ServiceBuilder::new()
+            .layer(axum::middleware::from_fn(middleware::log::log_middleware))
+            .layer(middleware::cors::make_middleware())
+            .layer(axum::middleware::from_fn_with_state(
+                state,
+                middleware::auth::auth_middleware,
+            ))
+            // This middleware goes above `TimeoutLayer` because it will receive errors returned by `TimeoutLayer`.
+            .layer(HandleErrorLayer::new(|_: axum::BoxError| async {
+                hyper::StatusCode::REQUEST_TIMEOUT
+            }))
+            .layer(TimeoutLayer::new(Duration::from_secs(15))),
+    )
 }
 
 fn init_system_logger() -> Arc<dyn sysevent::SystemEventSink> {

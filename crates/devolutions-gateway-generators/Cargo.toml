@@ -5,8 +5,13 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[features]
+default = ["standard"]
+standard = ["devolutions-gateway/standard"]
+fips = ["devolutions-gateway/fips"]
+
 [dependencies]
-devolutions-gateway = { path = "../../devolutions-gateway" }
+devolutions-gateway = { path = "../../devolutions-gateway", default-features = false }
 proptest = "1.7"
 uuid = "1.23"
 serde = { version = "1", features = ["derive"] }

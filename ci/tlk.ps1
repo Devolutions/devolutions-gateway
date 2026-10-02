@@ -981,7 +981,8 @@ function Invoke-TlkStep {
         [ValidateSet('dev', 'release', 'production')]
         [string] $CargoProfile,
         [ValidateSet('gateway', 'agent', 'jetsocat')]
-        [string] $Product
+        [string] $Product,
+        [switch] $Fips
 	)
 
     if (-Not $Platform) {
@@ -999,6 +1000,15 @@ function Invoke-TlkStep {
     if (-Not $Product) {
         Write-Warning "`[LEGACY] Product` parameter is not specified, defaulting to 'gateway'"
         $Product = 'gateway'
+    }
+
+    if ($Fips) {
+        if ($Product -ne 'gateway') {
+            throw 'The FIPS build profile is only supported for Devolutions Gateway'
+        }
+
+        $Env:CARGO_NO_DEFAULT_FEATURES = 'true'
+        $Env:CARGO_FEATURES = 'fips'
     }
 
     $RootPath = Split-Path -Parent $PSScriptRoot

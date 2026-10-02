@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
+#[cfg(feature = "standard")]
 use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
 use ironrdp_rdcleanpath::der::asn1::OctetString;
@@ -16,7 +17,9 @@ use tracing::field;
 const PCB_TRANSMIT_DEADLINE: Duration = Duration::from_secs(10);
 
 use crate::config::Conf;
-use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
+#[cfg(feature = "standard")]
+use crate::credential_injection::CredentialInjection;
+use crate::credential_injection::SyntheticKdcRegistry;
 use crate::provisioning::{MappingStatus, ProvisioningStore};
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
@@ -428,6 +431,7 @@ async fn connect_rdp_server(
 
 /// Handle RDP connection with credential injection via CredSSP MITM.
 #[expect(clippy::too_many_arguments)]
+#[cfg(feature = "standard")]
 async fn handle_with_credential_injection(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,
@@ -579,6 +583,9 @@ pub async fn handle(
     synthetic_kdc_registry: &SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
+    #[cfg(feature = "fips")]
+    let _ = synthetic_kdc_registry;
+
     // Special handshake of our RDP extension
 
     trace!("Reading RDCleanPath");
@@ -617,20 +624,26 @@ pub async fn handle(
 
     match mapping_status {
         MappingStatus::Available => {
-            debug!(jti = %auth.claims.jti, "Switching to RdpProxy for credential injection (WebSocket)");
-            return handle_with_credential_injection(
-                client_stream,
-                client_addr,
-                conf,
-                sessions,
-                subscriber_tx,
-                cleanpath_pdu,
-                auth.claims,
-                provisioning,
-                synthetic_kdc_registry,
-                agent_tunnel_handle.clone(),
-            )
-            .await;
+            #[cfg(feature = "fips")]
+            anyhow::bail!("credential injection is not available in FIPS mode");
+
+            #[cfg(feature = "standard")]
+            {
+                debug!(jti = %auth.claims.jti, "Switching to RdpProxy for credential injection (WebSocket)");
+                return handle_with_credential_injection(
+                    client_stream,
+                    client_addr,
+                    conf,
+                    sessions,
+                    subscriber_tx,
+                    cleanpath_pdu,
+                    auth.claims,
+                    provisioning,
+                    synthetic_kdc_registry,
+                    agent_tunnel_handle.clone(),
+                )
+                .await;
+            }
         }
         MappingStatus::Absent => {}
     }

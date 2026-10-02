@@ -10,7 +10,8 @@ param(
     [switch] $Static,
     [switch] $Symbols = $true,
     [switch]$Strip,
-    [string]$StripPath = 'strip'
+    [string]$StripPath = 'strip',
+    [switch]$Fips
 )
 
 Import-Module (Join-Path $PSScriptRoot 'Build')
@@ -49,7 +50,9 @@ function Invoke-Build() {
         # Whether or not to strip the binary. Use on releases. Only on non-Windows. 
         [switch] $Strip,
         # The path to the `strip` executable. Useful when stripping cross-compiled binaries. Only on non-Windows.
-        [string] $StripPath = 'strip'
+        [string] $StripPath = 'strip',
+        # Build the reduced Devolutions Gateway FIPS profile.
+        [switch] $Fips
     )
 
     if (!$IsWindows -and ($Product -eq 'pedm' -or $Product -eq 'session')) {
@@ -79,6 +82,15 @@ function Invoke-Build() {
 
     # Construct the `cargo build` command.
     $cArgs = @('build', '--package', $pkg, '--profile', $Profile)
+
+    if ($Fips) {
+        if ($Product -ne 'gateway') {
+            throw 'The FIPS build profile is only supported for Devolutions Gateway'
+        }
+
+        $cArgs += '--no-default-features'
+        $cArgs += '--features', 'fips'
+    }
 
     if ($Profile -eq 'dev') {
         # default dev profile outputs to `target/debug`
@@ -181,4 +193,4 @@ function Get-PackageName {
     }
 }
 
-Invoke-Build -Product $Product -Target $Target -Profile $Profile -OutputDir $OutputDir -Static:($Static.IsPresent) -Symbols:($Symbols.IsPresent) -Strip:($Strip.IsPresent) -StripPath $StripPath
+Invoke-Build -Product $Product -Target $Target -Profile $Profile -OutputDir $OutputDir -Static:($Static.IsPresent) -Symbols:($Symbols.IsPresent) -Strip:($Strip.IsPresent) -StripPath $StripPath -Fips:($Fips.IsPresent)

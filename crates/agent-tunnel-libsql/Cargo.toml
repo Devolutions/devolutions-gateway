@@ -8,8 +8,13 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["standard"]
+standard = ["agent-tunnel/standard"]
+fips = ["agent-tunnel/fips"]
+
 [dependencies]
-agent-tunnel.path = "../agent-tunnel"
+agent-tunnel = { path = "../agent-tunnel", default-features = false }
 anyhow = "1"
 async-trait = "0.1"
 libsql = { version = "0.9", default-features = false, features = ["core", "serde"] }

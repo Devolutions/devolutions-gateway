@@ -264,6 +264,7 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
     },
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     ListFiles {
         id: Uuid,
         channel: oneshot::Sender<Vec<Utf8PathBuf>>,
@@ -275,6 +276,7 @@ enum RecordingManagerMessage {
         id: Uuid,
         session_must_be_recorded: bool,
     },
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     SubscribeToSessionEndNotification {
         id: Uuid,
         channel: oneshot::Sender<Arc<Notify>>,
@@ -404,6 +406,7 @@ impl RecordingMessageSender {
             .context("couldn't send UpdateRecordingPolicy message")
     }
 
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) fn add_new_chunk_listener(&self, recording_id: Uuid, tx: oneshot::Sender<()>) {
         let mut lock = self.flush_map.lock();
         let senders = lock.entry(recording_id);
@@ -425,6 +428,7 @@ impl RecordingMessageSender {
         Ok(())
     }
 
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) async fn subscribe_to_recording_finish(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
         let (tx, rx) = oneshot::channel();
         self.channel
@@ -436,6 +440,7 @@ impl RecordingMessageSender {
         Ok(rx.await?)
     }
 
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
         let (tx, rx) = oneshot::channel();
         self.channel

@@ -7,6 +7,7 @@ use url::Url;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(try_from = "RawTargetConnectionOptions")]
 pub(crate) struct TargetConnectionOptions {
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     krb_kdc: Option<Url>,
 }
 
@@ -19,6 +20,7 @@ impl TargetConnectionOptions {
         Ok(Self { krb_kdc })
     }
 
+    #[cfg_attr(feature = "fips", allow(dead_code))]
     pub(crate) fn krb_kdc(&self) -> Option<&Url> {
         self.krb_kdc.as_ref()
     }

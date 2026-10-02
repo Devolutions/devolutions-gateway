@@ -8,8 +8,12 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential_injection::{CredentialInjection, SyntheticKdcRegistry};
-use crate::provisioning::{MappingStatus, ProvisioningStore};
+#[cfg(feature = "standard")]
+use crate::credential_injection::CredentialInjection;
+use crate::credential_injection::SyntheticKdcRegistry;
+#[cfg(feature = "standard")]
+use crate::provisioning::MappingStatus;
+use crate::provisioning::ProvisioningStore;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -57,6 +61,9 @@ where
             synthetic_kdc_registry,
             agent_tunnel_handle,
         } = self;
+
+        #[cfg(feature = "fips")]
+        let _ = (&provisioning, &synthetic_kdc_registry);
 
         let span = tracing::Span::current();
 
@@ -116,30 +123,39 @@ where
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
-                let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
-                let mapping_status = if is_rdp {
-                    provisioning.mapping_status(claims.jti)
-                } else {
-                    MappingStatus::Absent
-                };
-                let inject = match mapping_status {
-                    MappingStatus::Available => true,
-                    MappingStatus::Absent => false,
-                };
+                #[cfg(feature = "standard")]
+                let credential_injection = {
+                    let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
+                    let mapping_status = if is_rdp {
+                        provisioning.mapping_status(claims.jti)
+                    } else {
+                        MappingStatus::Absent
+                    };
+                    let inject = match mapping_status {
+                        MappingStatus::Available => true,
+                        MappingStatus::Absent => false,
+                    };
 
-                // Checkout before dialing so missing Kerberos material cannot open an upstream socket.
-                let credential_injection = if inject {
-                    Some(
-                        CredentialInjection::checkout(&provisioning, &synthetic_kdc_registry, claims.jti, token, true)
+                    // Checkout before dialing so missing Kerberos material cannot open an upstream socket.
+                    if inject {
+                        Some(
+                            CredentialInjection::checkout(
+                                &provisioning,
+                                &synthetic_kdc_registry,
+                                claims.jti,
+                                token,
+                                true,
+                            )
                             .with_context(|| {
                                 format!(
                                     "credential-injection material for {} is missing or expired; re-provision to retry",
                                     claims.jti
                                 )
                             })?,
-                    )
-                } else {
-                    None
+                        )
+                    } else {
+                        None
+                    }
                 };
 
                 let ConnectedUpstream {
@@ -170,6 +186,7 @@ where
 
                 let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
 
+                #[cfg(feature = "standard")]
                 if let Some(credential_injection) = credential_injection {
                     info!(
                         jti = %credential_injection.jti(),

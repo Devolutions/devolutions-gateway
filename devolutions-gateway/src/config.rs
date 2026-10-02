@@ -204,6 +204,8 @@ pub struct WebAppUser {
 
 impl Conf {
     pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
+        Self::validate_crypto_profile_configuration(conf_file)?;
+
         let hostname = conf_file
             .hostname
             .clone()
@@ -406,6 +408,14 @@ impl Conf {
             })
             .transpose()?;
 
+        #[cfg(feature = "fips")]
+        {
+            validate_fips_verification_key(&provisioner_public_key, "provisioner public key")?;
+            if let Some(subkey) = &sub_provisioner_public_key {
+                validate_fips_verification_key(&subkey.data, "sub-provisioner public key")?;
+            }
+        }
+
         let delegation_private_key = read_priv_key(
             conf_file.delegation_private_key_file.as_deref(),
             conf_file.delegation_private_key_data.as_ref(),
@@ -470,6 +480,135 @@ impl Conf {
         } else {
             None
         }
+    }
+
+    #[cfg(feature = "standard")]
+    fn validate_crypto_profile_configuration(_: &dto::ConfFile) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "fips")]
+    fn validate_crypto_profile_configuration(conf_file: &dto::ConfFile) -> anyhow::Result<()> {
+        anyhow::ensure!(conf_file.ngrok.is_none(), "Ngrok is not supported in FIPS mode");
+        anyhow::ensure!(
+            !conf_file.agent_tunnel.as_ref().is_some_and(|conf| conf.enabled),
+            "Agent Tunnel is not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            !conf_file.web_app.as_ref().is_some_and(|conf| conf.enabled),
+            "WebApp is not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.credssp_certificate_file.is_none()
+                && conf_file.credssp_private_key_file.is_none()
+                && conf_file.credssp_private_key_password.is_none(),
+            "CredSSP credential injection is not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.provisioner_private_key_file.is_none() && conf_file.provisioner_private_key_data.is_none(),
+            "token signing is not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.delegation_private_key_file.is_none() && conf_file.delegation_private_key_data.is_none(),
+            "JWE token decryption is not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.plugins.as_ref().is_none_or(Vec::is_empty),
+            "native plugins are not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.debug.as_ref().is_none_or(dto::DebugConf::is_default),
+            "debug options are not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            !conf_file
+                .tls_certificate_file
+                .as_ref()
+                .and_then(|path| path.extension())
+                .is_some_and(|extension| matches!(extension, "pfx" | "p12")),
+            "PKCS#12 certificate files are not supported in FIPS mode"
+        );
+        anyhow::ensure!(
+            conf_file.tls_verify_strict == Some(true),
+            "TlsVerifyStrict must be explicitly enabled in FIPS mode"
+        );
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "fips"))]
+mod fips_configuration_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_gateway_core_configuration() {
+        let conf = dto::ConfFile::generate_new();
+
+        Conf::validate_crypto_profile_configuration(&conf).expect("generated core configuration should be supported");
+    }
+
+    #[test]
+    fn rejects_agent_tunnel() {
+        let mut conf = dto::ConfFile::generate_new();
+        conf.agent_tunnel = Some(dto::AgentTunnelConf {
+            enabled: true,
+            ..Default::default()
+        });
+
+        let error = Conf::validate_crypto_profile_configuration(&conf).expect_err("Agent Tunnel should be rejected");
+
+        assert_eq!(error.to_string(), "Agent Tunnel is not supported in FIPS mode");
+    }
+
+    #[test]
+    fn rejects_web_app() {
+        let mut conf = dto::ConfFile::generate_new();
+        conf.web_app = Some(dto::WebAppConf {
+            enabled: true,
+            authentication: dto::WebAppAuth::None,
+            app_token_maximum_lifetime: None,
+            login_limit_rate: None,
+            users_file: None,
+            static_root_path: None,
+        });
+
+        let error = Conf::validate_crypto_profile_configuration(&conf).expect_err("WebApp should be rejected");
+
+        assert_eq!(error.to_string(), "WebApp is not supported in FIPS mode");
+    }
+
+    #[test]
+    fn rejects_credential_injection_certificate() {
+        let mut conf = dto::ConfFile::generate_new();
+        conf.credssp_certificate_file = Some("credssp.pem".into());
+
+        let error =
+            Conf::validate_crypto_profile_configuration(&conf).expect_err("CredSSP certificate should be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "CredSSP credential injection is not supported in FIPS mode"
+        );
+    }
+
+    #[test]
+    fn rejects_non_rsa_verification_key() {
+        let public_key = PublicKey::from_pem_str(
+            "-----BEGIN PUBLIC KEY-----\n\
+             MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMCmL5sL2DPBVXGIczfC8BePg3x+U\n\
+             3iHTs7iu1bbTHNlyFe0Se7Ji/m1Adp4IuIFQFzhIdhkXTKr8d3t32AVwsA==\n\
+             -----END PUBLIC KEY-----",
+        )
+        .expect("parse EC public key");
+
+        let error = validate_fips_verification_key(&public_key, "provisioner public key")
+            .expect_err("EC key should be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "provisioner public key must be an RSA key in FIPS mode"
+        );
     }
 }
 
@@ -764,6 +903,7 @@ fn generate_self_signed_certificate(
     Ok((vec![pki_types::CertificateDer::from(cert_der)], key_der))
 }
 
+#[cfg(feature = "standard")]
 fn read_pfx_file(
     path: &Utf8Path,
     password: Option<&SecretString>,
@@ -881,6 +1021,17 @@ fn read_pfx_file(
     Ok((certificates, private_key))
 }
 
+#[cfg(feature = "fips")]
+fn read_pfx_file(
+    _path: &Utf8Path,
+    _password: Option<&SecretString>,
+) -> anyhow::Result<(
+    Vec<pki_types::CertificateDer<'static>>,
+    pki_types::PrivateKeyDer<'static>,
+)> {
+    anyhow::bail!("PKCS#12 is not available in FIPS mode")
+}
+
 fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<pki_types::CertificateDer<'static>>> {
     read_rustls_certificate(Some(path), None)
         .transpose()
@@ -949,6 +1100,20 @@ fn read_pub_key_data(data: &dto::ConfData<dto::PubKeyFormat>) -> anyhow::Result<
     read_pub_key(None, Some(data))
         .transpose()
         .expect("data is provided, so it’s never None")
+}
+
+#[cfg(feature = "fips")]
+fn validate_fips_verification_key(key: &PublicKey, key_name: &str) -> anyhow::Result<()> {
+    let rsa_der = key
+        .to_pkcs1()
+        .map_err(|_| anyhow::anyhow!("{key_name} must be an RSA key in FIPS mode"))?;
+    let modulus_bits = aws_lc_rs::signature::RsaParameters::public_modulus_len(&rsa_der)
+        .map_err(|_| anyhow::anyhow!("{key_name} contains an invalid RSA key"))?;
+    anyhow::ensure!(
+        (2048..=8192).contains(&modulus_bits),
+        "{key_name} must contain an RSA key between 2048 and 8192 bits in FIPS mode"
+    );
+    Ok(())
 }
 
 fn read_pub_key(
@@ -1101,8 +1266,6 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 
 pub mod dto {
     use std::collections::HashMap;
-
-    use secrecy::ExposeSecret as _;
 
     use super::*;
 

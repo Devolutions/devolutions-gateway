@@ -26,6 +26,22 @@ Ensure that you have [the Rust toolchain installed][install_rust] and then clone
 cargo install --path ./devolutions-gateway
 ```
 
+### FIPS build profile
+
+The opt-in FIPS profile builds Devolutions Gateway with the rustls AWS-LC FIPS provider for Linux x86-64 and Windows x86-64.
+This profile also requires CMake, Go, Perl, Clang and libclang, NASM, and a platform C compiler.
+
+```shell
+cargo build --locked --package devolutions-gateway --profile production --no-default-features --features fips
+```
+
+The binary is written to `target/production/`.
+The profile supports direct TCP and TLS relay with RS256 token verification; its audit, reduced feature set, and configuration constraints are described in the [cryptographic dependency policy][fips_crypto].
+It rejects WebSocket relay, Agent Tunnel, WebApp, ngrok, CredSSP credential injection, credential provisioning, token signing, JWE decryption, native plugins, debug options, PKCS#12 certificate files, and Windows system-certificate-store private keys.
+
+A FIPS-capable build is not a certification and does not make a deployment compliant.
+Before distributing an artifact as FIPS compliant, verify that its exact AWS-LC version, build process, target platform, and operating environment are covered by an applicable [CMVP certificate and security policy][cmvp].
+
 ## Configuration
 
 Devolutions Gateway is configured using a JSON document.
@@ -355,3 +371,5 @@ See the dedicated [README.md file](./.github/workflows/README.md) in the `workfl
 [psmodule]: https://www.powershellgallery.com/packages/DevolutionsGateway/
 [rustls]: https://crates.io/crates/rustls
 [microsoft_tls]: https://learn.microsoft.com/en-us/windows-server/security/tls/tls-registry-settings
+[cmvp]: https://csrc.nist.gov/projects/cryptographic-module-validation-program/validated-modules
+[fips_crypto]: ./docs/FIPS-CRYPTOGRAPHY.md

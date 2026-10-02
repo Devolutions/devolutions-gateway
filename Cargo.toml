@@ -17,6 +17,7 @@ default-members = [
     "devolutions-session",
     "jetsocat",
 ]
+exclude = ["fips-audit"]
 
 [workspace.package]
 version = "2026.3.0"
@@ -32,6 +33,18 @@ codegen-units = 1
 lto = true
 
 [patch.crates-io]
+ironrdp-acceptor = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.10.0" }
+ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.10.0" }
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.2.1" }
+ironrdp-error = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.2.0" }
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.9.0" }
+ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP.git", rev = "9eaec054ac1fb8825b3083e5150a19be01bc14fb", version = "=0.10.0" }
+picky = { git = "https://github.com/Devolutions/picky-rs.git", rev = "48ee92e8371c074ee4c02b622199ce8cbd522ecd", version = "=7.0.0-rc.25" }
+picky-asn1 = { git = "https://github.com/Devolutions/picky-rs.git", rev = "48ee92e8371c074ee4c02b622199ce8cbd522ecd", version = "=0.10.1" }
+picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs.git", rev = "48ee92e8371c074ee4c02b622199ce8cbd522ecd", version = "=0.5.7" }
+picky-asn1-x509 = { git = "https://github.com/Devolutions/picky-rs.git", rev = "48ee92e8371c074ee4c02b622199ce8cbd522ecd", version = "=0.15.5" }
+rustls = { path = "vendor/rustls-fips", version = "=0.23.43" }
+sspi = { git = "https://github.com/Devolutions/sspi-rs.git", rev = "7252396beab5394ee6ad552c13ad9bb920a6d71c", version = "=0.21.3" }
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
 
 [workspace.lints.rust]

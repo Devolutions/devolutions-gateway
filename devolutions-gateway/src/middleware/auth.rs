@@ -1,14 +1,11 @@
 use std::net::SocketAddr;
 
-use axum::RequestPartsExt as _;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum_extra::TypedHeader;
-use axum_extra::headers::Authorization;
-use axum_extra::headers::authorization::Bearer;
 
 use crate::config::Conf;
 use crate::http::HttpError;
@@ -124,13 +121,19 @@ pub async fn auth_middleware(
         trace!("unauthenticated route");
         Ok(next.run(request).await)
     } else {
-        let (mut parts, body) = request.into_parts();
+        let (parts, body) = request.into_parts();
 
-        let extract_header = parts.extract::<TypedHeader<Authorization<Bearer>>>().await;
+        let authorization_token = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split_once(' '))
+            .filter(|(scheme, token)| scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty())
+            .map(|(_, token)| token);
 
-        let token = match &extract_header {
-            Ok(auth) => auth.token(),
-            Err(_) => {
+        let token = match authorization_token {
+            Some(token) => token,
+            None => {
                 let query = parts.uri.query().unwrap_or_default();
 
                 let Ok(query) = serde_urlencoded::from_str::<TokenQueryParam<'_>>(query) else {
