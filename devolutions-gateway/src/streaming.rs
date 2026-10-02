@@ -14,8 +14,73 @@ use video_streamer::{
     RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt, stream_session,
 };
 
-use crate::recording::{RecordingStreamState, StreamLifecycle};
 use crate::token::RecordingFileType;
+
+/// What viewers know about one recording session.
+///
+/// INVARIANT: `clips` is never empty, and while `lifecycle` is `Opening` or `Recording` the active clip is the last one.
+#[derive(Clone, Debug)]
+pub(crate) struct RecordingStreamState {
+    /// Clip paths in recording order; a clip's index is its sequence.
+    pub(crate) clips: Arc<Vec<camino::Utf8PathBuf>>,
+    pub(crate) lifecycle: StreamLifecycle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StreamLifecycle {
+    /// The producer is connected, but the file of the last clip is not open yet.
+    Opening,
+    /// The file of the last clip is open, and the producer writes to it.
+    Recording,
+    /// The producer disconnected; reconnecting before `reconnect_deadline` appends a clip.
+    Disconnected { reconnect_deadline: tokio::time::Instant },
+    /// The recording session is over and gets no more clips.
+    Ended,
+}
+
+impl RecordingStreamState {
+    pub(crate) fn new(clips: Vec<camino::Utf8PathBuf>) -> Self {
+        Self {
+            clips: Arc::new(clips),
+            lifecycle: StreamLifecycle::Opening,
+        }
+    }
+
+    /// Returns `true` while the clip at `index` can still receive data.
+    pub(crate) fn is_active(&self, index: usize) -> bool {
+        matches!(self.lifecycle, StreamLifecycle::Opening | StreamLifecycle::Recording) && index + 1 == self.clips.len()
+    }
+
+    /// Returns `true` while the clip at `index` is open but has no data yet.
+    pub(crate) fn is_opening(&self, index: usize) -> bool {
+        self.lifecycle == StreamLifecycle::Opening && index + 1 == self.clips.len()
+    }
+
+    /// Returns `true` once the session gets no more clips: it ended, or its producer missed the reconnect deadline.
+    pub(crate) fn has_ended(&self, now: tokio::time::Instant) -> bool {
+        match self.lifecycle {
+            StreamLifecycle::Opening | StreamLifecycle::Recording => false,
+            StreamLifecycle::Disconnected { reconnect_deadline } => reconnect_deadline <= now,
+            StreamLifecycle::Ended => true,
+        }
+    }
+
+    pub(crate) fn mark_disconnected(&mut self, reconnect_deadline: tokio::time::Instant) {
+        self.lifecycle = StreamLifecycle::Disconnected { reconnect_deadline };
+    }
+
+    pub(crate) fn mark_ended(&mut self) {
+        self.lifecycle = StreamLifecycle::Ended;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(clips: Vec<camino::Utf8PathBuf>, lifecycle: StreamLifecycle) -> Self {
+        Self {
+            clips: Arc::new(clips),
+            lifecycle,
+        }
+    }
+}
 
 /// WebSocket close codes of the `/shadow` endpoint.
 ///
@@ -50,18 +115,18 @@ pub(crate) async fn stream_recording(
     recording_id: Uuid,
 ) -> Response {
     // One read decides everything below, so a concurrent reconnection can’t mix two states.
-    let (path, index, lifecycle, active) = {
+    let (path, index, ended, active) = {
         let state = stream_state.borrow();
         let index = state.clips.len().saturating_sub(1);
         (
             state.clips.last().cloned(),
             index,
-            state.lifecycle,
+            state.has_ended(tokio::time::Instant::now()),
             state.is_active(index),
         )
     };
 
-    if lifecycle == StreamLifecycle::Ended {
+    if ended {
         return reject_shadow(ws, ShadowCloseCode::StreamingEnded);
     }
 
@@ -283,7 +348,9 @@ impl RecordingEventSource {
                 StreamLifecycle::Recording => (last, StartAt::LiveEdge),
                 StreamLifecycle::Opening => (last, StartAt::Beginning),
                 // The next clip, if any, starts with a reconnection.
-                StreamLifecycle::Disconnected | StreamLifecycle::Ended => (state.clips.len(), StartAt::Beginning),
+                StreamLifecycle::Disconnected { .. } | StreamLifecycle::Ended => {
+                    (state.clips.len(), StartAt::Beginning)
+                }
             }
         };
 
@@ -328,12 +395,13 @@ impl RecordingEventSource {
                 return Ok(Some(RecordingEvent::ClipEnded));
             }
 
-            let (next_path, opening, lifecycle) = {
+            let (next_path, opening, lifecycle, ended) = {
                 let state = self.stream_state.borrow_and_update();
                 (
                     state.clips.get(self.next_clip).cloned(),
                     state.is_opening(self.next_clip),
                     state.lifecycle,
+                    state.has_ended(tokio::time::Instant::now()),
                 )
             };
 
@@ -368,9 +436,17 @@ impl RecordingEventSource {
                 }));
             }
 
-            if lifecycle == StreamLifecycle::Ended {
+            if ended {
                 self.ended = true;
                 return Ok(Some(RecordingEvent::SessionEnded));
+            }
+
+            if let StreamLifecycle::Disconnected { reconnect_deadline } = lifecycle {
+                // Without a reconnection by the deadline, the next turn ends the session.
+                if let Ok(changed) = tokio::time::timeout_at(reconnect_deadline, self.wait_for_change()).await {
+                    changed?;
+                }
+                continue;
             }
 
             self.wait_for_change().await?;
@@ -609,11 +685,44 @@ mod tests {
         assert!(streaming_type_for_file_type(RecordingFileType::SessionRecordingLog).is_err());
     }
 
+    /// Simulates the recording manager’s disconnect, with a reconnect deadline far enough to not end the session.
+    fn disconnect(sender: &watch::Sender<RecordingStreamState>) {
+        let reconnect_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        sender.send_modify(|state| state.mark_disconnected(reconnect_deadline));
+    }
+
+    #[test]
+    fn disconnect_is_not_a_confirmed_session_end() {
+        let now = tokio::time::Instant::now();
+        let mut state = RecordingStreamState::for_test(vec!["recording-0.webm".into()], StreamLifecycle::Recording);
+        assert!(state.is_active(0));
+
+        state.mark_disconnected(now + Duration::from_secs(1));
+        assert!(!state.is_active(0));
+        assert!(!state.has_ended(now));
+        assert!(state.has_ended(now + Duration::from_secs(1)));
+
+        state.mark_ended();
+        assert!(state.has_ended(now));
+    }
+
+    #[test]
+    fn only_the_last_clip_is_active() {
+        let state = RecordingStreamState::for_test(
+            vec!["recording-0.webm".into(), "recording-1.webm".into()],
+            StreamLifecycle::Opening,
+        );
+
+        assert!(!state.is_active(0));
+        assert!(state.is_active(1));
+        assert!(state.is_opening(1));
+    }
+
     #[tokio::test]
     async fn terminal_clip_end_is_retained_before_waiting() {
         let state = RecordingStreamState::for_test(vec!["recording-0.cast".into()], StreamLifecycle::Recording);
         let (sender, receiver) = watch::channel(state);
-        sender.send_modify(RecordingStreamState::mark_disconnected);
+        disconnect(&sender);
 
         tokio::time::timeout(Duration::from_millis(25), wait_for_recording_clip_end(receiver, 0))
             .await
@@ -660,7 +769,7 @@ mod tests {
             Some(RecordingEvent::DataAvailable)
         ));
 
-        sender.send_modify(RecordingStreamState::mark_disconnected);
+        disconnect(&sender);
         assert!(matches!(
             source.next_event().await.expect("end first clip"),
             Some(RecordingEvent::ClipEnded)
@@ -687,7 +796,7 @@ mod tests {
             Some(RecordingEvent::CaughtUp)
         ));
 
-        sender.send_modify(RecordingStreamState::mark_disconnected);
+        disconnect(&sender);
         assert!(matches!(
             source.next_event().await.expect("end second clip"),
             Some(RecordingEvent::ClipEnded)
@@ -718,7 +827,7 @@ mod tests {
             source.next_event().await.expect("catch up"),
             Some(RecordingEvent::CaughtUp)
         ));
-        sender.send_modify(RecordingStreamState::mark_disconnected);
+        disconnect(&sender);
         assert!(matches!(
             source.next_event().await.expect("end WebM clip"),
             Some(RecordingEvent::ClipEnded)
@@ -731,6 +840,41 @@ mod tests {
             Some(RecordingEvent::SessionEnded)
         ));
         assert!(source.next_event().await.expect("finish source").is_none());
+    }
+
+    #[tokio::test]
+    async fn session_ends_when_the_producer_misses_its_reconnect_deadline() {
+        let scratch = scratch_directory();
+        let path = scratch.0.join("recording-0.webm");
+        fs::write(&path, b"recording").expect("write clip");
+        let state = RecordingStreamState::for_test(vec![path], StreamLifecycle::Recording);
+        let (sender, receiver) = watch::channel(state);
+        let mut source = RecordingEventSource::new(receiver);
+
+        assert_eq!(
+            clip_started(source.next_event().await.expect("read clip start")),
+            (0, StartAt::LiveEdge)
+        );
+        assert!(matches!(
+            source.next_event().await.expect("catch up"),
+            Some(RecordingEvent::CaughtUp)
+        ));
+
+        let reconnect_deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        sender.send_modify(|state| state.mark_disconnected(reconnect_deadline));
+        assert!(matches!(
+            source.next_event().await.expect("end clip"),
+            Some(RecordingEvent::ClipEnded)
+        ));
+
+        let event = tokio::time::timeout(Duration::from_secs(5), source.next_event())
+            .await
+            .expect("the deadline should end the session");
+        assert!(matches!(
+            event.expect("end session"),
+            Some(RecordingEvent::SessionEnded)
+        ));
+        assert!(reconnect_deadline <= tokio::time::Instant::now());
     }
 
     #[tokio::test]

@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::artifacts::{ArtifactKind, JrecArtifact, JrecArtifacts};
 use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
+use crate::streaming::{RecordingStreamState, StreamLifecycle};
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
@@ -101,15 +102,15 @@ where
             anyhow::bail!("inconsistent session ID (ID in token: {})", claims.jet_aid);
         }
 
-        let reconnect_window = match claims.jet_reuse {
+        let disconnected_ttl = match claims.jet_reuse {
             crate::token::ReconnectionPolicy::Disallowed => Duration::ZERO,
             crate::token::ReconnectionPolicy::Allowed { window_in_seconds } => {
-                Duration::from_secs(u64::from(window_in_seconds.get()))
+                Duration::from_secs(u64::from(window_in_seconds.get())) + DISCONNECTED_TTL_EXTRA_LEEWAY
             }
         };
 
-        let recording_file = match recordings.connect(session_id, file_type, reconnect_window).await {
-            Ok(recording_file) => recording_file,
+        let (recording_file, stream_state) = match recordings.connect(session_id, file_type, disconnected_ttl).await {
+            Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
                 client_stream.shutdown().await.context("shutdown")?;
@@ -134,7 +135,7 @@ where
 
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                recordings.clip_started(session_id).await?;
+                stream_state.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
                 // Wrap WriteProgressWriter inside a BufWriter to reduce the number of flushes.
                 let (file, flush_signal) = WriteProgressWriter::new(file);
                 // larger buffer size to reduce the number of flushes
@@ -142,19 +143,18 @@ where
                 let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
                 let signal_loop = tokio::spawn({
-                    let recordings = recordings.clone();
+                    let stream_state = stream_state.clone();
                     async move {
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    recordings.new_chunk_appended(session_id).await?;
+                                    notify_chunk_appended(&stream_state);
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
                                 },
                             }
                         }
-                        Ok::<_, anyhow::Error>(())
                     }
                 });
 
@@ -180,7 +180,7 @@ where
 
                 let flush_result = file.flush().await;
                 if flush_result.is_ok() {
-                    recordings.new_chunk_appended(session_id).await?;
+                    notify_chunk_appended(&stream_state);
                 }
 
                 match (res, flush_result) {
@@ -211,6 +211,12 @@ where
 /// on Windows.
 fn is_storage_full(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::StorageFull)
+}
+
+/// Wakes the viewers of a clip: new bytes reached its file.
+fn notify_chunk_appended(stream_state: &watch::Sender<RecordingStreamState>) {
+    // Viewers re-read the clip on any change, so an unchanged state still wakes them.
+    stream_state.send_modify(|_| {});
 }
 
 /// Writes a recording clip and wakes one waiter whenever bytes reach the file.
@@ -313,117 +319,16 @@ struct OnGoingRecording {
     state: OnGoingRecordingState,
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
-    /// How long the producer may stay away before viewers are told the recording ended.
-    reconnect_window: Duration,
-    /// When the producer last disconnected; None while it is connected.
-    disconnected_at: Option<tokio::time::Instant>,
+    disconnected_ttl: Duration,
     stream_state: watch::Sender<RecordingStreamState>,
-}
-
-impl OnGoingRecording {
-    /// How long Gateway keeps a recording after its producer disconnected.
-    fn disconnected_ttl(&self) -> Duration {
-        if self.reconnect_window.is_zero() {
-            Duration::ZERO
-        } else {
-            self.reconnect_window + DISCONNECTED_TTL_EXTRA_LEEWAY
-        }
-    }
-}
-
-/// What viewers know about one recording session.
-///
-/// INVARIANT: `clips` is never empty, and while `lifecycle` is `Opening` or `Recording` the active clip is the last one.
-#[derive(Clone, Debug)]
-pub(crate) struct RecordingStreamState {
-    /// Clip paths in recording order; a clip's index is its sequence.
-    pub(crate) clips: Arc<Vec<Utf8PathBuf>>,
-    pub(crate) lifecycle: StreamLifecycle,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum StreamLifecycle {
-    /// The producer is connected, but the file of the last clip is not open yet.
-    Opening,
-    /// The file of the last clip is open, and the producer writes to it.
-    Recording,
-    /// The producer disconnected and may reconnect, which appends a clip.
-    Disconnected,
-    /// The recording session is over and gets no more clips.
-    Ended,
-}
-
-impl RecordingStreamState {
-    fn new(clips: Vec<Utf8PathBuf>) -> Self {
-        Self {
-            clips: Arc::new(clips),
-            lifecycle: StreamLifecycle::Opening,
-        }
-    }
-
-    /// Returns `true` while the clip at `index` can still receive data.
-    pub(crate) fn is_active(&self, index: usize) -> bool {
-        matches!(self.lifecycle, StreamLifecycle::Opening | StreamLifecycle::Recording) && index + 1 == self.clips.len()
-    }
-
-    /// Returns `true` while the clip at `index` is open but has no data yet.
-    pub(crate) fn is_opening(&self, index: usize) -> bool {
-        self.lifecycle == StreamLifecycle::Opening && index + 1 == self.clips.len()
-    }
-
-    pub(crate) fn mark_disconnected(&mut self) {
-        self.lifecycle = StreamLifecycle::Disconnected;
-    }
-
-    pub(crate) fn mark_ended(&mut self) {
-        self.lifecycle = StreamLifecycle::Ended;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(clips: Vec<Utf8PathBuf>, lifecycle: StreamLifecycle) -> Self {
-        Self {
-            clips: Arc::new(clips),
-            lifecycle,
-        }
-    }
-}
-
-#[cfg(test)]
-mod stream_state_tests {
-    use super::*;
-
-    #[test]
-    fn disconnect_is_not_a_confirmed_session_end() {
-        let mut state = RecordingStreamState::for_test(vec!["recording-0.webm".into()], StreamLifecycle::Recording);
-        assert!(state.is_active(0));
-
-        state.mark_disconnected();
-        assert!(!state.is_active(0));
-        assert_eq!(state.lifecycle, StreamLifecycle::Disconnected);
-
-        state.mark_ended();
-        assert_eq!(state.lifecycle, StreamLifecycle::Ended);
-    }
-
-    #[test]
-    fn only_the_last_clip_is_active() {
-        let state = RecordingStreamState::for_test(
-            vec!["recording-0.webm".into(), "recording-1.webm".into()],
-            StreamLifecycle::Opening,
-        );
-
-        assert!(!state.is_active(0));
-        assert!(state.is_active(1));
-        assert!(state.is_opening(1));
-    }
 }
 
 enum RecordingManagerMessage {
     Connect {
         id: Uuid,
         file_type: RecordingFileType,
-        reconnect_window: Duration,
-        channel: oneshot::Sender<Utf8PathBuf>,
+        disconnected_ttl: Duration,
+        channel: oneshot::Sender<(Utf8PathBuf, watch::Sender<RecordingStreamState>)>,
     },
     AddArtifact {
         id: Uuid,
@@ -431,12 +336,6 @@ enum RecordingManagerMessage {
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
     Disconnect {
-        id: Uuid,
-    },
-    ClipStarted {
-        id: Uuid,
-    },
-    ChunkAppended {
         id: Uuid,
     },
     GetState {
@@ -462,13 +361,13 @@ impl fmt::Debug for RecordingManagerMessage {
             RecordingManagerMessage::Connect {
                 id,
                 file_type,
-                reconnect_window,
+                disconnected_ttl,
                 channel: _,
             } => f
                 .debug_struct("Connect")
                 .field("id", id)
                 .field("file_type", file_type)
-                .field("reconnect_window", reconnect_window)
+                .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::AddArtifact { id, kind, channel: _ } => f
                 .debug_struct("AddArtifact")
@@ -476,8 +375,6 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("kind", kind)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
-            RecordingManagerMessage::ClipStarted { id } => f.debug_struct("ClipStarted").field("id", id).finish(),
-            RecordingManagerMessage::ChunkAppended { id } => f.debug_struct("ChunkAppended").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -505,18 +402,19 @@ pub struct RecordingMessageSender {
 }
 
 impl RecordingMessageSender {
+    /// Returns the clip file to write, and the stream state its producer updates while writing.
     async fn connect(
         &self,
         id: Uuid,
         file_type: RecordingFileType,
-        reconnect_window: Duration,
-    ) -> anyhow::Result<Utf8PathBuf> {
+        disconnected_ttl: Duration,
+    ) -> anyhow::Result<(Utf8PathBuf, watch::Sender<RecordingStreamState>)> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
                 id,
                 file_type,
-                reconnect_window,
+                disconnected_ttl,
                 channel: tx,
             })
             .await
@@ -578,23 +476,6 @@ impl RecordingMessageSender {
             .context("couldn't send UpdateRecordingPolicy message")
     }
 
-    async fn clip_started(&self, recording_id: Uuid) -> anyhow::Result<()> {
-        self.channel
-            .send(RecordingManagerMessage::ClipStarted { id: recording_id })
-            .await
-            .ok()
-            .context("couldn't send ClipStarted message")
-    }
-
-    /// Wakes the viewers of `recording_id`: new bytes were written to its current clip.
-    pub(crate) async fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {
-        self.channel
-            .send(RecordingManagerMessage::ChunkAppended { id: recording_id })
-            .await
-            .ok()
-            .context("couldn't send ChunkAppended message")
-    }
-
     /// Subscribes to what viewers know about a recording session.
     ///
     /// Returns `None` when Gateway has no such recording session (it never started, or it ended and was removed).
@@ -638,46 +519,32 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
     (handle, receiver)
 }
 
-/// What happens to a disconnected recording when its deadline passes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum DisconnectAction {
-    /// The reconnect window is over: viewers are told the recording ended.
-    EndStream,
-    /// The extra leeway is over too: Gateway forgets the recording.
-    Remove,
-}
-
-struct DisconnectDeadline {
+struct DisconnectedTtl {
     deadline: tokio::time::Instant,
     id: Uuid,
-    action: DisconnectAction,
-    /// The disconnect that set this deadline; a later reconnection makes it stale.
-    disconnected_at: tokio::time::Instant,
 }
 
-impl PartialEq for DisconnectDeadline {
+impl PartialEq for DisconnectedTtl {
     fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == cmp::Ordering::Equal
+        self.deadline.eq(&other.deadline) && self.id.eq(&other.id)
     }
 }
 
-impl Eq for DisconnectDeadline {}
+impl Eq for DisconnectedTtl {}
 
-impl PartialOrd for DisconnectDeadline {
+impl PartialOrd for DisconnectedTtl {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for DisconnectDeadline {
-    // The earliest deadline is the greatest, so that `BinaryHeap` pops it first.
+impl Ord for DisconnectedTtl {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        other
-            .deadline
-            .cmp(&self.deadline)
-            .then_with(|| other.action.cmp(&self.action))
-            .then_with(|| self.id.cmp(&other.id))
-            .then_with(|| self.disconnected_at.cmp(&other.disconnected_at))
+        match self.deadline.cmp(&other.deadline) {
+            cmp::Ordering::Less => cmp::Ordering::Greater,
+            cmp::Ordering::Equal => self.id.cmp(&other.id),
+            cmp::Ordering::Greater => cmp::Ordering::Less,
+        }
     }
 }
 
@@ -709,8 +576,8 @@ impl RecordingManagerTask {
         &mut self,
         id: Uuid,
         file_type: RecordingFileType,
-        reconnect_window: Duration,
-    ) -> anyhow::Result<Utf8PathBuf> {
+        disconnected_ttl: Duration,
+    ) -> anyhow::Result<(Utf8PathBuf, watch::Sender<RecordingStreamState>)> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
         if let Some(ongoing) = self.ongoing_recordings.get(&id)
@@ -719,12 +586,6 @@ impl RecordingManagerTask {
             anyhow::bail!("concurrent recording for the same session is not supported");
         }
 
-        // An ended stream stays ended for its viewers; a later connection starts a new one.
-        let existing_stream_state = self
-            .ongoing_recordings
-            .get(&id)
-            .map(|ongoing| ongoing.stream_state.clone())
-            .filter(|stream_state| stream_state.borrow().lifecycle != StreamLifecycle::Ended);
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
@@ -804,12 +665,21 @@ impl RecordingManagerTask {
             .iter()
             .map(|file| recording_path.join(&file.file_name))
             .collect::<Vec<_>>();
-        let stream_state = match existing_stream_state {
-            Some(stream_state) => {
-                stream_state.send_modify(|state| *state = RecordingStreamState::new(clips));
-                stream_state
+        let stream_state = match self.ongoing_recordings.get(&id) {
+            // Within the reconnect window, viewers follow the new clip on the same stream.
+            Some(ongoing) if !ongoing.stream_state.borrow().has_ended(tokio::time::Instant::now()) => {
+                ongoing
+                    .stream_state
+                    .send_modify(|state| *state = RecordingStreamState::new(clips));
+                ongoing.stream_state.clone()
             }
-            None => watch::channel(RecordingStreamState::new(clips)).0,
+            previous => {
+                // An ended stream stays ended for its viewers; this connection starts a new one.
+                if let Some(previous) = previous {
+                    previous.stream_state.send_modify(RecordingStreamState::mark_ended);
+                }
+                watch::channel(RecordingStreamState::new(clips)).0
+            }
         };
 
         self.ongoing_recordings.insert(
@@ -818,9 +688,8 @@ impl RecordingManagerTask {
                 state: OnGoingRecordingState::Connected,
                 manifest_path,
                 session_must_be_recorded,
-                reconnect_window,
-                disconnected_at: None,
-                stream_state,
+                disconnected_ttl,
+                stream_state: stream_state.clone(),
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -834,41 +703,7 @@ impl RecordingManagerTask {
             );
         }
 
-        Ok(recording_file)
-    }
-
-    fn handle_clip_started(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let ongoing = self
-            .ongoing_recordings
-            .get(&id)
-            .with_context(|| format!("unknown recording for ID {id}"))?;
-        let lifecycle = ongoing.stream_state.borrow().lifecycle;
-
-        if !matches!(ongoing.state, OnGoingRecordingState::Connected) || lifecycle != StreamLifecycle::Opening {
-            anyhow::bail!("recording clip can’t be started in its current state");
-        }
-
-        ongoing
-            .stream_state
-            .send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
-
-        Ok(())
-    }
-
-    fn handle_chunk_appended(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let ongoing = self
-            .ongoing_recordings
-            .get(&id)
-            .with_context(|| format!("unknown recording for ID {id}"))?;
-
-        if ongoing.stream_state.borrow().lifecycle != StreamLifecycle::Recording {
-            anyhow::bail!("recording clip is not ready");
-        }
-
-        // Viewers re-read the clip on any change, so an unchanged state still wakes them.
-        ongoing.stream_state.send_modify(|_| {});
-
-        Ok(())
+        Ok((recording_file, stream_state))
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
@@ -883,7 +718,9 @@ impl RecordingManagerTask {
         let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
         ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
-        ongoing.disconnected_at = Some(tokio::time::Instant::now());
+        // Viewers wait for the reconnect window only, not for the extra leeway Gateway keeps the recording.
+        let reconnect_deadline =
+            tokio::time::Instant::now() + ongoing.disconnected_ttl.saturating_sub(DISCONNECTED_TTL_EXTRA_LEEWAY);
 
         // Re-read from disk: an artifact may have been added since this recording connected.
         let mut manifest = JrecManifest::read_from_file(&ongoing.manifest_path)
@@ -908,7 +745,7 @@ impl RecordingManagerTask {
 
         ongoing
             .stream_state
-            .send_modify(RecordingStreamState::mark_disconnected);
+            .send_modify(|state| state.mark_disconnected(reconnect_deadline));
 
         info!(%id, "Start video remuxing operation");
         if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
@@ -961,26 +798,10 @@ impl RecordingManagerTask {
         Ok(artifact_path)
     }
 
-    /// Tells viewers the recording ended once its producer stayed away for the whole reconnect window.
-    ///
-    /// Gateway keeps the recording for a little longer (see `handle_remove`), but viewers do not wait for that leeway.
-    fn handle_end_stream(&mut self, id: Uuid, disconnected_at: tokio::time::Instant) {
-        let Some(ongoing) = self.ongoing_recordings.get(&id) else {
-            return;
-        };
-
-        // A reconnection since this deadline was set leaves the producer connected, or disconnected at a later time.
-        if ongoing.disconnected_at == Some(disconnected_at) {
-            debug!(%id, "Reconnect window elapsed; end the recording stream");
-            ongoing.stream_state.send_modify(RecordingStreamState::mark_ended);
-        }
-    }
-
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            let disconnected_ttl_secs =
-                i64::try_from(ongoing.disconnected_ttl().as_secs()).expect("TTL can’t be so big");
+            let disconnected_ttl_secs = i64::try_from(ongoing.disconnected_ttl.as_secs()).expect("TTL can’t be so big");
 
             match ongoing.state {
                 // NOTE: Comparing with disconnected_ttl_secs - 1 just in case the sleep returns faster than expected.
@@ -1058,7 +879,7 @@ async fn recording_manager_task(
 ) -> anyhow::Result<()> {
     debug!("Task started");
 
-    let mut disconnected = BinaryHeap::<DisconnectDeadline>::new();
+    let mut disconnected = BinaryHeap::<DisconnectedTtl>::new();
 
     let next_remove_sleep = tokio::time::sleep_until(tokio::time::Instant::now());
     tokio::pin!(next_remove_sleep);
@@ -1069,12 +890,9 @@ async fn recording_manager_task(
     loop {
         tokio::select! {
             () = &mut next_remove_sleep, if !disconnected.is_empty() => {
-                let due = disconnected.pop().expect("we check for non-emptiness before entering this block");
+                let to_remove = disconnected.pop().expect("we check for non-emptiness before entering this block");
 
-                match due.action {
-                    DisconnectAction::EndStream => manager.handle_end_stream(due.id, due.disconnected_at),
-                    DisconnectAction::Remove => manager.handle_remove(due.id),
-                }
+                manager.handle_remove(to_remove.id);
 
                 // Re-arm the Sleep instance with the next deadline if required
                 if let Some(next) = disconnected.peek() {
@@ -1090,8 +908,8 @@ async fn recording_manager_task(
                 debug!(?msg, "Received message");
 
                 match msg {
-                    RecordingManagerMessage::Connect { id, file_type, reconnect_window, channel  } => {
-                        match manager.handle_connect(id, file_type, reconnect_window).await {
+                    RecordingManagerMessage::Connect { id, file_type, disconnected_ttl, channel  } => {
+                        match manager.handle_connect(id, file_type, disconnected_ttl).await {
                             Ok(recording_file) => {
                                 let _ = channel.send(recording_file);
                             }
@@ -1106,32 +924,19 @@ async fn recording_manager_task(
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
-                        if let Some(ongoing) = manager.ongoing_recordings.get(&id)
-                            && let Some(disconnected_at) = ongoing.disconnected_at
-                        {
-                            let deadlines = [
-                                (disconnected_at + ongoing.reconnect_window, DisconnectAction::EndStream),
-                                (disconnected_at + ongoing.disconnected_ttl(), DisconnectAction::Remove),
-                            ];
+                        if let Some(ongoing) = manager.ongoing_recordings.get(&id) {
+                            let now = tokio::time::Instant::now();
+                            let deadline = now + ongoing.disconnected_ttl;
 
-                            for (deadline, action) in deadlines {
-                                disconnected.push(DisconnectDeadline { deadline, id, action, disconnected_at });
+                            disconnected.push(DisconnectedTtl {
+                                deadline,
+                                id,
+                            });
 
-                                // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
-                                if next_remove_sleep.is_elapsed() || deadline < next_remove_sleep.deadline() {
-                                    next_remove_sleep.as_mut().reset(deadline);
-                                }
+                            // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
+                            if next_remove_sleep.is_elapsed() || deadline < next_remove_sleep.deadline() {
+                                next_remove_sleep.as_mut().reset(deadline);
                             }
-                        }
-                    }
-                    RecordingManagerMessage::ClipStarted { id } => {
-                        if let Err(error) = manager.handle_clip_started(id) {
-                            error!(error = format!("{error:#}"), "Failed to handle recording clip start");
-                        }
-                    }
-                    RecordingManagerMessage::ChunkAppended { id } => {
-                        if let Err(error) = manager.handle_chunk_appended(id) {
-                            error!(error = format!("{error:#}"), "Failed to handle appended recording data");
                         }
                     }
                     RecordingManagerMessage::GetState { id, channel } => {
@@ -1323,7 +1128,8 @@ mod tests {
         }
 
         async fn try_connect(&self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<Utf8PathBuf> {
-            self.sender.connect(id, file_type, Duration::from_secs(60)).await
+            let (path, _) = self.sender.connect(id, file_type, Duration::from_secs(60)).await?;
+            Ok(path)
         }
 
         async fn connect(&self, id: Uuid, file_type: RecordingFileType) -> String {
@@ -1496,7 +1302,7 @@ mod tests {
             .await
             .expect("subscribe")
             .expect("ongoing recording");
-        assert_eq!(state.borrow().lifecycle, StreamLifecycle::Disconnected);
+        assert!(matches!(state.borrow().lifecycle, StreamLifecycle::Disconnected { .. }));
 
         harness.connect(id, WEBM).await;
 
@@ -1507,41 +1313,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn viewers_see_the_end_at_the_reconnect_window_and_a_late_reconnection_starts_a_new_stream() {
+    async fn a_reconnection_after_the_window_starts_a_new_stream() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
+        let window = Duration::from_millis(200);
+        let disconnected_ttl = window + DISCONNECTED_TTL_EXTRA_LEEWAY;
         harness
             .sender
-            .connect(id, WEBM, Duration::from_secs(1))
+            .connect(id, WEBM, disconnected_ttl)
             .await
             .expect("connect");
-        let mut ended = harness
+        let ended = harness
             .sender
             .subscribe_to_stream(id)
             .await
             .expect("subscribe")
             .expect("ongoing recording");
         harness.disconnect(id).await;
-        let disconnected_at = tokio::time::Instant::now();
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            ended.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
-        )
-        .await
-        .expect("viewers should see the end after the reconnect window")
-        .expect("stream state alive");
+        assert!(!ended.borrow().has_ended(tokio::time::Instant::now()));
 
-        // The end follows the 1-second window, not the extra cleanup leeway, and Gateway still knows the recording.
-        assert!(disconnected_at.elapsed() < DISCONNECTED_TTL_EXTRA_LEEWAY);
-        assert!(matches!(
-            harness.sender.get_state(id).await.expect("get state"),
-            Some(OnGoingRecordingState::LastSeen { .. })
-        ));
+        tokio::time::sleep(window).await;
+        assert!(ended.borrow().has_ended(tokio::time::Instant::now()));
 
         // Within the cleanup leeway, Gateway still accepts the reconnection.
         harness
             .sender
-            .connect(id, WEBM, Duration::from_secs(1))
+            .connect(id, WEBM, disconnected_ttl)
             .await
             .expect("reconnect");
 
@@ -1553,37 +1350,6 @@ mod tests {
             .expect("subscribe")
             .expect("ongoing recording");
         assert!(fresh.borrow().is_opening(1));
-    }
-
-    #[tokio::test]
-    async fn a_stale_deadline_does_not_end_a_later_disconnection() {
-        let harness = Harness::start();
-        let id = Uuid::new_v4();
-        let window = Duration::from_secs(2);
-        harness.sender.connect(id, WEBM, window).await.expect("connect");
-        let mut state = harness
-            .sender
-            .subscribe_to_stream(id)
-            .await
-            .expect("subscribe")
-            .expect("ongoing recording");
-        harness.disconnect(id).await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        harness.sender.connect(id, WEBM, window).await.expect("reconnect");
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        harness.disconnect(id).await;
-        let second_disconnect = tokio::time::Instant::now();
-
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            state.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
-        )
-        .await
-        .expect("viewers should see the end")
-        .expect("stream state alive");
-
-        // The first disconnect's deadline passed 1 s after the second disconnect; only the second one counts.
-        assert!(window - Duration::from_millis(100) <= second_disconnect.elapsed());
     }
 
     #[tokio::test]
