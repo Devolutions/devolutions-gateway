@@ -22,10 +22,7 @@ const OUTPUT_CHUNK_SIZE: usize = 64 * 1024;
 const INPUT_CHANNEL_CAPACITY: usize = 1;
 const INPUT_CHUNK_SIZE: usize = 64 * 1024;
 const MAX_TAG_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
-const MAX_INPUT_BUFFER_BYTES: usize = MAX_TAG_PAYLOAD_BYTES +
-    4 /* EBML element ID, at most */ +
-    8 /* EBML data size, at most */ +
-    4 /* Slack */;
+const MAX_INPUT_BUFFER_BYTES: usize = MAX_TAG_PAYLOAD_BYTES + 16;
 const OUTPUT_BITRATE: u32 = 256 * 1024;
 const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
@@ -346,12 +343,12 @@ impl ClipNormalizer {
             if self.sender.is_closed() {
                 return Ok(());
             }
-            if MAX_INPUT_BUFFER_BYTES <= self.input.len() {
+            if self.input.len() >= MAX_INPUT_BUFFER_BYTES {
                 anyhow::bail!("recording input exceeds the resource limit");
             }
 
-            // Not zero: the buffer has room left, and chunks are never empty.
             let read_limit = (MAX_INPUT_BUFFER_BYTES - self.input.len()).min(INPUT_CHUNK_SIZE);
+            anyhow::ensure!(read_limit > 0, "recording input cannot make progress");
             let mut buffer = vec![0; read_limit];
             let read = self.clip.read(&mut buffer)?;
             if read == 0 {
@@ -627,7 +624,7 @@ impl ClipNormalizer {
         let processing_ms = u64::try_from(self.processing_time.as_millis()).unwrap_or(u64::MAX);
 
         self.config.adaptive_frame_skip
-            && media_advanced_ms < processing_ms
+            && processing_ms > media_advanced_ms
             && self.frames_since_last_encode < MAX_CONSECUTIVE_FRAME_SKIPS
     }
 
@@ -700,7 +697,7 @@ impl ClipNormalizer {
                 )?;
             }
 
-            if replay_end <= self.reader_head {
+            if self.reader_head >= replay_end {
                 anyhow::ensure!(self.input.is_empty(), "replay endpoint is inside an incomplete element");
                 if let Some(group) = block_group.take() {
                     anyhow::ensure!(
@@ -712,17 +709,17 @@ impl ClipNormalizer {
                 return Ok(());
             }
 
-            if MAX_INPUT_BUFFER_BYTES <= self.input.len() {
+            if self.input.len() >= MAX_INPUT_BUFFER_BYTES {
                 anyhow::bail!("replay input exceeds the resource limit");
             }
-            // Not zero: the reader is before the replay end, and the buffer has room left.
             let read_limit = usize::try_from(replay_end - self.reader_head)
                 .context("replay window is too large")?
                 .min(INPUT_CHUNK_SIZE)
                 .min(MAX_INPUT_BUFFER_BYTES - self.input.len());
+            anyhow::ensure!(read_limit > 0, "replay input cannot make progress");
             let mut buffer = vec![0; read_limit];
             let read = self.clip.read(&mut buffer)?;
-            anyhow::ensure!(0 < read, "recording ended before replay boundary");
+            anyhow::ensure!(read > 0, "recording ended before replay boundary");
             self.reader_head = self
                 .reader_head
                 .checked_add(u64::try_from(read).context("replay reader position overflow")?)
@@ -885,7 +882,7 @@ impl OutputSegment {
         self.previous_timestamp = Some(timestamp);
 
         let cluster_timestamp_expired = self.cluster_timestamp.is_some_and(|cluster_timestamp| {
-            MAX_WEBM_BLOCK_TIMESTAMP < relative_timestamp.saturating_sub(cluster_timestamp)
+            relative_timestamp.saturating_sub(cluster_timestamp) > MAX_WEBM_BLOCK_TIMESTAMP
         });
         let flags = if relative_timestamp == 0 || cluster_timestamp_expired {
             VPX_EFLAG_FORCE_KF

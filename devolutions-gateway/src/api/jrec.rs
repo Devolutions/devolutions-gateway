@@ -986,7 +986,7 @@ async fn shadow_recording(
         return reject_shadow(ws, ShadowCloseCode::InternalError);
     }
 
-    crate::streaming::stream_recording(ws, shutdown_signal, stream_state, id)
+    crate::streaming::stream_recording(ws, shutdown_signal, stream_state, id).await
 }
 
 #[cfg(test)]

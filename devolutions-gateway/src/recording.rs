@@ -162,7 +162,10 @@ where
                     res = copy_fut => {
                         match res {
                             Ok(_) => Ok(PushOutcome::Done),
-                            Err(e) if is_storage_full(&e) => Ok(PushOutcome::StorageFull),
+                            Err(e) if is_storage_full(&e) => {
+                                warn!(%session_id, "Recording storage is full; closing push stream");
+                                Ok(PushOutcome::StorageFull)
+                            }
                             Err(e) => Err(anyhow::Error::new(e).context("JREC streaming to file")),
                         }
                     },
@@ -182,7 +185,10 @@ where
 
                 match (res, flush_result) {
                     (Err(error), _) => Err(error),
-                    (Ok(_), Err(error)) if is_storage_full(&error) => Ok(PushOutcome::StorageFull),
+                    (Ok(_), Err(error)) if is_storage_full(&error) => {
+                        warn!(%session_id, "Recording storage is full; closing push stream");
+                        Ok(PushOutcome::StorageFull)
+                    }
                     (Ok(_), Err(error)) => Err(anyhow::Error::new(error).context("flush JREC recording file")),
                     (Ok(outcome), Ok(())) => Ok(outcome),
                 }
@@ -190,9 +196,6 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        if matches!(res, Ok(PushOutcome::StorageFull)) {
-            warn!(%session_id, "Recording storage is full; closing push stream");
-        }
         info!(?res, "Recording finished");
 
         recordings.disconnect(session_id).await.context("disconnect")?;
@@ -834,20 +837,11 @@ impl RecordingManagerTask {
         Ok(recording_file)
     }
 
-    fn ongoing(&self, id: Uuid) -> anyhow::Result<&OnGoingRecording> {
-        self.ongoing_recordings
-            .get(&id)
-            .with_context(|| format!("unknown recording for ID {id}"))
-    }
-
-    fn ongoing_mut(&mut self, id: Uuid) -> anyhow::Result<&mut OnGoingRecording> {
-        self.ongoing_recordings
-            .get_mut(&id)
-            .with_context(|| format!("unknown recording for ID {id}"))
-    }
-
     fn handle_clip_started(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let ongoing = self.ongoing(id)?;
+        let ongoing = self
+            .ongoing_recordings
+            .get(&id)
+            .with_context(|| format!("unknown recording for ID {id}"))?;
         let lifecycle = ongoing.stream_state.borrow().lifecycle;
 
         if !matches!(ongoing.state, OnGoingRecordingState::Connected) || lifecycle != StreamLifecycle::Opening {
@@ -862,7 +856,10 @@ impl RecordingManagerTask {
     }
 
     fn handle_chunk_appended(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let ongoing = self.ongoing(id)?;
+        let ongoing = self
+            .ongoing_recordings
+            .get(&id)
+            .with_context(|| format!("unknown recording for ID {id}"))?;
 
         if ongoing.stream_state.borrow().lifecycle != StreamLifecycle::Recording {
             anyhow::bail!("recording clip is not ready");
@@ -875,7 +872,9 @@ impl RecordingManagerTask {
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
-        let ongoing = self.ongoing_mut(id)?;
+        let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
+            return Err(anyhow::anyhow!("unknown recording for ID {id}"));
+        };
 
         if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
             anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
@@ -1096,15 +1095,15 @@ async fn recording_manager_task(
                             Ok(recording_file) => {
                                 let _ = channel.send(recording_file);
                             }
-                            Err(error) => error!(error = format!("{error:#}"), "Failed to connect recording"),
+                            Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
                     RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(error) = manager.handle_disconnect(id).await {
-                            error!(error = format!("{error:#}"), "Failed to disconnect recording");
+                        if let Err(e) = manager.handle_disconnect(id).await {
+                            error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
                         if let Some(ongoing) = manager.ongoing_recordings.get(&id)
@@ -1185,7 +1184,7 @@ async fn recording_manager_task(
         debug!(?msg, "Received message");
         if let RecordingManagerMessage::Disconnect { id } = msg {
             if let Err(e) = manager.handle_disconnect(id).await {
-                error!(error = format!("{e:#}"), "Failed to disconnect recording");
+                error!(error = format!("{e:#}"), "handle_disconnect");
             }
             manager.ongoing_recordings.remove(&id);
         }

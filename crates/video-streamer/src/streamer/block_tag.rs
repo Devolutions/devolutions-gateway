@@ -86,7 +86,7 @@ impl VideoBlock {
     pub(crate) fn absolute_timestamp(&self) -> anyhow::Result<u64> {
         let cluster_timestamp = self
             .cluster_timestamp
-            .with_context(|| format!("cluster timestamp not found for timestamp: {}", self.timestamp))?;
+            .with_context(|| format!("Cluster timestamp not found for timestamp: {}", self.timestamp))?;
         let timestamp = i64::try_from(cluster_timestamp)?
             .checked_add(i64::from(self.timestamp))
             .context("block timestamp overflow")?;

@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxImage};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,18 +28,18 @@ impl InputDecoder {
     }
 
     pub(crate) fn decode<'decoder>(&'decoder mut self, data: &[u8]) -> anyhow::Result<DecodedFrame<'decoder>> {
-        let decoder = match &mut self.decoder {
-            Some(decoder) => decoder,
-            decoder @ None => decoder.insert(
+        if self.decoder.is_none() {
+            self.decoder = Some(
                 VpxDecoder::builder()
                     .threads(self.threads)
                     .width(0)
                     .height(0)
                     .codec(self.codec)
                     .build()?,
-            ),
-        };
+            );
+        }
 
+        let decoder = self.decoder.as_mut().context("input decoder is missing")?;
         decoder.decode(data)?;
         let image = decoder.next_frame()?;
         let dimensions = Dimensions {
@@ -46,7 +47,7 @@ impl InputDecoder {
             height: image.height(),
         };
         anyhow::ensure!(
-            0 < dimensions.width && 0 < dimensions.height,
+            dimensions.width > 0 && dimensions.height > 0,
             "decoder returned invalid frame dimensions"
         );
         Ok(DecodedFrame { image, dimensions })

@@ -43,7 +43,7 @@ pub(crate) fn reject_shadow(ws: axum::extract::WebSocketUpgrade, code: ShadowClo
 }
 
 /// Streams the recording that `stream_state` describes, or closes the upgrade with the reason it can’t.
-pub(crate) fn stream_recording(
+pub(crate) async fn stream_recording(
     ws: axum::extract::WebSocketUpgrade,
     shutdown_signal: ShutdownSignal,
     stream_state: watch::Receiver<RecordingStreamState>,
@@ -70,7 +70,7 @@ pub(crate) fn stream_recording(
         return reject_shadow(ws, ShadowCloseCode::InternalError);
     };
 
-    let streaming_type = match validate_streaming_file(&path) {
+    let streaming_type = match validate_streaming_file(&path).await {
         Ok(streaming_type) => streaming_type,
         Err(error) => {
             warn!(%recording_id, error = format!("{error:#}"), "Shadow recording rejected: the recording can’t be streamed");
@@ -156,7 +156,7 @@ enum StreamingType {
 
 /// Determines streamability from recording type, which is stricter than pull MIME handling.
 /// A file may be downloadable but still rejected here when there is no streaming backend.
-fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
+async fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
     let path_extension = path
         .extension()
         .context("no extension found in the recording file path")?;
@@ -558,36 +558,45 @@ mod tests {
         assert_eq!(handshake.payload[..2], 4003u16.to_be_bytes());
     }
 
-    #[test]
-    fn validates_streaming_behavior_from_file_extension() {
-        let webm_type =
-            validate_streaming_file(camino::Utf8Path::new("recording-0.webm")).expect("webm should be accepted");
+    #[tokio::test]
+    async fn validates_streaming_behavior_from_file_extension() {
+        let webm_type = validate_streaming_file(camino::Utf8Path::new("recording-0.webm"))
+            .await
+            .expect("webm should be accepted");
         assert!(matches!(webm_type, StreamingType::WebM));
 
-        let cast_type =
-            validate_streaming_file(camino::Utf8Path::new("recording-0.cast")).expect("cast should be accepted");
+        let cast_type = validate_streaming_file(camino::Utf8Path::new("recording-0.cast"))
+            .await
+            .expect("cast should be accepted");
         assert!(matches!(
             cast_type,
             StreamingType::Terminal(terminal_streamer::InputStreamType::Asciinema)
         ));
 
-        let trp_type =
-            validate_streaming_file(camino::Utf8Path::new("recording-0.trp")).expect("trp should be accepted");
+        let trp_type = validate_streaming_file(camino::Utf8Path::new("recording-0.trp"))
+            .await
+            .expect("trp should be accepted");
         assert!(matches!(
             trp_type,
             StreamingType::Terminal(terminal_streamer::InputStreamType::Trp)
         ));
 
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0.slog")).is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0.slog"))
+                .await
+                .is_err(),
             "slog should be rejected for streaming"
         );
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0.bin")).is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0.bin"))
+                .await
+                .is_err(),
             "unknown extension should be rejected"
         );
         assert!(
-            validate_streaming_file(camino::Utf8Path::new("recording-0")).is_err(),
+            validate_streaming_file(camino::Utf8Path::new("recording-0"))
+                .await
+                .is_err(),
             "missing extension should be rejected"
         );
     }

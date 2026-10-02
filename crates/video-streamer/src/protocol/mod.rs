@@ -29,9 +29,9 @@ where
     E: Error + Send + Sync + 'static,
 {
     let mut transport = CodecTransport::new(transport);
-    if !receive_expected_request(&mut transport, ClientMessage::Start).await? {
+    let Some(_) = receive_expected_request(&mut transport, ClientMessage::Start).await? else {
         return Ok(());
-    }
+    };
 
     let source_stream = match start_source().await {
         Ok(source_stream) => source_stream,
@@ -51,19 +51,16 @@ where
     }
 }
 
-/// Reads the next request and rejects it unless it is `expected`.
-///
-/// Returns `false` when the client closed the transport instead.
 async fn receive_expected_request<T, E>(
     transport: &mut CodecTransport<T>,
     expected: ClientMessage,
-) -> anyhow::Result<bool>
+) -> anyhow::Result<Option<ClientMessage>>
 where
     T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
     E: Error + Send + Sync + 'static,
 {
     let Some(incoming) = transport.recv().await else {
-        return Ok(false);
+        return Ok(None);
     };
     let message = match incoming {
         Ok(message) => message,
@@ -83,7 +80,7 @@ where
         anyhow::bail!("invalid client stream state");
     }
 
-    Ok(true)
+    Ok(Some(message))
 }
 
 async fn run_started_session<T, E>(
@@ -98,9 +95,9 @@ where
     transport.send(ServerMessage::Metadata).await?;
 
     loop {
-        if !receive_expected_request(transport, ClientMessage::Pull).await? {
+        let Some(_) = receive_expected_request(transport, ClientMessage::Pull).await? else {
             return Ok(());
-        }
+        };
         debug!("Serving Pull request");
         let response = match segments.next().await {
             Ok(response) => response,
