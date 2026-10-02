@@ -24,6 +24,21 @@ Their manifest and build-script changes activate the AWS-LC modules only through
 
 `deny-fips.toml` is the authoritative list, rejecting alternate TLS providers, legacy algorithms, and standalone implementations of algorithms the validated provider already supplies.
 
+## Build and packaging requirements
+
+Building `aws-lc-fips-sys` requires CMake, Go, Perl, NASM, a C compiler, and libclang for `bindgen` on the build host.
+On Windows, run Cargo from a shell that has *not* already initialized a Visual Studio developer environment.
+The build script invokes `vcvarsall.bat` itself.
+Nesting that call inside an existing developer shell panics with `Failed to run vcvarsall.bat`.
+
+On Windows, a FIPS build links against a shared cryptographic module so the provider can run its startup integrity self-test.
+Cargo leaves `aws_lc_fips_<version>_crypto.dll` in `target/<target-triple>/<profile>/build/aws-lc-fips-sys-*/out/build/artifacts/` rather than next to the executable.
+Packaging must copy it beside `devolutions-gateway.exe`, or the service fails to start with `STATUS_DLL_NOT_FOUND` (`0xc0000135`).
+Linux x86-64 links the module statically and needs no extra file.
+
+Before release, run each staged FIPS artifact with the build directory absent from `PATH` to confirm that the module is resolvable.
+The dependency audit cannot detect a missing module.
+
 ## Reduced functionality
 
 Cargo features are additive, so the FIPS artifact must be built with `--no-default-features --features fips`.

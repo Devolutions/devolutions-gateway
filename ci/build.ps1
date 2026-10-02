@@ -151,6 +151,12 @@ function Invoke-Build() {
     Write-Output "Copied ${outputType} to $binOutPath"
 
     if ($IsWindows) {
+        if ($Fips) {
+            $modulePath = & (Join-Path $PSScriptRoot 'find-fips-module.ps1') -SearchRoot $cargoOutPath
+            Copy-Item $modulePath -Destination $outPath
+            Write-Output "Copied AWS-LC FIPS integrity module to $(Join-Path $outPath (Split-Path $modulePath -Leaf))"
+        }
+
         if ($Symbols) {
             $pdb = $pkg.Replace('-', '_') + '.pdb'
             $pdbPath = Join-Path $cargoOutPath $pdb

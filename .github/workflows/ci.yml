@@ -355,7 +355,30 @@ jobs:
 
       - name: Test FIPS profile
         shell: pwsh
-        run: cargo test --locked --package devolutions-gateway --target '${{ matrix.target }}' --no-default-features --features fips
+        run: |
+          $Arguments = @(
+            'test',
+            '--locked',
+            '--package', 'devolutions-gateway',
+            '--target', '${{ matrix.target }}',
+            '--no-default-features',
+            '--features', 'fips'
+          )
+
+          if ($Env:RUNNER_OS -eq 'Windows') {
+            cargo @Arguments --no-run
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+
+            $ModulePath = ./ci/find-fips-module.ps1 -SearchRoot "target/${{ matrix.target }}/debug"
+            $Env:PATH = "$(Split-Path $ModulePath -Parent);$Env:PATH"
+          }
+
+          cargo @Arguments
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Build FIPS profile
         shell: pwsh
@@ -371,7 +394,25 @@ jobs:
           $Staging = Join-Path $Env:RUNNER_TEMP 'devolutions-gateway-fips'
           New-Item -ItemType Directory -Path $Staging -Force | Out-Null
           Copy-Item "target/${{ matrix.target }}/production/${{ matrix.executable }}" -Destination $Staging
+
+          # On Windows, AWS-LC FIPS is linked dynamically so the provider can run its
+          # integrity self-test, and Cargo leaves the module under the build directory.
+          if ($Env:RUNNER_OS -eq 'Windows') {
+            $ModulePath = ./ci/find-fips-module.ps1 -SearchRoot "target/${{ matrix.target }}/production"
+            Copy-Item $ModulePath -Destination $Staging
+          }
+
           cargo tree --locked --package devolutions-gateway --target '${{ matrix.target }}' --edges normal,build --no-default-features --features fips | Out-File (Join-Path $Staging 'dependencies.txt')
+
+      - name: Verify staged FIPS artifact runs
+        shell: pwsh
+        run: |
+          # Confirms that the staged executable can resolve the AWS-LC integrity module.
+          $Staging = Join-Path $Env:RUNNER_TEMP 'devolutions-gateway-fips'
+          & (Join-Path $Staging '${{ matrix.executable }}') service | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "staged FIPS artifact failed to start (exit code $LASTEXITCODE)"
+          }
 
       - name: Upload FIPS artifact
         uses: actions/upload-artifact@v7
