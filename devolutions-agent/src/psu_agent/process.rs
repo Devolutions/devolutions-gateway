@@ -488,22 +488,16 @@ impl ProcessRegistry {
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
         // The process stays registered until it completes, so its correlation ID cannot be reused before its
         // ProcessCompleted message is sent.
-        let control = self
-            .inner
-            .lock()
-            .await
-            .processes
-            .get(correlation_id)
-            .map(|entry| Arc::clone(&entry.stop));
-
         let request = if kill_process {
             StopRequest::Kill
         } else {
             StopRequest::Graceful
         };
 
-        if let Some(control) = control {
-            request_stop(&control, request);
+        // Recorded while holding the lock, so that a concurrent dispatch cannot stop the stream to make room in the
+        // stdin budget after it was found without a stop request.
+        if let Some(entry) = self.inner.lock().await.processes.get(correlation_id) {
+            request_stop(&entry.stop, request);
         }
     }
 
@@ -637,7 +631,8 @@ fn reserve_total_budget(
         let Some((stalled_stream_id, stalled)) = inner
             .streams
             .iter_mut()
-            .filter(|(_, entry)| entry.backlog.is_evictable(limits))
+            // A stream already being stopped keeps its outcome.
+            .filter(|(_, entry)| entry.stop.borrow().is_none() && entry.backlog.is_evictable(limits))
             .max_by_key(|(_, entry)| entry.backlog.unwritten_bytes.load(Ordering::Relaxed))
         else {
             return false;
@@ -1924,7 +1919,7 @@ mod tests {
         assert!(!outcome.completed.canceled);
     }
     #[tokio::test]
-    async fn agent_wide_stdin_budget_fails_the_stream_that_exceeds_it() {
+    async fn connection_stdin_budget_fails_the_stream_that_exceeds_it() {
         let registry = ProcessRegistry::new(StdinLimits {
             max_total_buffered_bytes: 16 * 1024,
             ..LIMITS_FOR_TESTS
@@ -1939,7 +1934,7 @@ mod tests {
             dispatch(&registry, "second", sequence, vec![b'x'; 1024], false).await;
         }
 
-        // Each stream stays far below its own limit, but together they exceed the agent-wide budget.
+        // Each stream stays far below its own limit, but together they exceed the connection budget.
         assert!(first.control.borrow().is_none());
         assert_eq!(*second.control.borrow(), Some(StopRequest::StdinOverflow));
 
@@ -1954,7 +1949,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_wide_stdin_budget_stops_the_largest_stalled_stream() {
+    async fn connection_stdin_budget_stops_the_largest_stalled_stream() {
         let limits = StdinLimits {
             max_total_buffered_bytes: 16 * 1024,
             ..LIMITS_FOR_TESTS
@@ -2025,6 +2020,34 @@ mod tests {
         }
 
         assert!(stalled.control.borrow().is_none());
+        assert_eq!(*receiving.control.borrow(), Some(StopRequest::StdinOverflow));
+    }
+
+    #[tokio::test]
+    async fn stalled_stream_being_stopped_is_not_stopped_again_for_the_stdin_budget() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let stalled = registry.register("stalled", "stalled").await.expect("register");
+        let receiving = registry.register("receiving", "receiving").await.expect("register");
+
+        for sequence in 0..12 {
+            dispatch(&registry, "stalled", sequence, vec![b'x'; 1024], false).await;
+        }
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        stalled
+            .backlog
+            .stalled_for_ms
+            .store(stall_timeout_ms, Ordering::Relaxed);
+        registry.stop_process("stalled", false).await;
+
+        for sequence in 0..6 {
+            dispatch(&registry, "receiving", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        assert_eq!(*stalled.control.borrow(), Some(StopRequest::Graceful));
         assert_eq!(*receiving.control.borrow(), Some(StopRequest::StdinOverflow));
     }
 

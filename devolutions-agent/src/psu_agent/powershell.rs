@@ -459,8 +459,6 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
                 return Ok(None);
             }
         };
-        process_tree.release();
-
         if !output_read {
             match tokio::time::timeout(WORKER_OUTPUT_DRAIN_TIMEOUT, &mut read_output).await {
                 Ok(result) => {
@@ -471,6 +469,9 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
                 }
             }
         }
+
+        // Only a worker request that succeeded leaves the processes it started running.
+        process_tree.release();
 
         status
     };

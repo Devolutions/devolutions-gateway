@@ -13,8 +13,11 @@
 //!
 //! Tracking is best effort, and some descendants are not terminated with the tree:
 //!
-//! - Windows: the agent runs as LocalSystem, which holds `SeTcbPrivilege`, so a job script can start processes with
-//!   `CREATE_BREAKAWAY_FROM_JOB`; they leave the job and survive `TerminateJobObject`.
+//! - Windows: processes created on behalf of a job script by another process, for example through WMI
+//!   (`Win32_Process.Create`) or the Task Scheduler, are not in the job and survive `TerminateJobObject`.
+//! - Windows: the job does not set `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so `CREATE_BREAKAWAY_FROM_JOB` is documented to
+//!   fail. Callers holding `SeTcbPrivilege`, such as the LocalSystem account the agent runs as, may still be able to
+//!   break away; this is undocumented and not verified.
 //! - Windows: when `AssignProcessToJobObject` fails, for example on Windows versions without nested job support
 //!   while the agent already runs in a job, only the direct child is killed, and a warning is logged.
 //! - Unix: descendants that start their own session or process group, such as daemonizers calling `setsid` or
@@ -136,8 +139,7 @@ impl ProcessTree {
         // SAFETY: `job` is a valid handle owned by this function and not closed anywhere else.
         let job = unsafe { OwnedHandle::from_raw_handle(job.0) };
 
-        // A process created with `CREATE_BREAKAWAY_FROM_JOB` by a descendant leaves the job; see the module
-        // documentation.
+        // Some descendants can still escape the job; see the module documentation.
         // SAFETY: Both handles are valid for the duration of the call.
         unsafe { AssignProcessToJobObject(HANDLE(job.as_raw_handle()), HANDLE(process)) }
             .context("AssignProcessToJobObject failed")?;
