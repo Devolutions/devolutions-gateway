@@ -8,7 +8,7 @@
 //! Each task runs as a job of a job queue stored in that same database, with its own runner:
 //! tasks never take a slot from the other Gateway jobs, and other jobs never delay a task.
 //! The job definition holds only the persisted, non-secret parameters, so a [`DurableTask`] resumes after a restart.
-//! The secrets of an [`EphemeralTask`] stay in memory only: when Gateway restarts, the task fails instead.
+//! The secrets of an [`EphemeralTask`] stay in memory only: when Gateway restarts, the task fails at startup instead.
 //!
 //! The task system is unstable: it starts only when `__debug__.enable_unstable` is set.
 
@@ -17,7 +17,7 @@ pub mod recording_ai_analysis;
 
 use core::marker::PhantomData;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,8 +47,6 @@ pub const TASK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const TASK_MAX_ATTEMPTS: u32 = 5;
 
 pub const SECRETS_LOST_ERROR: &str = "gateway restarted, API key no longer available";
-
-pub const JOB_LOST_ERROR: &str = "gateway restarted, task job no longer exists";
 
 /// Why a run of a task failed; the message is stored in the task record and returned by the API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,9 +298,9 @@ impl TaskService {
         };
 
         service
-            .reconcile()
+            .fail_ephemeral_tasks()
             .await
-            .context("failed to reconcile the provisioner tasks")?;
+            .context("failed to fail the unfinished ephemeral tasks")?;
 
         Ok(service)
     }
@@ -315,30 +313,20 @@ impl TaskService {
         Ok(self.store().get(id).await?.map(TaskSnapshot::from))
     }
 
-    /// Fails every unfinished task that has no job left in the queue.
-    async fn reconcile(&self) -> anyhow::Result<()> {
-        let defs = self
-            .inner
-            .queue
-            .job_defs(TaskJob::NAME)
-            .await
-            .context("failed to list the task jobs")?;
-
-        self.reconcile_with_job_defs(&defs).await
-    }
-
-    async fn reconcile_with_job_defs(&self, defs: &[String]) -> anyhow::Result<()> {
-        let queued = defs
-            .iter()
-            .filter_map(|def| serde_json::from_str::<TaskJobDef>(def).ok())
-            .map(|def| def.task_id)
-            .collect::<HashSet<_>>();
-
+    /// Fails every unfinished ephemeral task: its secrets were held in memory by the previous process.
+    ///
+    /// Its job, if still queued, then finds the task finished and does nothing.
+    async fn fail_ephemeral_tasks(&self) -> anyhow::Result<()> {
         let store = self.store();
 
         for id in store.unfinished().await? {
-            if !queued.contains(&id) && store.fail(id, JOB_LOST_ERROR).await? {
-                warn!(task.id = %id, "Background task has no job left; marked as failed");
+            let is_ephemeral = store
+                .get(id)
+                .await?
+                .is_some_and(|record| is_ephemeral_kind(&record.kind));
+
+            if is_ephemeral && store.fail(id, SECRETS_LOST_ERROR).await? {
+                warn!(task.id = %id, "Background task lost its secrets at restart; marked as failed");
             }
         }
 
@@ -641,6 +629,11 @@ impl job_queue::Job for TaskJob {
             }
         }
     }
+}
+
+/// Whether tasks of this kind are [`EphemeralTask`]s, which cannot survive a restart.
+fn is_ephemeral_kind(kind: &str) -> bool {
+    matches!(kind, recording_ai_analysis::RecordingAiAnalysisTask::KIND)
 }
 
 struct TaskJobReader {

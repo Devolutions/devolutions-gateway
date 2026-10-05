@@ -402,27 +402,6 @@ impl JobQueue for LibSqlJobQueue {
 
         Ok(Some(scheduled_for))
     }
-
-    async fn job_defs(&self, name: &str) -> anyhow::Result<Vec<String>> {
-        let sql_query = "SELECT json(def) FROM job_queue WHERE name = $1";
-        let params = [name];
-
-        trace!(%sql_query, ?params, "Listing job definitions");
-
-        let mut rows = self
-            .conn
-            .query(sql_query, params)
-            .await
-            .context("failed to execute SQL query")?;
-
-        let mut defs = Vec::new();
-
-        while let Some(row) = rows.next().await.context("failed to read the row")? {
-            defs.push(row.get::<String>(0).context("failed to read def value")?);
-        }
-
-        Ok(defs)
-    }
 }
 
 // Typically, migrations should not be modified once released, and we should only be appending to this list.

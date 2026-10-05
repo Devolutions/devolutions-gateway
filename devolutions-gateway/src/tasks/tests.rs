@@ -135,20 +135,21 @@ impl Harness {
         }
     }
 
-    /// Reads back the job of a task from the task job queue.
+    /// Rebuilds the job of a task from its record, as the job queue stores the same definition.
     async fn queued_job(&self, id: Uuid) -> TaskJob {
-        let json = self
-            .tasks
-            .inner
-            .queue
-            .job_defs(TaskJob::NAME)
-            .await
-            .expect("job definitions")
-            .into_iter()
-            .find(|json| serde_json::from_str::<TaskJobDef>(json).is_ok_and(|def| def.task_id == id))
-            .expect("queued job");
+        let record = self.record(id).await;
+        let def = TaskJobDef {
+            task_id: record.id,
+            kind: record.kind,
+            target: serde_json::from_str(&record.target).expect("target JSON"),
+            params: serde_json::from_str(&record.params).expect("params JSON"),
+        };
 
-        TaskJob::read_json(&json, self.tasks.clone(), self.state.clone()).expect("valid job")
+        TaskJob {
+            def,
+            tasks: self.tasks.clone(),
+            state: self.state.clone(),
+        }
     }
 
     async fn start_scripted<const N: u32>(&self, outcome: Outcome) -> TaskJob {
@@ -358,32 +359,35 @@ async fn final_state_is_not_run_again_when_its_record_cannot_be_written() {
 }
 
 #[tokio::test]
-async fn reconcile_fails_unfinished_tasks_without_a_job() {
+async fn restart_fails_unfinished_ephemeral_tasks_only() {
     let harness = Harness::new().await;
 
-    let queued = harness.start_scripted::<5>(Outcome::Succeed).await;
-    let lost = harness.start_scripted::<5>(Outcome::Succeed).await;
-    let running_lost = harness.start_scripted::<5>(Outcome::Succeed).await;
+    let ephemeral = harness.start_recording_ai_analysis().await;
+    let running_ephemeral = harness.start_recording_ai_analysis().await;
+    let durable = harness.start_scripted::<5>(Outcome::Succeed).await;
     let finished = harness.start_scripted::<5>(Outcome::Succeed).await;
 
-    let store = harness.tasks.store();
-    store
-        .start_attempt(running_lost.def.task_id, "null")
+    harness
+        .tasks
+        .store()
+        .start_attempt(running_ephemeral.id, "null")
         .await
         .expect("start");
     harness.run_scripted::<5>(&finished).await.expect("run");
 
-    let defs = vec![queued.write_json().expect("JSON"), "not a task job".to_owned()];
-    harness.tasks.reconcile_with_job_defs(&defs).await.expect("reconcile");
+    // A restart keeps the database but loses the secrets held in memory.
+    TaskService::open(&harness.db_path, TASK_TIMEOUT)
+        .await
+        .expect("task service");
 
-    assert_eq!(harness.record(queued.def.task_id).await.state, TaskState::NotStarted);
-    assert_eq!(harness.record(finished.def.task_id).await.state, TaskState::Success);
-
-    for id in [lost.def.task_id, running_lost.def.task_id] {
+    for id in [ephemeral.id, running_ephemeral.id] {
         let record = harness.record(id).await;
         assert_eq!(record.state, TaskState::Failed);
-        assert_eq!(record.error.as_deref(), Some(JOB_LOST_ERROR));
+        assert_eq!(record.error.as_deref(), Some(SECRETS_LOST_ERROR));
     }
+
+    assert_eq!(harness.record(durable.def.task_id).await.state, TaskState::NotStarted);
+    assert_eq!(harness.record(finished.def.task_id).await.state, TaskState::Success);
 }
 
 #[tokio::test]
