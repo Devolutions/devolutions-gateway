@@ -554,22 +554,60 @@ pub struct EnrollmentTokenClaims {
 
 // ----- task claims ----- //
 
-/// Kind of background task, with the target that this kind works on.
+/// Background task that the provisioner asks Gateway to run: its kind, and the payload of that kind.
+///
+/// The token is signed but not encrypted, so a payload never holds a secret:
+/// a task that needs one, such as the API key of `recording.ai-analysis`, receives it in the body of its start request.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "jet_tk")]
-pub enum TaskKind {
+#[serde(tag = "kind", content = "payload", deny_unknown_fields)]
+pub enum TaskSpec {
     /// Describe what the user did in one session and store the result as a new log of that session.
-    #[serde(rename = "ai-log")]
-    AiLog {
-        /// Association ID (= Session ID) of the session to describe.
-        jet_aid: Uuid,
-    },
+    #[serde(rename = "recording.ai-analysis")]
+    RecordingAiAnalysis(RecordingAiAnalysisPayload),
+}
+
+impl TaskSpec {
+    /// Kind of the task, as named in the token.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            TaskSpec::RecordingAiAnalysis(_) => "recording.ai-analysis",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingAiAnalysisPayload {
+    /// Session to describe.
+    pub session_id: Uuid,
+    pub provider: AiProvider,
+    /// Model identifier, passed to the provider as is.
+    pub model: String,
+    /// Overrides the provider default; required for `openai-compatible`.
+    #[serde(default)]
+    pub base_url: Option<url::Url>,
+    /// Upper bound of tokens in each AI answer.
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AiProvider {
+    #[serde(rename = "openai")]
+    OpenAi,
+    #[serde(rename = "anthropic")]
+    Anthropic,
+    #[serde(rename = "mistral")]
+    Mistral,
+    #[serde(rename = "gemini")]
+    Gemini,
+    #[serde(rename = "openai-compatible")]
+    OpenAiCompatible,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskTokenClaims {
-    #[serde(flatten)]
-    pub kind: TaskKind,
+    pub jet_task: TaskSpec,
 
     /// JWT expiration time claim.
     pub exp: i64,
@@ -2051,10 +2089,20 @@ mod tests {
         }
     }
 
+    fn recording_ai_analysis_task() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "recording.ai-analysis",
+            "payload": {
+                "session_id": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+            },
+        })
+    }
+
     fn task_claims(extra: serde_json::Value) -> serde_json::Value {
         let mut claims = serde_json::json!({
-            "jet_tk": "ai-log",
-            "jet_aid": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+            "jet_task": recording_ai_analysis_task(),
             "nbf": time::OffsetDateTime::now_utc().unix_timestamp(),
             "exp": time::OffsetDateTime::now_utc().unix_timestamp() + 600,
             "jti": Uuid::new_v4(),
@@ -2068,6 +2116,12 @@ mod tests {
         claims
     }
 
+    fn validate_task(task: serde_json::Value) -> Result<AccessTokenClaims, TokenError> {
+        let fixture = TaskTokenFixture::new();
+        let token = fixture.sign(&task_claims(serde_json::json!({ "jet_task": task })));
+        fixture.validate(&token, None)
+    }
+
     #[test]
     fn task_token_claims_parse() {
         let fixture = TaskTokenFixture::new();
@@ -2078,12 +2132,32 @@ mod tests {
         let AccessTokenClaims::Task(claims) = claims else {
             panic!("expected TASK claims");
         };
+        let TaskSpec::RecordingAiAnalysis(payload) = claims.jet_task;
         assert_eq!(
-            claims.kind,
-            TaskKind::AiLog {
-                jet_aid: Uuid::parse_str("5e3e833f-84c7-4541-b676-acc3299e39b8").expect("UUID"),
-            }
+            payload.session_id,
+            Uuid::parse_str("5e3e833f-84c7-4541-b676-acc3299e39b8").expect("UUID")
         );
+        assert_eq!(payload.provider, AiProvider::OpenAi);
+        assert_eq!(payload.model, "gpt-5-mini");
+        assert_eq!(payload.base_url, None);
+        assert_eq!(payload.max_output_tokens, None);
+    }
+
+    #[test]
+    fn recording_ai_analysis_payload_accepts_optional_fields() {
+        let mut task = recording_ai_analysis_task();
+        task["payload"]["base_url"] = serde_json::json!("http://localhost:11434/v1");
+        task["payload"]["max_output_tokens"] = serde_json::json!(16000);
+
+        let AccessTokenClaims::Task(claims) = validate_task(task).expect("valid TASK token") else {
+            panic!("expected TASK claims");
+        };
+        let TaskSpec::RecordingAiAnalysis(payload) = claims.jet_task;
+        assert_eq!(
+            payload.base_url.as_ref().map(url::Url::as_str),
+            Some("http://localhost:11434/v1")
+        );
+        assert_eq!(payload.max_output_tokens, Some(16000));
     }
 
     #[test]
@@ -2097,12 +2171,15 @@ mod tests {
         assert!(matches!(error, TokenError::UnexpectedReplay { .. }), "{error:?}");
     }
 
-    #[test]
-    fn unknown_task_kind_is_rejected() {
-        let fixture = TaskTokenFixture::new();
-        let token = fixture.sign(&task_claims(serde_json::json!({ "jet_tk": "monitoring" })));
-
-        let error = fixture.validate(&token, None).err().expect("unknown kind is rejected");
+    #[rstest::rstest]
+    #[case::unknown_kind(serde_json::json!({ "kind": "monitoring", "payload": {} }))]
+    #[case::missing_payload(serde_json::json!({ "kind": "recording.ai-analysis" }))]
+    #[case::unknown_task_field({ let mut t = recording_ai_analysis_task(); t["extra"] = serde_json::json!(1); t })]
+    #[case::unknown_payload_field({ let mut t = recording_ai_analysis_task(); t["payload"]["temperature"] = serde_json::json!(1); t })]
+    #[case::api_key_in_token({ let mut t = recording_ai_analysis_task(); t["payload"]["api_key"] = serde_json::json!("sk-test"); t })]
+    #[case::unknown_provider({ let mut t = recording_ai_analysis_task(); t["payload"]["provider"] = serde_json::json!("ollama"); t })]
+    fn invalid_task_is_rejected(#[case] task: serde_json::Value) {
+        let error = validate_task(task).err().expect("invalid task is rejected");
 
         assert!(matches!(error, TokenError::InvalidClaimScheme { .. }), "{error:?}");
     }

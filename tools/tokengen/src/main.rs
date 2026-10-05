@@ -2,7 +2,9 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use tokengen::{ApplicationProtocol, RecordingOperation, SubCommandArgs, TaskKind, generate_token};
+use tokengen::{
+    ApplicationProtocol, RecordingAiAnalysisPayload, RecordingOperation, SubCommandArgs, TaskSpec, generate_token,
+};
 use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -142,7 +144,7 @@ fn sign(
         },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
-        SignSubCommand::Task { jet_tk, jet_aid } => SubCommandArgs::Task { jet_tk, jet_aid },
+        SignSubCommand::Task { task } => SubCommandArgs::Task { task: task.into() },
     };
 
     let validity_duration = humantime::parse_duration(validity_duration)?;
@@ -293,9 +295,45 @@ enum SignSubCommand {
     },
     NetScan {},
     Task {
-        #[clap(long)]
-        jet_tk: TaskKind,
-        #[clap(long)]
-        jet_aid: Option<Uuid>,
+        #[clap(subcommand)]
+        task: TaskSignSubCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum TaskSignSubCommand {
+    /// Describe what the user did in one session and store the result as a new log of that session
+    RecordingAiAnalysis {
+        #[clap(long)]
+        session_id: Option<Uuid>,
+        /// `openai`, `anthropic`, `mistral`, `gemini` or `openai-compatible`
+        #[clap(long)]
+        provider: String,
+        #[clap(long)]
+        model: String,
+        #[clap(long)]
+        base_url: Option<String>,
+        #[clap(long)]
+        max_output_tokens: Option<u32>,
+    },
+}
+
+impl From<TaskSignSubCommand> for TaskSpec {
+    fn from(task: TaskSignSubCommand) -> Self {
+        match task {
+            TaskSignSubCommand::RecordingAiAnalysis {
+                session_id,
+                provider,
+                model,
+                base_url,
+                max_output_tokens,
+            } => TaskSpec::RecordingAiAnalysis(RecordingAiAnalysisPayload {
+                session_id: session_id.unwrap_or_else(Uuid::new_v4),
+                provider,
+                model,
+                base_url,
+                max_output_tokens,
+            }),
+        }
+    }
 }

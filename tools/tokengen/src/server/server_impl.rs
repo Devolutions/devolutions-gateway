@@ -9,7 +9,9 @@ use axum::routing::post;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ApplicationProtocol, RecordingOperation, SubCommandArgs, TaskKind, generate_token};
+use crate::{
+    ApplicationProtocol, RecordingAiAnalysisPayload, RecordingOperation, SubCommandArgs, TaskSpec, generate_token,
+};
 
 pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_path: Option<PathBuf>) -> Router {
     Router::new()
@@ -274,14 +276,27 @@ pub(crate) async fn task_handler(
     Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<TaskRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
+    let task = match request.task {
+        TaskRequestSpec::RecordingAiAnalysis {
+            session_id,
+            provider,
+            model,
+            base_url,
+            max_output_tokens,
+        } => TaskSpec::RecordingAiAnalysis(RecordingAiAnalysisPayload {
+            session_id: session_id.unwrap_or_else(Uuid::new_v4),
+            provider,
+            model,
+            base_url,
+            max_output_tokens,
+        }),
+    };
+
     handle_subcommand(
         provisioner_key_path,
         delegation_key_path,
         request.common,
-        SubCommandArgs::Task {
-            jet_tk: request.jet_tk,
-            jet_aid: request.jet_aid,
-        },
+        SubCommandArgs::Task { task },
     )
     .await
 }
@@ -412,6 +427,20 @@ pub(crate) struct NetScanRequest {
 pub(crate) struct TaskRequest {
     #[serde(flatten)]
     common: CommonRequest,
-    jet_tk: TaskKind,
-    jet_aid: Option<Uuid>,
+    #[serde(flatten)]
+    task: TaskRequestSpec,
+}
+
+/// Task kind and its payload.
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+pub(crate) enum TaskRequestSpec {
+    #[serde(rename = "recording.ai-analysis")]
+    RecordingAiAnalysis {
+        session_id: Option<Uuid>,
+        provider: String,
+        model: String,
+        base_url: Option<String>,
+        max_output_tokens: Option<u32>,
+    },
 }
