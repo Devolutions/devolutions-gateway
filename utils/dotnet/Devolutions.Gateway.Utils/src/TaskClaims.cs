@@ -4,33 +4,26 @@ namespace Devolutions.Gateway.Utils;
 
 public class TaskClaims : IGatewayClaims
 {
-    [JsonPropertyName("jet_tk")]
-    public TaskKind TaskKind { get; set; }
-
-    [JsonPropertyName("jet_aid")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Guid? SessionId { get; set; }
+    [JsonPropertyName("jet_task")]
+    public TaskSpec Task { get; }
 
     [JsonPropertyName("jet_gw_id")]
-    public Guid ScopeGatewayId { get; set; }
+    public Guid ScopeGatewayId { get; }
 
-    private TaskClaims(Guid scopeGatewayId, TaskKind taskKind)
+    private TaskClaims(Guid scopeGatewayId, TaskPayload payload)
     {
         this.ScopeGatewayId = scopeGatewayId;
-        this.TaskKind = taskKind;
+        this.Task = new TaskSpec(payload);
     }
 
     /// <summary>
     /// Build the claims of a task that describes what the user did in one session and stores the result as a new log of that session.
     /// </summary>
     /// <param name="scopeGatewayId">Target Gateway identifier.</param>
-    /// <param name="sessionId">Session to describe.</param>
-    public static TaskClaims ForAiLog(Guid scopeGatewayId, Guid sessionId)
+    /// <param name="payload">What the task works on and how it calls the AI provider.</param>
+    public static TaskClaims ForRecordingAiAnalysis(Guid scopeGatewayId, RecordingAiAnalysisPayload payload)
     {
-        return new TaskClaims(scopeGatewayId, TaskKind.AiLog)
-        {
-            SessionId = sessionId,
-        };
+        return new TaskClaims(scopeGatewayId, payload);
     }
 
     public string GetContentType()

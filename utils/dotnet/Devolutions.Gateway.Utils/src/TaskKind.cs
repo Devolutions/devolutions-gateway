@@ -12,7 +12,7 @@ public struct TaskKind
         Value = value;
     }
 
-    public static TaskKind AiLog = new TaskKind("ai-log");
+    public static TaskKind RecordingAiAnalysis = new TaskKind("recording.ai-analysis");
 
     public override string? ToString()
     {

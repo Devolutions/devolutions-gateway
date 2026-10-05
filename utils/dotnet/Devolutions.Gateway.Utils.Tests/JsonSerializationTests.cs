@@ -209,14 +209,30 @@ public class JsonSerializationTests
     }
 
     [Fact]
-    public void TaskClaimsForAiLog()
+    public void TaskClaimsForRecordingAiAnalysis()
     {
-        const string EXPECTED = """{"jet_tk":"ai-log","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+        const string EXPECTED = """{"jet_task":{"kind":"recording.ai-analysis","payload":{"session_id":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","provider":"openai","model":"gpt-5-mini"}},"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
 
-        var claims = TaskClaims.ForAiLog(gatewayId, sessionId);
+        var payload = new RecordingAiAnalysisPayload(sessionId, AiProvider.OpenAi, "gpt-5-mini");
+        var claims = TaskClaims.ForRecordingAiAnalysis(gatewayId, payload);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
         Assert.Equal("TASK", claims.GetContentType());
+    }
+
+    [Fact]
+    public void TaskClaimsForRecordingAiAnalysisAllFields()
+    {
+        const string EXPECTED = """{"jet_task":{"kind":"recording.ai-analysis","payload":{"session_id":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","provider":"openai-compatible","model":"llama3","base_url":"http://localhost:11434/v1","max_output_tokens":16000}},"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var payload = new RecordingAiAnalysisPayload(sessionId, AiProvider.OpenAiCompatible, "llama3")
+        {
+            BaseUrl = "http://localhost:11434/v1",
+            MaxOutputTokens = 16000,
+        };
+        var claims = TaskClaims.ForRecordingAiAnalysis(gatewayId, payload);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
     }
 
     [Fact]
