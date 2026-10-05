@@ -128,6 +128,7 @@ pub(super) async fn execute_grant(
         elevation: request.client.requested_elevation,
         scope: request.options.scope,
         token_elevation_check: TokenElevationCheck::Exact,
+        custom_install_location: None,
         capture_output: true,
         cancel_token: tokio_util::sync::CancellationToken::new(),
         event_sink: None,

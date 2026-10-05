@@ -424,6 +424,25 @@ mod tests {
     }
 
     #[test]
+    fn elevated_user_scope_request_uses_standard_execution_privilege() {
+        let mut request = request();
+        request.client.requested_elevation = api::Elevation::Elevated;
+        request.options.scope = Some(api::Scope::User);
+        let flags = RequestFlags::from_request(&request);
+        let standard = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Standard]),
+            ..Default::default()
+        });
+        let elevated = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Elevated]),
+            ..Default::default()
+        });
+
+        assert!(rule_matches(&standard, &request, &flags, Some("1.2.3")));
+        assert!(!rule_matches(&elevated, &request, &flags, Some("1.2.3")));
+    }
+
+    #[test]
     fn absent_scope_and_architecture_use_deterministic_manager_defaults() {
         use api::{Architecture as A, ManagerName as M, Operation as O, Scope as S};
 

@@ -719,3 +719,97 @@ fn recommended_denied_custom_parameters_block_winget_installer_arguments() {
     request.options.custom_parameters = vec![api::CustomParameterString("--silent".to_owned())];
     assert_eq!(evaluate(&policy, &request).rule_id, "allow-winget");
 }
+
+#[test]
+fn effective_elevation_lowers_explicit_user_scope_and_raises_machine_scope() {
+    use api::{Elevation as E, Scope as S};
+
+    assert_eq!(super::effective_elevation(E::Elevated, Some(S::User)), E::Standard);
+    assert_eq!(super::effective_elevation(E::Elevated, None), E::Elevated);
+    assert_eq!(super::effective_elevation(E::Elevated, Some(S::Machine)), E::Elevated);
+    assert_eq!(super::effective_elevation(E::Standard, Some(S::Machine)), E::Elevated);
+    assert_eq!(super::effective_elevation(E::Standard, Some(S::User)), E::Standard);
+    assert_eq!(super::effective_elevation(E::Standard, None), E::Standard);
+}
+
+#[test]
+fn unacceptable_kill_process_names_are_denied_before_rules() {
+    let policy = make_policy(Decision::Allow, Vec::new());
+
+    for name in ["*", "Code*.exe", r"C:\Tools\Code.exe", "Code.bat"] {
+        let mut request = make_request(api::Operation::Install, "Microsoft.VisualStudioCode");
+        request.options.kill_before_operation = vec![api::ProcessName(name.to_owned())];
+        let result = evaluate(&policy, &request);
+        assert_eq!(result.decision, Decision::Deny, "{name}");
+        assert_eq!(result.rule_id, "<validation-failure>", "{name}");
+    }
+
+    let mut request = make_request(api::Operation::Install, "Microsoft.VisualStudioCode");
+    request.options.kill_before_operation = vec![
+        api::ProcessName("Code.exe".to_owned()),
+        api::ProcessName("chrome".to_owned()),
+    ];
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Allow);
+}
+
+#[test]
+fn agent_uninstall_is_denied_before_rules() {
+    let policy = make_policy(Decision::Allow, Vec::new());
+
+    let request = make_request(api::Operation::Uninstall, "devolutions.agent");
+    let result = evaluate(&policy, &request);
+    assert_eq!(result.decision, Decision::Deny);
+    assert_eq!(result.rule_id, "<validation-failure>");
+
+    let mut request = make_request(api::Operation::Update, "Devolutions.Agent");
+    request.options.uninstall_previous = true;
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Deny);
+
+    let mut request = make_request(api::Operation::Update, "Devolutions.Agent");
+    request.options.custom_parameters = vec![api::CustomParameterString("--uninstall-previous".to_owned())];
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Deny);
+
+    let mut request = make_request(api::Operation::Uninstall, "DEVO-AGENT");
+    request.manager = api::ManagerName::Chocolatey;
+    request.source.name = "chocolatey".to_owned();
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Deny);
+
+    // Installs and updates that keep the previous version, and other packages, are left to the policy.
+    let request = make_request(api::Operation::Update, "Devolutions.Agent");
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Allow);
+    let request = make_request(api::Operation::Uninstall, "Devolutions.Agent.Extra");
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Allow);
+    let mut request = make_request(api::Operation::Uninstall, "Devolutions.Agent");
+    request.manager = api::ManagerName::Chocolatey;
+    request.source.name = "chocolatey".to_owned();
+    assert_eq!(evaluate(&policy, &request).decision, Decision::Allow);
+}
+
+#[test]
+fn custom_parameter_user_scope_lowers_execution_elevation() {
+    let custom = |values: &[&str]| {
+        values
+            .iter()
+            .map(|value| api::CustomParameterString((*value).to_owned()))
+            .collect::<Vec<_>>()
+    };
+
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_parameters = custom(&["--scope", "user"]);
+    assert_eq!(super::effective_execution_elevation(&request), api::Elevation::Standard);
+
+    // A custom machine scope does not raise a standard request, and a typed scope takes precedence.
+    request.client.requested_elevation = api::Elevation::Standard;
+    request.options.custom_parameters = custom(&["--scope", "machine"]);
+    assert_eq!(super::effective_execution_elevation(&request), api::Elevation::Standard);
+
+    request.client.requested_elevation = api::Elevation::Elevated;
+    request.options.scope = Some(api::Scope::Machine);
+    request.options.custom_parameters = custom(&["--scope", "user"]);
+    assert_eq!(super::effective_execution_elevation(&request), api::Elevation::Elevated);
+
+    // Conflicting custom scopes leave the requested elevation unchanged.
+    request.options.scope = None;
+    request.options.custom_parameters = custom(&["--scope", "user", "--scope", "machine"]);
+    assert_eq!(super::effective_execution_elevation(&request), api::Elevation::Elevated);
+}

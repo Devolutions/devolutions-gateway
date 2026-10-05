@@ -2,6 +2,8 @@
 //!
 //! Handles running commands under the specified user identity.
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, ManagerName, Scope};
@@ -64,12 +66,19 @@ pub struct ExecutionContext {
     /// Session selection uses this SID so distinct accounts sharing the same name
     /// (e.g. `MACHINE\alice` vs `DOMAIN\alice`) cannot be confused with one another.
     pub user_sid: Sid,
-    /// Requested elevation level.
+    /// Execution elevation.
+    ///
+    /// On the local-policy route, as decided by `evaluator::effective_execution_elevation`.
+    /// On the remote-grant route, the requested elevation, which the grant binds.
     pub elevation: Elevation,
     /// Installation scope passed to the manager.
     pub scope: Option<Scope>,
     /// Whether the actual launching token's elevation must match the requirement exactly.
     pub token_elevation_check: TokenElevationCheck,
+    /// Normalized custom install location, when the request selects a known one.
+    ///
+    /// Elevated execution requires it to be writable by administrators only.
+    pub custom_install_location: Option<PathBuf>,
     /// When true, capture the main command's combined stdout+stderr.
     ///
     /// Since API v0.3 this only controls whether output frames are pushed on the
@@ -90,10 +99,17 @@ pub struct ExecutionContext {
 }
 
 impl ExecutionContext {
-    #[cfg(windows)]
-    fn requires_elevation(&self) -> bool {
-        self.elevation == Elevation::Elevated
-            || (self.token_elevation_check == TokenElevationCheck::Unchecked && self.scope == Some(Scope::Machine))
+    /// Whether the plan runs with the elevated (linked) token.
+    ///
+    /// An exact check follows the requested elevation regardless of the manager scope, so a
+    /// remote grant can use a machine selector under a standard token.
+    pub fn requires_elevation(&self) -> bool {
+        match self.token_elevation_check {
+            TokenElevationCheck::Exact => self.elevation == Elevation::Elevated,
+            TokenElevationCheck::Unchecked => {
+                crate::evaluator::effective_elevation(self.elevation, self.scope) == Elevation::Elevated
+            }
+        }
     }
 }
 

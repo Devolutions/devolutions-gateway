@@ -12,7 +12,7 @@ use now_policy_api::{
 
 use crate::evaluator;
 
-pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/11";
+pub(super) const VALIDATOR_VERSION: &str = "now-package-broker-policy-validator/12";
 const MAX_RULES: usize = 1024;
 const MAX_RULE_PRIORITY: u32 = i32::MAX as u32;
 const MAX_FINDING_MESSAGE_CHARS: usize = 2048;
@@ -343,10 +343,12 @@ fn semantic_checks(raw: &serde_json::Value, draft: &PolicyDraftDocument, finding
         return;
     }
     if draft.enforcement.audit_mode == Some(true) {
+        // Audit mode allows every request that passes the built-in restrictions, including
+        // elevated requests the rules would deny.
         findings.push(warning(
             PolicyFindingCode::AuditModeEnabled,
             "/Enforcement/AuditMode",
-            "audit mode is enabled; decisions are not enforced",
+            "audit mode does not enforce decisions; elevated requests run without a UAC prompt while it is enabled",
         ));
     }
     if draft.enforcement.default_decision == Decision::Allow {
@@ -712,6 +714,33 @@ mod tests {
         json!({ "Id": id, "Priority": 1, "Decision": "Deny", "Match": match_value })
     }
 
+    #[test]
+    fn audit_mode_warns_that_elevated_requests_run_without_a_prompt() {
+        let uac_warnings = |raw: &serde_json::Value| {
+            validate_draft(raw)
+                .findings
+                .iter()
+                .filter(|finding| {
+                    finding.code == PolicyFindingCode::AuditModeEnabled
+                        && finding.message.contains("without a UAC prompt")
+                })
+                .count()
+        };
+
+        // Audit mode allows elevated requests even when every rule is limited to standard execution.
+        let mut raw = draft();
+        raw["Enforcement"]["AuditMode"] = json!(true);
+        raw["Rules"] = json!([{
+            "Id": "allow.standard",
+            "Priority": 1,
+            "Decision": "Allow",
+            "Match": { "Managers": ["Winget"], "ExecutionElevation": ["Standard"] }
+        }]);
+        assert_eq!(uac_warnings(&raw), 1);
+
+        raw["Enforcement"]["AuditMode"] = json!(false);
+        assert_eq!(uac_warnings(&raw), 0);
+    }
     #[test]
     fn final_contract_is_canonical_and_uses_scalar_booleans() {
         let mut raw = draft();
