@@ -1,6 +1,6 @@
 //! AI settings shared by the task kinds that call an AI provider.
 //!
-//! The provisioner sends them with the API key in the body of `POST /jet/tasks`.
+//! The provisioner puts them in the payload of the TASK token, and sends the API key in the task secret header.
 //! [`AiSettings`] is the part persisted with the task; the API key stays in memory as the task secret.
 
 use core::fmt;
@@ -11,21 +11,7 @@ use url::Url;
 
 use super::{TaskError, TaskErrorCode};
 use crate::DgwState;
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AiProvider {
-    #[serde(rename = "openai")]
-    OpenAi,
-    #[serde(rename = "anthropic")]
-    Anthropic,
-    #[serde(rename = "mistral")]
-    Mistral,
-    #[serde(rename = "gemini")]
-    Gemini,
-    #[serde(rename = "openai-compatible")]
-    OpenAiCompatible,
-}
+use crate::token::AiProvider;
 
 impl From<AiProvider> for Provider {
     fn from(provider: AiProvider) -> Self {

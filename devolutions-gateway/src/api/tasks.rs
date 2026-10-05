@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::extract::{TaskToken, TasksReadScope};
-use crate::tasks::ai_log::{AiLogTarget, AiLogTask};
+use crate::tasks::recording_ai_analysis::RecordingAiAnalysisTask;
 use crate::tasks::{TaskErrorCode, TaskService, TaskSnapshot, TaskStatus};
-use crate::token::TaskKind;
+use crate::token::TaskSpec;
 
 #[derive(Clone)]
 pub(crate) struct TasksState {
@@ -26,8 +26,8 @@ pub fn make_router<S>(state: DgwState, tasks: TaskService) -> Router<S> {
 
 /// Starts a background task.
 ///
-/// The task kind and its target come from the TASK token.
-/// The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.
+/// The TASK token holds the whole task: its kind, and the payload of that kind.
+/// The token is not encrypted, so the request body carries the secrets of the kind: `RecordingAiAnalysisCredentials` for `recording.ai-analysis`.
 ///
 /// This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -35,10 +35,10 @@ pub fn make_router<S>(state: DgwState, tasks: TaskService) -> Router<S> {
     operation_id = "StartTask",
     tag = "Tasks",
     path = "/jet/tasks",
-    request_body(content = Object, description = "Kind-specific task parameters, such as `AiLogParams` for `ai-log`", content_type = "application/json"),
+    request_body(content = Object, description = "Secrets of the task kind, such as `RecordingAiAnalysisCredentials` for `recording.ai-analysis`", content_type = "application/json"),
     responses(
         (status = 202, description = "Task was accepted and runs in the background", body = TaskInfo),
-        (status = 400, description = "Invalid task parameters", body = TaskErrorResponse),
+        (status = 400, description = "Invalid task or request body", body = TaskErrorResponse),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 409, description = "The task target is busy, such as a session that is still recording", body = TaskErrorResponse),
@@ -51,11 +51,11 @@ pub(crate) async fn start_task(
     TaskToken(claims): TaskToken,
     body: Bytes,
 ) -> Result<(StatusCode, Json<TaskInfo>), TaskErrorCode> {
-    let snapshot = match claims.kind {
-        TaskKind::AiLog { jet_aid } => {
+    let snapshot = match claims.jet_task {
+        TaskSpec::RecordingAiAnalysis(payload) => {
             state
                 .tasks
-                .start_ephemeral::<AiLogTask>(&state.gateway, AiLogTarget { session_id: jet_aid }, &body, claims.jti)
+                .start_ephemeral::<RecordingAiAnalysisTask>(&state.gateway, payload, &body, claims.jti)
                 .await?
         }
     };
@@ -104,14 +104,14 @@ pub(crate) async fn get_task(
 /// A background task and its status.
 ///
 /// `substate` is set only when `state` is `running`, `result` only when it is `success`, and `error` only when it is `failed`.
-/// Both `substate` and `result` are kind-specific: for `ai-log`, `substate` is an `AiLogSubstate`.
+/// Both `substate` and `result` are kind-specific: for `recording.ai-analysis`, `substate` is an `RecordingAiAnalysisSubstate`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskInfo {
     /// Task ID.
     id: Uuid,
-    /// Task kind, as in the `jet_tk` claim of the TASK token.
+    /// Task kind, as in `jet_task.kind` in the TASK token.
     kind: String,
     state: TaskState,
     /// Progress of a running task.
@@ -168,7 +168,7 @@ pub(crate) struct TaskErrorResponse {
 impl IntoResponse for TaskErrorCode {
     fn into_response(self) -> Response {
         let status = match self {
-            TaskErrorCode::InvalidParams
+            TaskErrorCode::InvalidRequest
             | TaskErrorCode::MissingModel
             | TaskErrorCode::MissingApiKey
             | TaskErrorCode::MissingBaseUrl

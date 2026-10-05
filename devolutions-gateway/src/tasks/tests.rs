@@ -1,7 +1,7 @@
 use job_queue::Job as _;
 use provisioner_task_store_libsql::TaskState;
 
-use super::ai_log::{AiLogTarget, AiLogTask};
+use super::recording_ai_analysis::RecordingAiAnalysisTask;
 use super::*;
 use crate::MockHandles;
 
@@ -36,6 +36,7 @@ impl<const N: u32> TaskKind for Scripted<N> {
     const KIND: &'static str = "scripted";
     const RETRY: RetryPolicy = RetryPolicy { max_attempts: N };
 
+    type Payload = Outcome;
     type Target = ();
     type Params = Outcome;
     type Substate = Step;
@@ -55,8 +56,8 @@ impl<const N: u32> TaskKind for Scripted<N> {
 }
 
 impl<const N: u32> DurableTask for Scripted<N> {
-    fn prepare(_: &DgwState, _: &(), _: &Outcome) -> Result<(), TaskErrorCode> {
-        Ok(())
+    fn prepare(_: &DgwState, outcome: Outcome) -> Result<((), Outcome), TaskErrorCode> {
+        Ok(((), outcome))
     }
 }
 
@@ -67,6 +68,8 @@ impl TaskKind for LosesStore {
     const KIND: &'static str = "loses-store";
     const RETRY: RetryPolicy = RetryPolicy::JOB_QUEUE;
 
+    /// Path of the task database, and the outcome.
+    type Payload = (String, Outcome);
     /// Path of the task database.
     type Target = String;
     type Params = Outcome;
@@ -93,8 +96,8 @@ impl TaskKind for LosesStore {
 }
 
 impl DurableTask for LosesStore {
-    fn prepare(_: &DgwState, _: &String, _: &Outcome) -> Result<(), TaskErrorCode> {
-        Ok(())
+    fn prepare(_: &DgwState, payload: (String, Outcome)) -> Result<(String, Outcome), TaskErrorCode> {
+        Ok(payload)
     }
 }
 
@@ -149,11 +152,9 @@ impl Harness {
     }
 
     async fn start_scripted<const N: u32>(&self, outcome: Outcome) -> TaskJob {
-        let body = serde_json::to_vec(&outcome).expect("JSON");
-
         let snapshot = self
             .tasks
-            .start_durable::<Scripted<N>>(&self.state, (), &body, Uuid::new_v4())
+            .start_durable::<Scripted<N>>(&self.state, outcome, Uuid::new_v4())
             .await
             .expect("task starts");
 
@@ -166,14 +167,17 @@ impl Harness {
             .await
     }
 
-    async fn start_ai_log(&self) -> TaskSnapshot {
-        let body = serde_json::json!({ "provider": "openai", "model": "gpt-test", "apiKey": API_KEY }).to_string();
-        let target = AiLogTarget {
-            session_id: Uuid::new_v4(),
-        };
+    async fn start_recording_ai_analysis(&self) -> TaskSnapshot {
+        let payload = serde_json::from_value(serde_json::json!({
+            "session_id": Uuid::new_v4(),
+            "provider": "openai",
+            "model": "gpt-test",
+        }))
+        .expect("valid payload");
+        let body = serde_json::json!({ "apiKey": API_KEY }).to_string();
 
         self.tasks
-            .start_ephemeral::<AiLogTask>(&self.state, target, body.as_bytes(), Uuid::new_v4())
+            .start_ephemeral::<RecordingAiAnalysisTask>(&self.state, payload, body.as_bytes(), Uuid::new_v4())
             .await
             .expect("task starts")
     }
@@ -285,7 +289,7 @@ async fn timeout_and_panic_are_permanent_failures() {
 #[tokio::test]
 async fn ephemeral_task_fails_without_retry_after_a_restart() {
     let harness = Harness::new().await;
-    let snapshot = harness.start_ai_log().await;
+    let snapshot = harness.start_recording_ai_analysis().await;
 
     let json = harness.queued_job(snapshot.id).await.write_json().expect("job JSON");
     assert!(!json.contains(API_KEY), "{json}");
@@ -307,7 +311,7 @@ async fn ephemeral_task_fails_without_retry_after_a_restart() {
 #[tokio::test]
 async fn secrets_are_dropped_when_the_task_finishes() {
     let harness = Harness::new().await;
-    let snapshot = harness.start_ai_log().await;
+    let snapshot = harness.start_recording_ai_analysis().await;
 
     assert!(harness.tasks.inner.secrets.lock().contains_key(&snapshot.id));
 
@@ -318,7 +322,10 @@ async fn secrets_are_dropped_when_the_task_finishes() {
 
     let record = harness.record(snapshot.id).await;
     assert_eq!(record.state, TaskState::Failed);
-    assert_eq!(record.error.as_deref(), Some("ai-log task not implemented yet"));
+    assert_eq!(
+        record.error.as_deref(),
+        Some("recording.ai-analysis task not implemented yet")
+    );
     assert!(!record.params.contains(API_KEY), "{}", record.params);
 }
 
@@ -326,11 +333,10 @@ async fn secrets_are_dropped_when_the_task_finishes() {
 async fn final_state_is_not_run_again_when_its_record_cannot_be_written() {
     for outcome in [Outcome::Succeed, Outcome::Permanent] {
         let harness = Harness::new().await;
-        let body = serde_json::to_vec(&outcome).expect("JSON");
 
         let snapshot = harness
             .tasks
-            .start_durable::<LosesStore>(&harness.state, harness.db_path.clone(), &body, Uuid::new_v4())
+            .start_durable::<LosesStore>(&harness.state, (harness.db_path.clone(), outcome), Uuid::new_v4())
             .await
             .expect("task starts");
         let job = harness.queued_job(snapshot.id).await;

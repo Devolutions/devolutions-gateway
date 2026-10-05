@@ -114,9 +114,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::tasks::TaskState,
         crate::api::tasks::TaskErrorResponse,
         crate::tasks::TaskErrorCode,
-        crate::tasks::ai_log::AiLogParams,
-        crate::tasks::ai::AiProvider,
-        crate::tasks::ai_log::AiLogSubstate,
+        crate::tasks::recording_ai_analysis::RecordingAiAnalysisCredentials,
+        crate::tasks::recording_ai_analysis::RecordingAiAnalysisSubstate,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -254,7 +253,7 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some(
-                        "Token authorizing one kind of background task on a specific target".to_owned(),
+                        "Token holding one background task: its kind, and the payload of that kind".to_owned(),
                     ))
                     .build(),
             ),

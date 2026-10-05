@@ -1,5 +1,9 @@
 //! Background tasks started by the provisioner through `POST /jet/tasks` and polled through `GET /jet/tasks/{id}`.
 //!
+//! The TASK token holds the whole task: its kind, and the payload of that kind.
+//! The token is signed but not encrypted, so a secret, such as an API key, never goes into it:
+//! the request sends it in its body, as `provision-credentials` does for injected credentials.
+//!
 //! Every task has a record in the provisioner task database, kept forever so it can be audited.
 //! Each task runs as a job of a job queue stored in that same database, with its own runner:
 //! tasks never take a slot from the other Gateway jobs, and other jobs never delay a task.
@@ -9,7 +13,7 @@
 //! The task system is unstable: it starts only when `__debug__.enable_unstable` is set.
 
 pub mod ai;
-pub mod ai_log;
+pub mod recording_ai_analysis;
 
 use core::marker::PhantomData;
 use std::any::Any;
@@ -69,13 +73,16 @@ impl RetryPolicy {
 
 /// A kind of one-shot background task.
 pub trait TaskKind: Sized + Send + Sync + 'static {
-    /// Value of the TASK token `jet_tk` claim.
+    /// Value of `kind` in the `jet_task` claim of the TASK token.
     const KIND: &'static str;
 
     /// How many times a run ending with [`TaskError::Transient`] is attempted.
     const RETRY: RetryPolicy;
 
-    /// What the task works on, taken from the TASK token.
+    /// Payload of this kind in the TASK token.
+    type Payload;
+
+    /// What the task works on, taken from the payload and persisted.
     type Target: Serialize + DeserializeOwned + Send + Sync + 'static;
 
     /// Persisted parameters; they must never hold a secret.
@@ -91,23 +98,30 @@ pub trait TaskKind: Sized + Send + Sync + 'static {
 
 /// A task whose inputs are all persisted, so it resumes after a restart.
 pub trait DurableTask: TaskKind {
-    /// Checks the request before the task is recorded.
-    fn prepare(state: &DgwState, target: &Self::Target, params: &Self::Params) -> Result<(), TaskErrorCode>;
+    /// Checks the payload and splits it into what is persisted.
+    fn prepare(state: &DgwState, payload: Self::Payload) -> Result<(Self::Target, Self::Params), TaskErrorCode>;
 }
 
-/// A task that needs secrets, kept in memory only until the task finishes.
+/// A task that needs a secret, kept in memory only until the task finishes.
 pub trait EphemeralTask: TaskKind {
     type Secrets: Send + Sync + 'static;
 
-    /// Body of `POST /jet/tasks`, holding both the parameters and the secrets.
+    /// Body of `POST /jet/tasks`, holding the secrets.
     type Request: DeserializeOwned;
 
-    /// Checks the request and splits it into the persisted parameters and the secrets.
+    /// Checks the payload and the request, then splits them into what is persisted and the secrets.
     fn prepare(
         state: &DgwState,
-        target: &Self::Target,
+        payload: Self::Payload,
         request: Self::Request,
-    ) -> Result<(Self::Params, Self::Secrets), TaskErrorCode>;
+    ) -> Result<EphemeralParts<Self>, TaskErrorCode>;
+}
+
+/// What an [`EphemeralTask`] keeps from its payload and request.
+pub struct EphemeralParts<K: EphemeralTask> {
+    pub target: K::Target,
+    pub params: K::Params,
+    pub secrets: K::Secrets,
 }
 
 /// Stable code telling a client why a task request failed; safe to show.
@@ -115,17 +129,17 @@ pub trait EphemeralTask: TaskKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskErrorCode {
-    /// The body is not valid JSON or does not match the parameters of the task kind.
-    InvalidParams,
+    /// The body is not valid JSON or does not match the request of the task kind.
+    InvalidRequest,
     /// The AI model is empty.
     MissingModel,
     /// The AI API key is empty.
     MissingApiKey,
-    /// The AI provider has no default base URL, so the request must give one.
+    /// The AI provider has no default base URL, so the token must give one.
     MissingBaseUrl,
     /// The AI settings are invalid for another reason.
     InvalidAiSettings,
-    /// `ai-log`: the session is still recording.
+    /// `recording.ai-analysis`: the session is still recording.
     RecordingActive,
     /// No task has this ID.
     TaskNotFound,
@@ -331,30 +345,32 @@ impl TaskService {
         Ok(())
     }
 
-    /// Parses the request of an ephemeral task, records the task and queues its job.
+    /// Parses the request of an ephemeral task, checks it with the payload, records the task and queues its job.
     pub async fn start_ephemeral<K: EphemeralTask>(
         &self,
         state: &DgwState,
-        target: K::Target,
+        payload: K::Payload,
         body: &[u8],
         token_jti: Uuid,
     ) -> Result<TaskSnapshot, TaskErrorCode> {
-        let request = parse_body::<K, K::Request>(body)?;
-        let (params, secrets) = K::prepare(state, &target, request)?;
+        let request = parse_body::<K>(body)?;
+        let EphemeralParts {
+            target,
+            params,
+            secrets,
+        } = K::prepare(state, payload, request)?;
         self.create::<K>(state, &target, &params, token_jti, Some(Arc::new(secrets)))
             .await
     }
 
-    /// Parses the parameters of a durable task, records the task and queues its job.
+    /// Checks the payload of a durable task, records the task and queues its job.
     pub async fn start_durable<K: DurableTask>(
         &self,
         state: &DgwState,
-        target: K::Target,
-        body: &[u8],
+        payload: K::Payload,
         token_jti: Uuid,
     ) -> Result<TaskSnapshot, TaskErrorCode> {
-        let params = parse_body::<K, K::Params>(body)?;
-        K::prepare(state, &target, &params)?;
+        let (target, params) = K::prepare(state, payload)?;
         self.create::<K>(state, &target, &params, token_jti, None).await
     }
 
@@ -548,17 +564,17 @@ async fn run_attempt<K: TaskKind>(ctx: TaskCtx<K>, timeout: Duration) -> Result<
     }
 }
 
-fn parse_body<K: TaskKind, T: DeserializeOwned>(body: &[u8]) -> Result<T, TaskErrorCode> {
+fn parse_body<K: EphemeralTask>(body: &[u8]) -> Result<K::Request, TaskErrorCode> {
     // The serde error is not logged because it may quote the rejected value, which could be a secret.
-    serde_json::from_slice::<T>(body).map_err(|error| {
+    serde_json::from_slice(body).map_err(|error| {
         debug!(
             task.kind = K::KIND,
             category = ?error.classify(),
             line = error.line(),
             column = error.column(),
-            "Invalid task parameters"
+            "Invalid task request"
         );
-        TaskErrorCode::InvalidParams
+        TaskErrorCode::InvalidRequest
     })
 }
 
@@ -613,9 +629,9 @@ impl job_queue::Job for TaskJob {
         let def = self.def.clone();
 
         match def.kind.as_str() {
-            ai_log::AiLogTask::KIND => {
+            recording_ai_analysis::RecordingAiAnalysisTask::KIND => {
                 self.tasks
-                    .execute_ephemeral::<ai_log::AiLogTask>(&self.state, def)
+                    .execute_ephemeral::<recording_ai_analysis::RecordingAiAnalysisTask>(&self.state, def)
                     .await
             }
             kind => {

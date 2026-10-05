@@ -1,91 +1,89 @@
-//! `ai-log` task: describes what the user did in one session and stores the result as a new log of that session.
+//! `recording.ai-analysis` task: describes what the user did in one session and stores the result as a new log of that session.
 
 use secrecy::SecretString;
-use url::Url;
 use uuid::Uuid;
 
-use super::ai::{AiProvider, AiSettings};
-use super::{EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, TaskCtx, TaskError, TaskErrorCode, TaskKind};
+use super::ai::AiSettings;
+use super::{
+    EphemeralParts, EphemeralTask, RetryPolicy, SECRETS_LOST_ERROR, TaskCtx, TaskError, TaskErrorCode, TaskKind,
+};
 use crate::DgwState;
+use crate::token::RecordingAiAnalysisPayload;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AiLogTarget {
+pub struct RecordingAiAnalysisTarget {
     pub session_id: Uuid,
 }
 
-/// AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.
+/// Credentials of a `recording.ai-analysis` task: the body of `POST /jet/tasks` for a TASK token of kind `recording.ai-analysis`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AiLogParams {
-    pub provider: AiProvider,
-    /// Model identifier, passed to the provider as is.
-    pub model: String,
-    /// Kept in memory for this task only.
+pub struct RecordingAiAnalysisCredentials {
+    /// API key of the AI provider, kept in memory for this task only.
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub api_key: SecretString,
-    /// Overrides the provider default; required for `openai-compatible`.
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
-    pub base_url: Option<Url>,
-    /// Upper bound of tokens in each AI answer.
-    pub max_output_tokens: Option<u32>,
 }
 
-/// Progress of a running `ai-log` task.
+/// Progress of a running `recording.ai-analysis` task.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "step")]
-pub enum AiLogSubstate {
+pub enum RecordingAiAnalysisSubstate {
     #[default]
     Preparing,
 }
 
 #[derive(Debug, Serialize)]
-pub enum AiLogOutput {}
+pub enum RecordingAiAnalysisOutput {}
 
-pub enum AiLogTask {}
+pub enum RecordingAiAnalysisTask {}
 
-impl TaskKind for AiLogTask {
-    const KIND: &'static str = "ai-log";
+impl TaskKind for RecordingAiAnalysisTask {
+    const KIND: &'static str = "recording.ai-analysis";
     const RETRY: RetryPolicy = RetryPolicy::JOB_QUEUE;
 
-    type Target = AiLogTarget;
+    type Payload = RecordingAiAnalysisPayload;
+    type Target = RecordingAiAnalysisTarget;
     type Params = AiSettings;
-    type Substate = AiLogSubstate;
-    type Output = AiLogOutput;
+    type Substate = RecordingAiAnalysisSubstate;
+    type Output = RecordingAiAnalysisOutput;
 
-    async fn run(ctx: TaskCtx<Self>) -> Result<AiLogOutput, TaskError> {
+    async fn run(ctx: TaskCtx<Self>) -> Result<RecordingAiAnalysisOutput, TaskError> {
         let Some(api_key) = ctx.secrets() else {
             return Err(TaskError::Permanent(SECRETS_LOST_ERROR.to_owned()));
         };
 
         let _client = ctx.params.client(&ctx.state, api_key)?;
 
-        Err(TaskError::Permanent("ai-log task not implemented yet".to_owned()))
+        Err(TaskError::Permanent(
+            "recording.ai-analysis task not implemented yet".to_owned(),
+        ))
     }
 }
 
-impl EphemeralTask for AiLogTask {
+impl EphemeralTask for RecordingAiAnalysisTask {
+    /// API key of the AI provider.
     type Secrets = SecretString;
-    type Request = AiLogParams;
+    type Request = RecordingAiAnalysisCredentials;
 
     fn prepare(
         state: &DgwState,
-        target: &AiLogTarget,
-        request: AiLogParams,
-    ) -> Result<(AiSettings, SecretString), TaskErrorCode> {
-        if state.recordings.active_recordings.contains(target.session_id) {
-            return Err(TaskErrorCode::RecordingActive);
-        }
-
-        let AiLogParams {
+        payload: RecordingAiAnalysisPayload,
+        request: RecordingAiAnalysisCredentials,
+    ) -> Result<EphemeralParts<Self>, TaskErrorCode> {
+        let RecordingAiAnalysisPayload {
+            session_id,
             provider,
             model,
-            api_key,
             base_url,
             max_output_tokens,
-        } = request;
+        } = payload;
+
+        if state.recordings.active_recordings.contains(session_id) {
+            return Err(TaskErrorCode::RecordingActive);
+        }
 
         let settings = AiSettings {
             provider,
@@ -94,9 +92,13 @@ impl EphemeralTask for AiLogTask {
             max_output_tokens,
         };
 
-        settings.check(state, &api_key)?;
+        settings.check(state, &request.api_key)?;
 
-        Ok((settings, api_key))
+        Ok(EphemeralParts {
+            target: RecordingAiAnalysisTarget { session_id },
+            params: settings,
+            secrets: request.api_key,
+        })
     }
 }
 
@@ -104,7 +106,7 @@ impl EphemeralTask for AiLogTask {
 mod tests {
     use super::*;
 
-    const API_KEY: &str = "sk-ai-log-test-secret";
+    const API_KEY: &str = "sk-recording.ai-analysis-test-secret";
 
     const CONFIG: &str = r#"{
         "ProvisionerPublicKeyData": {
@@ -114,28 +116,28 @@ mod tests {
         "Proxy": { "Mode": "Off" }
     }"#;
 
-    fn params() -> AiLogParams {
+    fn payload() -> RecordingAiAnalysisPayload {
         serde_json::from_value(serde_json::json!({
+            "session_id": Uuid::new_v4(),
             "provider": "openai",
             "model": "gpt-test",
-            "apiKey": API_KEY,
         }))
-        .expect("valid params")
+        .expect("valid payload")
     }
 
-    fn target() -> AiLogTarget {
-        AiLogTarget {
-            session_id: Uuid::new_v4(),
-        }
+    fn api_key() -> RecordingAiAnalysisCredentials {
+        serde_json::from_value(serde_json::json!({ "apiKey": API_KEY })).expect("valid credentials")
     }
 
     #[tokio::test]
     async fn refuses_a_session_that_is_still_recording() {
         let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
-        let target = target();
-        state.recordings.active_recordings.insert(target.session_id);
+        let payload = payload();
+        state.recordings.active_recordings.insert(payload.session_id);
 
-        let error = AiLogTask::prepare(&state, &target, params()).expect_err("session is busy");
+        let error = RecordingAiAnalysisTask::prepare(&state, payload, api_key())
+            .err()
+            .expect("session is busy");
 
         assert_eq!(error, TaskErrorCode::RecordingActive);
     }
@@ -143,12 +145,16 @@ mod tests {
     #[tokio::test]
     async fn persisted_settings_never_hold_the_api_key() {
         let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
+        let payload = payload();
+        let session_id = payload.session_id;
 
-        let params = params();
-        assert!(!format!("{params:?}").contains(API_KEY));
+        let EphemeralParts {
+            target,
+            params: settings,
+            secrets: api_key,
+        } = RecordingAiAnalysisTask::prepare(&state, payload, api_key()).expect("valid task");
 
-        let (settings, api_key) = AiLogTask::prepare(&state, &target(), params).expect("valid task");
-
+        assert_eq!(target.session_id, session_id);
         let persisted = serde_json::to_string(&settings).expect("serializable settings");
         assert_eq!(
             persisted,
@@ -158,13 +164,25 @@ mod tests {
         assert!(!format!("{api_key:?}").contains(API_KEY));
     }
 
+    #[test]
+    fn credentials_hide_the_api_key_and_refuse_unknown_fields() {
+        assert!(!format!("{:?}", api_key()).contains(API_KEY));
+
+        let misplaced = serde_json::from_value::<RecordingAiAnalysisCredentials>(
+            serde_json::json!({ "apiKey": API_KEY, "model": "x" }),
+        );
+        assert!(misplaced.is_err());
+    }
+
     #[tokio::test]
     async fn invalid_ai_settings_are_refused_with_a_code() {
         let (state, _handles) = DgwState::mock(CONFIG).expect("mock state");
-        let mut params = params();
-        params.model = " ".to_owned();
+        let mut payload = payload();
+        payload.model = " ".to_owned();
 
-        let error = AiLogTask::prepare(&state, &target(), params).expect_err("empty model");
+        let error = RecordingAiAnalysisTask::prepare(&state, payload, api_key())
+            .err()
+            .expect("empty model");
 
         assert_eq!(error, TaskErrorCode::MissingModel);
     }

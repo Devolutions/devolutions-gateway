@@ -193,12 +193,24 @@ fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-fn task_token() -> String {
+fn recording_ai_analysis_payload() -> Value {
+    json!({
+        "session_id": Uuid::new_v4(),
+        "provider": "openai",
+        "model": "gpt-test",
+    })
+}
+
+/// Body of a `recording.ai-analysis` start request.
+fn credentials(api_key: &str) -> String {
+    json!({ "apiKey": api_key }).to_string()
+}
+
+fn task_token(payload: Value) -> String {
     unsigned_jws(
         "TASK",
         &json!({
-            "jet_tk": "ai-log",
-            "jet_aid": Uuid::new_v4(),
+            "jet_task": { "kind": "recording.ai-analysis", "payload": payload },
             "nbf": now(),
             "exp": now() + 600,
             "jti": Uuid::new_v4(),
@@ -213,21 +225,20 @@ fn scope_token(scope: &str) -> String {
     )
 }
 
-fn ai_params() -> Value {
-    json!({ "provider": "openai", "model": "gpt-test", "apiKey": API_KEY })
-}
-
-fn start_request(token: Option<&str>, params: &Value) -> Request<Body> {
-    let mut request = Request::builder()
-        .method("POST")
-        .uri("/jet/tasks")
-        .header(http::header::CONTENT_TYPE, "application/json");
+fn start_request(token: Option<&str>, body: Option<&str>) -> Request<Body> {
+    let mut request = Request::builder().method("POST").uri("/jet/tasks");
 
     if let Some(token) = token {
         request = request.header(http::header::AUTHORIZATION, format!("Bearer {token}"));
     }
 
-    request.body(Body::from(params.to_string())).unwrap()
+    match body {
+        Some(body) => request
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+        None => request.body(Body::empty()).unwrap(),
+    }
 }
 
 fn status_request(token: Option<&str>, id: Uuid) -> Request<Body> {
@@ -248,7 +259,14 @@ async fn send(app: &Router, request: Request<Body>) -> (StatusCode, String) {
 }
 
 async fn start_task(app: &Router) -> Value {
-    let (status, body) = send(app, start_request(Some(&task_token()), &ai_params())).await;
+    let (status, body) = send(
+        app,
+        start_request(
+            Some(&task_token(recording_ai_analysis_payload())),
+            Some(&credentials(API_KEY)),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
     serde_json::from_str(&body).unwrap()
 }
@@ -308,13 +326,13 @@ fn capture_logs() -> (CapturedLogs, impl Sized) {
 }
 
 #[tokio::test]
-async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
+async fn recording_ai_analysis_task_is_accepted_then_fails_as_not_implemented() {
     let dir = tempfile::tempdir().unwrap();
     let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
     let started = start_task(&app).await;
-    assert_eq!(started["kind"], "ai-log");
+    assert_eq!(started["kind"], "recording.ai-analysis");
     assert_eq!(started["state"], "not-started");
 
     let id = started["id"].as_str().unwrap().parse::<Uuid>().unwrap();
@@ -324,9 +342,9 @@ async fn ai_log_task_is_accepted_then_fails_as_not_implemented() {
         finished,
         json!({
             "id": id,
-            "kind": "ai-log",
+            "kind": "recording.ai-analysis",
             "state": "failed",
-            "error": "ai-log task not implemented yet",
+            "error": "recording.ai-analysis task not implemented yet",
         })
     );
 }
@@ -337,10 +355,14 @@ async fn start_requires_a_task_token() {
     let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
-    let (status, _) = send(&app, start_request(None, &ai_params())).await;
+    let (status, _) = send(&app, start_request(None, Some(&credentials(API_KEY)))).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let (status, _) = send(&app, start_request(Some(&scope_token("*")), &ai_params())).await;
+    let (status, _) = send(
+        &app,
+        start_request(Some(&scope_token("*")), Some(&credentials(API_KEY))),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
@@ -354,7 +376,11 @@ async fn status_requires_the_tasks_read_scope() {
     let (status, _) = send(&app, status_request(None, id)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let (status, _) = send(&app, status_request(Some(&task_token()), id)).await;
+    let (status, _) = send(
+        &app,
+        status_request(Some(&task_token(recording_ai_analysis_payload())), id),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     let (status, _) = send(&app, status_request(Some(&scope_token("gateway.sessions.read")), id)).await;
@@ -389,34 +415,86 @@ async fn invalid_ai_settings_are_typed_bad_requests() {
     let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
     let app = gateway.app.clone();
 
-    for (params, expected) in [
-        (json!({ "provider": "openai", "model": "gpt-test" }), "invalid_params"),
+    let with = |field: &str, value: Value| {
+        let mut payload = recording_ai_analysis_payload();
+        payload[field] = value;
+        payload
+    };
+
+    for (payload, api_key, expected) in [
+        (recording_ai_analysis_payload(), "", "missing_api_key"),
+        (with("model", json!(" ")), API_KEY, "missing_model"),
         (
-            json!({ "provider": "openai", "model": "gpt-test", "apiKey": "" }),
-            "missing_api_key",
-        ),
-        (
-            json!({ "provider": "openai", "model": " ", "apiKey": API_KEY }),
-            "missing_model",
-        ),
-        (
-            json!({ "provider": "openai-compatible", "model": "gpt-test", "apiKey": API_KEY }),
+            with("provider", json!("openai-compatible")),
+            API_KEY,
             "missing_base_url",
         ),
-        (
-            json!({ "provider": "ollama", "model": "llama", "baseUrl": "http://localhost:11434/" }),
-            "invalid_params",
-        ),
-        (json!({ "model": "gpt-test", "apiKey": API_KEY }), "invalid_params"),
     ] {
-        let (status, body) = send(&app, start_request(Some(&task_token()), &params)).await;
+        let (status, body) = send(
+            &app,
+            start_request(Some(&task_token(payload.clone())), Some(&credentials(api_key))),
+        )
+        .await;
 
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{params}");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{payload}");
         assert_eq!(
             serde_json::from_str::<Value>(&body).unwrap(),
             json!({ "error": expected })
         );
     }
+}
+
+#[tokio::test]
+async fn invalid_request_body_is_a_typed_bad_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
+
+    for body in [
+        None,
+        Some("not JSON"),
+        Some(r#"{}"#),
+        Some(r#"{"api_key":"sk"}"#),
+        Some(r#"{"apiKey":"sk","model":"gpt-test"}"#),
+    ] {
+        let (status, response) = send(
+            &app,
+            start_request(Some(&task_token(recording_ai_analysis_payload())), body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&response).unwrap(),
+            json!({ "error": "invalid_request" })
+        );
+    }
+
+    assert_eq!(queued_job_count(dir.path()).await, 0);
+}
+
+#[tokio::test]
+async fn invalid_task_payload_is_rejected_with_the_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let gateway = Gateway::start(dir.path(), Jobs::Run).await.unwrap();
+    let app = gateway.app.clone();
+
+    let mut unknown_provider = recording_ai_analysis_payload();
+    unknown_provider["provider"] = json!("ollama");
+
+    let mut unknown_field = recording_ai_analysis_payload();
+    unknown_field["temperature"] = json!(1);
+
+    for payload in [unknown_provider, unknown_field] {
+        let (status, _) = send(
+            &app,
+            start_request(Some(&task_token(payload.clone())), Some(&credentials(API_KEY))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{payload}");
+    }
+
+    assert_eq!(queued_job_count(dir.path()).await, 0);
 }
 
 #[tokio::test]
@@ -433,9 +511,13 @@ async fn api_key_never_appears_in_responses_or_logs() {
     let finished = wait_until_finished(&app, id).await;
     assert!(!finished.to_string().contains(API_KEY));
 
-    // A key sent in the wrong field must not be echoed by the parameter error either.
-    let misplaced = json!({ "provider": "openai", "model": "gpt-test", "apiKey": "sk", "maxOutputTokens": API_KEY });
-    let (status, body) = send(&app, start_request(Some(&task_token()), &misplaced)).await;
+    // A key sent in the wrong field must not be echoed by the request error either.
+    let misplaced = json!({ "apiKey": "sk", "model": API_KEY }).to_string();
+    let (status, body) = send(
+        &app,
+        start_request(Some(&task_token(recording_ai_analysis_payload())), Some(&misplaced)),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!body.contains(API_KEY));
 
@@ -452,7 +534,14 @@ async fn stable_gateway_never_touches_the_task_database() {
         .unwrap();
     let app = gateway.app.clone();
 
-    let (status, _) = send(&app, start_request(Some(&task_token()), &ai_params())).await;
+    let (status, _) = send(
+        &app,
+        start_request(
+            Some(&task_token(recording_ai_analysis_payload())),
+            Some(&credentials(API_KEY)),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let (status, _) = send(
@@ -515,7 +604,7 @@ async fn after_a_restart_the_ephemeral_task_fails_without_retry() {
         finished,
         json!({
             "id": id,
-            "kind": "ai-log",
+            "kind": "recording.ai-analysis",
             "state": "failed",
             "error": SECRETS_LOST_ERROR,
         })
