@@ -3,7 +3,7 @@
   "Metadata": {
     "Id": "contoso.desktop.deny-risky-options",
     "Publisher": "Contoso IT",
-    "Revision": 2,
+    "Revision": 3,
     "PublishedAt": "2026-05-05T00:00:00Z",
     "Description": "Default-allow policy that blocks risky broker request options."
   },
@@ -64,6 +64,27 @@
           "msstore",
           "winget-fonts"
         ]
+      }
+    },
+    {
+      "Id": "deny.elevated-uninstall-critical-software",
+      "Priority": 60,
+      "Decision": "Deny",
+      "Reason": "Endpoint protection, VPN and device management agents cannot be removed through the broker.",
+      "Match": {
+        "Operations": [
+          "Uninstall"
+        ],
+        "ExecutionElevation": [
+          "Elevated"
+        ],
+        "PackageIdentifiers": {
+          "Patterns": [
+            "Contoso.EndpointProtection*",
+            "Contoso.Vpn*",
+            "Contoso.DeviceManagement*"
+          ]
+        }
       }
     }
   ]

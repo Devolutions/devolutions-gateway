@@ -64,7 +64,7 @@ pub fn build_dotnet_command(request: &PackageRequest) -> anyhow::Result<Vec<Stri
 }
 
 fn validate_dotnet_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == now_policy_api::Elevation::Elevated
+    if crate::evaluator::effective_execution_elevation(request) == now_policy_api::Elevation::Elevated
         && !trusted_dotnet_executable_is_program_files_path()
     {
         bail!("elevated .NET tool operations require the trusted Program Files dotnet.exe path");

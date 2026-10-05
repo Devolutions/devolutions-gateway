@@ -2,6 +2,8 @@
 //!
 //! Handles running commands under the specified user identity.
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use now_policy_api::{Elevation, ManagerName, Scope};
@@ -50,10 +52,14 @@ pub struct ExecutionContext {
     /// Session selection uses this SID so distinct accounts sharing the same name
     /// (e.g. `MACHINE\alice` vs `DOMAIN\alice`) cannot be confused with one another.
     pub user_sid: Sid,
-    /// Requested elevation level.
+    /// Execution elevation, as decided by `evaluator::effective_execution_elevation`.
     pub elevation: Elevation,
     /// Installation scope (machine scope requires elevation).
     pub scope: Option<Scope>,
+    /// Normalized custom install location, when the request selects a known one.
+    ///
+    /// Elevated execution requires it to be writable by administrators only.
+    pub custom_install_location: Option<PathBuf>,
     /// When true, capture the main command's combined stdout+stderr.
     ///
     /// Since API v0.3 this only controls whether output frames are pushed on the
@@ -71,6 +77,13 @@ pub struct ExecutionContext {
     /// chunks to the sink when [`ExecutionContext::capture_output`] is true. All
     /// sink calls are non-blocking and best-effort.
     pub event_sink: Option<OperationEventSink>,
+}
+
+impl ExecutionContext {
+    /// Whether the plan runs with the elevated (linked) token.
+    pub fn requires_elevation(&self) -> bool {
+        crate::evaluator::effective_elevation(self.elevation, self.scope) == Elevation::Elevated
+    }
 }
 
 /// Marker error reported by executors when an operation was terminated because its

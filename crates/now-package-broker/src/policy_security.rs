@@ -50,7 +50,7 @@ use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurit
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetLengthSid, INHERIT_ONLY_ACE,
     IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, WinBuiltinAdministratorsSid,
-    WinLocalSystemSid,
+    WinCreatorOwnerSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
@@ -117,6 +117,13 @@ enum TrustedWriters {
     /// it is a low-privilege shared service identity, and accepting it for elevated
     /// executables would open a privilege-escalation path.
     AdminOrTrustedInstaller,
+    /// SYSTEM, the built-in Administrators group, and `NT SERVICE\TrustedInstaller`, for an
+    /// elevated custom install location.
+    ///
+    /// Inheritable ACEs are checked too, since they grant their rights on the folders and files
+    /// the installer creates; `CREATOR OWNER` is accepted on inherit-only ACEs because the
+    /// administrator token creates those objects.
+    InstallLocation,
 }
 
 // ACE type constants from winnt.h (the Win32_System_SystemServices feature is not enabled).
@@ -229,6 +236,11 @@ pub(crate) fn is_plain_local_drive_path(path: &str) -> bool {
         && !rest
             .iter()
             .any(|&byte| matches!(byte, b':' | b'/') || byte.is_ascii_control())
+}
+
+/// Accepts only a drive-letter root such as `C:\`.
+pub(crate) fn is_plain_local_drive_root(path: &str) -> bool {
+    matches!(path.as_bytes(), [drive, b':', b'\\'] if drive.is_ascii_alphabetic())
 }
 
 pub(crate) fn paths_match_case_insensitive(left: &Path, right: &Path) -> bool {
@@ -818,6 +830,99 @@ pub(crate) fn pin_launch_executable(
     )
 }
 
+/// Rights on an elevated install location, directly or through inheritable ACEs, that let a
+/// principal add, replace or delete what the installer puts there, or rewrite its security.
+const INSTALL_LOCATION_TAMPER_MASK: u32 = PARENT_DIRECTORY_TAMPER_MASK | WRITE_ACCESS_MASK;
+
+/// Handles pinning a verified elevated install location and its ancestors against rename.
+#[derive(Debug)]
+pub(crate) struct VerifiedInstallLocation {
+    _handles: Vec<File>,
+}
+
+/// Verify that an elevated operation may install into `location`.
+///
+/// The nearest existing folder, which is `location` itself when it exists, is opened through
+/// `opener` so the path resolves as it does for the execution token.
+/// That folder must be on a local disk volume, must not be a reparse point, and its owner and
+/// DACL, including inheritable ACEs, must not let principals other than SYSTEM, Administrators
+/// and TrustedInstaller write it.
+/// Its ancestors must not be reparse points or be renamable by other principals.
+/// The returned guard must be kept alive until the installation completes.
+pub(crate) fn verify_elevated_install_location(
+    opener: &dyn PathOpener,
+    location: &Path,
+) -> anyhow::Result<VerifiedInstallLocation> {
+    // Delete sharing lets the installer replace an existing install folder; non-administrators
+    // cannot, since the DACL check below rejects delete rights for them.
+    let mut options = OpenOptions::new();
+    options
+        .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0);
+
+    let mut folder = location;
+    let handle = loop {
+        match opener.open(&options, folder) {
+            Ok(handle) => break handle,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                folder = folder.parent().with_context(|| {
+                    format!(
+                        "custom install location '{}' is not on an existing drive",
+                        location.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to open install location folder '{}'", folder.display()));
+            }
+        }
+    };
+
+    let subject = format!("install location folder '{}'", folder.display());
+    verify_local_volume_file(&handle).with_context(|| format!("failed to verify {subject}"))?;
+    if is_reparse_point(&handle).with_context(|| format!("failed to inspect {subject}"))? {
+        bail!("{subject} is a reparse point");
+    }
+    if !handle
+        .metadata()
+        .with_context(|| format!("failed to inspect {subject}"))?
+        .is_dir()
+    {
+        bail!("{subject} is not a directory");
+    }
+    let resolved = final_path_from_handle(&handle).with_context(|| format!("failed to resolve {subject}"))?;
+    if !windows_paths_equal(&resolved, folder) {
+        bail!("{subject} resolved to an unexpected location '{}'", resolved.display());
+    }
+
+    verify_handle_security(
+        &handle,
+        &subject,
+        TrustedWriters::InstallLocation,
+        INSTALL_LOCATION_TAMPER_MASK,
+    )
+    .with_context(|| {
+        format!(
+            "custom install location '{}' is writable by non-administrators; \
+             choose a location under Program Files or a folder restricted to administrators",
+            location.display()
+        )
+    })?;
+
+    let mut handles =
+        retain_ancestor_directories(folder.parent(), DIRECTORY_TAMPER_MASK, &subject).with_context(|| {
+            format!(
+                "custom install location '{}' is in a folder that non-administrators can redirect",
+                location.display()
+            )
+        })?;
+    handles.push(handle);
+
+    Ok(VerifiedInstallLocation { _handles: handles })
+}
+
 /// Kind of Microsoft Store app execution alias found at a path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppExecAliasKind {
@@ -1082,9 +1187,17 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
 /// Each ancestor must not itself be a reparse point and must resolve to its own path.
 /// The returned handles pin the verified chain and must be kept alive by the caller.
 fn retain_executable_ancestor_directories(path: &Path, subject: &str) -> anyhow::Result<Vec<File>> {
+    retain_ancestor_directories(path.parent(), PARENT_DIRECTORY_TAMPER_MASK, subject)
+}
+
+/// Verify and pin `first` and each of its ancestors, checking `first` against `first_mask`
+/// and higher ancestors against [`DIRECTORY_TAMPER_MASK`].
+///
+/// See [`retain_executable_ancestor_directories`] for the rationale.
+fn retain_ancestor_directories(first: Option<&Path>, first_mask: u32, subject: &str) -> anyhow::Result<Vec<File>> {
     let mut handles = Vec::new();
-    let mut current = path.parent();
-    let mut tamper_mask = PARENT_DIRECTORY_TAMPER_MASK;
+    let mut current = first;
+    let mut tamper_mask = first_mask;
 
     while let Some(dir) = current {
         let dir_subject = format!("{subject} ancestor directory '{}'", dir.display());
@@ -1322,7 +1435,9 @@ unsafe fn verify_owner_and_dacl(
 
         // Inherit-only ACEs do not apply to the object itself, only to its children
         // (e.g. the `CREATOR OWNER` full-control template ACE on `Program Files`).
-        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE.0 != 0 {
+        // An install location also passes them on to what the installer creates there.
+        let inherit_only = u32::from(header.AceFlags) & INHERIT_ONLY_ACE.0 != 0;
+        if inherit_only && trusted_writers != TrustedWriters::InstallLocation {
             continue;
         }
 
@@ -1345,6 +1460,12 @@ unsafe fn verify_owner_and_dacl(
                 }
 
                 let trustee = PSID(std::ptr::from_ref(&ace.SidStart).cast_mut().cast());
+
+                // On objects created by the administrator token, `CREATOR OWNER` grants that owner.
+                // SAFETY: `SidStart` is the first DWORD of the trustee SID stored inline in the ACE.
+                if inherit_only && unsafe { IsWellKnownSid(trustee, WinCreatorOwnerSid) }.as_bool() {
+                    continue;
+                }
 
                 // SAFETY: `SidStart` is the first DWORD of the trustee SID stored inline in the ACE.
                 if !unsafe { is_trusted_sid(trustee, trusted_writers) } {
@@ -1386,10 +1507,14 @@ unsafe fn is_trusted_sid(sid: PSID, trusted_writers: TrustedWriters) -> bool {
     // SAFETY: Per function contract, `sid` points to a valid SID.
     let sid_string = unsafe { sid_to_string(sid) };
 
+    if sid_string.eq_ignore_ascii_case(TRUSTED_INSTALLER_SID) {
+        return true;
+    }
+
     // Windows-protected executables (e.g. Store apps under `Program Files\WindowsApps`)
     // grant write access to TrustedInstaller and to process trust-label SIDs, which the
     // kernel only assigns to Windows-signed protected processes.
-    sid_string.eq_ignore_ascii_case(TRUSTED_INSTALLER_SID) || sid_string.starts_with(PROCESS_TRUST_SID_PREFIX)
+    trusted_writers == TrustedWriters::AdminOrTrustedInstaller && sid_string.starts_with(PROCESS_TRUST_SID_PREFIX)
 }
 
 /// Best-effort conversion of a SID to its string form for diagnostics.
@@ -1781,6 +1906,135 @@ mod tests {
                 )
             }
         }
+
+        fn verify_as_install_location(&self) -> anyhow::Result<()> {
+            // SAFETY: `owner` and `dacl` point into the owned security descriptor, which outlives
+            // this call.
+            unsafe {
+                verify_owner_and_dacl(
+                    "test install location",
+                    self.owner,
+                    self.dacl,
+                    TrustedWriters::InstallLocation,
+                    INSTALL_LOCATION_TAMPER_MASK,
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn program_files_like_install_location_is_accepted() {
+        // `Program Files` grants Users read and execute, and full control to the owner of new objects.
+        let sd = SddlDescriptor::parse(&format!(
+            "O:{TRUSTED_INSTALLER_SID}D:PAI(A;;FA;;;{TRUSTED_INSTALLER_SID})(A;CIIO;GA;;;{TRUSTED_INSTALLER_SID})\
+             (A;;0x1301bf;;;SY)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;BA)(A;OICIIO;GA;;;BA)\
+             (A;;0x1200a9;;;BU)(A;OICIIO;GXGR;;;BU)(A;OICIIO;GA;;;CO)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;AC)"
+        ));
+        sd.verify_as_install_location()
+            .expect("Program Files-like folder must be accepted");
+    }
+
+    #[test]
+    fn administrators_only_install_location_is_accepted() {
+        let sd = SddlDescriptor::parse("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)");
+        sd.verify_as_install_location()
+            .expect("SYSTEM/Administrators-only folder must be accepted");
+    }
+
+    #[test]
+    fn inheritable_untrusted_write_ace_is_rejected_for_install_locations_only() {
+        // Users may modify what gets created inside the folder, but not the folder itself.
+        let sd = SddlDescriptor::parse("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICIIO;0x1301bf;;;BU)");
+        sd.verify_as_executable()
+            .expect("inherit-only ACEs do not apply to an executable's ancestor itself");
+        let error = sd.verify_as_install_location().unwrap_err();
+        assert!(error.to_string().contains("S-1-5-32-545"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn untrusted_create_rights_are_rejected_for_install_locations() {
+        // Drive roots let Authenticated Users create subfolders.
+        for ace in [
+            "(A;;0x4;;;AU)",
+            "(A;;0x2;;;AU)",
+            "(A;OICI;0x1301bf;;;BU)",
+            "(A;;GA;;;CO)",
+        ] {
+            let sd = SddlDescriptor::parse(&format!("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA){ace}"));
+            assert!(sd.verify_as_install_location().is_err(), "{ace}");
+        }
+    }
+
+    #[test]
+    fn untrusted_owner_is_rejected_for_install_locations() {
+        let sd = SddlDescriptor::parse("O:BUD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+        assert!(sd.verify_as_install_location().is_err());
+    }
+
+    #[test]
+    fn install_location_with_inheritable_users_write_ace_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("Contoso");
+        std::fs::create_dir(&folder).unwrap();
+        let users = Sid::from_well_known(windows::Win32::Security::WinBuiltinUsersSid, None).unwrap();
+        let current_user = Process::current_process()
+            .token(TOKEN_QUERY)
+            .unwrap()
+            .sid_and_attributes()
+            .unwrap()
+            .sid;
+        set_security(
+            &folder,
+            None,
+            &[
+                grant(GENERIC_ALL.0, current_user),
+                ExplicitAccess {
+                    access_permissions: GENERIC_ALL.0,
+                    access_mode: GRANT_ACCESS,
+                    inheritance: windows::Win32::Security::SUB_CONTAINERS_AND_OBJECTS_INHERIT
+                        | windows::Win32::Security::INHERIT_ONLY,
+                    trustee: Trustee::Sid(users),
+                },
+            ],
+        )
+        .unwrap();
+
+        let location = canonical_dir(&folder).join("App");
+        let error = verify_elevated_install_location(&ServiceOpener, &location).unwrap_err();
+        assert!(
+            error.to_string().contains("is writable by non-administrators"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn install_location_under_program_files_is_accepted() {
+        let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
+        let location = Path::new(&program_files).join(format!("now-package-broker-test-{}", uuid::Uuid::new_v4()));
+
+        verify_elevated_install_location(&ServiceOpener, &location.join("App"))
+            .expect("a new folder under Program Files must be accepted");
+    }
+
+    fn canonical_dir(path: &Path) -> PathBuf {
+        let canonical = path.canonicalize().unwrap();
+        dos_path_from_wide(&canonical.as_os_str().encode_wide().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn install_location_through_a_reparse_point_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = canonical_dir(temp.path());
+        let target = base.join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = base.join("link");
+        std::os::windows::fs::symlink_dir(&target, &link).unwrap();
+
+        let error = verify_elevated_install_location(&ServiceOpener, &link.join("App")).unwrap_err();
+        assert!(
+            error.to_string().contains("reparse point"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

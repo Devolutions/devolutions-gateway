@@ -42,12 +42,12 @@ pub fn build_bun_command(request: &PackageRequest) -> anyhow::Result<Vec<String>
 }
 
 fn validate_bun_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
-        bail!("elevated Bun package operations are not supported by the broker");
-    }
-
     if request.options.scope == Some(Scope::Machine) {
         bail!("machine-scope Bun package operations are not supported by the broker");
+    }
+
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
+        bail!("elevated Bun package operations are not supported by the broker");
     }
 
     if !request.source.name.eq_ignore_ascii_case(BUN_SOURCE_NAME)
@@ -265,6 +265,7 @@ mod tests {
     fn bun_rejects_elevated_execution() {
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
         let error = build_bun_command(&request).expect_err("elevation should fail");
 
