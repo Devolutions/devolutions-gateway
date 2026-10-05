@@ -28,6 +28,9 @@ const MIB: usize = 1024 * 1024;
 /// Stdin frames are queued without waiting because all streams share one server connection. The server is expected
 /// to apply flow control to the input it sends, keeping backlogs well below `max_buffered_bytes` and
 /// `max_total_buffered_bytes`.
+///
+/// Time during which the child process output is held back by the server connection does not count toward the stall
+/// timeouts, because a child process blocked writing its output cannot read its input.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StdinLimits {
     /// A child process is considered stalled while at least this many bytes of its stdin are unread and none are
@@ -40,12 +43,20 @@ pub(super) struct StdinLimits {
     pub(super) pipe_allowance_bytes: usize,
     /// How long a child process may stay stalled before it is stopped.
     ///
-    /// Time during which the child process output is held back by the server connection does not count, because
-    /// a child process blocked writing its output cannot read its input.
+    /// Also how long a stream must have made no stdin progress before it can be stopped to make room in
+    /// `max_total_buffered_bytes`.
     pub(super) stall_timeout: Duration,
+    /// How long any unwritten stdin may make no progress before the child process is stopped.
+    ///
+    /// Bounds how long a backlog below `stall_threshold_bytes` stays charged against `max_total_buffered_bytes`.
+    pub(super) pending_stall_timeout: Duration,
     /// Pending bytes beyond which the stream is failed immediately to bound memory usage.
     pub(super) max_buffered_bytes: usize,
-    /// Pending bytes across all streams beyond which the stream receiving input is failed immediately.
+    /// Pending bytes across all streams beyond which stalled streams are stopped to make room, or the stream
+    /// receiving input is failed if no stalled stream frees enough.
+    ///
+    /// Each server connection has its own registry, so this budget is per connection rather than agent-wide. On
+    /// reconnect, the processes of the previous connection may briefly hold their input while they are being stopped.
     pub(super) max_total_buffered_bytes: usize,
 }
 
@@ -57,6 +68,7 @@ impl Default for StdinLimits {
             stall_threshold_bytes: 16 * MIB,
             pipe_allowance_bytes: MIB,
             stall_timeout: Duration::from_secs(30),
+            pending_stall_timeout: Duration::from_secs(5 * 60),
             max_buffered_bytes: 64 * MIB,
             max_total_buffered_bytes: 256 * MIB,
         }
@@ -103,7 +115,16 @@ enum KillReason {
     ServerRequest,
     ExitTimeout,
     StdinOverflow,
-    StdinStalled,
+    StdinStalled(Stall),
+}
+
+/// Why the stall watchdog considers a child process stalled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stall {
+    /// At least [`StdinLimits::stall_threshold_bytes`] made no progress for [`StdinLimits::stall_timeout`].
+    LargeBacklog,
+    /// Some stdin made no progress for [`StdinLimits::pending_stall_timeout`].
+    PendingInput,
 }
 
 const INPUT_ACCEPTED: u8 = 0;
@@ -127,6 +148,10 @@ struct StdinBacklog {
     input_state: AtomicU8,
     /// Set by the stdin pump before it closes stdin because the server ended the stream.
     end_of_stream: AtomicBool,
+    /// How long unwritten stdin has made no progress, in milliseconds, as last measured by the stall watchdog.
+    ///
+    /// Zero while the stall watchdog does not supervise the stream.
+    stalled_for_ms: AtomicU64,
 }
 
 /// Memory charged against the stdin backlog for a queued frame, so that empty frames are bounded too.
@@ -143,6 +168,7 @@ impl StdinBacklog {
             consumed_bytes: AtomicU64::new(0),
             input_state: AtomicU8::new(INPUT_ACCEPTED),
             end_of_stream: AtomicBool::new(false),
+            stalled_for_ms: AtomicU64::new(0),
         }
     }
 
@@ -188,6 +214,15 @@ impl StdinBacklog {
             Ok(_) => true,
             Err(state) => state == INPUT_OVERFLOWED,
         }
+    }
+
+    /// Returns whether the stream can be stopped to make room in [`StdinLimits::max_total_buffered_bytes`].
+    fn is_evictable(&self, limits: StdinLimits) -> bool {
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).unwrap_or(u64::MAX);
+
+        self.input_state.load(Ordering::Acquire) == INPUT_ACCEPTED
+            && self.unwritten_bytes.load(Ordering::Relaxed) > 0
+            && self.stalled_for_ms.load(Ordering::Relaxed) >= stall_timeout_ms
     }
 
     /// Marks the child process exit as observed, and returns whether input was dropped before.
@@ -262,7 +297,10 @@ struct StallWatchdog {
     output: Arc<OutputBackpressure>,
     last_check: Instant,
     last_consumed_bytes: u64,
+    /// How long at least the stall threshold made no progress.
     stalled_for: Duration,
+    /// How long any unwritten input made no progress.
+    pending_for: Duration,
 }
 
 impl StallWatchdog {
@@ -274,6 +312,7 @@ impl StallWatchdog {
             last_check: Instant::now(),
             last_consumed_bytes: 0,
             stalled_for: Duration::ZERO,
+            pending_for: Duration::ZERO,
         }
     }
 
@@ -281,8 +320,8 @@ impl StallWatchdog {
         (self.limits.stall_timeout / 4).clamp(Duration::from_millis(10), Duration::from_secs(1))
     }
 
-    /// Returns whether the child process has been stalled for longer than the stall timeout.
-    fn is_stalled(&mut self) -> bool {
+    /// Returns why the child process is stalled, if it made no stdin progress for longer than a stall timeout.
+    fn check(&mut self) -> Option<Stall> {
         let now = Instant::now();
         let elapsed = now - self.last_check;
         self.last_check = now;
@@ -297,13 +336,38 @@ impl StallWatchdog {
         let backlog_full = unwritten_bytes > 0
             && unwritten_bytes + self.limits.pipe_allowance_bytes >= self.limits.stall_threshold_bytes;
 
-        if progressed || !backlog_full {
+        if progressed || unwritten_bytes == 0 {
             self.stalled_for = Duration::ZERO;
-        } else if !output_held_back {
-            self.stalled_for += elapsed;
+            self.pending_for = Duration::ZERO;
+        } else {
+            if !backlog_full {
+                self.stalled_for = Duration::ZERO;
+            } else if !output_held_back {
+                self.stalled_for += elapsed;
+            }
+
+            if !output_held_back {
+                self.pending_for += elapsed;
+            }
         }
 
-        self.stalled_for >= self.limits.stall_timeout
+        self.backlog.stalled_for_ms.store(
+            u64::try_from(self.pending_for.as_millis()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+
+        if self.stalled_for >= self.limits.stall_timeout {
+            Some(Stall::LargeBacklog)
+        } else if self.pending_for >= self.limits.pending_stall_timeout {
+            Some(Stall::PendingInput)
+        } else {
+            None
+        }
+    }
+
+    /// Stops supervising the stream, which can then no longer be stopped to make room for other streams.
+    fn stop(&self) {
+        self.backlog.stalled_for_ms.store(0, Ordering::Relaxed);
     }
 }
 
@@ -410,7 +474,7 @@ impl ProcessRegistry {
     /// every other stream and control message. A stream whose backlog exceeds the limit is failed instead.
     pub(super) async fn dispatch_stream_data(&self, stream_data: StreamData) {
         let mut inner = self.inner.lock().await;
-        dispatch_locked(&mut inner, self.limits, stream_data);
+        dispatch_locked(&mut inner, self.limits, &self.total_pending_bytes, stream_data);
     }
 
     pub(super) async fn stop_process(&self, correlation_id: &str, kill_process: bool) {
@@ -474,27 +538,38 @@ impl ProcessRegistry {
     }
 }
 
-fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream_data: StreamData) {
-    let Some(entry) = inner.streams.get_mut(&stream_data.stream_id) else {
+fn dispatch_locked(
+    inner: &mut ProcessRegistryInner,
+    limits: StdinLimits,
+    total_pending_bytes: &AtomicUsize,
+    stream_data: StreamData,
+) {
+    let frame_bytes = frame_charge(&stream_data);
+
+    let Some(entry) = inner.streams.get(&stream_data.stream_id) else {
         return;
     };
     // Input received after the stream input was closed is dropped.
+    if entry.stdin.is_none() {
+        return;
+    }
+    let within_limits = entry
+        .backlog
+        .pending_bytes
+        .load(Ordering::Relaxed)
+        .saturating_add(frame_bytes)
+        <= limits.max_buffered_bytes
+        && reserve_total_budget(inner, limits, total_pending_bytes, &stream_data.stream_id, frame_bytes);
+
+    let Some(entry) = inner.streams.get_mut(&stream_data.stream_id) else {
+        return;
+    };
     let Some(stdin) = &entry.stdin else {
         return;
     };
     let end_of_stream = stream_data.end_of_stream;
-    let frame_bytes = frame_charge(&stream_data);
 
-    let pending_bytes = entry.backlog.pending_bytes.load(Ordering::Relaxed);
-    let total_pending_bytes = entry.backlog.total_pending_bytes.load(Ordering::Relaxed);
-    let keep_input = if pending_bytes.saturating_add(frame_bytes) > limits.max_buffered_bytes
-        || total_pending_bytes.saturating_add(frame_bytes) > limits.max_total_buffered_bytes
-    {
-        if entry.backlog.record_overflow() {
-            request_stop(&entry.stop, StopRequest::StdinOverflow);
-        }
-        false
-    } else {
+    let keep_input = if within_limits {
         // Charged before sending, so the stdin pump never releases a frame that is not charged yet.
         entry.backlog.add_pending(frame_bytes);
         if stdin.send(stream_data).is_ok() {
@@ -503,11 +578,77 @@ fn dispatch_locked(inner: &mut ProcessRegistryInner, limits: StdinLimits, stream
             entry.backlog.cancel_pending(frame_bytes);
             false
         }
+    } else {
+        if entry.backlog.record_overflow() {
+            request_stop(&entry.stop, StopRequest::StdinOverflow);
+        }
+        false
     };
 
     // Close the input after the last frame, when the stdin pump is gone, or when the backlog overflows.
     if !keep_input {
         entry.stdin = None;
+    }
+}
+
+/// Returns whether a frame for `stream_id` fits in [`StdinLimits::max_total_buffered_bytes`].
+///
+/// When it does not, stalled streams are stopped, starting with the one holding the most unwritten input, until the
+/// frame fits. A stalled stream is preferred over the stream receiving input, which may be healthy. The frame does not
+/// fit if no other stalled stream is left.
+///
+/// Input held by streams already stopped for exceeding a limit is not counted, because it is released as soon as
+/// their child process is killed. Usage can therefore exceed the budget briefly.
+fn reserve_total_budget(
+    inner: &mut ProcessRegistryInner,
+    limits: StdinLimits,
+    total_pending_bytes: &AtomicUsize,
+    stream_id: &str,
+    frame_bytes: usize,
+) -> bool {
+    loop {
+        let total_pending_bytes = total_pending_bytes.load(Ordering::Relaxed);
+        if total_pending_bytes.saturating_add(frame_bytes) <= limits.max_total_buffered_bytes {
+            return true;
+        }
+
+        let releasing_bytes: usize = inner
+            .streams
+            .values()
+            .filter(|entry| entry.backlog.input_state.load(Ordering::Acquire) == INPUT_OVERFLOWED)
+            .map(|entry| entry.backlog.pending_bytes.load(Ordering::Relaxed))
+            .sum();
+        if total_pending_bytes
+            .saturating_sub(releasing_bytes)
+            .saturating_add(frame_bytes)
+            <= limits.max_total_buffered_bytes
+        {
+            return true;
+        }
+
+        let Some((stalled_stream_id, stalled)) = inner
+            .streams
+            .iter_mut()
+            .filter(|(_, entry)| entry.backlog.is_evictable(limits))
+            .max_by_key(|(_, entry)| entry.backlog.unwritten_bytes.load(Ordering::Relaxed))
+        else {
+            return false;
+        };
+
+        if stalled_stream_id == stream_id {
+            return false;
+        }
+
+        if stalled.backlog.record_overflow() {
+            warn!(
+                stream_id = %stalled_stream_id,
+                unwritten_bytes = stalled.backlog.unwritten_bytes.load(Ordering::Relaxed),
+                max_total_buffered_bytes = limits.max_total_buffered_bytes,
+                "Stopping stalled PSU gRPC stream to make room in the stdin budget"
+            );
+            request_stop(&stalled.stop, StopRequest::StdinOverflow);
+        }
+        stalled.stdin = None;
     }
 }
 
@@ -585,69 +726,52 @@ async fn run_process_inner(
 
     ProcessTree::prepare(&mut command);
 
-    let mut child = match command.spawn() {
-        Ok(child) => child,
+    let started = async {
+        let mut child = command.spawn()?;
+        let process_tree = ProcessTree::attach(&mut child).await?;
+        anyhow::Ok((child, process_tree))
+    }
+    .await
+    .with_context(|| format!("failed to start PSU gRPC child process using {executable}"));
+    let (mut child, mut process_tree) = match started {
+        Ok(started) => started,
         Err(error) => {
-            let error =
-                anyhow::Error::new(error).context(format!("failed to start PSU gRPC child process using {executable}"));
-            let error_message = format!("{error:#}");
-            let _ = outgoing_tx
-                .send(agent_message(
-                    &agent_id,
-                    &connection_id,
-                    AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
-                ))
-                .await;
-            let _ = send_process_completed(
-                &outgoing_tx,
-                &agent_id,
-                &connection_id,
-                &request.correlation_id,
-                -1,
-                false,
-                error_message,
-            )
-            .await;
+            report_start_failure(&outgoing_tx, &agent_id, &connection_id, &request, &error).await;
             return Err(error);
         }
     };
-    let mut process_tree = ProcessTree::attach(&mut child);
     let process_id_u32 = child.id().unwrap_or(0);
     let process_id = i32::try_from(process_id_u32).unwrap_or(i32::MAX);
-
-    outgoing_tx
-        .send(agent_message(
-            &agent_id,
-            &connection_id,
-            AgentPayload::ProcessStarted(ProcessStarted {
-                correlation_id: request.correlation_id.clone(),
-                process_id,
-            }),
-        ))
-        .await
-        .context("failed to send PSU gRPC ProcessStarted message")?;
 
     let stdin = child.stdin.take().context("child process stdin was not piped")?;
     let stdout = child.stdout.take().context("child process stdout was not piped")?;
     let stderr = child.stderr.take().context("child process stderr was not piped")?;
 
+    // Output is held back until ProcessStarted is sent, so that the server sees it first.
+    let (process_started_tx, process_started_rx) = watch::channel(false);
     let output_backpressure = Arc::new(OutputBackpressure::default());
-    let stdout_task = tokio::spawn(pump_stdout_to_server(
-        stdout,
-        request.stream_id.clone(),
-        outgoing_tx.clone(),
-        Arc::clone(&output_backpressure),
-        agent_id.clone(),
-        connection_id.clone(),
-        process_id,
+    let stdout_task = tokio::spawn(after_process_started(
+        process_started_rx.clone(),
+        pump_stdout_to_server(
+            stdout,
+            request.stream_id.clone(),
+            outgoing_tx.clone(),
+            Arc::clone(&output_backpressure),
+            agent_id.clone(),
+            connection_id.clone(),
+            process_id,
+        ),
     ));
-    let stderr_task = tokio::spawn(pump_stderr_diagnostics(
-        stderr,
-        outgoing_tx.clone(),
-        Arc::clone(&output_backpressure),
-        agent_id.clone(),
-        connection_id.clone(),
-        process_id,
+    let stderr_task = tokio::spawn(after_process_started(
+        process_started_rx,
+        pump_stderr_diagnostics(
+            stderr,
+            outgoing_tx.clone(),
+            Arc::clone(&output_backpressure),
+            agent_id.clone(),
+            connection_id.clone(),
+            process_id,
+        ),
     ));
     let mut stdin_task = tokio::spawn(pump_server_to_stdin(stdin_rx, stdin, Arc::clone(&backlog), process_id));
     let _abort_pumps = [
@@ -657,9 +781,25 @@ async fn run_process_inner(
     ]
     .map(AbortOnDrop);
 
-    let mut watchdog = StallWatchdog::new(limits, Arc::clone(&backlog), output_backpressure);
+    let mut watchdog = StallWatchdog::new(limits, Arc::clone(&backlog), Arc::clone(&output_backpressure));
     let mut watchdog_interval = tokio::time::interval(watchdog.check_period());
     watchdog_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    // Sent while the child process is supervised, so that stop requests apply even if the server connection holds
+    // the message back. Waiting for it counts as held back output, so it does not count toward a stall.
+    let send_process_started = output_backpressure.send(
+        &outgoing_tx,
+        agent_message(
+            &agent_id,
+            &connection_id,
+            AgentPayload::ProcessStarted(ProcessStarted {
+                correlation_id: request.correlation_id.clone(),
+                process_id,
+            }),
+        ),
+    );
+    tokio::pin!(send_process_started);
+    let mut process_started_sent = false;
 
     let mut stdin_task_completed = false;
     let mut control_open = true;
@@ -695,6 +835,8 @@ async fn run_process_inner(
                             stdin_task.abort();
                             let _ = (&mut stdin_task).await;
                             stdin_task_completed = true;
+                            // Input left unwritten by the aborted pump is not a stall.
+                            watchdog.stop();
                         }
                         exit_deadline.get_or_insert_with(|| Instant::now() + GRACEFUL_EXIT_TIMEOUT);
                     }
@@ -703,9 +845,15 @@ async fn run_process_inner(
                 // All stop request senders are gone; stop polling the closed channel.
                 Err(_) => control_open = false,
             },
+            result = &mut send_process_started, if !process_started_sent => {
+                result.context("failed to send PSU gRPC ProcessStarted message")?;
+                process_started_sent = true;
+                process_started_tx.send_replace(true);
+            }
             status = child.wait() => break status.context("failed to wait for PSU gRPC child process")?,
             _ = &mut stdin_task, if !stdin_task_completed => {
                 stdin_task_completed = true;
+                watchdog.stop();
                 info!(process_id, "Finished receiving PSU gRPC stdin data; waiting for graceful child process exit");
                 exit_deadline.get_or_insert_with(|| Instant::now() + GRACEFUL_EXIT_TIMEOUT);
             }
@@ -714,15 +862,16 @@ async fn run_process_inner(
                 kill_reason = Some(KillReason::ExitTimeout);
                 break kill_process_tree(&mut child, &mut process_tree).await?;
             }
-            _ = watchdog_interval.tick() => {
-                if watchdog.is_stalled() {
+            // Only input that the stdin pump is still writing can stall.
+            _ = watchdog_interval.tick(), if !stdin_task_completed => {
+                if let Some(stall) = watchdog.check() {
                     warn!(
                         process_id,
                         correlation_id = %request.correlation_id,
-                        stall_timeout = ?limits.stall_timeout,
+                        ?stall,
                         "Killing PSU gRPC child process because its stdin backlog made no progress"
                     );
-                    kill_reason = Some(KillReason::StdinStalled);
+                    kill_reason = Some(KillReason::StdinStalled(stall));
                     break kill_process_tree(&mut child, &mut process_tree).await?;
                 }
             }
@@ -762,6 +911,13 @@ async fn run_process_inner(
     // rather than after output delivery, which can be held back by the server connection.
     backlog.release_remaining();
 
+    if !process_started_sent {
+        send_process_started
+            .await
+            .context("failed to send PSU gRPC ProcessStarted message")?;
+        process_started_tx.send_replace(true);
+    }
+
     await_pump_task(stdout_task, process_id, "stdout").await;
     await_pump_task(stderr_task, process_id, "stderr").await;
 
@@ -780,11 +936,16 @@ async fn run_process_inner(
     // cancellation or a non-zero exit based on the StreamClosed message.
     let canceled = kill_reason.is_some() || graceful_stop_requested || stdin_overflowed;
     let stream_error = canceled || (exit_code != 0 && !expected_pwsh_exit);
-    let stream_reason = if kill_reason == Some(KillReason::StdinStalled) {
+    let stream_reason = if kill_reason == Some(KillReason::StdinStalled(Stall::LargeBacklog)) {
         format!(
             "no stdin consumed for {:?} while at least {} was unread",
             limits.stall_timeout,
             format_bytes(limits.stall_threshold_bytes)
+        )
+    } else if kill_reason == Some(KillReason::StdinStalled(Stall::PendingInput)) {
+        format!(
+            "no stdin consumed for {:?} while input was unread",
+            limits.pending_stall_timeout
         )
     } else if kill_reason == Some(KillReason::StdinOverflow) || stdin_overflowed {
         format!(
@@ -821,6 +982,46 @@ async fn run_process_inner(
     .context("failed to send PSU gRPC ProcessCompleted message")?;
 
     Ok(())
+}
+
+/// Reports a child process that could not be started.
+async fn report_start_failure(
+    outgoing_tx: &mpsc::Sender<AgentMessage>,
+    agent_id: &str,
+    connection_id: &str,
+    request: &StartProcess,
+    error: &anyhow::Error,
+) {
+    let error_message = format!("{error:#}");
+    let _ = outgoing_tx
+        .send(agent_message(
+            agent_id,
+            connection_id,
+            AgentPayload::StreamClosed(stream_closed(request.stream_id.clone(), error_message.clone(), true)),
+        ))
+        .await;
+    let _ = send_process_completed(
+        outgoing_tx,
+        agent_id,
+        connection_id,
+        &request.correlation_id,
+        -1,
+        false,
+        error_message,
+    )
+    .await;
+}
+
+/// Runs an output pump once ProcessStarted is sent.
+async fn after_process_started(
+    mut process_started: watch::Receiver<bool>,
+    pump: impl Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    process_started
+        .wait_for(|sent| *sent)
+        .await
+        .context("ProcessStarted was not sent")?;
+    pump.await
 }
 
 async fn sleep_until(deadline: Option<Instant>) {
@@ -1071,6 +1272,7 @@ mod tests {
         stall_threshold_bytes: 64 * 1024,
         pipe_allowance_bytes: 0,
         stall_timeout: Duration::from_millis(300),
+        pending_stall_timeout: Duration::from_secs(60),
         max_buffered_bytes: 64 * MIB,
         max_total_buffered_bytes: 256 * MIB,
     };
@@ -1744,6 +1946,204 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_wide_stdin_budget_stops_the_largest_stalled_stream() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let small = registry.register("small", "small").await.expect("register");
+        let large = registry.register("large", "large").await.expect("register");
+        let mut healthy = registry.register("healthy", "healthy").await.expect("register");
+
+        for sequence in 0..2 {
+            dispatch(&registry, "small", sequence, vec![b'x'; 1024], false).await;
+        }
+        for sequence in 0..10 {
+            dispatch(&registry, "large", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        // Model the stall watchdog reporting both streams as stalled.
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        for stalled in [&small, &large] {
+            stalled
+                .backlog
+                .stalled_for_ms
+                .store(stall_timeout_ms, Ordering::Relaxed);
+        }
+
+        for sequence in 0..6 {
+            dispatch(&registry, "healthy", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        assert_eq!(*large.control.borrow(), Some(StopRequest::StdinOverflow));
+        assert!(registry.inner.lock().await.streams["large"].stdin.is_none());
+        assert!(
+            small.control.borrow().is_none(),
+            "only the largest stalled stream is stopped"
+        );
+        assert!(healthy.control.borrow().is_none());
+        let mut received = 0;
+        while healthy.stdin.try_recv().is_ok() {
+            received += 1;
+        }
+        assert_eq!(received, 6);
+    }
+
+    #[tokio::test]
+    async fn small_backlog_that_makes_no_progress_is_stopped_eventually() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let registry = ProcessRegistry::new(StdinLimits {
+            stall_threshold_bytes: 64 * MIB,
+            pending_stall_timeout: Duration::from_secs(1),
+            ..LIMITS_FOR_TESTS
+        });
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        // More than the stdin pipe holds, but far below the stall threshold.
+        for sequence in 0..512 {
+            dispatch(&registry, "job", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        assert!(
+            outcome.stream_closed.reason.contains("no stdin consumed"),
+            "unexpected reason: {}",
+            outcome.stream_closed.reason
+        );
+        assert!(outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn graceful_stop_of_a_stalled_child_is_reported_as_canceled() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let script = sleeping_script(temp_dir.path(), 30);
+        let limits = StdinLimits {
+            stall_timeout: Duration::from_secs(2),
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 64).await;
+        wait_for_process_started(&mut outgoing_rx).await;
+
+        for sequence in 0..1024 {
+            dispatch(&registry, "job", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        // The stall timeout elapses during the graceful exit timeout, after stdin was closed.
+        tokio::time::sleep(limits.stall_timeout / 2).await;
+        registry.stop_process("job", false).await;
+
+        let outcome = collect_outcome(task, outgoing_rx, GRACEFUL_EXIT_TIMEOUT + Duration::from_secs(5)).await;
+        assert_eq!(outcome.stream_closed.reason, "child process canceled");
+        assert!(outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn kill_applies_while_process_started_is_held_back() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("child-survived");
+        let script = write_script(
+            temp_dir.path(),
+            "child",
+            &format!(
+                "@echo started\n@ping -n 4 127.0.0.1 >nul\n@echo done> \"{}\"\n@ping -n 31 127.0.0.1 >nul\n",
+                marker.display()
+            ),
+            &format!("echo started\nsleep 3\ntouch '{}'\nsleep 30\n", marker.display()),
+        );
+        let registry = ProcessRegistry::default();
+        let request = start_request("job", &script);
+        let channels = registry.register("job", "job").await.expect("register");
+
+        // The server connection holds back every message.
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(1);
+        outgoing_tx
+            .send(agent_message(
+                "agent-id",
+                "connection-id",
+                AgentPayload::Diagnostic(diagnostic("info", "filler".to_owned())),
+            ))
+            .await
+            .expect("fill outgoing queue");
+        let task = tokio::spawn(run_process(
+            request,
+            channels,
+            outgoing_tx,
+            registry.clone(),
+            "agent-id".to_owned(),
+            "connection-id".to_owned(),
+            "pwsh".to_owned(),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        registry.stop_process("job", true).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(
+            !marker.exists(),
+            "the child process kept running while ProcessStarted was held back"
+        );
+
+        let filler = outgoing_rx.recv().await.expect("filler message");
+        assert!(matches!(filler.payload, Some(AgentPayload::Diagnostic(_))));
+        let first = outgoing_rx.recv().await.expect("first message");
+        assert!(
+            matches!(first.payload, Some(AgentPayload::ProcessStarted(_))),
+            "ProcessStarted must come first: {:?}",
+            first.payload
+        );
+        let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(10)).await;
+        assert!(outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn failure_to_start_the_child_is_reported_without_process_started() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("child-ran");
+        let script = write_script(
+            temp_dir.path(),
+            "child",
+            &format!("@ping -n 3 127.0.0.1 >nul\n@echo done> \"{}\"\n", marker.display()),
+            &format!("sleep 2\ntouch '{}'\n", marker.display()),
+        );
+        let registry = ProcessRegistry::default();
+
+        // The process task runs on this thread, so the next child process fails to start.
+        crate::psu_agent::process_tree::tests::FAIL_NEXT_START.set(true);
+        let (task, mut outgoing_rx) = spawn_process(&registry, start_request("job", &script), 8).await;
+        let error = task.await.expect("process task panicked").expect_err("start failure");
+        assert!(format!("{error:#}").contains("injected child process start failure"));
+
+        match outgoing_rx.recv().await.expect("stream closed message").payload {
+            Some(AgentPayload::StreamClosed(closed)) => {
+                assert!(closed.error);
+                assert!(closed.reason.contains("injected child process start failure"));
+            }
+            payload => panic!("unexpected payload: {payload:?}"),
+        }
+        match outgoing_rx.recv().await.expect("process completed message").payload {
+            Some(AgentPayload::ProcessCompleted(completed)) => {
+                assert_eq!(completed.exit_code, -1);
+                assert!(completed.error_message.contains("injected child process start failure"));
+            }
+            payload => panic!("unexpected payload: {payload:?}"),
+        }
+        assert!(outgoing_rx.recv().await.is_none());
+
+        registry
+            .register("job", "job")
+            .await
+            .expect("identifiers are released after a start failure");
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(!marker.exists(), "the child process that failed to start kept running");
+    }
+
+    #[tokio::test]
     async fn backlog_just_above_the_stall_threshold_still_times_out() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let script = sleeping_script(temp_dir.path(), 30);
@@ -1994,6 +2394,7 @@ mod tests {
         dispatch_locked(
             &mut inner,
             registry.limits,
+            &registry.total_pending_bytes,
             stream_data("job".to_owned(), 0, vec![b'x'; 2048], false),
         );
         drop(inner);

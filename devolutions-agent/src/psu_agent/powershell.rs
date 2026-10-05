@@ -1,17 +1,21 @@
 use std::ffi::OsString;
 use std::fmt;
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 use crate::config::dto::PsuPowerShellConf;
 use crate::psu_agent::process_tree::ProcessTree;
+
+/// How long output is still collected once the worker process exited.
+const WORKER_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -377,33 +381,16 @@ impl PowerShellWorker {
         if let Some(virtual_environment) = &self.conf.virtual_environment {
             command.env("PSMODULE_VENV_PATH", virtual_environment);
         }
-        command.kill_on_drop(true);
-        ProcessTree::prepare(&mut command);
 
-        let mut child = command.spawn().with_context(|| {
-            format!(
-                "failed to start PowerShell worker using {}",
-                executable.to_string_lossy()
-            )
-        })?;
-        let mut process_tree = ProcessTree::attach(&mut child);
-
-        let output = match tokio::time::timeout(self.execution_timeout, child.wait_with_output()).await {
-            Ok(output) => {
-                // On failure, the process tree guard is dropped armed and terminates the worker tree.
-                let output = output.context("failed to wait for PowerShell worker")?;
-                process_tree.release();
-                output
-            }
-            Err(_) => {
-                warn!(
-                    timeout_secs = self.execution_timeout.as_secs(),
-                    "PowerShell worker timed out"
-                );
-                // Also stops processes started by the worker, such as a secret vault client.
-                process_tree.terminate();
-                return Ok(PowerShellWorkerResponse::timeout("PowerShell worker timed out"));
-            }
+        let output = run_worker_command(command, self.execution_timeout)
+            .await
+            .with_context(|| format!("failed to run PowerShell worker using {}", executable.to_string_lossy()))?;
+        let Some(output) = output else {
+            warn!(
+                timeout_secs = self.execution_timeout.as_secs(),
+                "PowerShell worker timed out"
+            );
+            return Ok(PowerShellWorkerResponse::timeout("PowerShell worker timed out"));
         };
 
         if !output.status.success() {
@@ -416,6 +403,85 @@ impl PowerShellWorker {
         }
 
         serde_json::from_slice(&output.stdout).context("failed to parse PowerShell worker response")
+    }
+}
+
+/// Runs a worker process with piped stdout and stderr, and returns its output, or `None` if it timed out.
+///
+/// Completion is determined by the worker process exit rather than by the end of its output, because a process it
+/// started, such as a secret vault helper, can inherit its stdout and stderr and keep them open after it exits.
+/// Output still being written once it exits is collected for at most [`WORKER_OUTPUT_DRAIN_TIMEOUT`].
+///
+/// On timeout, the worker process and every process it started are killed.
+async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::Result<Option<Output>> {
+    command.kill_on_drop(true);
+    ProcessTree::prepare(&mut command);
+
+    let mut child = command.spawn().context("failed to start process")?;
+    // On failure, the process tree guard is dropped armed and terminates the worker tree.
+    let mut process_tree = ProcessTree::attach(&mut child).await?;
+
+    let mut stdout_reader = child.stdout.take().context("worker stdout was not piped")?;
+    let mut stderr_reader = child.stderr.take().context("worker stderr was not piped")?;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let status = {
+        // Output is read while waiting, so that the worker never blocks on a full pipe.
+        let read_output = async {
+            tokio::join!(
+                read_until_end(&mut stdout_reader, &mut stdout),
+                read_until_end(&mut stderr_reader, &mut stderr),
+            )
+        };
+        tokio::pin!(read_output);
+        let mut output_read = false;
+
+        let wait_for_exit = async {
+            loop {
+                tokio::select! {
+                    status = child.wait() => return status,
+                    _ = &mut read_output, if !output_read => output_read = true,
+                }
+            }
+        };
+
+        let status = match tokio::time::timeout(timeout, wait_for_exit).await {
+            Ok(status) => status.context("failed to wait for process")?,
+            Err(_) => {
+                // Also stops processes started by the worker, such as a secret vault client.
+                process_tree.terminate();
+                return Ok(None);
+            }
+        };
+        process_tree.release();
+
+        if !output_read
+            && tokio::time::timeout(WORKER_OUTPUT_DRAIN_TIMEOUT, &mut read_output)
+                .await
+                .is_err()
+        {
+            debug!("PowerShell worker output was still open after it exited; using the output read so far");
+        }
+
+        status
+    };
+
+    Ok(Some(Output { status, stdout, stderr }))
+}
+
+/// Appends everything read to `buffer`, keeping the data read so far if the future is dropped.
+async fn read_until_end<R>(reader: &mut R, buffer: &mut Vec<u8>) -> std::io::Result<()>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut chunk = [0u8; 8192];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        buffer.extend_from_slice(&chunk[..read]);
     }
 }
 
@@ -573,6 +639,46 @@ mod tests {
         let token = worker.resolve_app_token("literal-token").await.expect("resolve token");
 
         assert_eq!(token, "literal-token");
+    }
+
+    #[tokio::test]
+    async fn worker_completes_when_it_exits_while_a_child_keeps_its_output_open() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let response = r#"{"data":"secret-value","complete":true}"#;
+        // A background process inherits the worker output and outlives the worker, like a secret vault helper.
+        let mut command = if cfg!(windows) {
+            let script = temp_dir.path().join("worker.cmd");
+            std::fs::write(
+                &script,
+                format!("@start \"\" /B ping -n 21 127.0.0.1 >nul\r\n@echo {response}\r\n@exit /b 0\r\n"),
+            )
+            .expect("write worker script");
+            let mut command = Command::new("cmd.exe");
+            command.arg("/C").arg(script);
+            command
+        } else {
+            let mut command = Command::new("/bin/sh");
+            command.arg("-c").arg(format!("sleep 20 &\necho '{response}'\n"));
+            command
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let started_at = std::time::Instant::now();
+        let output = run_worker_command(command, Duration::from_secs(10))
+            .await
+            .expect("run worker")
+            .expect("worker timed out");
+
+        assert!(
+            started_at.elapsed() < Duration::from_secs(8),
+            "worker completion waited for its output to close"
+        );
+        assert!(output.status.success());
+        let response: PowerShellWorkerResponse = serde_json::from_slice(&output.stdout).expect("parse response");
+        assert_eq!(response.data.as_deref(), Some("secret-value"));
     }
 
     #[test]

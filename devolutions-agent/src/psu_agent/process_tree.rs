@@ -9,15 +9,27 @@
 //! the direct child exits on its own, processes it deliberately left running in the background are kept, as they
 //! would be when the script runs outside the agent.
 //!
+//! # Limitations
+//!
+//! Tracking is best effort, and some descendants are not terminated with the tree:
+//!
+//! - Windows: the agent runs as LocalSystem, which holds `SeTcbPrivilege`, so a job script can start processes with
+//!   `CREATE_BREAKAWAY_FROM_JOB`; they leave the job and survive `TerminateJobObject`.
+//! - Windows: when `AssignProcessToJobObject` fails, for example on Windows versions without nested job support
+//!   while the agent already runs in a job, only the direct child is killed, and a warning is logged.
+//! - Unix: descendants that start their own session or process group, such as daemonizers calling `setsid` or
+//!   `setpgid`, or units started with `systemd-run`, leave the process group and survive `killpg`.
+//!
 //! # Design decisions
 //!
 //! - Windows: `Win32_System_JobObjects` provides the job object. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is not set,
 //!   because it would also kill background processes when a job exits on its own; the tree is terminated explicitly
-//!   on stop paths instead.
+//!   on stop paths instead. The trade-off is that a job tree keeps running if the agent itself crashes.
 //! - Windows: `Win32_System_Diagnostics_ToolHelp` finds the initial thread of the suspended child to resume it,
-//!   because the standard library does not expose its handle. Joining the job at creation time with
-//!   `PROC_THREAD_ATTRIBUTE_JOB_LIST` would remove the suspend and resume steps, but requires the unstable
-//!   `CommandExt::raw_attribute`.
+//!   because neither Tokio nor the stable standard library exposes the thread handle returned by `CreateProcessW`.
+//!   The snapshot lists every thread on the system, so it runs on the blocking thread pool. Joining the job at
+//!   creation time with `PROC_THREAD_ATTRIBUTE_JOB_LIST` would remove the suspend and resume steps, but requires the
+//!   unstable `CommandExt::raw_attribute`.
 //! - Unix: `libc` provides `killpg`, which the standard library lacks. It was chosen over `nix` or `rustix` because
 //!   it was already in the dependency tree.
 
@@ -47,33 +59,56 @@ impl ProcessTree {
     /// Starts tracking the descendants of a child process spawned from a [`prepared`](Self::prepare) command, then
     /// lets it run.
     ///
-    /// If tracking cannot be set up, only the direct child can be killed, which is logged.
-    pub(super) fn attach(child: &mut Child) -> Self {
-        let tree = Self::try_attach(child);
-
-        if let Err(error) = &tree {
+    /// If tracking cannot be set up, only the direct child can be killed, which is logged. If the child process
+    /// cannot be started, it is killed and an error is returned.
+    pub(super) async fn attach(child: &mut Child) -> anyhow::Result<Self> {
+        let mut tree = Self::try_attach(child).unwrap_or_else(|error| {
             warn!(
                 error = format!("{error:#}"),
                 "Failed to track PSU child process tree; only the direct child process can be killed"
             );
+            Self {
+                #[cfg(windows)]
+                job: None,
+                #[cfg(unix)]
+                process_group: None,
+                armed: false,
+            }
+        });
+
+        if let Err(error) = Self::start(child).await {
+            tree.terminate();
+            // Covers the case where the process tree could not be tracked.
+            let _ = child.start_kill();
+            return Err(error);
+        }
+
+        Ok(tree)
+    }
+
+    /// Lets a child process spawned from a [`prepared`](Self::prepare) command run.
+    async fn start(child: &Child) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if tests::FAIL_NEXT_START.take() {
+            anyhow::bail!("injected child process start failure");
         }
 
         #[cfg(windows)]
-        if let Err(error) = resume_process(child) {
-            error!(
-                error = format!("{error:#}"),
-                "Failed to resume PSU child process; killing it"
-            );
-            let _ = child.start_kill();
+        {
+            use anyhow::Context as _;
+
+            let process_id = child.id().context("child process already exited")?;
+            // The thread snapshot lists every thread on the system, so it must not block the runtime.
+            tokio::task::spawn_blocking(move || resume_process(process_id))
+                .await
+                .context("child process resume task failed")?
+                .context("failed to resume child process")?;
         }
 
-        tree.unwrap_or(Self {
-            #[cfg(windows)]
-            job: None,
-            #[cfg(unix)]
-            process_group: None,
-            armed: false,
-        })
+        #[cfg(not(windows))]
+        let _ = child;
+
+        Ok(())
     }
 
     #[cfg(windows)]
@@ -93,6 +128,8 @@ impl ProcessTree {
         // SAFETY: `job` is a valid handle owned by this function and not closed anywhere else.
         let job = unsafe { OwnedHandle::from_raw_handle(job.0) };
 
+        // A process created with `CREATE_BREAKAWAY_FROM_JOB` by a descendant leaves the job; see the module
+        // documentation.
         // SAFETY: Both handles are valid for the duration of the call.
         unsafe { AssignProcessToJobObject(HANDLE(job.as_raw_handle()), HANDLE(process)) }
             .context("AssignProcessToJobObject failed")?;
@@ -141,6 +178,7 @@ impl ProcessTree {
             }
         }
 
+        // Descendants that started their own session or process group are not reached; see the module documentation.
         #[cfg(unix)]
         if let Some(process_group) = self.process_group {
             // SAFETY: `killpg` has no memory safety preconditions.
@@ -168,8 +206,10 @@ impl Drop for ProcessTree {
 }
 
 /// Resumes the initial thread of a child process created with `CREATE_SUSPENDED`.
+///
+/// The caller must keep a handle to the process open, so that its ID cannot be reused by another process.
 #[cfg(windows)]
-fn resume_process(child: &Child) -> anyhow::Result<()> {
+fn resume_process(process_id: u32) -> anyhow::Result<()> {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
     use anyhow::Context as _;
@@ -178,8 +218,6 @@ fn resume_process(child: &Child) -> anyhow::Result<()> {
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
     };
     use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
-
-    let process_id = child.id().context("child process already exited")?;
 
     // SAFETY: Taking a thread snapshot has no preconditions.
     let snapshot =
@@ -218,4 +256,17 @@ fn resume_process(child: &Child) -> anyhow::Result<()> {
     anyhow::ensure!(resumed_threads > 0, "no thread found for process {process_id}");
 
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Makes the next [`ProcessTree::attach`](super::ProcessTree::attach) on this thread fail to start the child
+        /// process, which stays suspended on Windows.
+        ///
+        /// Tokio tests use a current-thread runtime, so tasks spawned by a test run on its thread.
+        pub(in crate::psu_agent) static FAIL_NEXT_START: Cell<bool> = const { Cell::new(false) };
+    }
 }
