@@ -603,7 +603,7 @@ fn dispatch_locked(
 
 /// Returns whether a frame for `stream_id` fits in [`StdinLimits::max_total_buffered_bytes`].
 ///
-/// When it does not, stalled streams are stopped, starting with the one holding the most unwritten input, until the
+/// When it does not, stalled streams are stopped, starting with the one charged the most stdin memory, until the
 /// frame fits. A stalled stream is preferred over the stream receiving input, which may be healthy. The frame does not
 /// fit if no other stalled stream is left.
 ///
@@ -641,7 +641,8 @@ fn reserve_total_budget(
             .iter_mut()
             // A stream already being stopped keeps its outcome.
             .filter(|(_, entry)| entry.stop.borrow().is_none() && entry.backlog.is_evictable(limits))
-            .max_by_key(|(_, entry)| entry.backlog.unwritten_bytes.load(Ordering::Relaxed))
+            // Partly written frames stay fully charged, so the charge rather than the unwritten bytes is what is freed.
+            .max_by_key(|(_, entry)| entry.backlog.pending_bytes.load(Ordering::Relaxed))
         else {
             return false;
         };
@@ -653,7 +654,7 @@ fn reserve_total_budget(
         if stalled.backlog.record_overflow() {
             warn!(
                 stream_id = %stalled_stream_id,
-                unwritten_bytes = stalled.backlog.unwritten_bytes.load(Ordering::Relaxed),
+                pending_bytes = stalled.backlog.pending_bytes.load(Ordering::Relaxed),
                 max_total_buffered_bytes = limits.max_total_buffered_bytes,
                 "Stopping stalled PSU gRPC stream to make room in the stdin budget"
             );
@@ -2087,6 +2088,55 @@ mod tests {
 
         assert!(stalled.control.borrow().is_none());
         assert!(registry.inner.lock().await.streams["closed"].stdin.is_none());
+    }
+
+    #[tokio::test]
+    async fn stdin_budget_stops_the_stalled_stream_charged_the_most() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let partly_written = registry
+            .register("partly-written", "partly-written")
+            .await
+            .expect("register");
+        let unwritten = registry.register("unwritten", "unwritten").await.expect("register");
+        let mut receiving = registry.register("receiving", "receiving").await.expect("register");
+
+        dispatch(&registry, "partly-written", 0, vec![b'x'; 10 * 1024], false).await;
+        for sequence in 0..4 {
+            dispatch(&registry, "unwritten", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        // Most of the large frame was written, but it stays charged until it is released.
+        partly_written.backlog.record_progress(9 * 1024);
+
+        // Model the stall watchdog reporting both streams as stalled since their last progress.
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        for stalled in [&partly_written, &unwritten] {
+            stalled.backlog.stalled_at_consumed_bytes.store(
+                stalled.backlog.consumed_bytes.load(Ordering::Relaxed),
+                Ordering::Relaxed,
+            );
+            stalled
+                .backlog
+                .stalled_for_ms
+                .store(stall_timeout_ms, Ordering::Relaxed);
+        }
+
+        for sequence in 0..4 {
+            dispatch(&registry, "receiving", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        assert_eq!(*partly_written.control.borrow(), Some(StopRequest::StdinOverflow));
+        assert!(unwritten.control.borrow().is_none());
+        assert!(receiving.control.borrow().is_none());
+        let mut received = 0;
+        while receiving.stdin.try_recv().is_ok() {
+            received += 1;
+        }
+        assert_eq!(received, 4);
     }
 
     #[tokio::test]
