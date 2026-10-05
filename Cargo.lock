@@ -1761,6 +1761,7 @@ dependencies = [
  "http-client-proxy",
  "ipnetwork",
  "ironrdp",
+ "libc",
  "notify-debouncer-mini",
  "now-package-broker",
  "parking_lot",

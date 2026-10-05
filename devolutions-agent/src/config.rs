@@ -217,14 +217,37 @@ fn required_tunnel_path(path: Option<Utf8PathBuf>) -> anyhow::Result<Utf8PathBuf
 /// Constructed from `dto::PsuConf` via `TryFrom<dto::PsuConf> for Option<PsuConf>`.
 /// Illegal states are made unrepresentable: a disabled PSU agent is `None`, and an
 /// enabled one is `Some(PsuConf)` with all required fields (server URL and application
-/// token) guaranteed present.
-#[derive(Debug, Clone)]
+/// token) guaranteed present, and the server URL uses the `http` or `https` scheme.
+#[derive(Clone)]
 pub struct PsuConf {
     pub server_url: Url,
     pub agent_id: Option<String>,
     pub display_name: Option<String>,
     pub app_token: String,
     pub powershell: dto::PsuPowerShellConf,
+}
+
+impl std::fmt::Debug for PsuConf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PsuConf")
+            .field("server_url", &format_args!("{}", redacted_url(&self.server_url)))
+            .field("agent_id", &self.agent_id)
+            .field("display_name", &self.display_name)
+            .field("app_token", &REDACTED)
+            .field("powershell", &self.powershell)
+            .finish()
+    }
+}
+
+const REDACTED: &str = "***REDACTED***";
+
+/// Formats a URL for logs with only its scheme, host, and port, leaving out credentials, path, and query.
+pub(crate) fn redacted_url(url: &Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
+    }
 }
 
 impl TryFrom<dto::PsuConf> for Option<PsuConf> {
@@ -240,6 +263,13 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
         let server_url = conf
             .server_url
             .context("PSU agent enabled but ServerUrl is not configured")?;
+        // Tonic only enables TLS for `https`, so any other scheme would silently send the AppToken in plaintext.
+        // The `url` crate normalizes the scheme to lowercase.
+        anyhow::ensure!(
+            matches!(server_url.scheme(), "http" | "https"),
+            "unsupported PSU agent ServerUrl scheme `{}`: expected http or https",
+            server_url.scheme()
+        );
         let app_token = conf
             .app_token
             .filter(|token| !token.trim().is_empty())
@@ -696,7 +726,7 @@ pub mod dto {
     }
 
     /// PowerShell Universal remoting agent configuration.
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Clone, Default, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuConf {
         /// Enable the PSU agent transport.
@@ -725,6 +755,19 @@ pub mod dto {
             skip_serializing_if = "PsuPowerShellConf::is_default"
         )]
         pub powershell: PsuPowerShellConf,
+    }
+
+    impl std::fmt::Debug for PsuConf {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PsuConf")
+                .field("enabled", &self.enabled)
+                .field("server_url", &self.server_url.as_ref().map(redacted_url))
+                .field("agent_id", &self.agent_id)
+                .field("display_name", &self.display_name)
+                .field("app_token", &self.app_token.as_ref().map(|_| REDACTED))
+                .field("powershell", &self.powershell)
+                .finish()
+        }
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
@@ -1221,5 +1264,88 @@ mod tests {
 
         let conf = Conf::from_conf_file(&conf_file).expect("load config");
         assert!(conf.psu_agent.is_none());
+    }
+
+    fn load_psu_server_url(server_url: &str) -> anyhow::Result<Conf> {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuAgent": {
+                "Enabled": true,
+                "ServerUrl": server_url,
+                "AppToken": "app-token"
+            }
+        }))
+        .expect("deserialize config");
+
+        Conf::from_conf_file(&conf_file)
+    }
+
+    #[test]
+    fn psu_accepts_http_and_https_server_urls() {
+        for server_url in [
+            "http://localhost:5000",
+            "https://psu.example.com",
+            "HTTPS://psu.example.com",
+            "Http://192.0.2.10:5000",
+        ] {
+            load_psu_server_url(server_url).unwrap_or_else(|error| panic!("{server_url}: {error:#}"));
+        }
+    }
+
+    #[test]
+    fn psu_rejects_unsupported_server_url_schemes() {
+        for server_url in [
+            "grpcs://psu.example.com",
+            "grpc://psu.example.com",
+            "ws://psu.example.com",
+            "file:///psu",
+        ] {
+            let error = load_psu_server_url(server_url).expect_err("unsupported scheme should be rejected");
+
+            assert!(
+                format!("{error:#}").contains("unsupported PSU agent ServerUrl scheme"),
+                "unexpected error for {server_url}: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn psu_debug_output_redacts_secrets() {
+        let conf_file: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "PsuAgent": {
+                "Enabled": true,
+                "ServerUrl": "https://url-user:url-password@psu.example.com:8443/base?token=url-query-token",
+                "AppToken": "super-secret-token"
+            }
+        }))
+        .expect("deserialize config");
+        let conf = Conf::from_conf_file(&conf_file).expect("load config");
+
+        let conf_file_debug = format!("{conf_file:?}");
+        let conf_debug = format!("{conf:?}");
+
+        for debug in [conf_file_debug, conf_debug] {
+            for secret in ["super-secret-token", "url-user", "url-password", "url-query-token"] {
+                assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+            }
+            assert!(debug.contains(REDACTED), "missing redaction marker: {debug}");
+            assert!(
+                debug.contains("https://psu.example.com:8443"),
+                "missing server URL: {debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn redacted_url_keeps_only_scheme_host_and_port() {
+        for (url, expected) in [
+            (
+                "http://user:password@localhost:5000/path?query=value#fragment",
+                "http://localhost:5000",
+            ),
+            ("https://psu.example.com", "https://psu.example.com"),
+            ("http://[::1]:5000", "http://[::1]:5000"),
+        ] {
+            assert_eq!(redacted_url(&url.parse().expect("parse URL")), expected);
+        }
     }
 }

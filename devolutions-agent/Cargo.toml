@@ -99,7 +99,14 @@ features = [
     "Win32_Security_Authorization",
     "Win32_System_ApplicationInstallationAndServicing",
     "Win32_System_RemoteDesktop",
+    # Used by `psu_agent::process_tree`, see its module documentation.
+    "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp",
 ]
+
+# Used by `psu_agent::process_tree`, see its module documentation.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"
