@@ -50,6 +50,8 @@ pub(super) struct StdinLimits {
 }
 
 impl Default for StdinLimits {
+    // Far above what a script normally receives on stdin, so only a child process that stopped reading is affected,
+    // while a few stalled jobs cannot use more than a bounded amount of agent memory.
     fn default() -> Self {
         Self {
             stall_threshold_bytes: 16 * MIB,

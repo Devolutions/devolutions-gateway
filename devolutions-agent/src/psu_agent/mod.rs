@@ -89,6 +89,8 @@ struct ConnectionSettings {
 }
 
 impl Default for ConnectionSettings {
+    // A dead connection is detected within about 50 seconds, well below common NAT and firewall idle timeouts, which
+    // are usually several minutes.
     fn default() -> Self {
         Self {
             app_token_resolution_timeout: Duration::from_secs(30),
@@ -206,6 +208,7 @@ impl PsuAgent {
         let app_token = self.resolve_app_token().await?;
 
         let endpoint = psu_endpoint(self.conf.server_url.as_str(), &self.settings)?;
+        // `Endpoint::connect_timeout` only bounds the TCP connection; this also bounds the TLS and HTTP/2 handshakes.
         let channel = tokio::time::timeout(self.settings.connect_timeout, endpoint.connect())
             .await
             .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.display_url))?
@@ -360,6 +363,8 @@ impl PsuAgent {
                     .stop_process(&stop_process.correlation_id, stop_process.kill_process)
                     .await;
             }
+            // The protocol does not define a heartbeat interval or require agent heartbeats, so server heartbeats are
+            // not used to detect dead connections; HTTP/2 keepalive does that independently of the server.
             Some(ServerPayload::Heartbeat(_)) | None => {}
         }
 
@@ -424,7 +429,8 @@ fn psu_endpoint(server_url: &str, settings: &ConnectionSettings) -> Result<Endpo
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     // HTTP/2 PINGs detect a silently dropped connection (for example, after a NAT or firewall idle timeout)
-    // even when no job is running, and make the pending stream read fail so the agent reconnects.
+    // even when no job is running, and make the pending stream read fail so the agent reconnects. No request timeout
+    // is set: it would also end the long-lived agent stream.
     Ok(Endpoint::new(server_url.to_owned())?
         .connect_timeout(settings.connect_timeout)
         .tcp_keepalive(Some(settings.keep_alive_interval))
