@@ -1,0 +1,357 @@
+{
+  "WixLocalization": {
+    "strings": {
+      "metadata": [
+        {
+          "id": "Language",
+          "text": "1053"
+        },
+        {
+          "id": "VendorName",
+          "text": "Devolutions"
+        },
+        {
+          "id": "VendorFullName",
+          "text": "Devolutions Inc."
+        },
+        {
+          "id": "ProductDescription",
+          "text": "Systemomfattande tjänst som utökar funktionerna i Devolutions Gateway."
+        },
+        {
+          "id": "FeatureAgentName",
+          "text": "Devolutions Agent"
+        },
+        {
+          "id": "FeatureAgentDescription",
+          "text": "Installerar tjänsten Devolutions Agent"
+        },
+        {
+          "id": "FeatureAgentUpdaterName",
+          "text": "Devolutions Gateway-uppdaterare"
+        },
+        {
+          "id": "FeatureAgentUpdaterDescription",
+          "text": "Aktiverar uppdateraren för Devolutions Gateway"
+        },
+        {
+          "id": "FeaturePedmName",
+          "text": "Devolutions PEDM"
+        },
+        {
+          "id": "FeaturePedmDescription",
+          "text": "Aktiverar PEDM-funktioner och installerar skalutökningen"
+        },
+        {
+          "id": "FeatureSessionName",
+          "text": "RDP-utökning"
+        },
+        {
+          "id": "FeatureSessionDescription",
+          "text": "Aktiverar RDP-sessionsfunktioner som fjärrkörning, Jump-sessioner och fjärravloggning."
+        },
+        {
+          "id": "FeatureAgentTunnelName",
+          "text": "Agenttunnel"
+        },
+        {
+          "id": "FeatureAgentTunnelDescription",
+          "text": "Ansluter agenten till en Devolutions Gateway. Kräver en registreringssträng från gatewayoperatören."
+        },
+        {
+          "id": "FeaturePsuName",
+          "text": "PowerShell Universal Agent"
+        },
+        {
+          "id": "FeaturePsuDescription",
+          "text": "Aktiverar fjärragenten för PowerShell Universal."
+        }
+      ],
+      "messages": [
+        {
+          "id": "ThereIsAProblemWithTheEnteredData",
+          "text": "Det finns ett problem med angivna data. Rätta felet och försök igen."
+        },
+        {
+          "id": "OS2Old",
+          "text": "Produkten kräver minst Windows 8 eller Windows Server 2012 R2"
+        },
+        {
+          "id": "NewerInstalled",
+          "text": "En nyare version av produkten är redan installerad."
+        },
+        {
+          "id": "x64VersionRequired",
+          "text": "Du måste installera 64-bitarsversionen av produkten på 64-bitars Windows."
+        },
+        {
+          "id": "x86VersionRequired",
+          "text": "Du måste installera 32-bitarsversionen av produkten på 32-bitars Windows."
+        },
+        {
+          "id": "Dotnet48IsRequired",
+          "text": "Produkten kräver Microsoft .NET Framework 4.8. Vill du hämta den nu?"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "ViewButton",
+          "text": "Visa"
+        },
+        {
+          "id": "SearchButton",
+          "text": "Sök"
+        },
+        {
+          "id": "ViewLogButton",
+          "text": "Visa logg"
+        }
+      ],
+      "propertyGroups": [
+        {
+          "id": "Group_InstallLocation",
+          "text": "Installationsplats"
+        }
+      ],
+      "properties": [
+        {
+          "id": "Property_Directory",
+          "text": "Katalog"
+        }
+      ],
+      "static": [
+        {
+          "id": "UACPromptLabel",
+          "text": "Vänta tills UAC-prompten visas.\n\nOm den visas minimerad aktiverar du den från aktivitetsfältet."
+        },
+        {
+          "id": "ExperimentalLabel",
+          "text": "Experimentell"
+        }
+      ],
+      "filters": [
+        {
+          "id": "Filter_AllFiles",
+          "text": "Alla filer"
+        }
+      ],
+      "dialogs": {
+        "static": [
+          {
+            "id": "AgentDlg_Title",
+            "text": "Installera [ProductName]"
+          }
+        ],
+        "browse": [
+          {
+            "id": "BrowseDlgTitle",
+            "text": "Byt målmapp"
+          },
+          {
+            "id": "BrowseDlgDescription",
+            "text": "Bläddra till målmappen"
+          }
+        ],
+        "installDir": [
+          {
+            "id": "InstallDirDlgTitle",
+            "text": "Målmapp"
+          },
+          {
+            "id": "InstallDirDlgDescription",
+            "text": "Klicka på Nästa för att installera i standardmappen eller på Ändra för att välja en annan."
+          }
+        ],
+        "progress": [
+          {
+            "id": "ProgressDlgTitleInstalling",
+            "text": "Installerar [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleChanging",
+            "text": "Ändrar [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRepairing",
+            "text": "Reparerar [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRemoving",
+            "text": "Tar bort [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleUpdating",
+            "text": "Uppdaterar [ProductName]"
+          }
+        ],
+        "verifyReady": [
+          {
+            "id": "VerifyReadyDlgInstallTitle",
+            "text": "Redo att installera [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgChangeTitle",
+            "text": "Redo att ändra [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRepairTitle",
+            "text": "Redo att reparera [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRemoveTitle",
+            "text": "Redo att ta bort [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgUpdateTitle",
+            "text": "Redo att uppdatera [ProductName]"
+          }
+        ],
+        "welcome": [
+          {
+            "id": "WelcomeDlgTitle",
+            "overridable": "yes",
+            "text": "Välkommen till installationsguiden för [ProductName] 20[ProductVersion]"
+          }
+        ],
+        "agentTunnel": [
+          {
+            "id": "AgentTunnelDlgTitle",
+            "text": "Agenttunnel"
+          },
+          {
+            "id": "AgentTunnelDlgDescription",
+            "text": "Anslut den här agenten till en Devolutions Gateway."
+          },
+          {
+            "id": "AgentTunnelDlgEnrollmentStringLabel",
+            "text": "Registreringssträng (tillhandahålls av gatewayoperatören):"
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsLabel",
+            "text": "Annonsera undernät:"
+          },
+          {
+            "id": "AgentTunnelDlgSubnetsHint",
+            "text": "Valfritt. Kommaavgränsade CIDR-intervall, till exempel 10.10.0.0/24, 192.168.1.0/24. Om fältet lämnas tomt upptäcks agentens lokala undernät automatiskt."
+          },
+          {
+            "id": "AgentTunnelDlgDomainsLabel",
+            "text": "Annonsera DNS-vägar:"
+          },
+          {
+            "id": "AgentTunnelDlgDomainsHint",
+            "text": "Valfritt. Exakta namn matchar bara sig själva. Använd ett uttryckligt jokertecken, till exempel *.example.com, för att matcha underdomäner."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainOption",
+            "text": "DNS-domänen {0} upptäcktes. Annonsera dess underdomäner som {1}?"
+          },
+          {
+            "id": "AgentTunnelDlgNoDetectedDomain",
+            "text": "Ingen DNS-domän upptäcktes. Ange exakta namn eller uttryckliga jokerteckenvägar nedan vid behov."
+          },
+          {
+            "id": "AgentTunnelDlgDetectedDomainAlreadyIncluded",
+            "text": "Den föreslagna DNS-vägen {0} ingår redan."
+          }
+        ],
+        "psu": [
+          {
+            "id": "PsuDlgTitle",
+            "text": "PowerShell Universal Agent"
+          },
+          {
+            "id": "PsuDlgDescription",
+            "text": "Konfigurera hur agenten ansluter till PowerShell Universal."
+          },
+          {
+            "id": "PsuDlgServerUrlLabel",
+            "text": "Server-URL:"
+          },
+          {
+            "id": "PsuDlgServerUrlHint",
+            "text": "Krävs. PowerShell Universal-slutpunkt, till exempel http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenLabel",
+            "text": "Apptoken:"
+          },
+          {
+            "id": "PsuDlgAppTokenHint",
+            "text": "Krävs. Tokenvärde eller ett hemlighetsnamn som löses vid körning."
+          },
+          {
+            "id": "PsuDlgAppTokenValueOption",
+            "text": "Tokenvärde"
+          },
+          {
+            "id": "PsuDlgAppTokenSecretOption",
+            "text": "Hemlighetsnamn"
+          },
+          {
+            "id": "PsuDlgAgentIdLabel",
+            "text": "Agent-ID:"
+          },
+          {
+            "id": "PsuDlgAgentIdHint",
+            "text": "Valfritt. Stabilt agent-ID. Standardvärdet är datornamnet."
+          },
+          {
+            "id": "PsuDlgDisplayNameLabel",
+            "text": "Visningsnamn:"
+          },
+          {
+            "id": "PsuDlgDisplayNameHint",
+            "text": "Valfritt. Namnet som visas i PowerShell Universal. Standardvärdet är agent-ID:t."
+          },
+          {
+            "id": "PsuDlgServerUrlRequired",
+            "text": "En server-URL krävs. Ange PowerShell Universal-slutpunkten, eller gå tillbaka och avmarkera funktionen PowerShell Universal Agent."
+          },
+          {
+            "id": "PsuDlgServerUrlInvalid",
+            "text": "Server-URL:en måste vara en absolut http- eller https-URL, till exempel http://localhost:5000."
+          },
+          {
+            "id": "PsuDlgAppTokenRequired",
+            "text": "En apptoken krävs. Ange tokenvärdet eller ett hemlighetsnamn, eller gå tillbaka och avmarkera funktionen PowerShell Universal Agent."
+          },
+          {
+            "id": "PsuDlgServerUnreachable",
+            "text": "Det gick inte att nå PowerShell Universal-servern ({0}).\n\nVill du fortsätta ändå?"
+          }
+        ],
+        "firewall": [
+          {
+            "id": "msierrFirewallCannotConnect",
+            "text": "Det går inte att ansluta till Windows-brandväggen.  ([2]   [3]   [4]   [5])"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsInstall",
+            "text": "Konfigurerar Windows-brandväggen"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsUninstall",
+            "text": "Konfigurerar Windows-brandväggen"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsInstall",
+            "text": "Återställer konfigurationen av Windows-brandväggen"
+          },
+          {
+            "id": "WixExecFirewallExceptionsInstall",
+            "text": "Installerar konfigurationen av Windows-brandväggen"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsUninstall",
+            "text": "Återställer konfigurationen av Windows-brandväggen"
+          },
+          {
+            "id": "WixExecFirewallExceptionsUninstall",
+            "text": "Avinstallerar konfigurationen av Windows-brandväggen"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -42,7 +42,8 @@ function Get-Version {
 function Get-PackageLanguages {
     return @(
         [PSCustomObject]@{ Name = 'en-US'; LCID = 1033 },
-        [PSCustomObject]@{ Name = 'fr-FR'; LCID = 1036 }
+        [PSCustomObject]@{ Name = 'fr-FR'; LCID = 1036 },
+        [PSCustomObject]@{ Name = 'sv-SE'; LCID = 1053 }
     )
 }
 

@@ -37,6 +37,17 @@ powershell/run-tests.ps1
 ### C#/.NET
 Follow standard .NET conventions.
 
+#### Windows installer localization
+The installer strings under `package/WindowsManaged/Resources` and `package/AgentWindowsManaged/Resources` are generated.
+**Never edit `*.wxl` or `Strings.g.cs` by hand.**
+Edit `Strings_<culture>.json` (`en-US` is the source of truth), then regenerate:
+```powershell
+package\Update-InstallerLocalization.ps1
+```
+Commit the JSON and the regenerated files together, and make sure regeneration leaves no further diff.
+Missing keys in a non-English JSON fall back to English.
+To add a language, follow `.agents/skills/installer-localization/SKILL.md`.
+The `Resources.<culture>.resx` files of the Desktop Agent are ordinary .NET satellite resources and are edited directly.
 ## Git Workflow
 
 ### Branch Naming

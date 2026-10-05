@@ -6,6 +6,8 @@ Windows Installer project for Devolutions Agent.
 
 Project structure is the same as Devolutions Gateway, see [README.md](../WindowsManaged/README.md) for more info.
 
+Localization works the same way; see the Localization section of that README.
+Run `package\Update-InstallerLocalization.ps1 -Product agent` to regenerate the Agent files.
 ## Build
 
 ### MSBuild

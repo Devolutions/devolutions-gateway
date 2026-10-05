@@ -264,6 +264,10 @@ class TlkRecipe
         [PSCustomObject]@{
             Name = "fr-FR";
             LCID = 1036;
+        },
+        [PSCustomObject]@{
+            Name = "sv-SE";
+            LCID = 1053;
         }
     )
 

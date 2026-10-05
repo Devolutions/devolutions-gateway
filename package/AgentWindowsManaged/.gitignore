@@ -2,6 +2,7 @@ Debug
 Release
 wix
 fr-FR.*
+sv-SE.*
 *_missing.json
 msbuild_*.log
 *.user

@@ -80,7 +80,7 @@ function Convert-Path {
 # The package is particular about the input file names, but all of the proper renaming and linking is handled by this function.
 function New-AgentMsi() {
     param(
-        # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces files `package\WindowsManaged\Release\en-US` and `package\WindowsManaged\Release\fr-FR`.
+        # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces one directory per language under `package\AgentWindowsManaged\Release`, for example `en-US`, `fr-FR`, and `sv-SE`.
         [switch] $Generate,
         [parameter(Mandatory = $true)]
         # The path to the devolutions-agent.exe file.

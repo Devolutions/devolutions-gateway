@@ -178,11 +178,14 @@ internal class Program
     {
         { "en-US", "DevolutionsAgent_en-us.wxl" },
         { "fr-FR", "DevolutionsAgent_fr-fr.wxl" },
+        { "sv-SE", "DevolutionsAgent_sv-se.wxl" },
     };
 
     private static KeyValuePair<string, string> enUS => Languages.First(x => x.Key == "en-US");
 
     private static KeyValuePair<string, string> frFR => Languages.First(x => x.Key == "fr-FR");
+
+    private static KeyValuePair<string, string> svSE => Languages.First(x => x.Key == "sv-SE");
 
     static void Main()
     {
@@ -453,7 +456,12 @@ internal class Program
 
     private static void Project_UIInitialized(SetupEventArgs e)
     {
-        string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "fr" ? frFR.Key : enUS.Key;
+        string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        {
+            "fr" => frFR.Key,
+            "sv" => svSE.Key,
+            _ => enUS.Key,
+        };
 
         using Stream stream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream($"DevolutionsAgent.Resources.{Languages[lcid]}");
