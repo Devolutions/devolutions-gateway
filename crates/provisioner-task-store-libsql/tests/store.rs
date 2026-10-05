@@ -1,0 +1,218 @@
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+
+use provisioner_task_store_libsql::{LibSqlProvisionerTaskStore, NewTask, TaskState};
+use uuid::Uuid;
+
+fn new_task<'a>(id: Uuid, token_jti: Uuid) -> NewTask<'a> {
+    NewTask {
+        id,
+        kind: "recording.ai-analysis",
+        target: r#"{"sessionId":"3e2b1d6c-5d1a-4a8c-9a8c-1d6f9b2a4c11"}"#,
+        params: r#"{"provider":"openai","model":"gpt-test"}"#,
+        token_jti,
+    }
+}
+
+async fn connect(path: &str) -> libsql::Connection {
+    libsql::Builder::new_local(path)
+        .build()
+        .await
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+async fn open(path: &str) -> LibSqlProvisionerTaskStore {
+    LibSqlProvisionerTaskStore::init(connect(path).await).await.unwrap()
+}
+
+async fn memory_store() -> LibSqlProvisionerTaskStore {
+    open(":memory:").await
+}
+
+async fn query_u64(conn: &libsql::Connection, sql_query: &str) -> u64 {
+    let row = conn.query(sql_query, ()).await.unwrap().next().await.unwrap().unwrap();
+    row.get::<u64>(0).unwrap()
+}
+
+#[tokio::test]
+async fn migrations_leave_user_version_alone_and_are_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisioner_tasks.db");
+    let path = path.to_str().unwrap();
+
+    // Another schema in the same database, such as the job queue, owns `user_version`.
+    let conn = connect(path).await;
+    conn.execute("PRAGMA user_version = 7", ()).await.unwrap();
+
+    let id = Uuid::new_v4();
+    {
+        let store = LibSqlProvisionerTaskStore::init(conn.clone()).await.unwrap();
+        store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+    }
+
+    let store = open(path).await;
+    assert!(store.get(id).await.unwrap().is_some());
+
+    assert_eq!(query_u64(&conn, "PRAGMA user_version").await, 7);
+    assert_eq!(
+        query_u64(&conn, "SELECT max(version) FROM task_schema_version").await,
+        1
+    );
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 1);
+}
+
+#[tokio::test]
+async fn failed_migration_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisioner_tasks.db");
+    let path = path.to_str().unwrap();
+
+    // Another table already uses the name of the index of the first migration, so it fails at its last statement.
+    let conn = connect(path).await;
+    conn.execute_batch("CREATE TABLE other (x INT); CREATE INDEX idx_task_kind_created_at ON other (x);")
+        .await
+        .unwrap();
+
+    assert!(LibSqlProvisionerTaskStore::init(conn.clone()).await.is_err());
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 0);
+
+    // Once the name is free, the migration applies in full, since the failed attempt left no table behind.
+    conn.execute("DROP INDEX idx_task_kind_created_at", ()).await.unwrap();
+
+    let store = LibSqlProvisionerTaskStore::init(conn.clone()).await.unwrap();
+    store.insert(new_task(Uuid::new_v4(), Uuid::new_v4())).await.unwrap();
+    assert_eq!(query_u64(&conn, "SELECT count(*) FROM task_schema_version").await, 1);
+}
+
+#[tokio::test]
+async fn insert_then_read_back() {
+    let store = memory_store().await;
+    let id = Uuid::new_v4();
+    let jti = Uuid::new_v4();
+
+    store.insert(new_task(id, jti)).await.unwrap();
+
+    let record = store.get(id).await.unwrap().unwrap();
+    assert_eq!(record.id, id);
+    assert_eq!(record.kind, "recording.ai-analysis");
+    assert_eq!(record.target, r#"{"sessionId":"3e2b1d6c-5d1a-4a8c-9a8c-1d6f9b2a4c11"}"#);
+    assert_eq!(record.params, r#"{"provider":"openai","model":"gpt-test"}"#);
+    assert_eq!(record.state, TaskState::NotStarted);
+    assert_eq!(record.attempts, 0);
+    assert_eq!(record.token_jti, jti);
+    assert!(record.substate.is_none() && record.result.is_none() && record.error.is_none());
+    assert!(record.started_at.is_none() && record.finished_at.is_none());
+    assert!(record.created_at > 0);
+
+    assert!(store.get(Uuid::new_v4()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn attempts_substate_retry_and_success() {
+    let store = memory_store().await;
+    let id = Uuid::new_v4();
+    store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+
+    assert_eq!(
+        store.start_attempt(id, r#"{"step":"preparing"}"#).await.unwrap(),
+        Some(1)
+    );
+    let record = store.get(id).await.unwrap().unwrap();
+    assert_eq!(record.state, TaskState::Running);
+    assert_eq!(record.substate.as_deref(), Some(r#"{"step":"preparing"}"#));
+    assert!(record.started_at.is_some());
+
+    store.set_substate(id, r#"{"step":"reading"}"#).await.unwrap();
+    assert_eq!(
+        store.get(id).await.unwrap().unwrap().substate.as_deref(),
+        Some(r#"{"step":"reading"}"#)
+    );
+
+    store.retry_later(id, "rate limited").await.unwrap();
+    let record = store.get(id).await.unwrap().unwrap();
+    assert_eq!(record.state, TaskState::NotStarted);
+    assert_eq!(record.error.as_deref(), Some("rate limited"));
+    assert!(record.substate.is_none());
+
+    assert_eq!(store.start_attempt(id, "null").await.unwrap(), Some(2));
+    assert!(store.succeed(id, r#"{"log":"log-1.slog"}"#).await.unwrap());
+
+    let record = store.get(id).await.unwrap().unwrap();
+    assert_eq!(record.state, TaskState::Success);
+    assert_eq!(record.result.as_deref(), Some(r#"{"log":"log-1.slog"}"#));
+    assert!(record.error.is_none());
+    assert!(record.finished_at.is_some());
+    assert_eq!(record.attempts, 2);
+}
+
+#[tokio::test]
+async fn finished_tasks_are_not_changed_again() {
+    let store = memory_store().await;
+    let id = Uuid::new_v4();
+    store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+
+    assert!(store.fail(id, "boom").await.unwrap());
+    assert!(!store.fail(id, "again").await.unwrap());
+    assert!(!store.succeed(id, "1").await.unwrap());
+    assert_eq!(store.start_attempt(id, "null").await.unwrap(), None);
+    store.set_substate(id, "2").await.unwrap();
+
+    let record = store.get(id).await.unwrap().unwrap();
+    assert_eq!(record.state, TaskState::Failed);
+    assert_eq!(record.error.as_deref(), Some("boom"));
+    assert!(record.substate.is_none() && record.result.is_none());
+}
+
+#[tokio::test]
+async fn unfinished_lists_not_started_and_running_tasks() {
+    let store = memory_store().await;
+    let [not_started, running, succeeded, failed] = [(); 4].map(|()| Uuid::new_v4());
+
+    for id in [not_started, running, succeeded, failed] {
+        store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+    }
+
+    store.start_attempt(running, "null").await.unwrap();
+    store.succeed(succeeded, "null").await.unwrap();
+    store.fail(failed, "boom").await.unwrap();
+
+    let mut unfinished = store.unfinished().await.unwrap();
+    unfinished.sort();
+    let mut expected = vec![not_started, running];
+    expected.sort();
+
+    assert_eq!(unfinished, expected);
+}
+
+#[tokio::test]
+async fn rows_are_never_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisioner_tasks.db");
+    let path = path.to_str().unwrap();
+
+    let ids = [(); 3].map(|()| Uuid::new_v4());
+    {
+        let store = open(path).await;
+        for id in ids {
+            store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+        }
+        store.succeed(ids[0], "null").await.unwrap();
+        store.fail(ids[1], "boom").await.unwrap();
+    }
+
+    let store = open(path).await;
+    for id in ids {
+        assert!(store.get(id).await.unwrap().is_some(), "{id}");
+    }
+}
+
+#[tokio::test]
+async fn duplicate_id_is_rejected() {
+    let store = memory_store().await;
+    let id = Uuid::new_v4();
+
+    store.insert(new_task(id, Uuid::new_v4())).await.unwrap();
+    assert!(store.insert(new_task(id, Uuid::new_v4())).await.is_err());
+}
