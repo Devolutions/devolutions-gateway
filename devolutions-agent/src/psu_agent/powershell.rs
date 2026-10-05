@@ -412,7 +412,7 @@ impl PowerShellWorker {
 /// started, such as a secret vault helper, can inherit its stdout and stderr and keep them open after it exits.
 /// Output still being written once it exits is collected for at most [`WORKER_OUTPUT_DRAIN_TIMEOUT`].
 ///
-/// On timeout, the worker process and every process it started are killed.
+/// On timeout or failure, the worker process and every process it started are killed.
 async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::Result<Option<Output>> {
     command.kill_on_drop(true);
     ProcessTree::prepare(&mut command);
@@ -470,8 +470,10 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
             }
         }
 
-        // Only a worker request that succeeded leaves the processes it started running.
-        process_tree.release();
+        // Only a worker that succeeded leaves the processes it started running.
+        if status.success() {
+            process_tree.release();
+        }
 
         status
     };
@@ -688,6 +690,48 @@ mod tests {
         assert!(output.status.success());
         let response: PowerShellWorkerResponse = serde_json::from_slice(&output.stdout).expect("parse response");
         assert_eq!(response.data.as_deref(), Some("secret-value"));
+    }
+
+    #[tokio::test]
+    async fn processes_started_by_a_failed_worker_are_killed() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("helper-survived");
+        let mut command = if cfg!(windows) {
+            let helper = temp_dir.path().join("helper.cmd");
+            std::fs::write(
+                &helper,
+                format!("@ping -n 4 127.0.0.1 >nul\r\n@echo done> \"{}\"\r\n", marker.display()),
+            )
+            .expect("write helper script");
+            let worker = temp_dir.path().join("worker.cmd");
+            std::fs::write(
+                &worker,
+                format!("@start \"\" /B \"{}\"\r\n@exit /b 1\r\n", helper.display()),
+            )
+            .expect("write worker script");
+            let mut command = Command::new("cmd.exe");
+            command.arg("/C").arg(worker);
+            command
+        } else {
+            let mut command = Command::new("/bin/sh");
+            command
+                .arg("-c")
+                .arg(format!("(sleep 3; touch '{}') &\nexit 1\n", marker.display()));
+            command
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let output = run_worker_command(command, Duration::from_secs(10))
+            .await
+            .expect("run worker")
+            .expect("worker timed out");
+        assert!(!output.status.success());
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!marker.exists(), "a process started by a failed worker survived");
     }
 
     #[test]

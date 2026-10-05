@@ -551,9 +551,17 @@ fn dispatch_locked(
     let Some(entry) = inner.streams.get(&stream_data.stream_id) else {
         return;
     };
-    // Input received after the stream input was closed is dropped.
-    if entry.stdin.is_none() {
-        return;
+    // Input received after the stream input was closed, or once the stdin pump is gone, is dropped without making
+    // room for it in the stdin budget.
+    match &entry.stdin {
+        None => return,
+        Some(stdin) if stdin.is_closed() => {
+            if let Some(entry) = inner.streams.get_mut(&stream_data.stream_id) {
+                entry.stdin = None;
+            }
+            return;
+        }
+        Some(_) => {}
     }
     let within_limits = entry
         .backlog
@@ -813,6 +821,9 @@ async fn run_process_inner(
     // Every branch returns promptly, so stop requests are handled while waiting for the child process to exit.
     let status = loop {
         tokio::select! {
+            // Stop requests come first, so that a stop requested by the server is not reported as a stall.
+            biased;
+
             stop_request = control_rx.changed(), if control_open => match stop_request.map(|()| *control_rx.borrow_and_update()) {
                 Ok(Some(StopRequest::Kill)) => {
                     info!(process_id, correlation_id = %request.correlation_id, "Killing PSU gRPC child process on server request");
@@ -2049,6 +2060,33 @@ mod tests {
 
         assert_eq!(*stalled.control.borrow(), Some(StopRequest::Graceful));
         assert_eq!(*receiving.control.borrow(), Some(StopRequest::StdinOverflow));
+    }
+
+    #[tokio::test]
+    async fn frame_for_a_closed_stdin_queue_does_not_stop_a_stalled_stream() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let stalled = registry.register("stalled", "stalled").await.expect("register");
+        let closed = registry.register("closed", "closed").await.expect("register");
+
+        for sequence in 0..12 {
+            dispatch(&registry, "stalled", sequence, vec![b'x'; 1024], false).await;
+        }
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        stalled
+            .backlog
+            .stalled_for_ms
+            .store(stall_timeout_ms, Ordering::Relaxed);
+
+        // The stdin pump of the other stream is gone.
+        drop(closed);
+        dispatch(&registry, "closed", 0, vec![b'x'; 8 * 1024], false).await;
+
+        assert!(stalled.control.borrow().is_none());
+        assert!(registry.inner.lock().await.streams["closed"].stdin.is_none());
     }
 
     #[tokio::test]
