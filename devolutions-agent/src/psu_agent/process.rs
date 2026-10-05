@@ -55,6 +55,9 @@ pub(super) struct StdinLimits {
     /// Pending bytes across all streams beyond which stalled streams are stopped to make room, or the stream
     /// receiving input is failed if no stalled stream frees enough.
     ///
+    /// Streams being stopped for exceeding a limit may hold up to `max_buffered_bytes` beyond it until their child
+    /// process is killed.
+    ///
     /// Each server connection has its own registry, so this budget is per connection rather than agent-wide. On
     /// reconnect, the processes of the previous connection may briefly hold their input while they are being stopped.
     pub(super) max_total_buffered_bytes: usize,
@@ -604,11 +607,12 @@ fn dispatch_locked(
 /// Returns whether a frame for `stream_id` fits in [`StdinLimits::max_total_buffered_bytes`].
 ///
 /// When it does not, stalled streams are stopped, starting with the one charged the most stdin memory, until the
-/// frame fits. A stalled stream is preferred over the stream receiving input, which may be healthy. The frame does not
-/// fit if no other stalled stream is left.
+/// frame fits. A stalled stream is preferred over the stream receiving input, which may be healthy. Nothing is stopped
+/// if the frame would still not fit, or if the stream receiving input is itself stalled and would be reached first.
 ///
-/// Input held by streams already stopped for exceeding a limit is not counted, because it is released as soon as
-/// their child process is killed. Usage can therefore exceed the budget briefly.
+/// Input held by streams already stopped for exceeding a limit is released as soon as their child process is killed,
+/// so up to [`StdinLimits::max_buffered_bytes`] of it is not counted. Usage can therefore exceed the budget briefly,
+/// by at most that amount.
 fn reserve_total_budget(
     inner: &mut ProcessRegistryInner,
     limits: StdinLimits,
@@ -616,45 +620,61 @@ fn reserve_total_budget(
     stream_id: &str,
     frame_bytes: usize,
 ) -> bool {
-    loop {
-        let total_pending_bytes = total_pending_bytes.load(Ordering::Relaxed);
-        if total_pending_bytes.saturating_add(frame_bytes) <= limits.max_total_buffered_bytes {
-            return true;
-        }
-
-        let releasing_bytes: usize = inner
-            .streams
-            .values()
-            .filter(|entry| entry.backlog.input_state.load(Ordering::Acquire) == INPUT_OVERFLOWED)
-            .map(|entry| entry.backlog.pending_bytes.load(Ordering::Relaxed))
-            .sum();
-        if total_pending_bytes
-            .saturating_sub(releasing_bytes)
+    let total_pending_bytes = total_pending_bytes.load(Ordering::Relaxed);
+    let fits = |releasing_bytes: usize| {
+        total_pending_bytes
             .saturating_add(frame_bytes)
+            .saturating_sub(releasing_bytes.min(limits.max_buffered_bytes))
             <= limits.max_total_buffered_bytes
-        {
-            return true;
+    };
+
+    let mut releasing_bytes: usize = inner
+        .streams
+        .values()
+        .filter(|entry| entry.backlog.input_state.load(Ordering::Acquire) == INPUT_OVERFLOWED)
+        .map(|entry| entry.backlog.pending_bytes.load(Ordering::Relaxed))
+        .sum();
+    if fits(releasing_bytes) {
+        return true;
+    }
+
+    let mut stalled: Vec<_> = inner
+        .streams
+        .iter_mut()
+        // A stream already being stopped keeps its outcome.
+        .filter(|(_, entry)| entry.stop.borrow().is_none() && entry.backlog.is_evictable(limits))
+        // Partly written frames stay fully charged, so the charge rather than the unwritten bytes is what is freed.
+        .map(|(stalled_stream_id, entry)| {
+            (
+                entry.backlog.pending_bytes.load(Ordering::Relaxed),
+                stalled_stream_id,
+                entry,
+            )
+        })
+        .collect();
+    stalled.sort_unstable_by(|(charge, _, _), (other_charge, _, _)| other_charge.cmp(charge));
+
+    // Stalled streams are only stopped once stopping them is known to make room.
+    let mut evicted_streams = 0;
+    for (charge, stalled_stream_id, _) in &stalled {
+        if fits(releasing_bytes) {
+            break;
         }
-
-        let Some((stalled_stream_id, stalled)) = inner
-            .streams
-            .iter_mut()
-            // A stream already being stopped keeps its outcome.
-            .filter(|(_, entry)| entry.stop.borrow().is_none() && entry.backlog.is_evictable(limits))
-            // Partly written frames stay fully charged, so the charge rather than the unwritten bytes is what is freed.
-            .max_by_key(|(_, entry)| entry.backlog.pending_bytes.load(Ordering::Relaxed))
-        else {
-            return false;
-        };
-
-        if stalled_stream_id == stream_id {
+        if stalled_stream_id.as_str() == stream_id {
             return false;
         }
+        releasing_bytes = releasing_bytes.saturating_add(*charge);
+        evicted_streams += 1;
+    }
+    if !fits(releasing_bytes) {
+        return false;
+    }
 
+    for (charge, stalled_stream_id, stalled) in stalled.into_iter().take(evicted_streams) {
         if stalled.backlog.record_overflow() {
             warn!(
                 stream_id = %stalled_stream_id,
-                pending_bytes = stalled.backlog.pending_bytes.load(Ordering::Relaxed),
+                pending_bytes = charge,
                 max_total_buffered_bytes = limits.max_total_buffered_bytes,
                 "Stopping stalled PSU gRPC stream to make room in the stdin budget"
             );
@@ -662,6 +682,8 @@ fn reserve_total_budget(
         }
         stalled.stdin = None;
     }
+
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2141,6 +2163,68 @@ mod tests {
             received += 1;
         }
         assert_eq!(received, 4);
+    }
+
+    #[tokio::test]
+    async fn streams_being_stopped_extend_the_stdin_budget_by_at_most_one_job_limit() {
+        let limits = StdinLimits {
+            max_buffered_bytes: 4 * 1024,
+            max_total_buffered_bytes: 8 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+
+        // Each stream overflows its own limit, and keeps its charge until its child process is killed.
+        let mut streams = Vec::new();
+        for index in 0..6 {
+            let stream_id = format!("stream-{index}");
+            streams.push(registry.register(&stream_id, &stream_id).await.expect("register"));
+            for sequence in 0..5 {
+                dispatch(&registry, &stream_id, sequence, vec![b'x'; 1024], false).await;
+            }
+        }
+
+        assert!(
+            streams
+                .iter()
+                .all(|stream| *stream.control.borrow() == Some(StopRequest::StdinOverflow))
+        );
+        let total_pending_bytes = registry.total_pending_bytes.load(Ordering::Relaxed);
+        assert!(
+            total_pending_bytes <= limits.max_total_buffered_bytes + limits.max_buffered_bytes,
+            "{total_pending_bytes} bytes charged"
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_stream_is_not_stopped_when_that_would_not_make_room() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let stalled = registry.register("stalled", "stalled").await.expect("register");
+        let healthy = registry.register("healthy", "healthy").await.expect("register");
+        let receiving = registry.register("receiving", "receiving").await.expect("register");
+
+        dispatch(&registry, "stalled", 0, vec![b'x'; 1024], false).await;
+        for sequence in 0..13 {
+            dispatch(&registry, "healthy", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        stalled
+            .backlog
+            .stalled_for_ms
+            .store(stall_timeout_ms, Ordering::Relaxed);
+
+        // Stopping the stalled stream would not free enough for this frame.
+        dispatch(&registry, "receiving", 0, vec![b'x'; 4 * 1024], false).await;
+
+        assert_eq!(*receiving.control.borrow(), Some(StopRequest::StdinOverflow));
+        assert!(stalled.control.borrow().is_none());
+        assert!(registry.inner.lock().await.streams["stalled"].stdin.is_some());
+        assert!(healthy.control.borrow().is_none());
     }
 
     #[tokio::test]
