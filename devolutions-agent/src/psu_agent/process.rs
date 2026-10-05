@@ -627,6 +627,9 @@ fn reserve_total_budget(
             .saturating_sub(releasing_bytes.min(limits.max_buffered_bytes))
             <= limits.max_total_buffered_bytes
     };
+    if fits(0) {
+        return true;
+    }
 
     let mut releasing_bytes: usize = inner
         .streams
