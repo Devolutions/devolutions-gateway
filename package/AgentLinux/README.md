@@ -33,6 +33,9 @@ For HTTPS, set `PSU_SERVER_URL` to an `https://` URL and trust the PSU server ce
 | `PSU_DISPLAY_NAME` | `Devolutions Agent Linux` |
 | `PSU_POWERSHELL_EXECUTABLE` | `/var/lib/devolutions-agent/.pwsh/bin/pwsh` |
 
+Stopping a PSU job kills the job process and its process group.
+Processes that a job script moves to their own session or process group, for example with `setsid`, keep running.
+
 Build one image locally:
 
 ```powershell
