@@ -8,6 +8,18 @@
 //! The tree is terminated when the job is stopped, including when the guard is dropped without being released. When
 //! the direct child exits on its own, processes it deliberately left running in the background are kept, as they
 //! would be when the script runs outside the agent.
+//!
+//! # Design decisions
+//!
+//! - Windows: `Win32_System_JobObjects` provides the job object. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is not set,
+//!   because it would also kill background processes when a job exits on its own; the tree is terminated explicitly
+//!   on stop paths instead.
+//! - Windows: `Win32_System_Diagnostics_ToolHelp` finds the initial thread of the suspended child to resume it,
+//!   because the standard library does not expose its handle. Joining the job at creation time with
+//!   `PROC_THREAD_ATTRIBUTE_JOB_LIST` would remove the suspend and resume steps, but requires the unstable
+//!   `CommandExt::raw_attribute`.
+//! - Unix: `libc` provides `killpg`, which the standard library lacks. It was chosen over `nix` or `rustix` because
+//!   it was already in the dependency tree.
 
 use tokio::process::{Child, Command};
 
